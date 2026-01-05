@@ -3,9 +3,11 @@
 [![License: GPL v2](https://img.shields.io/badge/License-GPL_v2-blue.svg)](https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html)
 [![CI](https://github.com/RallyPat/LibreTune/actions/workflows/ci.yml/badge.svg)](https://github.com/RallyPat/LibreTune/actions/workflows/ci.yml)
 
-Modern, open-source ECU tuning software for Speeduino, rusEFI, and compatible aftermarket engine control units.
+Modern, open-source ECU tuning software for EpicEFI, Speeduino, rusEFI, and other TS format INI compatible aftermarket engine control units.
 
 ![LibreTune Table Editor](docs/screenshots/table-editor.png)
+
+## Please note that this project is still very early days - these notes are largely agentically written, and may not be 100% accurate at this time.  We welcome public contribution, and want this to be a thriving publically developed effort. 
 
 ## Features
 
@@ -137,4 +139,4 @@ Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) before
 
 ## Acknowledgments
 
-This project is inspired by TunerStudio by EFI Analytics. LibreTune is an independent open-source project and is not affiliated with EFI Analytics.
+LibreTune is an independent open-source project and is not affiliated with EFI Analytics.
