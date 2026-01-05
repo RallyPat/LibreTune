@@ -1,0 +1,77 @@
+.tune-mismatch-dialog {
+  max-width: 600px;
+}
+
+.tune-mismatch-warning {
+  background: rgba(255, 193, 7, 0.1);
+  border: 1px solid rgba(255, 193, 7, 0.3);
+  border-radius: 6px;
+  padding: 16px;
+  margin-bottom: 24px;
+}
+
+.tune-mismatch-warning p {
+  margin: 8px 0;
+  color: var(--text-primary);
+}
+
+.tune-mismatch-options {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  margin-bottom: 20px;
+}
+
+.tune-option {
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  padding: 16px;
+  background: var(--bg-elevated);
+}
+
+.tune-option h3 {
+  margin: 0 0 8px 0;
+  font-size: 16px;
+  color: var(--text-primary);
+}
+
+.tune-option p {
+  margin: 0 0 12px 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.tune-option button {
+  width: 100%;
+  padding: 10px 16px;
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  transition: all 0.2s;
+}
+
+.tune-option button:hover:not(:disabled) {
+  background: var(--bg-hover);
+  border-color: var(--primary);
+}
+
+.tune-option button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.tune-option button.dialog-primary {
+  background: var(--primary);
+  color: white;
+  border-color: var(--primary);
+}
+
+.tune-option button.dialog-primary:hover:not(:disabled) {
+  background: var(--primary-hover);
+}
+
