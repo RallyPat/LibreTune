@@ -142,18 +142,30 @@ impl TuneCache {
     
     /// Write raw bytes to a page (marks as dirty)
     pub fn write_bytes(&mut self, page: u8, offset: u16, data: &[u8]) -> bool {
-        if let Some(page_data) = self.pages.get_mut(&page) {
-            let start = offset as usize;
-            let end = start + data.len();
-            
-            if end <= page_data.len() {
-                page_data[start..end].copy_from_slice(data);
-                self.shadow.mark_dirty(page, offset, data.len() as u16);
-                self.page_states.insert(page, PageState::Dirty);
-                return true;
-            }
+        let start = offset as usize;
+        let end = start + data.len();
+        
+        // Get page size from definition before mutable borrow
+        let default_page_size = self.page_size(page).unwrap_or(0) as usize;
+        
+        // Get or create the page
+        let page_data = self.pages.entry(page).or_insert_with(|| {
+            // If page doesn't exist, create it with size from definition, or expand to fit the write
+            let min_size = end.max(default_page_size);
+            vec![0u8; min_size]
+        });
+        
+        // Expand page if needed
+        if end > page_data.len() {
+            let new_size = end.max(default_page_size);
+            page_data.resize(new_size, 0);
         }
-        false
+        
+        // Write the data
+        page_data[start..end].copy_from_slice(data);
+        self.shadow.mark_dirty(page, offset, data.len() as u16);
+        self.page_states.insert(page, PageState::Dirty);
+        true
     }
     
     /// Get a complete page

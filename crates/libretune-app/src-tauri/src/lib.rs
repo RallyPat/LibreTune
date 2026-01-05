@@ -355,7 +355,32 @@ fn compare_signatures(ecu_sig: &str, ini_sig: &str) -> SignatureMatchType {
             // Same base ECU type, different version
             SignatureMatchType::Partial
         } else {
-            SignatureMatchType::Mismatch
+            // Check for common firmware family keywords (e.g., "uaefi", "speeduino", etc.)
+            // This helps recognize similar projects like "rusEFI ... uaefi ..." variants
+            let common_keywords = ["uaefi", "speeduino", "rusefi", "epicefi", "megasquirt"];
+            let ecu_has_keyword = common_keywords.iter().any(|kw| ecu_normalized.contains(kw));
+            let ini_has_keyword = common_keywords.iter().any(|kw| ini_normalized.contains(kw));
+            
+            if ecu_has_keyword && ini_has_keyword {
+                // Both have common firmware keywords - check if they share at least one
+                let ecu_keywords: Vec<&str> = common_keywords.iter()
+                    .filter(|kw| ecu_normalized.contains(**kw))
+                    .copied()
+                    .collect();
+                let ini_keywords: Vec<&str> = common_keywords.iter()
+                    .filter(|kw| ini_normalized.contains(**kw))
+                    .copied()
+                    .collect();
+                
+                // If they share a keyword, it's a partial match (same firmware family)
+                if ecu_keywords.iter().any(|kw| ini_keywords.contains(kw)) {
+                    SignatureMatchType::Partial
+                } else {
+                    SignatureMatchType::Mismatch
+                }
+            } else {
+                SignatureMatchType::Mismatch
+            }
         }
     }
 }
@@ -450,15 +475,106 @@ async fn load_ini(app: tauri::AppHandle, state: tauri::State<'_, AppState>, path
             println!("Successfully loaded INI: {} ({} tables, {} pages)", 
                 def.signature, def.tables.len(), def.n_pages);
             
-            // Initialize TuneCache from definition
-            let cache = TuneCache::from_definition(&def);
-            {
-                let mut cache_guard = state.tune_cache.lock().await;
-                *cache_guard = Some(cache);
-            }
+            // Get current tune before updating definition (if any)
+            let current_tune = {
+                let tune_guard = state.current_tune.lock().await;
+                tune_guard.as_ref().cloned()
+            };
             
+            // Update definition
+            let def_clone = def.clone();
             let mut guard = state.definition.lock().await;
             *guard = Some(def);
+            drop(guard);
+            
+            // Initialize TuneCache from new definition
+            let cache = TuneCache::from_definition(&def_clone);
+            let mut cache_guard = state.tune_cache.lock().await;
+            *cache_guard = Some(cache);
+            
+            // Re-apply current tune to new cache if we have one
+            if let Some(tune) = current_tune {
+                eprintln!("[DEBUG] load_ini: Re-applying tune data to new INI definition");
+                use libretune_core::tune::TuneValue;
+                
+                let mut applied_count = 0;
+                let mut skipped_count = 0;
+                
+                for (name, tune_value) in &tune.constants {
+                    if let Some(constant) = def_clone.constants.get(name) {
+                        // PC variables
+                        if constant.is_pc_variable {
+                            match tune_value {
+                                TuneValue::Scalar(v) => {
+                                    cache_guard.as_mut().unwrap().local_values.insert(name.clone(), *v);
+                                    applied_count += 1;
+                                }
+                                TuneValue::Array(arr) if !arr.is_empty() => {
+                                    cache_guard.as_mut().unwrap().local_values.insert(name.clone(), arr[0]);
+                                    applied_count += 1;
+                                }
+                                _ => {
+                                    skipped_count += 1;
+                                }
+                            }
+                            continue;
+                        }
+                        
+                        // Skip zero-size constants
+                        let length = constant.size_bytes() as u16;
+                        if length == 0 {
+                            skipped_count += 1;
+                            continue;
+                        }
+                        
+                        // Convert and write to cache
+                        let element_size = constant.data_type.size_bytes();
+                        let element_count = constant.shape.element_count();
+                        let mut raw_data = vec![0u8; length as usize];
+                        
+                        match tune_value {
+                            TuneValue::Scalar(v) => {
+                                let raw_val = constant.display_to_raw(*v);
+                                constant.data_type.write_to_bytes(&mut raw_data, 0, raw_val, def_clone.endianness);
+                                if cache_guard.as_mut().unwrap().write_bytes(constant.page, constant.offset, &raw_data) {
+                                    applied_count += 1;
+                                } else {
+                                    skipped_count += 1;
+                                }
+                            }
+                            TuneValue::Array(arr) => {
+                                let write_count = arr.len().min(element_count);
+                                let last_value = arr.last().copied().unwrap_or(0.0);
+                                
+                                for i in 0..element_count {
+                                    let val = if i < arr.len() { arr[i] } else { last_value };
+                                    let raw_val = constant.display_to_raw(val);
+                                    let offset = i * element_size;
+                                    constant.data_type.write_to_bytes(&mut raw_data, offset, raw_val, def_clone.endianness);
+                                }
+                                
+                                if cache_guard.as_mut().unwrap().write_bytes(constant.page, constant.offset, &raw_data) {
+                                    applied_count += 1;
+                                } else {
+                                    skipped_count += 1;
+                                }
+                            }
+                            TuneValue::String(_) | TuneValue::Bool(_) => {
+                                skipped_count += 1;
+                            }
+                        }
+                    } else {
+                        skipped_count += 1;
+                    }
+                }
+                
+                eprintln!("[DEBUG] load_ini: Re-applied tune constants - applied: {}, skipped: {}, total: {}", 
+                    applied_count, skipped_count, tune.constants.len());
+                
+                // Emit event to notify UI that tune was re-applied
+                let _ = app.emit("tune:loaded", "ini_changed");
+            }
+            drop(cache_guard);
             
             // Save as last INI
             let mut settings = load_settings(&app);
@@ -1032,32 +1148,9 @@ async fn get_table_data(
             return Ok(vec![0.0; element_count]);
         }
         
-        // Try to read from cache first
-        if let Some(cache) = cache {
-            if let Some(raw_data) = cache.read_bytes(constant.page, constant.offset, length) {
-                eprintln!("[DEBUG] read_const_from_source: CACHE HIT for '{}' (page={}, offset={}, len={})", 
-                    constant.name, constant.page, constant.offset, length);
-                let mut values = Vec::new();
-                for i in 0..element_count {
-                    let offset = i * element_size;
-                    if let Some(raw_val) = constant.data_type.read_from_bytes(raw_data, offset, endianness) {
-                        values.push(constant.raw_to_display(raw_val));
-                    } else {
-                        values.push(0.0);
-                    }
-                }
-                return Ok(values);
-            } else {
-                eprintln!("[DEBUG] read_const_from_source: CACHE MISS for '{}' (page={}, offset={}, len={}, page_state={:?})", 
-                    constant.name, constant.page, constant.offset, length, cache.page_state(constant.page));
-            }
-        } else {
-            eprintln!("[DEBUG] read_const_from_source: NO CACHE for '{}'", constant.name);
-        }
-        
-        // Fall back to ECU read if cache doesn't have the data
+        // If connected to ECU, always read from ECU (live data)
         if let Some(ref mut conn_ptr) = conn {
-            eprintln!("[DEBUG] read_const_from_source: reading '{}' from ECU", constant.name);
+            eprintln!("[DEBUG] read_const_from_source: reading '{}' from ECU (online mode)", constant.name);
             let params = libretune_core::protocol::commands::ReadMemoryParams {
                 can_id: 0,
                 page: constant.page,
@@ -1077,6 +1170,29 @@ async fn get_table_data(
                 }
             }
             return Ok(values);
+        }
+        
+        // If offline, read from cache (MSQ data)
+        if let Some(cache) = cache {
+            if let Some(raw_data) = cache.read_bytes(constant.page, constant.offset, length) {
+                eprintln!("[DEBUG] read_const_from_source: CACHE HIT for '{}' (page={}, offset={}, len={}, offline mode)", 
+                    constant.name, constant.page, constant.offset, length);
+                let mut values = Vec::new();
+                for i in 0..element_count {
+                    let offset = i * element_size;
+                    if let Some(raw_val) = constant.data_type.read_from_bytes(raw_data, offset, endianness) {
+                        values.push(constant.raw_to_display(raw_val));
+                    } else {
+                        values.push(0.0);
+                    }
+                }
+                return Ok(values);
+            } else {
+                eprintln!("[DEBUG] read_const_from_source: CACHE MISS for '{}' (page={}, offset={}, len={}, page_state={:?})", 
+                    constant.name, constant.page, constant.offset, length, cache.page_state(constant.page));
+            }
+        } else {
+            eprintln!("[DEBUG] read_const_from_source: NO CACHE for '{}'", constant.name);
         }
         
         // No cache and no connection - return zeros
@@ -1879,6 +1995,7 @@ async fn get_constant(state: tauri::State<'_, AppState>, name: String) -> Result
 async fn get_constant_string_value(state: tauri::State<'_, AppState>, name: String) -> Result<String, String> {
     let mut conn_guard = state.connection.lock().await;
     let def_guard = state.definition.lock().await;
+    let cache_guard = state.tune_cache.lock().await;
     
     let def = def_guard.as_ref().ok_or("Definition not loaded")?;
     let conn = conn_guard.as_mut();
@@ -1897,6 +2014,7 @@ async fn get_constant_string_value(state: tauri::State<'_, AppState>, name: Stri
         return Ok(String::new());
     }
     
+    // If connected to ECU, always read from ECU (live data)
     if let Some(conn) = conn {
         let params = libretune_core::protocol::commands::ReadMemoryParams {
             can_id: 0,
@@ -1912,7 +2030,17 @@ async fn get_constant_string_value(state: tauri::State<'_, AppState>, name: Stri
         return Ok(s);
     }
     
-    // Not connected - return empty string
+    // If offline, read from cache (MSQ data)
+    if let Some(cache) = cache_guard.as_ref() {
+        if let Some(raw_data) = cache.read_bytes(constant.page, constant.offset, length) {
+            // Convert to string, stopping at first null byte
+            let s = String::from_utf8_lossy(raw_data);
+            let s = s.trim_end_matches('\0').to_string();
+            return Ok(s);
+        }
+    }
+    
+    // No cache and not connected - return empty string
     Ok(String::new())
 }
 
@@ -1947,6 +2075,7 @@ async fn get_constant_value(state: tauri::State<'_, AppState>, name: String) -> 
     let length = constant.size_bytes() as u16;
     if length == 0 { return Ok(0.0); } // Packed bits handled differently or just 0 for now
     
+    // If connected to ECU, always read from ECU (live data)
     if let Some(conn) = conn {
         let params = libretune_core::protocol::commands::ReadMemoryParams {
             can_id: 0,
@@ -1959,8 +2088,19 @@ async fn get_constant_value(state: tauri::State<'_, AppState>, name: String) -> 
         if let Some(raw_val) = constant.data_type.read_from_bytes(&raw_data, 0, def.endianness) {
             return Ok(constant.raw_to_display(raw_val));
         }
+        return Ok(0.0);
     }
     
+    // If offline, read from cache (MSQ data)
+    if let Some(cache) = cache_guard.as_ref() {
+        if let Some(raw_data) = cache.read_bytes(constant.page, constant.offset, length) {
+            if let Some(raw_val) = constant.data_type.read_from_bytes(raw_data, 0, def.endianness) {
+                return Ok(constant.raw_to_display(raw_val));
+            }
+        }
+    }
+    
+    // No cache and not connected - return 0
     Ok(0.0)
 }
 
@@ -3226,6 +3366,75 @@ async fn save_tune(state: tauri::State<'_, AppState>, path: Option<String>) -> R
                 tune.pages.insert(page_num, page_data.to_vec());
             }
         }
+        
+        // Read constants from cache and add to tune file
+        use libretune_core::tune::TuneValue;
+        let mut constants_saved = 0;
+        
+        for (name, constant) in &def.constants {
+            // Skip PC variables - they're stored separately
+            if constant.is_pc_variable {
+                // Get PC variable from local_values
+                if let Some(value) = cache.local_values.get(name) {
+                    tune.constants.insert(name.clone(), TuneValue::Scalar(*value));
+                    constants_saved += 1;
+                }
+                continue;
+            }
+            
+            // Skip constants with zero size
+            let length = constant.size_bytes() as u16;
+            if length == 0 {
+                continue;
+            }
+            
+            // Read constant from cache
+            let page_state = cache.page_state(constant.page);
+            let page_size = cache.page_size(constant.page);
+            let page_data_opt = cache.get_page(constant.page);
+            let page_data_len = page_data_opt.map(|p| p.len()).unwrap_or(0);
+            
+            if name == "veTable" || name == "veRpmBins" || name == "veLoadBins" {
+                eprintln!("[DEBUG] save_tune: Attempting to save '{}' - page={}, offset={}, len={}, page_state={:?}, page_size={:?}, page_data_len={}", 
+                    name, constant.page, constant.offset, length, page_state, page_size, page_data_len);
+            }
+            
+            if let Some(raw_data) = cache.read_bytes(constant.page, constant.offset, length) {
+                let element_count = constant.shape.element_count();
+                let element_size = constant.data_type.size_bytes();
+                let mut values = Vec::new();
+                
+                for i in 0..element_count {
+                    let offset = i * element_size;
+                    if let Some(raw_val) = constant.data_type.read_from_bytes(raw_data, offset, def.endianness) {
+                        values.push(constant.raw_to_display(raw_val));
+                    } else {
+                        values.push(0.0);
+                    }
+                }
+                
+                // Convert to TuneValue format
+                let tune_value = if element_count == 1 {
+                    TuneValue::Scalar(values[0])
+                } else {
+                    TuneValue::Array(values)
+                };
+                
+                tune.constants.insert(name.clone(), tune_value);
+                constants_saved += 1;
+                
+                if name == "veTable" || name == "veRpmBins" || name == "veLoadBins" {
+                    eprintln!("[DEBUG] save_tune: ✓ Saved '{}' - {} elements", name, element_count);
+                }
+            } else {
+                if name == "veTable" || name == "veRpmBins" || name == "veLoadBins" {
+                    eprintln!("[DEBUG] save_tune: ✗ Failed to read '{}' from cache - page_state={:?}, page_size={:?}, page_data_len={}, required_offset={}", 
+                        name, page_state, page_size, page_data_len, constant.offset as usize + length as usize);
+                }
+            }
+        }
+        
+        eprintln!("[DEBUG] save_tune: Saved {} constants from cache to tune file", constants_saved);
     }
     
     // Update modified timestamp
@@ -3270,9 +3479,75 @@ async fn save_tune_as(state: tauri::State<'_, AppState>, path: String) -> Result
 }
 
 #[tauri::command]
-async fn load_tune(state: tauri::State<'_, AppState>, path: String) -> Result<TuneInfo, String> {
+async fn load_tune(state: tauri::State<'_, AppState>, app: tauri::AppHandle, path: String) -> Result<TuneInfo, String> {
+    eprintln!("\n[INFO] ========================================");
+    eprintln!("[INFO] LOADING TUNE FILE: {}", path);
+    eprintln!("[INFO] ========================================");
+    
     let tune = TuneFile::load(&path)
         .map_err(|e| format!("Failed to load tune: {}", e))?;
+    
+    eprintln!("[INFO] ✓ Tune file loaded successfully");
+    eprintln!("[INFO]   Signature: '{}'", tune.signature);
+    eprintln!("[INFO]   Constants: {}", tune.constants.len());
+    eprintln!("[INFO]   Pages: {}", tune.pages.len());
+    
+    // Debug: List first 20 constant names to see what we parsed
+    let constant_names: Vec<String> = tune.constants.keys().take(20).cloned().collect();
+    eprintln!("[DEBUG] load_tune: Sample constants from MSQ: {:?}", constant_names);
+    
+    // Debug: Check VE table constants specifically
+    let ve_table_in_tune = tune.constants.contains_key("veTable");
+    let ve_rpm_bins_in_tune = tune.constants.contains_key("veRpmBins");
+    let ve_load_bins_in_tune = tune.constants.contains_key("veLoadBins");
+    eprintln!("[DEBUG] load_tune: VE constants in tune - veTable: {}, veRpmBins: {}, veLoadBins: {}", 
+        ve_table_in_tune, ve_rpm_bins_in_tune, ve_load_bins_in_tune);
+    
+    // Check if MSQ signature matches current INI definition (informational only)
+    // We'll still apply constants by name match regardless of signature match
+    let def_guard = state.definition.lock().await;
+    let current_ini_signature = def_guard.as_ref().map(|d| d.signature.clone());
+    drop(def_guard);
+    
+    if let Some(ref ini_sig) = current_ini_signature {
+        let match_type = compare_signatures(&tune.signature, ini_sig);
+        if match_type != SignatureMatchType::Exact {
+            eprintln!("[INFO] load_tune: MSQ signature '{}' {} current INI signature '{}' - will apply constants by name match", 
+                tune.signature,
+                if match_type == SignatureMatchType::Partial { "partially matches" } else { "does not match" },
+                ini_sig);
+            eprintln!("[INFO] load_tune: This is normal - many constants (like VE table, ignition tables) will still work across different INI versions");
+            
+            // Only show dialog for complete mismatches, and only if we find better matching INIs
+            if match_type == SignatureMatchType::Mismatch {
+                let matching_inis = find_matching_inis_internal(&state, &tune.signature).await;
+                let matching_count = matching_inis.len();
+                
+                // Only show dialog if we found better matching INIs
+                if matching_count > 0 {
+                    let current_ini_path = {
+                        let settings = load_settings(&app);
+                        settings.last_ini_path.clone()
+                    };
+                    
+                    let mismatch_info = SignatureMismatchInfo {
+                        ecu_signature: tune.signature.clone(),
+                        ini_signature: ini_sig.clone(),
+                        match_type,
+                        current_ini_path,
+                        matching_inis,
+                    };
+                    
+                    let _ = app.emit("signature:mismatch", &mismatch_info);
+                    eprintln!("[INFO] load_tune: Found {} better matching INI file(s). You can switch in the dialog, or continue with current INI.", matching_count);
+                }
+            }
+        } else {
+            eprintln!("[INFO] load_tune: MSQ signature matches current INI definition");
+        }
+    } else {
+        eprintln!("[WARN] load_tune: No INI definition loaded - will apply constants by name match if definition is loaded later");
+    }
     
     let info = TuneInfo {
         path: Some(path.clone()),
@@ -3284,11 +3559,253 @@ async fn load_tune(state: tauri::State<'_, AppState>, path: String) -> Result<Tu
     // Populate TuneCache from loaded tune data
     // This allows table operations to use cached data instead of reading from ECU
     {
+        let def_guard = state.definition.lock().await;
+        let def = def_guard.as_ref();
         let mut cache_guard = state.tune_cache.lock().await;
+        
+        // Initialize cache if it doesn't exist, or reinitialize if it was reset
+        if cache_guard.is_none() {
+            if let Some(def) = def {
+                eprintln!("[DEBUG] load_tune: Initializing cache from definition");
+                *cache_guard = Some(TuneCache::from_definition(def));
+            } else {
+                eprintln!("[WARN] load_tune: No definition loaded, cannot initialize cache");
+                return Err("No ECU definition loaded. Please open a project first.".to_string());
+            }
+        }
+        
+        // Ensure cache is initialized even if it exists but is empty
         if let Some(cache) = cache_guard.as_mut() {
+            if cache.page_count() == 0 {
+                if let Some(def) = def {
+                    eprintln!("[DEBUG] load_tune: Cache exists but is empty, reinitializing from definition");
+                    *cache_guard = Some(TuneCache::from_definition(def));
+                }
+            }
+        }
+        
+        if let Some(cache) = cache_guard.as_mut() {
+            // First, load any raw page data
             for (page_num, page_data) in &tune.pages {
                 cache.load_page(*page_num, page_data.clone());
                 eprintln!("[DEBUG] load_tune: populated cache page {} with {} bytes", page_num, page_data.len());
+            }
+            
+            // Then, apply constants from tune file to cache
+            if let Some(def) = def {
+                eprintln!("[DEBUG] load_tune: Definition loaded - {} constants in definition", def.constants.len());
+                
+                // Debug: Check if VE table constants are in the definition
+                let ve_table_in_def = def.constants.contains_key("veTable");
+                let ve_rpm_bins_in_def = def.constants.contains_key("veRpmBins");
+                let ve_load_bins_in_def = def.constants.contains_key("veLoadBins");
+                eprintln!("[DEBUG] load_tune: VE constants in definition - veTable: {}, veRpmBins: {}, veLoadBins: {}", 
+                    ve_table_in_def, ve_rpm_bins_in_def, ve_load_bins_in_def);
+                
+                // Debug: Show what veTable constant looks like if it exists
+                if let Some(ve_const) = def.constants.get("veTable") {
+                    eprintln!("[DEBUG] load_tune: veTable constant - page={}, offset={}, size={}, shape={:?}", 
+                        ve_const.page, ve_const.offset, ve_const.size_bytes(), ve_const.shape);
+                }
+                
+                use libretune_core::tune::TuneValue;
+                
+                let mut applied_count = 0;
+                let mut skipped_count = 0;
+                let mut failed_count = 0;
+                let mut pcvar_count = 0;
+                let mut zero_size_count = 0;
+                let mut string_bool_count = 0;
+                
+                for (name, tune_value) in &tune.constants {
+                    // Debug VE table constants
+                    if name == "veTable" || name == "veRpmBins" || name == "veLoadBins" {
+                        eprintln!("[DEBUG] load_tune: Found VE constant '{}' in MSQ file", name);
+                    }
+                    
+                    // Look up constant in definition
+                    if let Some(constant) = def.constants.get(name) {
+                        // PC variables are stored locally, not in page data
+                        if constant.is_pc_variable {
+                            match tune_value {
+                                TuneValue::Scalar(v) => {
+                                    cache.local_values.insert(name.clone(), *v);
+                                    pcvar_count += 1;
+                                    eprintln!("[DEBUG] load_tune: set PC variable '{}' = {}", name, v);
+                                }
+                                TuneValue::Array(arr) if !arr.is_empty() => {
+                                    // For arrays, store first value (or handle differently if needed)
+                                    cache.local_values.insert(name.clone(), arr[0]);
+                                    pcvar_count += 1;
+                                    eprintln!("[DEBUG] load_tune: set PC variable '{}' = {} (from array)", name, arr[0]);
+                                }
+                                _ => {
+                                    skipped_count += 1;
+                                    eprintln!("[DEBUG] load_tune: skipping PC variable '{}' (unsupported value type)", name);
+                                }
+                            }
+                            continue;
+                        }
+                        
+                        // Skip if constant has no size (packed bits or invalid)
+                        let length = constant.size_bytes() as u16;
+                        if length == 0 {
+                            zero_size_count += 1;
+                            skipped_count += 1;
+                            eprintln!("[DEBUG] load_tune: skipping constant '{}' (zero size)", name);
+                            continue;
+                        }
+                        
+                        // Convert tune value to raw bytes
+                        let element_size = constant.data_type.size_bytes();
+                        let element_count = constant.shape.element_count();
+                        let mut raw_data = vec![0u8; length as usize];
+                        
+                        match tune_value {
+                            TuneValue::Scalar(v) => {
+                                let raw_val = constant.display_to_raw(*v);
+                                constant.data_type.write_to_bytes(&mut raw_data, 0, raw_val, def.endianness);
+                                // Check if page exists before writing
+                                let page_exists = cache.page_size(constant.page).is_some();
+                                let page_state_before = cache.page_state(constant.page);
+                                
+                                if name == "veTable" || name == "veRpmBins" || name == "veLoadBins" {
+                                    eprintln!("[DEBUG] load_tune: About to write '{}' - page={}, page_exists={}, page_state={:?}, offset={}, len={}", 
+                                        name, constant.page, page_exists, page_state_before, constant.offset, length);
+                                }
+                                
+                                if cache.write_bytes(constant.page, constant.offset, &raw_data) {
+                                    applied_count += 1;
+                                    let page_state_after = cache.page_state(constant.page);
+                                    
+                                    // Verify the data was actually written by reading it back
+                                    if name == "veTable" || name == "veRpmBins" || name == "veLoadBins" {
+                                        let verify_read = cache.read_bytes(constant.page, constant.offset, length);
+                                        eprintln!("[DEBUG] load_tune: ✓ Applied constant '{}' = {} (scalar, page={}, offset={}, state={:?}, verify_read={})", 
+                                            name, v, constant.page, constant.offset, page_state_after, verify_read.is_some());
+                                    }
+                                } else {
+                                    failed_count += 1;
+                                    if name == "veTable" || name == "veRpmBins" || name == "veLoadBins" {
+                                        eprintln!("[DEBUG] load_tune: ✗ Failed to write constant '{}' (scalar, page={}, offset={}, len={}, page_size={:?}, page_exists={})", 
+                                            name, constant.page, constant.offset, length, cache.page_size(constant.page), page_exists);
+                                    }
+                                }
+                            }
+                            TuneValue::Array(arr) => {
+                                // Handle size mismatches: write what we have, pad or truncate as needed
+                                let write_count = arr.len().min(element_count);
+                                let last_value = arr.last().copied().unwrap_or(0.0);
+                                
+                                for i in 0..element_count {
+                                    let val = if i < arr.len() {
+                                        arr[i]
+                                    } else {
+                                        // Pad with last value if array is smaller
+                                        last_value
+                                    };
+                                    let raw_val = constant.display_to_raw(val);
+                                    let offset = i * element_size;
+                                    constant.data_type.write_to_bytes(&mut raw_data, offset, raw_val, def.endianness);
+                                }
+                                
+                                // Check if page exists before writing
+                                let page_exists = cache.page_size(constant.page).is_some();
+                                let page_state_before = cache.page_state(constant.page);
+                                
+                                if name == "veTable" || name == "veRpmBins" || name == "veLoadBins" {
+                                    if arr.len() != element_count {
+                                        eprintln!("[DEBUG] load_tune: array size mismatch for '{}': expected {}, got {} (will pad/truncate)", 
+                                            name, element_count, arr.len());
+                                    }
+                                    eprintln!("[DEBUG] load_tune: About to write '{}' - page={}, page_exists={}, page_state={:?}, offset={}, len={}", 
+                                        name, constant.page, page_exists, page_state_before, constant.offset, length);
+                                }
+                                
+                                if cache.write_bytes(constant.page, constant.offset, &raw_data) {
+                                    applied_count += 1;
+                                    let page_state_after = cache.page_state(constant.page);
+                                    
+                                    // Verify the data was actually written by reading it back
+                                    if name == "veTable" || name == "veRpmBins" || name == "veLoadBins" {
+                                        let verify_read = cache.read_bytes(constant.page, constant.offset, length);
+                                        eprintln!("[DEBUG] load_tune: ✓ Applied constant '{}' (array, {} elements written, {} expected, page={}, offset={}, state={:?}, verify_read={})", 
+                                            name, write_count, element_count, constant.page, constant.offset, page_state_after, verify_read.is_some());
+                                    }
+                                } else {
+                                    failed_count += 1;
+                                    if name == "veTable" || name == "veRpmBins" || name == "veLoadBins" {
+                                        eprintln!("[DEBUG] load_tune: ✗ Failed to write constant '{}' (array, page={}, offset={}, len={}, page_size={:?}, page_exists={})", 
+                                            name, constant.page, constant.offset, length, cache.page_size(constant.page), page_exists);
+                                    }
+                                }
+                            }
+                            TuneValue::String(_) | TuneValue::Bool(_) => {
+                                string_bool_count += 1;
+                                skipped_count += 1;
+                                eprintln!("[DEBUG] load_tune: skipping constant '{}' (string/bool not supported for page data)", name);
+                            }
+                        }
+                    } else {
+                        skipped_count += 1;
+                        if name == "veTable" || name == "veRpmBins" || name == "veLoadBins" {
+                            eprintln!("[DEBUG] load_tune: constant '{}' not found in definition", name);
+                        }
+                    }
+                }
+                
+                // Print prominent summary
+                let total_accounted = applied_count + pcvar_count + skipped_count + failed_count;
+                eprintln!("\n[INFO] ========================================");
+                eprintln!("[INFO] Tune Load Summary:");
+                eprintln!("[INFO]   Total constants in MSQ: {}", tune.constants.len());
+                eprintln!("[INFO]   Successfully applied (page data): {}", applied_count);
+                eprintln!("[INFO]   PC variables applied: {}", pcvar_count);
+                eprintln!("[INFO]   Failed to apply: {}", failed_count);
+                eprintln!("[INFO]   Skipped:");
+                eprintln!("[INFO]     - Not in definition: {}", skipped_count - zero_size_count - string_bool_count);
+                eprintln!("[INFO]     - Zero size (packed bits): {}", zero_size_count);
+                eprintln!("[INFO]     - String/Bool (unsupported): {}", string_bool_count);
+                eprintln!("[INFO]   Total skipped: {}", skipped_count);
+                if total_accounted != tune.constants.len() {
+                    eprintln!("[WARN]   ⚠ Accounting mismatch: {} constants unaccounted for!", 
+                        tune.constants.len() - total_accounted);
+                }
+                eprintln!("[INFO] ========================================\n");
+                
+                // Debug: Check page states after loading and show actual data sizes
+                eprintln!("[DEBUG] load_tune: Page states after loading:");
+                for page in 0..cache.page_count() {
+                    let state = cache.page_state(page);
+                    let def_size = cache.page_size(page);
+                    let actual_size = cache.get_page(page).map(|p| p.len()).unwrap_or(0);
+                    if state != PageState::NotLoaded || def_size.is_some() || actual_size > 0 {
+                        eprintln!("[DEBUG] load_tune:   Page {}: state={:?}, def_size={:?}, actual_data_size={} bytes", 
+                            page, state, def_size, actual_size);
+                    }
+                }
+                
+                if applied_count > 0 {
+                    let total_applied = applied_count + pcvar_count;
+                    eprintln!("[INFO] ✓ Successfully loaded {} constants into cache ({} page data + {} PC variables).", 
+                        total_applied, applied_count, pcvar_count);
+                    eprintln!("[INFO]   Important tables like VE, ignition, and fuel should work even if some constants don't match.");
+                    eprintln!("[INFO]   All open tables will refresh automatically.");
+                    
+                    // Informational note if many constants were skipped (not a warning - this is normal)
+                    if skipped_count > applied_count && skipped_count > 100 {
+                        let applied_percent = (total_applied as f64 / tune.constants.len() as f64 * 100.0) as u32;
+                        eprintln!("[INFO] ℹ Note: {} constants ({}%) were skipped - they're not in the current INI definition.", skipped_count, 100 - applied_percent);
+                        eprintln!("[INFO]   This is normal when INI versions differ. Core tuning tables should still work.");
+                        eprintln!("[INFO]   If you need those constants, switch to a matching INI file in Settings.");
+                    }
+                } else {
+                    eprintln!("[WARN] ⚠ No constants were applied! This usually means the MSQ file doesn't match the current INI definition.");
+                    eprintln!("[WARN]   MSQ signature: '{}'", tune.signature);
+                    eprintln!("[WARN]   Check the Signature Mismatch dialog (if shown) or switch to a matching INI file in Settings.");
+                }
+            } else {
+                eprintln!("[DEBUG] load_tune: no definition loaded, skipping constant application");
             }
         }
     }
@@ -3296,6 +3813,9 @@ async fn load_tune(state: tauri::State<'_, AppState>, path: String) -> Result<Tu
     *state.current_tune.lock().await = Some(tune);
     *state.current_tune_path.lock().await = Some(PathBuf::from(path));
     *state.tune_modified.lock().await = false;
+    
+    // Emit event to notify UI that tune was loaded
+    let _ = app.emit("tune:loaded", "file");
     
     Ok(info)
 }
@@ -3557,13 +4077,83 @@ async fn create_project(
     let mut project = Project::create(&name, &ini_path, &signature, None)
         .map_err(|e| format!("Failed to create project: {}", e))?;
     
-    // If a tune path was provided, import it
+    // Store current project and load its definition first (needed for applying tune)
+    let mut def_guard = state.definition.lock().await;
+    *def_guard = Some(def.clone());
+    drop(def_guard);
+    
+    // Initialize TuneCache from definition
+    let cache = TuneCache::from_definition(&def);
+    {
+        let mut cache_guard = state.tune_cache.lock().await;
+        *cache_guard = Some(cache);
+    }
+    
+    // If a tune path was provided, import it and apply to cache
     if let Some(tune_file) = tune_path {
         let tune_path_ref = std::path::Path::new(&tune_file);
         if tune_path_ref.exists() {
             // TuneFile::load handles both XML and MSQ formats automatically
             let tune = TuneFile::load(tune_path_ref)
                 .map_err(|e| format!("Failed to load tune: {}", e))?;
+            
+            // Apply tune constants to cache (same logic as load_tune)
+            {
+                let mut cache_guard = state.tune_cache.lock().await;
+                if let Some(cache) = cache_guard.as_mut() {
+                    // Load any raw page data
+                    for (page_num, page_data) in &tune.pages {
+                        cache.load_page(*page_num, page_data.clone());
+                    }
+                    
+                    // Apply constants from tune file to cache
+                    use libretune_core::tune::TuneValue;
+                    
+                    for (name, tune_value) in &tune.constants {
+                        if let Some(constant) = def.constants.get(name) {
+                            // PC variables are stored locally
+                            if constant.is_pc_variable {
+                                match tune_value {
+                                    TuneValue::Scalar(v) => {
+                                        cache.local_values.insert(name.clone(), *v);
+                                    }
+                                    TuneValue::Array(arr) if !arr.is_empty() => {
+                                        cache.local_values.insert(name.clone(), arr[0]);
+                                    }
+                                    _ => {}
+                                }
+                                continue;
+                            }
+                            
+                            let length = constant.size_bytes() as u16;
+                            if length == 0 {
+                                continue;
+                            }
+                            
+                            let element_size = constant.data_type.size_bytes();
+                            let element_count = constant.shape.element_count();
+                            let mut raw_data = vec![0u8; length as usize];
+                            
+                            match tune_value {
+                                TuneValue::Scalar(v) => {
+                                    let raw_val = constant.display_to_raw(*v);
+                                    constant.data_type.write_to_bytes(&mut raw_data, 0, raw_val, def.endianness);
+                                    let _ = cache.write_bytes(constant.page, constant.offset, &raw_data);
+                                }
+                                TuneValue::Array(arr) if arr.len() == element_count => {
+                                    for (i, val) in arr.iter().enumerate() {
+                                        let raw_val = constant.display_to_raw(*val);
+                                        let offset = i * element_size;
+                                        constant.data_type.write_to_bytes(&mut raw_data, offset, raw_val, def.endianness);
+                                    }
+                                    let _ = cache.write_bytes(constant.page, constant.offset, &raw_data);
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+            }
             
             // Store tune in project
             project.current_tune = Some(tune);
@@ -3584,10 +4174,6 @@ async fn create_project(
         },
     };
     
-    // Store current project and load its definition
-    let mut def_guard = state.definition.lock().await;
-    *def_guard = Some(def);
-    
     let mut proj_guard = state.current_project.lock().await;
     *proj_guard = Some(project);
     
@@ -3597,16 +4183,38 @@ async fn create_project(
 /// Open an existing project
 #[tauri::command]
 async fn open_project(
+    app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
     path: String,
 ) -> Result<CurrentProjectInfo, String> {
+    eprintln!("\n[INFO] ========================================");
+    eprintln!("[INFO] OPENING PROJECT: {}", path);
+    eprintln!("[INFO] ========================================");
+    
     let project = Project::open(&path)
         .map_err(|e| format!("Failed to open project: {}", e))?;
     
+    eprintln!("[INFO] Project opened: {}", project.config.name);
+    eprintln!("[INFO] Project has tune file: {}", project.current_tune.is_some());
+    
+    if let Some(ref tune) = project.current_tune {
+        eprintln!("[INFO] Tune file signature: '{}'", tune.signature);
+        eprintln!("[INFO] Tune file has {} constants", tune.constants.len());
+        eprintln!("[INFO] Tune file has {} pages", tune.pages.len());
+    } else {
+        let tune_path = project.current_tune_path();
+        eprintln!("[WARN] No tune file loaded. Expected at: {:?}", tune_path);
+        eprintln!("[WARN] Tune file exists: {}", tune_path.exists());
+    }
+    
     // Load the project's INI definition
     let ini_path = project.ini_path();
+    eprintln!("[INFO] Loading INI from: {:?}", ini_path);
     let def = EcuDefinition::from_file(&ini_path)
         .map_err(|e| format!("Failed to parse project INI: {}", e))?;
+    
+    eprintln!("[INFO] INI signature: '{}'", def.signature);
+    eprintln!("[INFO] INI has {} constants", def.constants.len());
     
     let response = CurrentProjectInfo {
         name: project.config.name.clone(),
@@ -3650,17 +4258,183 @@ async fn open_project(
         
         // Populate cache from project tune
         if let Some(cache) = cache_guard.as_mut() {
+            // Load any raw page data first
             for (page_num, page_data) in &tune.pages {
                 cache.load_page(*page_num, page_data.clone());
             }
+            
+            // Apply constants from tune file to cache (same logic as load_tune)
+            use libretune_core::tune::TuneValue;
+            
+            // Debug: Check if VE table constants are in the tune
+            let ve_table_in_tune = tune.constants.contains_key("veTable");
+            let ve_rpm_bins_in_tune = tune.constants.contains_key("veRpmBins");
+            let ve_load_bins_in_tune = tune.constants.contains_key("veLoadBins");
+            eprintln!("[DEBUG] open_project: VE constants in tune - veTable: {}, veRpmBins: {}, veLoadBins: {}", 
+                ve_table_in_tune, ve_rpm_bins_in_tune, ve_load_bins_in_tune);
+            
+            // Debug: Check if VE table constants are in the definition
+            let ve_table_in_def = def_clone.constants.contains_key("veTable");
+            let ve_rpm_bins_in_def = def_clone.constants.contains_key("veRpmBins");
+            let ve_load_bins_in_def = def_clone.constants.contains_key("veLoadBins");
+            eprintln!("[DEBUG] open_project: VE constants in definition - veTable: {}, veRpmBins: {}, veLoadBins: {}", 
+                ve_table_in_def, ve_rpm_bins_in_def, ve_load_bins_in_def);
+            
+            // Debug: Show sample constant names from MSQ and definition to see why they're not matching
+            let msq_sample: Vec<String> = tune.constants.keys().take(10).cloned().collect();
+            let def_sample: Vec<String> = def_clone.constants.keys().take(10).cloned().collect();
+            eprintln!("[DEBUG] open_project: Sample MSQ constants: {:?}", msq_sample);
+            eprintln!("[DEBUG] open_project: Sample definition constants: {:?}", def_sample);
+            eprintln!("[DEBUG] open_project: Total MSQ constants: {}, Total definition constants: {}", 
+                tune.constants.len(), def_clone.constants.len());
+            
+            let mut applied_count = 0;
+            let mut skipped_count = 0;
+            let mut failed_count = 0;
+            
+            for (name, tune_value) in &tune.constants {
+                // Debug VE table constants specifically
+                let is_ve_related = name == "veTable" || name == "veRpmBins" || name == "veLoadBins";
+                
+                if let Some(constant) = def_clone.constants.get(name) {
+                    if is_ve_related {
+                        eprintln!("[DEBUG] open_project: Found constant '{}' in definition (page={}, offset={}, size={})", 
+                            name, constant.page, constant.offset, constant.size_bytes());
+                    }
+                    
+                    // PC variables are stored locally
+                    if constant.is_pc_variable {
+                        match tune_value {
+                            TuneValue::Scalar(v) => {
+                                cache.local_values.insert(name.clone(), *v);
+                                applied_count += 1;
+                                if is_ve_related {
+                                    eprintln!("[DEBUG] open_project: Applied PC variable '{}' = {}", name, v);
+                                }
+                            }
+                            TuneValue::Array(arr) if !arr.is_empty() => {
+                                cache.local_values.insert(name.clone(), arr[0]);
+                                applied_count += 1;
+                                if is_ve_related {
+                                    eprintln!("[DEBUG] open_project: Applied PC variable '{}' = {} (from array)", name, arr[0]);
+                                }
+                            }
+                            _ => {
+                                skipped_count += 1;
+                                if is_ve_related {
+                                    eprintln!("[DEBUG] open_project: Skipped PC variable '{}' (unsupported value type)", name);
+                                }
+                            }
+                        }
+                        continue;
+                    }
+                    
+                    let length = constant.size_bytes() as u16;
+                    if length == 0 {
+                        skipped_count += 1;
+                        if is_ve_related {
+                            eprintln!("[DEBUG] open_project: Skipped constant '{}' (zero size)", name);
+                        }
+                        continue;
+                    }
+                    
+                    let element_size = constant.data_type.size_bytes();
+                    let element_count = constant.shape.element_count();
+                    let mut raw_data = vec![0u8; length as usize];
+                    
+                    match tune_value {
+                        TuneValue::Scalar(v) => {
+                            let raw_val = constant.display_to_raw(*v);
+                            constant.data_type.write_to_bytes(&mut raw_data, 0, raw_val, def_clone.endianness);
+                            if cache.write_bytes(constant.page, constant.offset, &raw_data) {
+                                applied_count += 1;
+                                if is_ve_related {
+                                    eprintln!("[DEBUG] open_project: Applied constant '{}' = {} (scalar, page={}, offset={})", 
+                                        name, v, constant.page, constant.offset);
+                                }
+                            } else {
+                                failed_count += 1;
+                                if is_ve_related {
+                                    eprintln!("[DEBUG] open_project: Failed to write constant '{}' (page={}, offset={}, len={}, page_size={:?})", 
+                                        name, constant.page, constant.offset, length, cache.page_size(constant.page));
+                                }
+                            }
+                        }
+                        TuneValue::Array(arr) => {
+                            // Handle size mismatches: write what we have, pad or truncate as needed
+                            let write_count = arr.len().min(element_count);
+                            let last_value = arr.last().copied().unwrap_or(0.0);
+                            
+                            if arr.len() != element_count && is_ve_related {
+                                eprintln!("[DEBUG] open_project: Array size mismatch for '{}': expected {}, got {} (will write {} and pad/truncate)", 
+                                    name, element_count, arr.len(), write_count);
+                            }
+                            
+                            for i in 0..element_count {
+                                let val = if i < arr.len() {
+                                    arr[i]
+                                } else {
+                                    // Pad with last value if array is smaller
+                                    last_value
+                                };
+                                let raw_val = constant.display_to_raw(val);
+                                let offset = i * element_size;
+                                constant.data_type.write_to_bytes(&mut raw_data, offset, raw_val, def_clone.endianness);
+                            }
+                            
+                            if cache.write_bytes(constant.page, constant.offset, &raw_data) {
+                                applied_count += 1;
+                                if is_ve_related {
+                                    eprintln!("[DEBUG] open_project: Applied constant '{}' (array, {} elements written, page={}, offset={})", 
+                                        name, write_count, constant.page, constant.offset);
+                                }
+                            } else {
+                                failed_count += 1;
+                                if is_ve_related {
+                                    eprintln!("[DEBUG] open_project: Failed to write constant '{}' (array, page={}, offset={}, len={}, page_size={:?})", 
+                                        name, constant.page, constant.offset, length, cache.page_size(constant.page));
+                                }
+                            }
+                        }
+                        TuneValue::String(_) | TuneValue::Bool(_) => {
+                            skipped_count += 1;
+                            if is_ve_related {
+                                eprintln!("[DEBUG] open_project: Skipped constant '{}' (string/bool not supported for page data)", name);
+                            }
+                        }
+                    }
+                } else {
+                    skipped_count += 1;
+                    // Log first 10 skipped constants to see what's missing
+                    if skipped_count <= 10 || is_ve_related {
+                        eprintln!("[DEBUG] open_project: Constant '{}' not found in definition (skipped {}/{})", 
+                            name, skipped_count, tune.constants.len());
+                    }
+                }
+            }
+            
+            eprintln!("\n[INFO] ========================================");
+            eprintln!("[INFO] TUNE LOAD SUMMARY:");
+            eprintln!("[INFO]   Applied: {} constants", applied_count);
+            eprintln!("[INFO]   Failed: {} constants", failed_count);
+            eprintln!("[INFO]   Skipped: {} constants", skipped_count);
+            eprintln!("[INFO]   Total in MSQ: {} constants", tune.constants.len());
+            eprintln!("[INFO] ========================================\n");
         }
         drop(cache_guard);
         
         // Store tune in state
         *state.current_tune.lock().await = Some(tune.clone());
         *state.current_tune_path.lock().await = Some(project_path.join("CurrentTune.msq"));
+        
+        // Emit event to notify UI that tune was loaded
+        let _ = app.emit("tune:loaded", "project");
+        eprintln!("[INFO] ✓ Project opened successfully with tune file");
     } else {
         // No project tune - create empty cache
+        eprintln!("[WARN] ⚠ Project opened but NO TUNE FILE found!");
+        eprintln!("[WARN]   Expected tune file at: {:?}", project_path.join("CurrentTune.msq"));
+        eprintln!("[WARN]   You can load an MSQ file manually using File > Load Tune");
         let cache = TuneCache::from_definition(&def_clone);
         *state.tune_cache.lock().await = Some(cache);
     }
@@ -3765,6 +4539,7 @@ async fn update_project_ini(
     
     // Update the loaded definition
     let mut def_guard = state.definition.lock().await;
+    let def_clone = new_def.clone();
     *def_guard = Some(new_def);
     drop(def_guard);
     
@@ -3773,19 +4548,114 @@ async fn update_project_ini(
     settings.last_ini_path = Some(ini_path);
     save_settings(&app, &settings);
     
-    // If force_resync is requested and we're connected, clear the cache and re-sync
+    // Re-initialize cache with new definition and re-apply project tune constants
+    let project_tune = {
+        let proj_guard = state.current_project.lock().await;
+        proj_guard.as_ref().and_then(|p| p.current_tune.as_ref().cloned())
+    };
+    
+    // Create new cache from updated definition
+    let cache = TuneCache::from_definition(&def_clone);
+    let mut cache_guard = state.tune_cache.lock().await;
+    *cache_guard = Some(cache);
+    
+    // Re-apply project tune constants with new definition
+    if let Some(tune) = project_tune {
+        if let Some(cache) = cache_guard.as_mut() {
+            // Load any raw page data first
+            for (page_num, page_data) in &tune.pages {
+                cache.load_page(*page_num, page_data.clone());
+            }
+            
+            // Apply constants from tune file to cache (same logic as open_project)
+            use libretune_core::tune::TuneValue;
+            
+            let mut applied_count = 0;
+            let mut skipped_count = 0;
+            let mut failed_count = 0;
+            
+            for (name, tune_value) in &tune.constants {
+                if let Some(constant) = def_clone.constants.get(name) {
+                    // PC variables are stored locally
+                    if constant.is_pc_variable {
+                        match tune_value {
+                            TuneValue::Scalar(v) => {
+                                cache.local_values.insert(name.clone(), *v);
+                                applied_count += 1;
+                            }
+                            TuneValue::Array(arr) if !arr.is_empty() => {
+                                cache.local_values.insert(name.clone(), arr[0]);
+                                applied_count += 1;
+                            }
+                            _ => {
+                                skipped_count += 1;
+                            }
+                        }
+                        continue;
+                    }
+                    
+                    let length = constant.size_bytes() as u16;
+                    if length == 0 {
+                        skipped_count += 1;
+                        continue;
+                    }
+                    
+                    let element_size = constant.data_type.size_bytes();
+                    let element_count = constant.shape.element_count();
+                    let mut raw_data = vec![0u8; length as usize];
+                    
+                    match tune_value {
+                        TuneValue::Scalar(v) => {
+                            let raw_val = constant.display_to_raw(*v);
+                            constant.data_type.write_to_bytes(&mut raw_data, 0, raw_val, def_clone.endianness);
+                            if cache.write_bytes(constant.page, constant.offset, &raw_data) {
+                                applied_count += 1;
+                            } else {
+                                failed_count += 1;
+                            }
+                        }
+                        TuneValue::Array(arr) => {
+                            // Handle size mismatches
+                            let write_count = arr.len().min(element_count);
+                            let last_value = arr.last().copied().unwrap_or(0.0);
+                            
+                            for i in 0..element_count {
+                                let val = if i < arr.len() {
+                                    arr[i]
+                                } else {
+                                    last_value
+                                };
+                                let raw_val = constant.display_to_raw(val);
+                                let offset = i * element_size;
+                                constant.data_type.write_to_bytes(&mut raw_data, offset, raw_val, def_clone.endianness);
+                            }
+                            
+                            if cache.write_bytes(constant.page, constant.offset, &raw_data) {
+                                applied_count += 1;
+                            } else {
+                                failed_count += 1;
+                            }
+                        }
+                        TuneValue::String(_) | TuneValue::Bool(_) => {
+                            skipped_count += 1;
+                        }
+                    }
+                } else {
+                    skipped_count += 1;
+                }
+            }
+            
+            eprintln!("[DEBUG] update_project_ini: Re-applied tune constants - applied: {}, failed: {}, skipped: {}, total: {}", 
+                applied_count, failed_count, skipped_count, tune.constants.len());
+            
+            // Emit event to notify UI that tune data was re-applied
+            let _ = app.emit("tune:loaded", "ini_updated");
+        }
+    }
+    drop(cache_guard);
+    
+    // If force_resync is requested and we're connected, trigger re-sync
     if force_resync {
-        // Clear the tune cache
-        let mut cache_guard = state.tune_cache.lock().await;
-        *cache_guard = None;
-        drop(cache_guard);
-        
-        // Clear the current tune
-        let mut tune_guard = state.current_tune.lock().await;
-        *tune_guard = None;
-        drop(tune_guard);
-        
-        // Check if connected and trigger re-sync
         let conn_guard = state.connection.lock().await;
         if conn_guard.is_some() {
             drop(conn_guard);
