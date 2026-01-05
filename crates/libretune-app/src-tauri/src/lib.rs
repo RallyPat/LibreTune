@@ -734,11 +734,15 @@ async fn sync_ecu_data(
     
     // Store tune file in state (even if partial)
     let mut tune_guard = state.current_tune.lock().await;
+    let project_tune = tune_guard.clone(); // Keep copy for comparison
+    let ecu_tune = tune.clone(); // Keep copy for comparison
     *tune_guard = Some(tune);
     
     // Mark as not modified (freshly synced from ECU)
     let mut modified_guard = state.tune_modified.lock().await;
     *modified_guard = false;
+    drop(modified_guard);
+    drop(tune_guard);
     
     // Emit complete
     let progress = SyncProgress {
@@ -750,6 +754,49 @@ async fn sync_ecu_data(
         failed_page: None,
     };
     let _ = app.emit("sync:progress", &progress);
+    
+    // Check if project tune exists and differs from ECU tune
+    if let Some(ref project) = project_tune {
+        if project.signature == ecu_tune.signature {
+            // Compare page data
+            let mut has_differences = false;
+            let mut diff_pages: Vec<u8> = Vec::new();
+            
+            // Check all pages that exist in either tune
+            let all_pages: std::collections::HashSet<u8> = project.pages.keys()
+                .chain(ecu_tune.pages.keys())
+                .copied()
+                .collect();
+            
+            for page_num in all_pages {
+                let project_page = project.pages.get(&page_num);
+                let ecu_page = ecu_tune.pages.get(&page_num);
+                
+                match (project_page, ecu_page) {
+                    (Some(p), Some(e)) if p != e => {
+                        has_differences = true;
+                        diff_pages.push(page_num);
+                    }
+                    (Some(_), None) | (None, Some(_)) => {
+                        has_differences = true;
+                        diff_pages.push(page_num);
+                    }
+                    _ => {}
+                }
+            }
+            
+            if has_differences {
+                // Emit event for frontend to show dialog
+                let ecu_page_nums: Vec<u8> = ecu_tune.pages.keys().copied().collect();
+                let project_page_nums: Vec<u8> = project.pages.keys().copied().collect();
+                let _ = app.emit("tune:mismatch", &serde_json::json!({
+                    "ecu_pages": ecu_page_nums,
+                    "project_pages": project_page_nums,
+                    "diff_pages": diff_pages,
+                }));
+            }
+        }
+    }
     
     // Log detailed errors for debugging
     if !errors.is_empty() {
@@ -1368,55 +1415,44 @@ async fn update_table_data(
         constant.data_type.write_to_bytes(&mut raw_data, offset, raw_val, def.endianness);
     }
 
-    // Check if connected - if not, save to tune file instead
+    // Always write to TuneCache if available (enables offline editing)
+    if let Some(cache) = cache_guard.as_mut() {
+        if cache.write_bytes(constant.page, constant.offset, &raw_data) {
+            // Also update TuneFile in memory
+            let mut tune_guard = state.current_tune.lock().await;
+            if let Some(tune) = tune_guard.as_mut() {
+                // Get or create page data
+                let page_data = tune.pages.entry(constant.page).or_insert_with(|| {
+                    // Create empty page if it doesn't exist
+                    vec![0u8; def.page_sizes.get(constant.page as usize).copied().unwrap_or(256) as usize]
+                });
+                
+                // Update the page data
+                let start = constant.offset as usize;
+                let end = start + raw_data.len();
+                if end <= page_data.len() {
+                    page_data[start..end].copy_from_slice(&raw_data);
+                }
+            }
+            
+            // Mark tune as modified
+            *state.tune_modified.lock().await = true;
+        }
+    }
+
+    // Write to ECU if connected (optional - offline mode works without this)
     if let Some(conn) = conn_guard.as_mut() {
-        // Connected: write to ECU
         let params = libretune_core::protocol::commands::WriteMemoryParams {
             can_id: 0,
             page: constant.page,
             offset: constant.offset,
             data: raw_data.clone(),
         };
-        conn.write_memory(params).map_err(|e| e.to_string())?;
-    } else {
-        // Not connected: update cache and tune file for offline editing
-        if let Some(cache) = cache_guard.as_mut() {
-            cache.write_bytes(constant.page, constant.offset, &raw_data);
-        }
         
-        // Update tune file
-        let mut tune_guard = state.current_tune.lock().await;
-        if let Some(tune) = tune_guard.as_mut() {
-            // Get or create page data
-            let page_data = tune.pages.entry(constant.page).or_insert_with(|| {
-                vec![0u8; def.protocol.page_sizes.get(constant.page as usize).copied().unwrap_or(256) as usize]
-            });
-            
-            // Update the page data
-            let start = constant.offset as usize;
-            let end = start + raw_data.len();
-            if end <= page_data.len() {
-                page_data[start..end].copy_from_slice(&raw_data);
-                tune.touch();
-            }
+        // Don't fail if ECU write fails - offline mode should still work
+        if let Err(e) = conn.write_memory(params) {
+            eprintln!("[WARN] Failed to write to ECU (offline mode?): {}", e);
         }
-        drop(tune_guard);
-        
-        // Mark as modified
-        *state.tune_modified.lock().await = true;
-        
-        // Auto-save to project tune file if we have a path
-        let path_guard = state.current_tune_path.lock().await;
-        if let Some(ref tune_path) = *path_guard {
-            let tune_guard = state.current_tune.lock().await;
-            if let Some(ref tune) = *tune_guard {
-                if let Err(e) = tune.save(tune_path) {
-                    eprintln!("[WARN] Failed to auto-save tune: {}", e);
-                }
-            }
-            drop(tune_guard);
-        }
-        drop(path_guard);
     }
 
     Ok(())
@@ -1951,60 +1987,49 @@ async fn update_constant(
         return Ok(());
     }
     
+    // Convert display value to raw bytes
     let raw_val = constant.display_to_raw(value);
     let mut raw_data = vec![0u8; constant.size_bytes() as usize];
-    
     constant.data_type.write_to_bytes(&mut raw_data, 0, raw_val, def.endianness);
 
-    // Check if connected - if not, save to tune file instead
+    // Always write to TuneCache if available (enables offline editing)
+    if let Some(cache) = cache_guard.as_mut() {
+        if cache.write_bytes(constant.page, constant.offset, &raw_data) {
+            // Also update TuneFile in memory
+            let mut tune_guard = state.current_tune.lock().await;
+            if let Some(tune) = tune_guard.as_mut() {
+                // Get or create page data
+                let page_data = tune.pages.entry(constant.page).or_insert_with(|| {
+                    // Create empty page if it doesn't exist
+                    vec![0u8; def.page_sizes.get(constant.page as usize).copied().unwrap_or(256) as usize]
+                });
+                
+                // Update the page data
+                let start = constant.offset as usize;
+                let end = start + raw_data.len();
+                if end <= page_data.len() {
+                    page_data[start..end].copy_from_slice(&raw_data);
+                }
+            }
+            
+            // Mark tune as modified
+            *state.tune_modified.lock().await = true;
+        }
+    }
+
+    // Write to ECU if connected (optional - offline mode works without this)
     if let Some(conn) = conn_guard.as_mut() {
-        // Connected: write to ECU
         let params = libretune_core::protocol::commands::WriteMemoryParams {
             can_id: 0,
             page: constant.page,
             offset: constant.offset,
             data: raw_data.clone(),
         };
-        conn.write_memory(params).map_err(|e| e.to_string())?;
-    } else {
-        // Not connected: update cache and tune file for offline editing
-        if let Some(cache) = cache_guard.as_mut() {
-            cache.write_bytes(constant.page, constant.offset, &raw_data);
-        }
         
-        // Update tune file
-        let mut tune_guard = state.current_tune.lock().await;
-        if let Some(tune) = tune_guard.as_mut() {
-            // Get or create page data
-            let page_data = tune.pages.entry(constant.page).or_insert_with(|| {
-                vec![0u8; def.protocol.page_sizes.get(constant.page as usize).copied().unwrap_or(256) as usize]
-            });
-            
-            // Update the page data
-            let start = constant.offset as usize;
-            let end = start + raw_data.len();
-            if end <= page_data.len() {
-                page_data[start..end].copy_from_slice(&raw_data);
-                tune.touch();
-            }
+        // Don't fail if ECU write fails - offline mode should still work
+        if let Err(e) = conn.write_memory(params) {
+            eprintln!("[WARN] Failed to write to ECU (offline mode?): {}", e);
         }
-        drop(tune_guard);
-        
-        // Mark as modified
-        *state.tune_modified.lock().await = true;
-        
-        // Auto-save to project tune file if we have a path
-        let path_guard = state.current_tune_path.lock().await;
-        if let Some(ref tune_path) = *path_guard {
-            let tune_guard = state.current_tune.lock().await;
-            if let Some(ref tune) = *tune_guard {
-                if let Err(e) = tune.save(tune_path) {
-                    eprintln!("[WARN] Failed to auto-save tune: {}", e);
-                }
-            }
-            drop(tune_guard);
-        }
-        drop(path_guard);
     }
 
     Ok(())
@@ -3185,10 +3210,26 @@ async fn new_tune(state: tauri::State<'_, AppState>) -> Result<(), String> {
 
 #[tauri::command]
 async fn save_tune(state: tauri::State<'_, AppState>, path: Option<String>) -> Result<String, String> {
-    let tune_guard = state.current_tune.lock().await;
+    let mut tune_guard = state.current_tune.lock().await;
     let path_guard = state.current_tune_path.lock().await;
+    let cache_guard = state.tune_cache.lock().await;
+    let def_guard = state.definition.lock().await;
     
-    let tune = tune_guard.as_ref().ok_or("No tune loaded")?;
+    let tune = tune_guard.as_mut().ok_or("No tune loaded")?;
+    let def = def_guard.as_ref().ok_or("Definition not loaded")?;
+    
+    // Write TuneCache data to TuneFile before saving (ensures offline changes are saved)
+    if let Some(cache) = cache_guard.as_ref() {
+        // Copy all pages from cache to tune file
+        for page_num in 0..def.n_pages {
+            if let Some(page_data) = cache.get_page(page_num) {
+                tune.pages.insert(page_num, page_data.to_vec());
+            }
+        }
+    }
+    
+    // Update modified timestamp
+    tune.touch();
     
     // Use provided path, or current path, or generate default
     let save_path = if let Some(p) = path {
@@ -3214,6 +3255,8 @@ async fn save_tune(state: tauri::State<'_, AppState>, path: Option<String>) -> R
     
     drop(tune_guard);
     drop(path_guard);
+    drop(cache_guard);
+    drop(def_guard);
     
     *state.current_tune_path.lock().await = Some(save_path.clone());
     *state.tune_modified.lock().await = false;
@@ -3676,6 +3719,7 @@ async fn create_project(
             let tune = TuneFile::load(tune_path_ref)
                 .map_err(|e| format!("Failed to load tune: {}", e))?;
             
+            // Store tune in project
             project.current_tune = Some(tune);
             project.save_current_tune()
                 .map_err(|e| format!("Failed to save imported tune: {}", e))?;
@@ -3738,10 +3782,42 @@ async fn open_project(
     
     // Store current project and definition
     let mut def_guard = state.definition.lock().await;
+    let def_clone = def.clone();
     *def_guard = Some(def);
+    drop(def_guard);
     
+    // Save project path before moving project into mutex
+    let project_path = project.path.clone();
+    let project_tune = project.current_tune.as_ref().cloned();
+    
+    // Load project tune if it exists
     let mut proj_guard = state.current_project.lock().await;
     *proj_guard = Some(project);
+    drop(proj_guard);
+    
+    // Initialize TuneCache and load project tune
+    if let Some(tune) = project_tune {
+        // Create TuneCache from definition
+        let cache = TuneCache::from_definition(&def_clone);
+        let mut cache_guard = state.tune_cache.lock().await;
+        *cache_guard = Some(cache);
+        
+        // Populate cache from project tune
+        if let Some(cache) = cache_guard.as_mut() {
+            for (page_num, page_data) in &tune.pages {
+                cache.load_page(*page_num, page_data.clone());
+            }
+        }
+        drop(cache_guard);
+        
+        // Store tune in state
+        *state.current_tune.lock().await = Some(tune.clone());
+        *state.current_tune_path.lock().await = Some(project_path.join("CurrentTune.msq"));
+    } else {
+        // No project tune - create empty cache
+        let cache = TuneCache::from_definition(&def_clone);
+        *state.tune_cache.lock().await = Some(cache);
+    }
     
     Ok(response)
 }
@@ -4225,6 +4301,7 @@ mod demo_mode_tests {
             data_logger: Mutex::new(DataLogger::default()),
             current_project: Mutex::new(None),
             ini_repository: Mutex::new(None),
+            online_ini_repository: Mutex::new(OnlineIniRepository::new()),
             tune_cache: Mutex::new(None),
             demo_mode: Mutex::new(false),
         };
@@ -4303,6 +4380,55 @@ async fn update_constant_string(
     // In the future, we might need to handle ECU memory updates
     eprintln!("Updated string constant '{}' to: '{}'", name, value);
 
+    Ok(())
+}
+
+/// Use the project tune (discard ECU tune)
+#[tauri::command]
+async fn use_project_tune(
+    state: tauri::State<'_, AppState>,
+    app: tauri::AppHandle,
+) -> Result<(), String> {
+    let project_guard = state.current_project.lock().await;
+    let project = project_guard.as_ref().ok_or("No project loaded")?;
+    
+    // Load project tune from disk
+    let tune_path = project.current_tune_path();
+    if tune_path.exists() {
+        let tune = TuneFile::load(&tune_path)
+            .map_err(|e| format!("Failed to load project tune: {}", e))?;
+        
+        // Populate TuneCache from project tune
+        {
+            let mut cache_guard = state.tune_cache.lock().await;
+            if let Some(cache) = cache_guard.as_mut() {
+                for (page_num, page_data) in &tune.pages {
+                    cache.load_page(*page_num, page_data.clone());
+                }
+            }
+        }
+        
+        // Set as current tune
+        *state.current_tune.lock().await = Some(tune);
+        *state.current_tune_path.lock().await = Some(tune_path);
+        *state.tune_modified.lock().await = false;
+        
+        // Emit event to trigger re-sync if connected
+        let _ = app.emit("tune:loaded", "project");
+    } else {
+        return Err("Project tune file not found".to_string());
+    }
+    
+    Ok(())
+}
+
+/// Use the ECU tune (discard project tune changes)
+#[tauri::command]
+async fn use_ecu_tune(
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    // ECU tune is already loaded from sync, just mark as not modified
+    *state.tune_modified.lock().await = false;
     Ok(())
 }
 
@@ -4391,6 +4517,8 @@ pub fn run() {
             load_tune,
             list_tune_files,
             burn_to_ecu,
+            use_project_tune,
+            use_ecu_tune,
             mark_tune_modified,
             compare_project_and_ecu_tunes,
             write_project_tune_to_ecu,

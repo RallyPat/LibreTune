@@ -28,7 +28,7 @@ import TsDashboard from "./components/dashboards/TsDashboard";
 import DialogRenderer, { DialogDefinition as RendererDialogDef } from "./components/dialogs/DialogRenderer";
 import HelpViewer, { HelpTopicData } from "./components/dialogs/HelpViewer";
 import SignatureMismatchDialog, { SignatureMismatchInfo } from "./components/dialogs/SignatureMismatchDialog";
-import TuneComparisonDialog from "./components/dialogs/TuneComparisonDialog";
+import TuneMismatchDialog, { TuneMismatchInfo } from "./components/dialogs/TuneMismatchDialog";
 import "./themes/base.css";
 
 // Backend types
@@ -243,8 +243,9 @@ function AppContent() {
   const [signatureMismatchOpen, setSignatureMismatchOpen] = useState(false);
   const [signatureMismatchInfo, setSignatureMismatchInfo] = useState<SignatureMismatchInfo | null>(null);
   
-  // Tune comparison dialog state
-  const [tuneComparisonOpen, setTuneComparisonOpen] = useState(false);
+  // Tune mismatch dialog state
+  const [tuneMismatchOpen, setTuneMismatchOpen] = useState(false);
+  const [tuneMismatchInfo, setTuneMismatchInfo] = useState<TuneMismatchInfo | null>(null);
   
   // Sync status tracking (for partial sync warning)
   const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);
@@ -376,6 +377,27 @@ function AppContent() {
       if (unlisten) unlisten();
     };
   }, [status.state]);
+  
+  // Listen for tune mismatch events (after ECU sync)
+  useEffect(() => {
+    let unlisten: UnlistenFn | null = null;
+    
+    (async () => {
+      try {
+        unlisten = await listen<TuneMismatchInfo>("tune:mismatch", (event) => {
+          console.log("Tune mismatch detected:", event.payload);
+          setTuneMismatchInfo(event.payload);
+          setTuneMismatchOpen(true);
+        });
+      } catch (e) {
+        console.error("Failed to listen for tune:mismatch events:", e);
+      }
+    })();
+    
+    return () => {
+      if (unlisten) unlisten();
+    };
+  }, []);
 
   // Realtime streaming
   useEffect(() => {
@@ -1439,6 +1461,26 @@ function AppContent() {
           onClose={() => setHelpTopic(null)}
         />
       )}
+      
+      {/* Tune Mismatch Dialog */}
+      <TuneMismatchDialog
+        isOpen={tuneMismatchOpen}
+        mismatchInfo={tuneMismatchInfo}
+        onClose={() => {
+          setTuneMismatchOpen(false);
+          setTuneMismatchInfo(null);
+        }}
+        onUseProject={async () => {
+          // Refresh menus and constants after loading project tune
+          const values = await fetchConstants();
+          await fetchMenuTree(values);
+        }}
+        onUseECU={async () => {
+          // ECU tune is already loaded, just refresh UI
+          const values = await fetchConstants();
+          await fetchMenuTree(values);
+        }}
+      />
     </>
   );
 }

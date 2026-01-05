@@ -81,6 +81,41 @@ npm install
 npm run tauri dev
 ```
 
+### Notes for Windows Users
+
+```bash
+# If you are getting a message about link.exe not being found
+# you may need to download the Visual Stuido Build Tools 
+# until the binaries are ready to be distributed.
+
+# 1. Install Visual Studio Build Tools
+# Download from:
+# https://visualstudio.microsoft.com/downloads/
+#
+# Scroll to "Tools for Visual Studio" → "Build Tools for Visual Studio".
+# During installation, enable ONLY this workload:
+#
+#   ✔ Desktop development with C++
+#
+# This installs:
+# - MSVC compiler
+# - link.exe
+# - Windows 10/11 SDK
+# - CMake and Ninja
+
+# 2. Ensure Rust is using the MSVC toolchain
+rustup default stable-x86_64-pc-windows-msvc
+
+# 3. Restart your terminal so PATH updates
+
+# 4. Build LibreTune (development mode)
+cd crates/libretune-app
+npm install
+npm run tauri dev
+```
+
+
+
 ### Build for Production
 
 ```bash
