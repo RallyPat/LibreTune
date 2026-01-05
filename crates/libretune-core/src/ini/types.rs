@@ -1,0 +1,729 @@
+//! Common types used across INI parsing
+
+use serde::{Deserialize, Serialize};
+use std::collections::VecDeque;
+use std::time::Duration;
+
+/// Data types supported by ECU constants
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DataType {
+    /// Unsigned 8-bit integer
+    U08,
+    /// Signed 8-bit integer
+    S08,
+    /// Unsigned 16-bit integer
+    U16,
+    /// Signed 16-bit integer
+    S16,
+    /// Unsigned 32-bit integer
+    U32,
+    /// Signed 32-bit integer
+    S32,
+    /// 32-bit floating point
+    F32,
+    /// ASCII string
+    String,
+    /// Bit field within a byte
+    Bits,
+}
+
+/// Endianness of ECU data
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum Endianness {
+    #[default]
+    Big,
+    Little,
+}
+
+impl DataType {
+    /// Parse a data type from INI format string
+    pub fn from_ini_str(s: &str) -> Option<Self> {
+        match s.trim().to_uppercase().as_str() {
+            "U08" | "UINT8" | "BYTE" => Some(DataType::U08),
+            "S08" | "INT8" | "SBYTE" => Some(DataType::S08),
+            "U16" | "UINT16" | "WORD" => Some(DataType::U16),
+            "S16" | "INT16" | "SWORD" => Some(DataType::S16),
+            "U32" | "UINT32" | "DWORD" => Some(DataType::U32),
+            "S32" | "INT32" | "SDWORD" => Some(DataType::S32),
+            "F32" | "FLOAT" => Some(DataType::F32),
+            "ASCII" | "STRING" => Some(DataType::String),
+            "BITS" => Some(DataType::Bits),
+            _ => None,
+        }
+    }
+    
+    /// Get the size in bytes for this data type
+    pub fn size_bytes(&self) -> usize {
+        match self {
+            DataType::U08 | DataType::S08 | DataType::Bits => 1,
+            DataType::U16 | DataType::S16 => 2,
+            DataType::U32 | DataType::S32 | DataType::F32 => 4,
+            DataType::String => 0, // Variable size
+        }
+    }
+
+    /// Read a value from bytes at given offset
+    pub fn read_from_bytes(&self, data: &[u8], offset: usize, endian: Endianness) -> Option<f64> {
+        use byteorder::{BigEndian, LittleEndian, ByteOrder};
+        
+        if offset + self.size_bytes() > data.len() {
+            return None;
+        }
+
+        let bytes = &data[offset..];
+        match (self, endian) {
+            (DataType::U08 | DataType::Bits, _) => Some(bytes[0] as f64),
+            (DataType::S08, _) => Some(bytes[0] as i8 as f64),
+            (DataType::U16, Endianness::Big) => Some(BigEndian::read_u16(bytes) as f64),
+            (DataType::U16, Endianness::Little) => Some(LittleEndian::read_u16(bytes) as f64),
+            (DataType::S16, Endianness::Big) => Some(BigEndian::read_i16(bytes) as f64),
+            (DataType::S16, Endianness::Little) => Some(LittleEndian::read_i16(bytes) as f64),
+            (DataType::U32, Endianness::Big) => Some(BigEndian::read_u32(bytes) as f64),
+            (DataType::U32, Endianness::Little) => Some(LittleEndian::read_u32(bytes) as f64),
+            (DataType::S32, Endianness::Big) => Some(BigEndian::read_i32(bytes) as f64),
+            (DataType::S32, Endianness::Little) => Some(LittleEndian::read_i32(bytes) as f64),
+            (DataType::F32, Endianness::Big) => Some(BigEndian::read_f32(bytes) as f64),
+            (DataType::F32, Endianness::Little) => Some(LittleEndian::read_f32(bytes) as f64),
+            (DataType::String, _) => None,
+        }
+    }
+
+    /// Write a value to bytes at given offset
+    pub fn write_to_bytes(&self, data: &mut [u8], offset: usize, value: f64, endian: Endianness) {
+        use byteorder::{BigEndian, LittleEndian, ByteOrder};
+        
+        if offset + self.size_bytes() > data.len() {
+            return;
+        }
+
+        let bytes = &mut data[offset..];
+        match (self, endian) {
+            (DataType::U08 | DataType::Bits, _) => bytes[0] = value as u8,
+            (DataType::S08, _) => bytes[0] = value as i8 as u8,
+            (DataType::U16, Endianness::Big) => BigEndian::write_u16(bytes, value as u16),
+            (DataType::U16, Endianness::Little) => LittleEndian::write_u16(bytes, value as u16),
+            (DataType::S16, Endianness::Big) => BigEndian::write_i16(bytes, value as i16),
+            (DataType::S16, Endianness::Little) => LittleEndian::write_i16(bytes, value as i16),
+            (DataType::U32, Endianness::Big) => BigEndian::write_u32(bytes, value as u32),
+            (DataType::U32, Endianness::Little) => LittleEndian::write_u32(bytes, value as u32),
+            (DataType::S32, Endianness::Big) => BigEndian::write_i32(bytes, value as i32),
+            (DataType::S32, Endianness::Little) => LittleEndian::write_i32(bytes, value as i32),
+            (DataType::F32, Endianness::Big) => BigEndian::write_f32(bytes, value as f32),
+            (DataType::F32, Endianness::Little) => LittleEndian::write_f32(bytes, value as f32),
+            (DataType::String, _) => {},
+        }
+    }
+}
+
+/// Shape of a constant (scalar, 1D array, 2D array)
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Shape {
+    /// Single value
+    Scalar,
+    /// 1D array with given size
+    Array1D(usize),
+    /// 2D array with [rows, cols]
+    Array2D { rows: usize, cols: usize },
+}
+
+impl Shape {
+    /// Parse shape from INI format (e.g., "[16]" or "[16x16]")
+    pub fn from_ini_str(s: &str) -> Self {
+        let s = s.trim();
+        if s.is_empty() {
+            return Shape::Scalar;
+        }
+        
+        // Remove brackets if present and trim whitespace
+        let inner = s.trim_start_matches('[').trim_end_matches(']').trim();
+        
+        if inner.contains('x') || inner.contains('X') {
+            // 2D array
+            let parts: Vec<&str> = inner.split(['x', 'X']).collect();
+            if parts.len() == 2 {
+                if let (Ok(rows), Ok(cols)) = (parts[0].trim().parse(), parts[1].trim().parse()) {
+                    return Shape::Array2D { rows, cols };
+                }
+            }
+        } else if let Ok(size) = inner.parse() {
+            // 1D array
+            return Shape::Array1D(size);
+        }
+        
+        Shape::Scalar
+    }
+    
+    /// Get total element count
+    pub fn element_count(&self) -> usize {
+        match self {
+            Shape::Scalar => 1,
+            Shape::Array1D(size) => *size,
+            Shape::Array2D { rows, cols } => rows * cols,
+        }
+    }
+    
+    /// Get the X dimension (columns for 2D, size for 1D, 1 for scalar)
+    pub fn x_size(&self) -> usize {
+        match self {
+            Shape::Scalar => 1,
+            Shape::Array1D(size) => *size,
+            Shape::Array2D { cols, .. } => *cols,
+        }
+    }
+    
+    /// Get the Y dimension (rows for 2D, 1 otherwise)
+    pub fn y_size(&self) -> usize {
+        match self {
+            Shape::Scalar => 1,
+            Shape::Array1D(_) => 1,
+            Shape::Array2D { rows, .. } => *rows,
+        }
+    }
+}
+
+/// Setting group for UI organization
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SettingGroup {
+    /// Internal reference name
+    pub name: String,
+    /// Display label
+    pub label: String,
+    /// Available options
+    pub options: Vec<SettingOption>,
+}
+
+/// An option within a setting group
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SettingOption {
+    /// Option value
+    pub value: String,
+    pub label: String,
+}
+
+/// A high-level menu container
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Menu {
+    /// Internal name or ID
+    pub name: String,
+    /// Display title for the top-level menu
+    pub title: String,
+    /// List of items (submenus, dialogs, tables)
+    pub items: Vec<MenuItem>,
+}
+
+/// A menu item
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum MenuItem {
+    /// Link to a dialog
+    Dialog {
+        label: String,
+        target: String,
+        condition: Option<String>,
+    },
+    /// Link to a table editor
+    Table {
+        label: String,
+        target: String,
+        condition: Option<String>,
+    },
+    /// Submenu (standard or group)
+    SubMenu {
+        label: String,
+        items: Vec<MenuItem>,
+        condition: Option<String>,
+    },
+    /// Built-in standard feature (std_realtime, std_ms2gentherm, etc.)
+    Std {
+        label: String,
+        target: String,
+        condition: Option<String>,
+    },
+    /// Link to a help topic
+    Help {
+        label: String,
+        target: String,
+        condition: Option<String>,
+    },
+    /// Separator between menu items
+    Separator,
+}
+
+/// A help topic definition
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HelpTopic {
+    /// Internal name/ID
+    pub name: String,
+    /// Display title
+    pub title: String,
+    /// Web help URL (opens in browser)
+    pub web_url: Option<String>,
+    /// Text content lines (may contain HTML)
+    pub text_lines: Vec<String>,
+}
+
+/// Dialog definition for settings windows
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DialogDefinition {
+    /// Internal name/ID
+    pub name: String,
+    /// Display title
+    pub title: String,
+    /// Components within the dialog
+    pub components: Vec<DialogComponent>,
+}
+
+/// Components that can exist inside a dialog
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum DialogComponent {
+    /// A simple text label
+    Label { text: String },
+    /// Reference to an indicator panel
+    Panel { name: String },
+    /// A constant field with label
+    Field { label: String, name: String },
+    /// A live graph visualization
+    LiveGraph { 
+        name: String, 
+        title: String, 
+        position: String,
+        channels: Vec<String> 
+    },
+    /// An embedded table editor
+    Table { name: String },
+    /// An indicator
+    Indicator {
+        expression: String,
+        label_off: String,
+        label_on: String,
+    },
+}
+
+/// Datalog entry definition
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DatalogEntry {
+    /// Output channel name
+    pub channel: String,
+    /// Display label
+    pub label: String,
+    /// Format string
+    pub format: String,
+    /// Whether enabled by default
+    pub enabled: bool,
+}
+
+/// FrontPage configuration for default dashboard layout
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct FrontPageConfig {
+    /// Gauge references (gauge1-gauge8 → gauge names)
+    pub gauges: Vec<String>,
+    /// Status indicators
+    pub indicators: Vec<FrontPageIndicator>,
+}
+
+/// FrontPage status indicator with color support
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FrontPageIndicator {
+    /// Boolean expression (e.g., "running", "tps > 50", "sd_status & 8")
+    pub expression: String,
+    /// Label when expression is false
+    pub label_off: String,
+    /// Label when expression is true (can be dynamic expression with { })
+    pub label_on: String,
+    /// Background color when off (named color or hex)
+    pub bg_off: String,
+    /// Foreground (text) color when off
+    pub fg_off: String,
+    /// Background color when on
+    pub bg_on: String,
+    /// Foreground (text) color when on
+    pub fg_on: String,
+}
+
+impl FrontPageIndicator {
+    /// Convert a named color to CSS hex color
+    pub fn color_to_css(color: &str) -> String {
+        match color.to_lowercase().as_str() {
+            "white" => "#ffffff".to_string(),
+            "black" => "#000000".to_string(),
+            "red" => "#ff0000".to_string(),
+            "green" => "#00ff00".to_string(),
+            "blue" => "#0000ff".to_string(),
+            "yellow" => "#ffff00".to_string(),
+            "orange" => "#ffa500".to_string(),
+            "cyan" => "#00ffff".to_string(),
+            "magenta" => "#ff00ff".to_string(),
+            "gray" | "grey" => "#808080".to_string(),
+            "lightgray" | "lightgrey" => "#d3d3d3".to_string(),
+            "darkgray" | "darkgrey" => "#a9a9a9".to_string(),
+            "lime" => "#00ff00".to_string(),
+            "maroon" => "#800000".to_string(),
+            "navy" => "#000080".to_string(),
+            "olive" => "#808000".to_string(),
+            "purple" => "#800080".to_string(),
+            "silver" => "#c0c0c0".to_string(),
+            "teal" => "#008080".to_string(),
+            // If already hex or unknown, return as-is
+            other => {
+                if other.starts_with('#') {
+                    other.to_string()
+                } else {
+                    // Try to use as CSS color name
+                    other.to_string()
+                }
+            }
+        }
+    }
+}
+
+/// Configuration for adaptive timing
+/// When enabled, dynamically adjusts communication delays based on measured ECU response times
+#[derive(Debug, Clone)]
+pub struct AdaptiveTimingConfig {
+    /// Whether adaptive timing is enabled
+    pub enabled: bool,
+    /// Minimum timeout in milliseconds (floor for adaptive adjustment)
+    pub min_timeout_ms: u32,
+    /// Maximum timeout in milliseconds (ceiling for adaptive adjustment)
+    pub max_timeout_ms: u32,
+    /// Number of samples to keep for rolling average
+    pub sample_count: usize,
+    /// Multiplier applied to average response time (e.g., 2.5 = timeout is 2.5x avg response)
+    pub multiplier: f32,
+}
+
+impl Default for AdaptiveTimingConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            min_timeout_ms: 10,
+            max_timeout_ms: 500,
+            sample_count: 20,
+            multiplier: 2.5,
+        }
+    }
+}
+
+impl Serialize for AdaptiveTimingConfig {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeStruct;
+        let mut state = serializer.serialize_struct("AdaptiveTimingConfig", 5)?;
+        state.serialize_field("enabled", &self.enabled)?;
+        state.serialize_field("min_timeout_ms", &self.min_timeout_ms)?;
+        state.serialize_field("max_timeout_ms", &self.max_timeout_ms)?;
+        state.serialize_field("sample_count", &self.sample_count)?;
+        state.serialize_field("multiplier", &self.multiplier)?;
+        state.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for AdaptiveTimingConfig {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct Helper {
+            enabled: bool,
+            min_timeout_ms: u32,
+            max_timeout_ms: u32,
+            sample_count: usize,
+            multiplier: f32,
+        }
+        let helper = Helper::deserialize(deserializer)?;
+        Ok(Self {
+            enabled: helper.enabled,
+            min_timeout_ms: helper.min_timeout_ms,
+            max_timeout_ms: helper.max_timeout_ms,
+            sample_count: helper.sample_count,
+            multiplier: helper.multiplier,
+        })
+    }
+}
+
+/// Runtime state for adaptive timing (not serialized)
+#[derive(Debug, Clone)]
+pub struct AdaptiveTiming {
+    /// Configuration
+    pub config: AdaptiveTimingConfig,
+    /// Rolling sample buffer of response times
+    samples: VecDeque<Duration>,
+    /// Current calculated timeout based on samples
+    current_timeout: Duration,
+    /// Running sum for efficient average calculation
+    running_sum_us: u64,
+}
+
+impl AdaptiveTiming {
+    /// Create new adaptive timing with given config
+    pub fn new(config: AdaptiveTimingConfig) -> Self {
+        let initial_timeout = Duration::from_millis(
+            ((config.min_timeout_ms + config.max_timeout_ms) / 2) as u64
+        );
+        Self {
+            samples: VecDeque::with_capacity(config.sample_count),
+            current_timeout: initial_timeout,
+            running_sum_us: 0,
+            config,
+        }
+    }
+    
+    /// Record a new response time sample and recalculate timeout
+    pub fn record_response_time(&mut self, elapsed: Duration) {
+        if !self.config.enabled {
+            return;
+        }
+        
+        let elapsed_us = elapsed.as_micros() as u64;
+        
+        // Remove oldest sample if at capacity
+        if self.samples.len() >= self.config.sample_count {
+            if let Some(old) = self.samples.pop_front() {
+                self.running_sum_us = self.running_sum_us.saturating_sub(old.as_micros() as u64);
+            }
+        }
+        
+        // Add new sample
+        self.samples.push_back(elapsed);
+        self.running_sum_us += elapsed_us;
+        
+        // Recalculate timeout
+        self.recalculate_timeout();
+    }
+    
+    /// Get current effective timeout
+    pub fn get_timeout(&self) -> Duration {
+        if self.config.enabled && !self.samples.is_empty() {
+            self.current_timeout
+        } else {
+            Duration::from_millis(self.config.max_timeout_ms as u64)
+        }
+    }
+    
+    /// Get current effective inter-character timeout (1/4 of main timeout, min 5ms)
+    pub fn get_inter_char_timeout(&self) -> Duration {
+        let main_ms = self.get_timeout().as_millis() as u64;
+        Duration::from_millis(std::cmp::max(5, main_ms / 4))
+    }
+    
+    /// Get current effective minimum wait time for write_and_wait (1/3 of timeout, min 5ms)
+    pub fn get_min_wait(&self) -> Duration {
+        let main_ms = self.get_timeout().as_millis() as u64;
+        Duration::from_millis(std::cmp::max(5, main_ms / 3))
+    }
+    
+    /// Reset adaptive timing (e.g., after communication error)
+    /// Clears samples and backs off to conservative timeout
+    pub fn reset_on_error(&mut self) {
+        self.samples.clear();
+        self.running_sum_us = 0;
+        // Back off to 75% of max timeout
+        self.current_timeout = Duration::from_millis(
+            (self.config.max_timeout_ms as u64 * 3) / 4
+        );
+    }
+    
+    /// Check if adaptive timing is enabled
+    pub fn is_enabled(&self) -> bool {
+        self.config.enabled
+    }
+    
+    /// Enable or disable adaptive timing
+    pub fn set_enabled(&mut self, enabled: bool) {
+        self.config.enabled = enabled;
+        if !enabled {
+            self.samples.clear();
+            self.running_sum_us = 0;
+        }
+    }
+    
+    /// Get average response time (for diagnostics)
+    pub fn average_response_time(&self) -> Option<Duration> {
+        if self.samples.is_empty() {
+            None
+        } else {
+            let avg_us = self.running_sum_us / self.samples.len() as u64;
+            Some(Duration::from_micros(avg_us))
+        }
+    }
+    
+    /// Get number of samples collected
+    pub fn sample_count(&self) -> usize {
+        self.samples.len()
+    }
+    
+    fn recalculate_timeout(&mut self) {
+        if self.samples.is_empty() {
+            return;
+        }
+        
+        // Calculate average in microseconds
+        let avg_us = self.running_sum_us / self.samples.len() as u64;
+        
+        // Apply multiplier
+        let timeout_us = (avg_us as f32 * self.config.multiplier) as u64;
+        let timeout_ms = timeout_us / 1000;
+        
+        // Clamp to configured bounds
+        let clamped_ms = timeout_ms
+            .max(self.config.min_timeout_ms as u64)
+            .min(self.config.max_timeout_ms as u64);
+        
+        self.current_timeout = Duration::from_millis(clamped_ms);
+    }
+}
+
+impl Default for AdaptiveTiming {
+    fn default() -> Self {
+        Self::new(AdaptiveTimingConfig::default())
+    }
+}
+
+/// Protocol settings parsed from INI file
+/// These define how to communicate with the ECU
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProtocolSettings {
+    /// Message envelope format (e.g., "msEnvelope_1.0" for CRC framing)
+    pub message_envelope_format: Option<String>,
+    
+    /// Query command to get signature (usually "S" or "Q")
+    pub query_command: String,
+    
+    /// Delay in ms after opening port before sending commands
+    pub delay_after_port_open: u32,
+    
+    /// Page identifiers for multi-page ECUs (raw byte sequences)
+    pub page_identifiers: Vec<Vec<u8>>,
+    
+    /// Page sizes in bytes for each page
+    pub page_sizes: Vec<u32>,
+    
+    /// Page read command format strings (one per page)
+    /// Format: "R%2i%2o%2c" where %2i=page, %2o=offset, %2c=count
+    pub page_read_commands: Vec<String>,
+    
+    /// Page write command format strings (one per page)
+    /// Format: "C%2i%2o%2c%v" where %v=value bytes
+    pub page_chunk_write_commands: Vec<String>,
+    
+    /// Burn command format strings (one per page, empty = no burn for that page)
+    pub burn_commands: Vec<String>,
+    
+    /// CRC32 check command format strings (one per page)
+    pub crc32_check_commands: Vec<String>,
+    
+    /// Command to get realtime/output channel data
+    pub och_get_command: Option<String>,
+    
+    /// Size of output channel block in bytes
+    pub och_block_size: u32,
+    
+    /// Burst mode get command (usually "A")
+    pub burst_get_command: Option<String>,
+    
+    /// Retrieve config error command
+    pub retrieve_config_error: Option<String>,
+    
+    /// Delay in ms after burn command
+    pub page_activation_delay: u32,
+    
+    /// Max bytes per read/write chunk
+    pub blocking_factor: u32,
+    
+    /// Delay in ms between consecutive writes
+    pub inter_write_delay: u32,
+    
+    /// Read timeout in ms
+    pub block_read_timeout: u32,
+    
+    /// Whether to use block writes
+    pub write_blocks: bool,
+    
+    /// Whether ECU uses CAN IDs (enable2ndByteCanID)
+    pub enable_can_id: bool,
+    
+    /// Default baud rate
+    pub default_baud_rate: u32,
+    
+    /// Default IP address for TCP connections
+    pub default_ip_address: Option<String>,
+    
+    /// Default IP port for TCP connections
+    pub default_ip_port: u16,
+}
+
+impl Default for ProtocolSettings {
+    fn default() -> Self {
+        Self {
+            message_envelope_format: None,
+            query_command: "Q".to_string(),
+            delay_after_port_open: 0,
+            page_identifiers: Vec::new(),
+            page_sizes: Vec::new(),
+            page_read_commands: Vec::new(),
+            page_chunk_write_commands: Vec::new(),
+            burn_commands: Vec::new(),
+            crc32_check_commands: Vec::new(),
+            och_get_command: None,
+            och_block_size: 0,
+            burst_get_command: Some("A".to_string()),
+            retrieve_config_error: None,
+            page_activation_delay: 500,
+            blocking_factor: 256,
+            inter_write_delay: 0,
+            block_read_timeout: 1000,
+            write_blocks: true,
+            enable_can_id: true,
+            default_baud_rate: 115200,
+            default_ip_address: None,
+            default_ip_port: 29001,
+        }
+    }
+}
+
+impl ProtocolSettings {
+    /// Check if this ECU uses modern CRC-framed protocol
+    pub fn uses_modern_protocol(&self) -> bool {
+        self.message_envelope_format
+            .as_ref()
+            .map(|f| f.contains("msEnvelope"))
+            .unwrap_or(false)
+    }
+    
+    /// Get the number of pages
+    pub fn num_pages(&self) -> usize {
+        self.page_sizes.len()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    
+    #[test]
+    fn test_data_type_parsing() {
+        assert_eq!(DataType::from_ini_str("U08"), Some(DataType::U08));
+        assert_eq!(DataType::from_ini_str("uint16"), Some(DataType::U16));
+        assert_eq!(DataType::from_ini_str("BITS"), Some(DataType::Bits));
+        assert_eq!(DataType::from_ini_str("invalid"), None);
+    }
+    
+    #[test]
+    fn test_shape_parsing() {
+        assert_eq!(Shape::from_ini_str(""), Shape::Scalar);
+        assert_eq!(Shape::from_ini_str("[16]"), Shape::Array1D(16));
+        assert_eq!(Shape::from_ini_str("[16x16]"), Shape::Array2D { rows: 16, cols: 16 });
+        assert_eq!(Shape::from_ini_str("[8X12]"), Shape::Array2D { rows: 8, cols: 12 });
+    }
+    
+    #[test]
+    fn test_shape_element_count() {
+        assert_eq!(Shape::Scalar.element_count(), 1);
+        assert_eq!(Shape::Array1D(10).element_count(), 10);
+        assert_eq!(Shape::Array2D { rows: 4, cols: 5 }.element_count(), 20);
+    }
+}

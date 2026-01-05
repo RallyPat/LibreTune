@@ -1,0 +1,227 @@
+/*
+ * TableEditor - 2D table editor with TunerStudio-style controls
+ */
+
+.table-editor {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--table-bg);
+  outline: none;
+}
+
+/* Toolbar */
+.table-toolbar {
+  display: flex;
+  align-items: center;
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg-toolbar);
+  border-bottom: 1px solid var(--border-subtle);
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
+.table-toolbar-group {
+  display: flex;
+  gap: var(--space-1);
+}
+
+.table-toolbar-separator {
+  width: 1px;
+  height: 20px;
+  background: var(--border-default);
+  margin: 0 var(--space-2);
+}
+
+.table-toolbar-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  height: 26px;
+  padding: 0 var(--space-2);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-size: var(--font-size-base);
+  font-weight: 500;
+  transition: all var(--transition-fast);
+}
+
+.table-toolbar-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  border-color: var(--border-strong);
+}
+
+.table-toolbar-btn:active:not(:disabled) {
+  background: var(--bg-active);
+}
+
+.table-toolbar-btn:disabled {
+  color: var(--text-disabled);
+  cursor: not-allowed;
+}
+
+.table-toolbar-btn-burn {
+  background: var(--error);
+  border-color: var(--error);
+  color: white;
+}
+
+.table-toolbar-btn-burn:hover:not(:disabled) {
+  background: var(--error-bg);
+  border-color: var(--error-bg);
+}
+
+/* Grid container */
+.table-grid-container {
+  flex: 1;
+  overflow: auto;
+  padding: var(--space-2);
+}
+
+/* Grid */
+.table-grid {
+  border-collapse: collapse;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+  user-select: none;
+}
+
+.table-corner {
+  position: sticky;
+  top: 0;
+  left: 0;
+  z-index: 3;
+  background: var(--table-header-bg);
+  border: 1px solid var(--table-grid-line);
+  padding: var(--space-2) var(--space-3);
+  text-align: center;
+  font-weight: 600;
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
+}
+
+.table-x-header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--table-axis-bg);
+  border: 1px solid var(--table-grid-line);
+  padding: var(--space-2) var(--space-3);
+  text-align: center;
+  font-weight: 600;
+  color: var(--text-primary);
+  min-width: 50px;
+}
+
+.table-y-header {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  background: var(--table-axis-bg);
+  border: 1px solid var(--table-grid-line);
+  padding: var(--space-2) var(--space-3);
+  text-align: right;
+  font-weight: 600;
+  color: var(--text-primary);
+  min-width: 50px;
+}
+
+.table-cell {
+  border: 1px solid var(--table-grid-line);
+  padding: var(--space-2) var(--space-3);
+  text-align: center;
+  color: white;
+  min-width: 50px;
+  cursor: cell;
+  transition: all var(--transition-fast);
+  position: relative;
+}
+
+.table-cell:hover {
+  outline: 1px solid var(--primary);
+  outline-offset: -1px;
+}
+
+.table-cell.selected {
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
+  z-index: 1;
+}
+
+.table-cell.live {
+  outline: 2px solid var(--cursor-live);
+  outline-offset: -2px;
+  z-index: 2;
+}
+
+.table-cell.live::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--cursor-live);
+  opacity: 0.2;
+  pointer-events: none;
+}
+
+/* Trail cells - opacity controlled via CSS custom property */
+.table-cell.trail {
+  z-index: 1;
+}
+
+.table-cell.trail::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--cursor-trail, #ffcc00);
+  opacity: calc(var(--trail-opacity, 0.3) * 0.4);
+  pointer-events: none;
+  border-radius: 2px;
+}
+
+/* Follow mode button */
+.table-toolbar-btn-follow {
+  background: var(--bg-elevated);
+  border-color: var(--border-default);
+}
+
+.table-toolbar-btn-follow.active {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: white;
+}
+
+.table-toolbar-btn-follow.active:hover {
+  background: var(--primary-hover);
+  border-color: var(--primary-hover);
+}
+
+/* Cell editing */
+.table-cell-input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  background: var(--bg-input);
+  border: 2px solid var(--primary);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: inherit;
+  text-align: center;
+  padding: 0;
+}
+
+/* Status bar */
+.table-status {
+  display: flex;
+  align-items: center;
+  gap: var(--space-6);
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg-statusbar);
+  border-top: 1px solid var(--border-subtle);
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}

@@ -1,0 +1,217 @@
+.cell-edit-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  backdrop-filter: blur(4px);
+}
+
+.cell-edit-dialog {
+  min-width: 320px;
+  max-width: 400px;
+  padding: 20px;
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+}
+
+.cell-edit-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.cell-edit-header h3 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.cell-location {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 14px;
+  color: var(--text-secondary);
+  background: var(--bg-hover);
+  padding: 4px 8px;
+  border-radius: 4px;
+}
+
+.cell-edit-info {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 16px;
+  padding: 12px;
+  background: var(--bg-surface);
+  border-radius: 8px;
+  border: 1px solid var(--border-subtle);
+}
+
+.info-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.info-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.info-value {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-link);
+}
+
+.cell-edit-input-section {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.input-with-buttons {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.adjust-btn {
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.adjust-btn:hover {
+  background: var(--bg-active);
+  color: var(--text-primary);
+}
+
+.adjust-btn:active {
+  transform: scale(0.95);
+}
+
+.cell-value-input {
+  width: 120px;
+  height: 48px;
+  padding: 0 16px;
+  border: 2px solid var(--border-focus);
+  border-radius: 8px;
+  background: var(--bg-input);
+  color: var(--text-primary);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 20px;
+  font-weight: 600;
+  text-align: center;
+  transition: all 0.15s ease;
+}
+
+.cell-value-input:focus {
+  outline: none;
+  border-color: var(--text-link);
+  box-shadow: 0 0 0 3px rgba(100, 181, 246, 0.2);
+}
+
+.cell-value-input.error {
+  border-color: var(--error);
+  box-shadow: 0 0 0 3px rgba(239, 83, 80, 0.2);
+}
+
+/* Hide number input spinners */
+.cell-value-input::-webkit-inner-spin-button,
+.cell-value-input::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.cell-value-input[type='number'] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+.units-label {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.cell-edit-error {
+  color: var(--error);
+  font-size: 12px;
+  text-align: center;
+  margin-bottom: 12px;
+  padding: 8px;
+  background: rgba(239, 83, 80, 0.1);
+  border-radius: 6px;
+  border: 1px solid var(--error);
+}
+
+.cell-edit-range {
+  display: flex;
+  justify-content: center;
+  gap: 24px;
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 16px;
+}
+
+.cell-edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.cell-edit-actions button {
+  padding: 10px 20px;
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.secondary-btn {
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-default);
+}
+
+.secondary-btn:hover {
+  background: var(--bg-active);
+  color: var(--text-primary);
+}
+
+.primary-btn {
+  background: var(--primary);
+  color: var(--primary-text);
+}
+
+.primary-btn:hover {
+  background: var(--primary-hover);
+  box-shadow: 0 4px 12px rgba(66, 165, 245, 0.3);
+}
+
+.primary-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

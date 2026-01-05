@@ -1,0 +1,165 @@
+/*
+ * StatusBar - Bottom status bar with connection, logging, and custom indicators
+ */
+
+.statusbar {
+  display: flex;
+  align-items: center;
+  height: 38px;
+  background: var(--bg-statusbar);
+  border-top: 1px solid var(--border-subtle);
+  padding: 0 var(--space-3);
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.statusbar-section {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.statusbar-section-left {
+  flex: 0 0 auto;
+}
+
+.statusbar-section-center {
+  flex: 1;
+  justify-content: center;
+}
+
+.statusbar-section-right {
+  flex: 0 0 auto;
+  justify-content: flex-end;
+}
+
+.statusbar-connection {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+}
+
+.statusbar-connection.connected {
+  color: var(--success);
+}
+
+.statusbar-connection.disconnected {
+  color: var(--text-muted);
+}
+
+.statusbar-icon {
+  width: 14px;
+  height: 14px;
+}
+
+.statusbar-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+}
+
+.statusbar-item-clickable {
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+
+.statusbar-item-clickable:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+/* Status channel indicators (realtime data display) */
+.statusbar-channel {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.statusbar-channel-label {
+  color: var(--text-muted);
+}
+
+.statusbar-channel-value {
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+}
+
+.statusbar-channel-unit {
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+}
+
+.statusbar-channel-success .statusbar-channel-value { color: var(--success); }
+.statusbar-channel-warning .statusbar-channel-value { color: var(--warning); }
+.statusbar-channel-error .statusbar-channel-value { color: var(--error); }
+.statusbar-channel-info .statusbar-channel-value { color: var(--info); }
+
+/* TunerStudio-style grid cells for realtime data */
+.statusbar-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-width: 70px;
+  padding: 2px 8px;
+  background: var(--bg-input, #1a1a1a);
+  border: 1px solid var(--border-default, #444);
+  border-radius: 2px;
+}
+
+.statusbar-cell-label {
+  font-size: 9px;
+  font-weight: 500;
+  color: var(--text-muted, #888);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  line-height: 1;
+  margin-bottom: 1px;
+}
+
+.statusbar-cell-value {
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent, #4fc3f7);
+  line-height: 1.1;
+}
+
+.statusbar-cell-unit {
+  font-size: 9px;
+  font-weight: 400;
+  color: var(--text-muted, #888);
+  margin-left: 2px;
+}
+
+/* Color variants for cells */
+.statusbar-cell-success .statusbar-cell-value { color: var(--success, #4caf50); }
+.statusbar-cell-warning .statusbar-cell-value { color: var(--warning, #ff9800); }
+.statusbar-cell-error .statusbar-cell-value { color: var(--error, #f44336); }
+.statusbar-cell-info .statusbar-cell-value { color: var(--info, #2196f3); }
+
+/* Logging indicator */
+.logging-indicator {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.logging-inactive {
+  color: var(--text-muted);
+}
+
+.logging-active {
+  color: var(--error);
+}
+
+.logging-duration {
+  font-family: var(--font-mono);
+  margin-left: var(--space-1);
+}

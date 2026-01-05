@@ -1,0 +1,47 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/libretune-core",
+    "crates/libretune-app/src-tauri",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "GPL-2.0-only"
+authors = ["LibreTune Contributors"]
+repository = "https://github.com/RallyPat/LibreTune"
+description = "Modern ECU tuning software for Speeduino, EpicEFI, and compatible ECUs"
+
+[workspace.dependencies]
+# Async runtime
+tokio = { version = "1.41", features = ["full"] }
+tokio-util = { version = "0.7", features = ["codec"] }
+
+# Serial communication
+serialport = "4.6"
+tokio-serial = "5.4"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Error handling
+thiserror = "2.0"
+anyhow = "1.0"
+
+# Logging/tracing
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# CRC for protocol
+crc32fast = "1.4"
+
+# Date/time
+chrono = { version = "0.4", features = ["serde"] }
+
+# Random number generation (for demo mode)
+rand = "0.8"
+
+# Testing
+pretty_assertions = "1.4"

@@ -1,0 +1,59 @@
+/*
+ * Toolbar - Icon toolbar below menu bar
+ */
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  height: var(--toolbar-height);
+  background: var(--bg-toolbar);
+  border-bottom: 1px solid var(--border-subtle);
+  padding: 0 var(--space-2);
+  gap: var(--space-1);
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.toolbar-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: var(--space-2);
+  color: var(--text-secondary);
+  background: transparent;
+  border-radius: var(--radius-sm);
+  transition: all var(--transition-fast);
+}
+
+.toolbar-button:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.toolbar-button:active:not(:disabled) {
+  background: var(--bg-active);
+}
+
+.toolbar-button-active {
+  background: var(--bg-active);
+  color: var(--primary);
+}
+
+.toolbar-button:disabled {
+  color: var(--text-disabled);
+  cursor: not-allowed;
+}
+
+.toolbar-button svg {
+  width: 16px;
+  height: 16px;
+}
+
+.toolbar-separator {
+  width: 1px;
+  height: 20px;
+  background: var(--border-default);
+  margin: 0 var(--space-2);
+}

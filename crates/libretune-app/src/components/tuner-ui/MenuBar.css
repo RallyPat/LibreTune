@@ -1,0 +1,125 @@
+/*
+ * MenuBar - Windows-style menu bar with dropdowns
+ */
+
+.menubar {
+  display: flex;
+  height: var(--menubar-height);
+  background: var(--bg-menubar);
+  border-bottom: 1px solid var(--border-subtle);
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.menubar-item-wrapper {
+  position: relative;
+}
+
+.menubar-item {
+  height: 100%;
+  padding: 0 var(--space-4);
+  display: flex;
+  align-items: center;
+  color: var(--text-primary);
+  font-size: var(--font-size-base);
+  background: transparent;
+  transition: background var(--transition-fast);
+}
+
+.menubar-item:hover,
+.menubar-item-focused {
+  background: var(--bg-hover);
+}
+
+.menubar-item-open {
+  background: var(--bg-active);
+}
+
+.menubar-accelerator {
+  text-decoration: underline;
+}
+
+/* Dropdown menu */
+.menu-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  min-width: 200px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-default);
+  box-shadow: var(--shadow-dropdown);
+  z-index: 1000;
+  padding: var(--space-1) 0;
+}
+
+.menu-dropdown-level-1,
+.menu-dropdown-level-2,
+.menu-dropdown-level-3 {
+  top: 0;
+  left: 100%;
+}
+
+.menu-item-wrapper {
+  position: relative;
+}
+
+.menu-item {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: var(--space-2) var(--space-4);
+  text-align: left;
+  color: var(--text-primary);
+  font-size: var(--font-size-base);
+  background: transparent;
+  transition: background var(--transition-fast);
+  gap: var(--space-3);
+}
+
+.menu-item:hover,
+.menu-item-focused {
+  background: var(--bg-selected);
+  color: var(--primary-text);
+}
+
+.menu-item-disabled {
+  color: var(--text-disabled);
+  pointer-events: none;
+}
+
+.menu-item-check {
+  width: 16px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.menu-item-label {
+  flex: 1;
+}
+
+.menu-item-accelerator {
+  text-decoration: underline;
+}
+
+.menu-item-shortcut {
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  margin-left: auto;
+  padding-left: var(--space-6);
+}
+
+.menu-item-focused .menu-item-shortcut {
+  color: inherit;
+  opacity: 0.8;
+}
+
+.menu-item-arrow {
+  font-size: 8px;
+  margin-left: var(--space-2);
+}
+
+.menu-separator {
+  height: 1px;
+  background: var(--border-default);
+  margin: var(--space-1) var(--space-3);
+}

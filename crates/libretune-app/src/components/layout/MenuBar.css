@@ -1,0 +1,114 @@
+/* TunerStudio-style Menu Bar */
+.menubar {
+  grid-area: menubar;
+  display: flex;
+  align-items: center;
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border-color);
+  padding: 0 4px;
+  height: 28px;
+  user-select: none;
+}
+
+.menubar-item {
+  position: relative;
+  padding: 4px 10px;
+  font-size: 12px;
+  color: var(--text-primary);
+  cursor: pointer;
+  border-radius: 2px;
+}
+
+.menubar-item:hover,
+.menubar-item.active {
+  background: var(--bg-hover);
+  color: var(--primary);
+}
+
+/* Dropdown Menu */
+.menu-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  min-width: 200px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: 2px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  z-index: 1000;
+  padding: 4px 0;
+}
+
+.menu-item {
+  display: flex;
+  align-items: center;
+  padding: 6px 12px;
+  font-size: 12px;
+  color: var(--text-primary);
+  cursor: pointer;
+  position: relative;
+}
+
+.menu-item:hover {
+  background: var(--primary);
+  color: #fff;
+}
+
+.menu-item.has-submenu:hover .menu-item-arrow {
+  color: #fff;
+}
+
+.menu-item-label {
+  flex: 1;
+}
+
+.menu-item-hotkey {
+  margin-left: 24px;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.menu-item:hover .menu-item-hotkey {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.menu-item-arrow {
+  margin-left: 8px;
+  font-size: 8px;
+  color: var(--text-secondary);
+}
+
+.menu-separator {
+  height: 1px;
+  background: var(--border-color);
+  margin: 4px 8px;
+}
+
+/* Submenu */
+.submenu-dropdown {
+  position: absolute;
+  left: 100%;
+  top: 0;
+  min-width: 180px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: 2px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  z-index: 1001;
+  padding: 4px 0;
+}
+
+.menu-item.submenu-open > .submenu-dropdown {
+  display: block;
+}
+
+/* Disabled items */
+.menu-item.disabled {
+  color: var(--text-muted);
+  cursor: not-allowed;
+}
+
+.menu-item.disabled:hover {
+  background: transparent;
+  color: var(--text-muted);
+}

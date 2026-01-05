@@ -1,0 +1,196 @@
+/*
+ * Gauges - Various gauge types for realtime data display
+ */
+
+.gauge {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: var(--gauge-bg);
+  border-radius: var(--radius-md);
+}
+
+/* Analog gauge */
+.gauge-analog {
+  padding: var(--space-2);
+}
+
+.gauge-analog canvas {
+  display: block;
+}
+
+/* Digital gauge */
+.gauge-digital {
+  padding: var(--space-4);
+  gap: var(--space-2);
+}
+
+.gauge-digital-title {
+  font-size: var(--font-size-sm);
+  color: var(--gauge-text);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.gauge-digital-value {
+  font-family: 'DSEG7 Classic', 'Consolas', monospace;
+  font-size: 2.5rem;
+  font-weight: bold;
+  line-height: 1;
+  text-shadow: 0 0 10px currentColor;
+}
+
+.gauge-digital-value.normal {
+  color: var(--gauge-normal);
+}
+
+.gauge-digital-value.warning {
+  color: var(--gauge-warning);
+}
+
+.gauge-digital-value.critical {
+  color: var(--gauge-critical);
+  animation: blink 0.5s ease-in-out infinite alternate;
+}
+
+@keyframes blink {
+  from { opacity: 1; }
+  to { opacity: 0.5; }
+}
+
+.gauge-digital-units {
+  font-size: var(--font-size-sm);
+  color: var(--text-muted);
+}
+
+/* Bar gauge */
+.gauge-bar {
+  padding: var(--space-3);
+  gap: var(--space-2);
+}
+
+.gauge-bar.horizontal {
+  flex-direction: column;
+}
+
+.gauge-bar.vertical {
+  flex-direction: row;
+  align-items: stretch;
+}
+
+.gauge-bar-label {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+}
+
+.gauge-bar-title {
+  font-size: var(--font-size-sm);
+  color: var(--gauge-text);
+  font-weight: 600;
+}
+
+.gauge-bar-value {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+  color: var(--gauge-text);
+}
+
+.gauge-bar-track {
+  position: relative;
+  flex: 1;
+  background: var(--bg-surface);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.gauge-bar.horizontal .gauge-bar-track {
+  height: 16px;
+  width: 100%;
+}
+
+.gauge-bar.vertical .gauge-bar-track {
+  width: 16px;
+  height: 100%;
+}
+
+.gauge-bar-fill {
+  position: absolute;
+  transition: all 0.2s ease;
+}
+
+.gauge-bar.horizontal .gauge-bar-fill {
+  left: 0;
+  top: 0;
+  height: 100%;
+}
+
+.gauge-bar.vertical .gauge-bar-fill {
+  left: 0;
+  bottom: 0;
+  width: 100%;
+}
+
+.gauge-bar-marker {
+  position: absolute;
+  background: var(--gauge-warning);
+  z-index: 1;
+}
+
+.gauge-bar.horizontal .gauge-bar-marker {
+  width: 2px;
+  height: 100%;
+  top: 0;
+}
+
+.gauge-bar.vertical .gauge-bar-marker {
+  width: 100%;
+  height: 2px;
+  left: 0;
+}
+
+.gauge-bar-range {
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+}
+
+/* Sweep gauge */
+.gauge-sweep {
+  padding: var(--space-2);
+}
+
+/* LED indicator */
+.gauge-led {
+  padding: var(--space-3);
+  gap: var(--space-2);
+}
+
+.gauge-led-light {
+  width: 40%;
+  height: 40%;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.1);
+  transition: all 0.2s ease;
+}
+
+.gauge-led-light.on {
+  animation: glow 1s ease-in-out infinite alternate;
+}
+
+@keyframes glow {
+  from { opacity: 0.9; }
+  to { opacity: 1; }
+}
+
+.gauge-led-label {
+  font-size: var(--font-size-sm);
+  color: var(--gauge-text);
+  font-weight: 600;
+  text-align: center;
+}

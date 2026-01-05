@@ -1,0 +1,236 @@
+.gauge-wrapper {
+  position: relative;
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  width: 100%;
+  height: 100%;
+}
+
+.gauge-wrapper.analog-dial {
+  background: radial-gradient(circle at 50% 50%, var(--bg-surface-elevated) 0%, var(--bg-surface) 100%);
+  border-radius: 50%;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  aspect-ratio: 1 / 1;
+  width: 100%;
+  height: auto;
+  max-height: 100%;
+}
+
+.gauge-wrapper.analog-dial canvas {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.gauge-wrapper.digital-readout {
+  background: var(--bg-surface);
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--border);
+}
+
+.gauge-wrapper.bar-gauge-wrapper {
+  background: var(--bg-surface);
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--border);
+}
+
+.gauge-wrapper.sweep-gauge {
+  background: var(--bg-surface);
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--border);
+}
+
+.gauge-wrapper.led-indicator-wrapper {
+  background: var(--bg-surface);
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--border);
+}
+
+.gauge-wrapper.warning-light {
+  background: transparent;
+  border-radius: 50%;
+  aspect-ratio: 1 / 1;
+  width: 100%;
+  height: auto;
+  max-width: 120px;
+  max-height: 120px;
+}
+
+.gauge-controls {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  z-index: 10;
+}
+
+.gauge-control {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.gauge-control:hover {
+  background: var(--primary-light);
+  border-color: var(--primary);
+}
+
+.gauge-label {
+  text-align: center;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  margin-bottom: 0.25rem;
+  font-weight: 600;
+}
+
+.digital-value {
+  font-family: 'Courier New', monospace;
+  font-size: 2rem;
+  text-align: center;
+  color: var(--text-bright);
+  font-weight: bold;
+  margin: 0.5rem 0;
+}
+
+.digital-label {
+  text-align: center;
+  font-size: 0.875rem;
+  color: var(--text-muted);
+  margin-bottom: 0.5rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.digital-units {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  margin-left: 0.25rem;
+}
+
+.digital-min-max {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-top: 0.25rem;
+}
+
+.bar-gauge {
+  display: flex;
+  flex-direction: column;
+  padding: 1rem;
+  width: 100%;
+  height: 100%;
+  justify-content: space-between;
+}
+
+.bar-label {
+  text-align: center;
+  font-size: 0.875rem;
+  color: var(--text-muted);
+  margin-bottom: 0.5rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.bar-track {
+  height: 2rem;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  overflow: hidden;
+  position: relative;
+  flex-shrink: 0;
+}
+
+.bar-fill {
+  height: 100%;
+  transition: width 0.3s ease-out;
+  border-radius: 8px;
+}
+
+.bar-value {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Courier New', monospace;
+  font-size: 1.5rem;
+  color: var(--text-bright);
+  font-weight: bold;
+  margin-top: 0.5rem;
+}
+
+.bar-units {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  margin-left: 0.5rem;
+}
+
+.led-indicator {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 1rem;
+  background: var(--surface);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0, 0.3);
+}
+
+.led-light {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  box-shadow: inset 0 4px 4px rgba(0, 0, 0, 0.5);
+  margin: 0 auto 0.5rem;
+  transition: background-color 0.2s;
+}
+
+.led-light.on {
+  background: var(--success);
+  box-shadow: 0 0 8px 4px rgba(76, 175, 80, 0.5);
+}
+
+.led-label {
+  text-align: center;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  margin-bottom: 0.25rem;
+  font-weight: 600;
+}
+
+.led-status {
+  text-align: center;
+  font-size: 1.25rem;
+  font-weight: bold;
+  margin-top: 0.5rem;
+}
+
+.led-status.on {
+  color: var(--success);
+}
+
+.digital-min-max {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-top: 0.25rem;
+}

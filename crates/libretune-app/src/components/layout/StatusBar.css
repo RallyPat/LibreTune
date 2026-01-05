@@ -1,0 +1,127 @@
+/* TunerStudio-style Status Bar */
+.statusbar {
+  grid-area: statusbar;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--bg-surface);
+  border-top: 1px solid var(--border-color);
+  padding: 0 8px;
+  height: 24px;
+  font-size: 11px;
+  user-select: none;
+}
+
+.statusbar-section {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.statusbar-left {
+  flex: 1;
+  justify-content: flex-start;
+}
+
+.statusbar-center {
+  flex: 2;
+  justify-content: center;
+}
+
+.statusbar-right {
+  flex: 1;
+  justify-content: flex-end;
+}
+
+/* Connection indicator */
+.statusbar-indicator {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.statusbar-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-muted);
+}
+
+.statusbar-indicator.status-connected .statusbar-dot {
+  background: #4caf50;
+  box-shadow: 0 0 4px #4caf50;
+}
+
+.statusbar-indicator.status-connecting .statusbar-dot {
+  background: #ff9800;
+  animation: pulse 1s infinite;
+}
+
+.statusbar-indicator.status-error .statusbar-dot {
+  background: #f44336;
+}
+
+.statusbar-indicator.status-disconnected .statusbar-dot {
+  background: #666;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.statusbar-text {
+  color: var(--text-secondary);
+}
+
+.statusbar-indicator.status-connected .statusbar-text {
+  color: #4caf50;
+}
+
+.statusbar-indicator.status-error .statusbar-text {
+  color: #f44336;
+}
+
+/* ECU signature */
+.statusbar-signature {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  padding-left: 8px;
+  border-left: 1px solid var(--border-color);
+}
+
+/* Current page */
+.statusbar-page {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+/* Realtime values */
+.statusbar-value {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 6px;
+  border-left: 1px solid var(--border-color);
+}
+
+.statusbar-value:first-child {
+  border-left: none;
+}
+
+.statusbar-label {
+  color: var(--text-secondary);
+}
+
+.statusbar-number {
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-weight: 600;
+  min-width: 40px;
+  text-align: right;
+}
+
+/* Dividers */
+.statusbar-item {
+  color: var(--text-secondary);
+}

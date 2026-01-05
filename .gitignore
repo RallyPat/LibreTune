@@ -1,0 +1,33 @@
+# Build artifacts
+/target/
+**/target/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Node (for Tauri frontend)
+node_modules/
+dist/
+
+# Logs
+*.log
+
+# Environment
+.env
+.env.local
+
+# Test artifacts
+*.profraw
+
+# Accidental path copies (shell quoting mistakes)
+**/"/
+
+# Reference materials (not for distribution)
+/reference/

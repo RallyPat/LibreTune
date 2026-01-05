@@ -1,0 +1,244 @@
+.dialog-view {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0; /* Allow flex shrinking for proper scrolling */
+  background: var(--bg-primary);
+}
+
+.dialog-view .editor-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.dialog-view .icon-btn {
+  padding: 6px;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.dialog-view .icon-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.dialog-container {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 0; /* Critical for nested flex scroll */
+}
+
+.settings-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.settings-field label {
+  font-size: 13px;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.field-input-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.field-input-wrap input {
+  flex: 1;
+  max-width: 200px;
+  padding: 8px 12px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-size: 14px;
+}
+
+.field-input-wrap input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.field-unit {
+  font-size: 12px;
+  color: var(--text-muted);
+  min-width: 40px;
+}
+
+.field-help {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 4px;
+  font-style: italic;
+}
+
+.field-input-wrap select {
+  flex: 1;
+  max-width: 200px;
+  padding: 8px 12px;
+  background: var(--bg-input);
+  border: 1.5px solid var(--border-default);
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-size: 14px;
+}
+
+.field-input-wrap select:focus {
+  outline: none;
+  border-color: var(--border-focus);
+}
+
+.field-input-wrap input[type="text"] {
+  max-width: 300px;
+}
+
+.settings-field input[type="checkbox"] {
+  margin-right: 8px;
+  width: 16px;
+  height: 16px;
+}
+
+.field-loading {
+  padding: 8px 0;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.dialog-label {
+  font-size: 14px;
+  color: var(--text-primary);
+  padding: 8px 0;
+}
+
+.nested-panel {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  overflow: visible; /* Changed from hidden to prevent content clipping */
+  flex-shrink: 0; /* Prevent panel from collapsing */
+}
+
+.panel-title {
+  padding: 10px 16px;
+  background: var(--bg-subtle);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.panel-content {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.panel-loading {
+  padding: 12px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.embedded-table-link {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  color: var(--accent);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.embedded-table-link:hover {
+  background: var(--bg-hover);
+  border-color: var(--accent);
+}
+
+.embedded-graph-placeholder {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 16px;
+  background: var(--bg-subtle);
+  border: 1px dashed var(--border-color);
+  border-radius: 6px;
+  color: var(--text-muted);
+}
+
+.indicator-field {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+}
+
+.indicator-light {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  transition: background 0.2s;
+}
+
+.indicator-light.on {
+  background: var(--success);
+  box-shadow: 0 0 8px var(--success);
+}
+
+.indicator-light.off {
+  background: var(--border-strong);
+}
+
+.indicator-label {
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+/* Curve Editor Styles */
+.embedded-curve {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.curve-title {
+  padding: 10px 16px;
+  background: var(--bg-subtle);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.curve-chart {
+  padding: 16px;
+  display: flex;
+  justify-content: center;
+}
+
+.curve-svg {
+  background: var(--bg-primary);
+  border-radius: 4px;
+}

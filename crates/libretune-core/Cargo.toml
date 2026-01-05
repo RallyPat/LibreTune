@@ -1,0 +1,58 @@
+[package]
+name = "libretune-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Core library for LibreTune ECU tuning software"
+
+[dependencies]
+# Async runtime
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+
+# Serial communication
+serialport = { workspace = true }
+tokio-serial = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Error handling
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+
+# CRC for protocol
+crc32fast = { workspace = true }
+
+# Date/time
+chrono = { workspace = true }
+
+# Random number generation (for demo mode)
+rand = { workspace = true }
+
+# Byte order handling
+byteorder = "1.5"
+
+# Regex for INI parsing
+regex = "1.11"
+
+# XML parsing for TunerStudio dashboard format
+quick-xml = { version = "0.37", features = ["serialize"] }
+base64 = "0.22"
+
+# Directory paths
+dirs = "5.0"
+libc = "0.2.178"
+
+# HTTP client for online INI repository (using rustls to avoid OpenSSL dependency)
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }
+tokio = { workspace = true, features = ["test-util", "macros"] }
+tracing-subscriber = { workspace = true }

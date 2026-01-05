@@ -1,0 +1,202 @@
+/*
+ * Sidebar - Resizable project tree navigator
+ */
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-sidebar);
+  border-right: 1px solid var(--border-subtle);
+  min-width: 150px;
+  max-width: 400px;
+  position: relative;
+  flex-shrink: 0;
+}
+
+.sidebar-header {
+  display: flex;
+  align-items: center;
+  height: var(--tab-height);
+  padding: 0 var(--space-4);
+  background: var(--bg-toolbar);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.sidebar-title {
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* Search box */
+.sidebar-search {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-toolbar);
+}
+
+.search-icon {
+  width: 14px;
+  height: 14px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.search-input {
+  flex: 1;
+  background: var(--bg-input);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--font-size-sm);
+  color: var(--text-primary);
+  outline: none;
+  min-width: 0;
+}
+
+.search-input::placeholder {
+  color: var(--text-muted);
+}
+
+.search-input:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px rgba(var(--primary-rgb), 0.2);
+}
+
+.search-clear {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  background: var(--bg-hover);
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.search-clear:hover {
+  background: var(--bg-active);
+  color: var(--text-primary);
+}
+
+.search-no-results {
+  padding: var(--space-4);
+  text-align: center;
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+}
+
+.search-highlight {
+  background: rgba(var(--warning-rgb, 255, 193, 7), 0.3);
+  color: inherit;
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
+.sidebar-content {
+  flex: 1;
+  overflow: auto;
+  padding: var(--space-2) 0;
+}
+
+.sidebar-resize {
+  position: absolute;
+  top: 0;
+  right: -3px;
+  width: 6px;
+  height: 100%;
+  cursor: ew-resize;
+  z-index: 10;
+}
+
+.sidebar-resize:hover,
+.sidebar-resize:active {
+  background: var(--primary);
+  opacity: 0.5;
+}
+
+/* Tree view */
+.tree-list {
+  margin: 0;
+  padding: 0;
+}
+
+.tree-item {
+  list-style: none;
+}
+
+.tree-item-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  cursor: pointer;
+  transition: background var(--transition-fast);
+  border-left: 2px solid transparent;
+}
+
+.tree-item-row:hover {
+  background: var(--bg-hover);
+}
+
+.tree-item-row:active {
+  background: var(--bg-active);
+}
+
+.tree-item-row.selected {
+  background: var(--bg-selected);
+  border-left-color: var(--primary);
+}
+
+.tree-item-expander {
+  width: 12px;
+  font-size: 8px;
+  color: var(--text-muted);
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.node-icon {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+.node-icon-folder {
+  color: var(--warning);
+}
+
+.node-icon-table {
+  color: var(--info);
+}
+
+.node-icon-dialog {
+  color: var(--success);
+}
+
+.node-icon-dashboard {
+  color: var(--accent);
+}
+
+.node-icon-log {
+  color: var(--text-secondary);
+}
+
+.tree-item-label {
+  flex: 1;
+  font-size: var(--font-size-sm);
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

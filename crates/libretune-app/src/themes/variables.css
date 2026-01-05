@@ -1,0 +1,439 @@
+/*
+ * LibreTune Theme System
+ * Based on TunerStudio MS color analysis
+ * 
+ * This file defines CSS custom properties (variables) for theming.
+ * The [data-theme] attribute on <html> controls which theme is active.
+ */
+
+:root {
+  /* Font families */
+  --font-sans: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  --font-mono: 'Consolas', 'Monaco', 'Courier New', monospace;
+  --font-lcd: 'LCD', 'DSEG7 Classic', 'Consolas', monospace;
+  
+  /* Font sizes */
+  --font-size-xs: 10px;
+  --font-size-sm: 11px;
+  --font-size-base: 12px;
+  --font-size-md: 13px;
+  --font-size-lg: 14px;
+  --font-size-xl: 16px;
+  --font-size-2xl: 18px;
+  --font-size-3xl: 24px;
+  
+  /* Spacing */
+  --space-1: 2px;
+  --space-2: 4px;
+  --space-3: 6px;
+  --space-4: 8px;
+  --space-5: 12px;
+  --space-6: 16px;
+  --space-7: 20px;
+  --space-8: 24px;
+  
+  /* Border radius */
+  --radius-sm: 2px;
+  --radius-md: 3px;
+  --radius-lg: 4px;
+  
+  /* Shadows */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 2px 4px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 4px 8px rgba(0, 0, 0, 0.5);
+  --shadow-dropdown: 0 4px 12px rgba(0, 0, 0, 0.6);
+  
+  /* Layout dimensions */
+  --menubar-height: 24px;
+  --toolbar-height: 32px;
+  --statusbar-height: 22px;
+  --sidebar-width: 240px;
+  --tab-height: 28px;
+  
+  /* Transitions */
+  --transition-fast: 0.1s ease;
+  --transition-normal: 0.2s ease;
+  --transition-slow: 0.3s ease;
+}
+
+/* =============================================
+   DARK THEME (Default - TunerStudio Classic)
+   ============================================= */
+[data-theme="dark"] {
+  color-scheme: dark;
+  
+  /* Background colors */
+  --bg-app: #1a1a1a;
+  --bg-surface: #242424;
+  --bg-elevated: #2d2d2d;
+  --bg-input: #2a2a2a;
+  --bg-hover: #383838;
+  --bg-active: #424242;
+  --bg-selected: #0d47a1;
+  --bg-dashboard: #000000;
+  
+  /* Menu/toolbar backgrounds */
+  --bg-menubar: #2d2d2d;
+  --bg-toolbar: #262626;
+  --bg-statusbar: #1e1e1e;
+  --bg-sidebar: #1e1e1e;
+  --bg-tab: #2a2a2a;
+  --bg-tab-active: #1e1e1e;
+  
+  /* Text colors - improved contrast */
+  --text-primary: #e8e8e8;
+  --text-secondary: #b0b0b0;
+  --text-muted: #909090;
+  --text-disabled: #606060;
+  --text-inverse: #1a1a1a;
+  --text-link: #64b5f6;
+  
+  /* Border colors - improved visibility */
+  --border-default: #555555;
+  --border-subtle: #444444;
+  --border-strong: #666666;
+  --border-focus: #1976d2;
+  
+  /* Accent colors */
+  --primary: #1976d2;
+  --primary-hover: #1e88e5;
+  --primary-active: #1565c0;
+  --primary-text: #ffffff;
+  
+  --accent: #ff9800;
+  --accent-hover: #ffa726;
+  --accent-text: #000000;
+  
+  /* Status colors */
+  --success: #4caf50;
+  --success-bg: #1b5e20;
+  --warning: #ff9800;
+  --warning-bg: #e65100;
+  --error: #f44336;
+  --error-bg: #b71c1c;
+  --info: #2196f3;
+  --info-bg: #0d47a1;
+  
+  /* Gauge colors (matching TunerStudio) */
+  --gauge-bg: #000000;
+  --gauge-face: #1a1a1a;
+  --gauge-bezel: #333333;
+  --gauge-needle: #00ff00;
+  --gauge-needle-shadow: rgba(0, 255, 0, 0.3);
+  --gauge-text: #ffffff;
+  --gauge-tick: #808080;
+  --gauge-tick-major: #c0c0c0;
+  --gauge-warning: #ffff00;
+  --gauge-critical: #ff0000;
+  --gauge-normal: #00ff00;
+  
+  /* Table editor colors */
+  --table-bg: #1e1e1e;
+  --table-header-bg: #2a2a2a;
+  --table-cell-bg: #252525;
+  --table-cell-hover: #333333;
+  --table-cell-selected: #0d47a1;
+  --table-cell-editing: #1565c0;
+  --table-axis-bg: #2d2d2d;
+  --table-grid-line: #383838;
+  
+  /* Value change colors (richer = blue, leaner = red) */
+  --value-richer: #2196f3;
+  --value-leaner: #f44336;
+  --value-unchanged: #808080;
+  
+  /* History trail */
+  --trail-color: #1976d2;
+  --trail-dot: #64b5f6;
+  
+  /* Live cursor */
+  --cursor-live: #00ff00;
+  --cursor-trail: #ffcc00;
+  --cursor-selected: #ff0000;
+  --cursor-active: #0088ff;
+  
+  /* Scrollbar */
+  --scrollbar-track: #1e1e1e;
+  --scrollbar-thumb: #404040;
+  --scrollbar-thumb-hover: #505050;
+  
+  /* Alias variables for backward compatibility */
+  --bg-primary: var(--bg-app);
+  --bg-secondary: var(--bg-surface);
+  --bg-subtle: var(--bg-hover);
+  --surface: var(--bg-surface);
+  --surface-hover: var(--bg-hover);
+}
+
+/* =============================================
+   LIGHT THEME
+   ============================================= */
+[data-theme="light"] {
+  color-scheme: light;
+  
+  /* Background colors */
+  --bg-app: #f5f5f5;
+  --bg-surface: #ffffff;
+  --bg-elevated: #ffffff;
+  --bg-input: #ffffff;
+  --bg-hover: #e8e8e8;
+  --bg-active: #d0d0d0;
+  --bg-selected: #bbdefb;
+  --bg-dashboard: #e0e0e0;
+  
+  /* Menu/toolbar backgrounds */
+  --bg-menubar: #f0f0f0;
+  --bg-toolbar: #f5f5f5;
+  --bg-statusbar: #e8e8e8;
+  --bg-sidebar: #fafafa;
+  --bg-tab: #e8e8e8;
+  --bg-tab-active: #ffffff;
+  
+  /* Text colors */
+  --text-primary: #212121;
+  --text-secondary: #616161;
+  --text-muted: #9e9e9e;
+  --text-disabled: #bdbdbd;
+  --text-inverse: #ffffff;
+  --text-link: #1976d2;
+  
+  /* Border colors */
+  --border-default: #d0d0d0;
+  --border-subtle: #e0e0e0;
+  --border-strong: #b0b0b0;
+  --border-focus: #1976d2;
+  
+  /* Accent colors */
+  --primary: #1976d2;
+  --primary-hover: #1565c0;
+  --primary-active: #0d47a1;
+  --primary-text: #ffffff;
+  
+  --accent: #f57c00;
+  --accent-hover: #ef6c00;
+  --accent-text: #ffffff;
+  
+  /* Status colors */
+  --success: #388e3c;
+  --success-bg: #c8e6c9;
+  --warning: #f57c00;
+  --warning-bg: #ffe0b2;
+  --error: #d32f2f;
+  --error-bg: #ffcdd2;
+  --info: #1976d2;
+  --info-bg: #bbdefb;
+  
+  /* Gauge colors */
+  --gauge-bg: #e0e0e0;
+  --gauge-face: #f5f5f5;
+  --gauge-bezel: #9e9e9e;
+  --gauge-needle: #d32f2f;
+  --gauge-needle-shadow: rgba(211, 47, 47, 0.3);
+  --gauge-text: #212121;
+  --gauge-tick: #757575;
+  --gauge-tick-major: #424242;
+  --gauge-warning: #f57c00;
+  --gauge-critical: #d32f2f;
+  --gauge-normal: #388e3c;
+  
+  /* Table editor colors */
+  --table-bg: #ffffff;
+  --table-header-bg: #f0f0f0;
+  --table-cell-bg: #fafafa;
+  --table-cell-hover: #e3f2fd;
+  --table-cell-selected: #bbdefb;
+  --table-cell-editing: #90caf9;
+  --table-axis-bg: #eeeeee;
+  --table-grid-line: #e0e0e0;
+  
+  /* Value change colors */
+  --value-richer: #1976d2;
+  --value-leaner: #d32f2f;
+  --value-unchanged: #757575;
+  
+  /* History trail */
+  --trail-color: #1976d2;
+  --trail-dot: #42a5f5;
+  
+  /* Live cursor */
+  --cursor-live: #388e3c;
+  --cursor-trail: #ff9800;
+  --cursor-selected: #d32f2f;
+  --cursor-active: #1976d2;
+  
+  /* Scrollbar */
+  --scrollbar-track: #f0f0f0;
+  --scrollbar-thumb: #c0c0c0;
+  --scrollbar-thumb-hover: #a0a0a0;
+  
+  /* Alias variables for backward compatibility */
+  --bg-primary: var(--bg-app);
+  --bg-secondary: var(--bg-surface);
+  --bg-subtle: var(--bg-hover);
+  --surface: var(--bg-surface);
+  --surface-hover: var(--bg-hover);
+}
+
+/* =============================================
+   MIDNIGHT THEME (Deep blue variant)
+   ============================================= */
+[data-theme="midnight"] {
+  color-scheme: dark;
+  
+  --bg-app: #0a0e14;
+  --bg-surface: #0d1117;
+  --bg-elevated: #161b22;
+  --bg-input: #161b22;
+  --bg-hover: #21262d;
+  --bg-active: #30363d;
+  --bg-selected: #1f6feb;
+  --bg-dashboard: #000000;
+  
+  --bg-menubar: #161b22;
+  --bg-toolbar: #0d1117;
+  --bg-statusbar: #0d1117;
+  --bg-sidebar: #0d1117;
+  --bg-tab: #161b22;
+  --bg-tab-active: #0d1117;
+  
+  /* Text colors - improved contrast */
+  --text-primary: #d1d9e0;
+  --text-secondary: #9ca6b0;
+  --text-muted: #8b949e;
+  --text-disabled: #586069;
+  --text-inverse: #0a0e14;
+  --text-link: #58a6ff;
+  
+  /* Border colors - improved visibility */
+  --border-default: #484f58;
+  --border-subtle: #3a4048;
+  --border-strong: #586069;
+  --border-focus: #58a6ff;
+  
+  --primary: #238636;
+  --primary-hover: #2ea043;
+  --primary-active: #1a7f37;
+  --primary-text: #ffffff;
+  
+  --accent: #f78166;
+  --accent-hover: #ff9580;
+  --accent-text: #0a0e14;
+  
+  --success: #238636;
+  --warning: #d29922;
+  --error: #f85149;
+  --info: #58a6ff;
+  
+  --gauge-bg: #000000;
+  --gauge-face: #0d1117;
+  --gauge-bezel: #30363d;
+  --gauge-needle: #3fb950;
+  --gauge-text: #c9d1d9;
+  --gauge-warning: #d29922;
+  --gauge-critical: #f85149;
+  --gauge-normal: #3fb950;
+  
+  --table-bg: #0d1117;
+  --table-header-bg: #161b22;
+  --table-cell-bg: #0d1117;
+  --table-cell-hover: #21262d;
+  --table-cell-selected: #1f6feb;
+  --table-axis-bg: #161b22;
+  --table-grid-line: #21262d;
+  
+  --value-richer: #58a6ff;
+  --value-leaner: #f85149;
+  
+  --scrollbar-track: #0d1117;
+  --scrollbar-thumb: #30363d;
+  --scrollbar-thumb-hover: #484f58;
+  
+  /* Alias variables for backward compatibility */
+  --bg-primary: var(--bg-app);
+  --bg-secondary: var(--bg-surface);
+  --bg-subtle: var(--bg-hover);
+  --surface: var(--bg-surface);
+  --surface-hover: var(--bg-hover);
+}
+
+/* =============================================
+   CARBON THEME (High contrast dark)
+   ============================================= */
+[data-theme="carbon"] {
+  color-scheme: dark;
+  
+  --bg-app: #000000;
+  --bg-surface: #161616;
+  --bg-elevated: #262626;
+  --bg-input: #2a2a2a;
+  --bg-hover: #3a3a3a;
+  --bg-active: #525252;
+  --bg-selected: #0f62fe;
+  --bg-dashboard: #000000;
+  
+  --bg-menubar: #161616;
+  --bg-toolbar: #262626;
+  --bg-statusbar: #161616;
+  --bg-sidebar: #161616;
+  --bg-tab: #262626;
+  --bg-tab-active: #161616;
+  
+  /* Text colors - improved contrast */
+  --text-primary: #f4f4f4;
+  --text-secondary: #d0d0d0;
+  --text-muted: #a8a8a8;
+  --text-disabled: #606060;
+  --text-inverse: #161616;
+  --text-link: #78a9ff;
+  
+  /* Border colors - improved visibility */
+  --border-default: #525252;
+  --border-subtle: #424242;
+  --border-strong: #6f6f6f;
+  --border-focus: #0f62fe;
+  
+  --primary: #0f62fe;
+  --primary-hover: #0353e9;
+  --primary-active: #002d9c;
+  --primary-text: #ffffff;
+  
+  --accent: #ff832b;
+  --accent-hover: #eb6200;
+  --accent-text: #000000;
+  
+  --success: #42be65;
+  --warning: #f1c21b;
+  --error: #fa4d56;
+  --info: #4589ff;
+  
+  --gauge-bg: #000000;
+  --gauge-face: #161616;
+  --gauge-bezel: #393939;
+  --gauge-needle: #42be65;
+  --gauge-text: #f4f4f4;
+  --gauge-warning: #f1c21b;
+  --gauge-critical: #fa4d56;
+  --gauge-normal: #42be65;
+  
+  --table-bg: #161616;
+  --table-header-bg: #262626;
+  --table-cell-bg: #161616;
+  --table-cell-hover: #353535;
+  --table-cell-selected: #0f62fe;
+  --table-axis-bg: #262626;
+  --table-grid-line: #393939;
+  
+  --value-richer: #78a9ff;
+  --value-leaner: #fa4d56;
+  
+  --scrollbar-track: #161616;
+  --scrollbar-thumb: #393939;
+  --scrollbar-thumb-hover: #525252;
+  
+  /* Alias variables for backward compatibility */
+  --bg-primary: var(--bg-app);
+  --bg-secondary: var(--bg-surface);
+  --bg-subtle: var(--bg-hover);
+  --surface: var(--bg-surface);
+  --surface-hover: var(--bg-hover);
+}
