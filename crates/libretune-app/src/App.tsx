@@ -614,6 +614,19 @@ function AppContent() {
         result.errors.forEach(err => console.warn("Sync error:", err));
       }
       
+      // Compare tunes after successful sync
+      if (result.pages_synced > 0) {
+        try {
+          const differs = await invoke<boolean>("compare_project_and_ecu_tunes");
+          if (differs) {
+            setTuneComparisonOpen(true);
+          }
+        } catch (e) {
+          console.error("Failed to compare tunes:", e);
+          // Don't block on comparison failure
+        }
+      }
+      
       return result;
     } catch (e) {
       console.error("Sync failed completely:", e);
@@ -1399,6 +1412,20 @@ function AppContent() {
         onClose={() => setOpenProjectDialogOpen(false)}
         projects={availableProjects}
         onOpen={openProject}
+      />
+      
+      {/* Tune Comparison Dialog */}
+      <TuneComparisonDialog
+        isOpen={tuneComparisonOpen}
+        onClose={() => setTuneComparisonOpen(false)}
+        onUseProjectTune={async () => {
+          // Project tune has been written to ECU, refresh UI
+          await checkStatus();
+        }}
+        onUseEcuTune={async () => {
+          // ECU tune has been saved to project, refresh UI
+          await checkStatus();
+        }}
       />
       
       {/* Signature Mismatch Dialog */}
