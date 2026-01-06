@@ -71,13 +71,23 @@ jobs:
       - name: Copy Linux artifacts
         working-directory: crates/libretune-app
         run: |
-          # Copy AppImage if it exists
-          if [ -d "src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/appimage" ]; then
-            cp -r src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/appimage/* artifacts/linux/ 2>/dev/null || true
+          # Copy AppImage if it exists (check both possible locations)
+          if [ -d "../../target/x86_64-unknown-linux-gnu/release/bundle/appimage" ]; then
+            cp ../../target/x86_64-unknown-linux-gnu/release/bundle/appimage/*.AppImage artifacts/linux/ 2>/dev/null || true
+          elif [ -d "src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/appimage" ]; then
+            cp src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/appimage/*.AppImage artifacts/linux/ 2>/dev/null || true
           fi
           # Copy DEB if it exists
-          if [ -d "src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/deb" ]; then
-            cp -r src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/deb/* artifacts/linux/ 2>/dev/null || true
+          if [ -d "../../target/x86_64-unknown-linux-gnu/release/bundle/deb" ]; then
+            cp ../../target/x86_64-unknown-linux-gnu/release/bundle/deb/*.deb artifacts/linux/ 2>/dev/null || true
+          elif [ -d "src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/deb" ]; then
+            cp src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/deb/*.deb artifacts/linux/ 2>/dev/null || true
+          fi
+          # Copy RPM if it exists
+          if [ -d "../../target/x86_64-unknown-linux-gnu/release/bundle/rpm" ]; then
+            cp ../../target/x86_64-unknown-linux-gnu/release/bundle/rpm/*.rpm artifacts/linux/ 2>/dev/null || true
+          elif [ -d "src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/rpm" ]; then
+            cp src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/rpm/*.rpm artifacts/linux/ 2>/dev/null || true
           fi
           # List what we found
           echo "=== Artifacts copied ==="
