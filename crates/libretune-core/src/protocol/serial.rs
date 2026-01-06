@@ -4,6 +4,7 @@
 
 use serialport::{SerialPort, SerialPortInfo, SerialPortType};
 use std::collections::HashMap;
+use std::fs;
 use std::time::Duration;
 
 use super::{ProtocolError, DEFAULT_BAUD_RATE};
