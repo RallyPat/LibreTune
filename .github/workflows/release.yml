@@ -63,22 +63,31 @@ jobs:
         working-directory: crates/libretune-app
         run: npx tauri build --target x86_64-unknown-linux-gnu
 
-      - name: List build outputs (debug)
+      - name: Prepare artifacts directory
         working-directory: crates/libretune-app
         run: |
-          echo "=== Checking bundle directory structure ==="
-          find src-tauri/target/x86_64-unknown-linux-gnu/release/bundle -type f 2>/dev/null | head -20 || echo "No bundle files found"
-          echo "=== Bundle subdirectories ==="
-          ls -la src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/ 2>/dev/null || echo "Bundle directory not found"
+          mkdir -p artifacts/linux
+
+      - name: Copy Linux artifacts
+        working-directory: crates/libretune-app
+        run: |
+          # Copy AppImage if it exists
+          if [ -d "src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/appimage" ]; then
+            cp -r src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/appimage/* artifacts/linux/ 2>/dev/null || true
+          fi
+          # Copy DEB if it exists
+          if [ -d "src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/deb" ]; then
+            cp -r src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/deb/* artifacts/linux/ 2>/dev/null || true
+          fi
+          # List what we found
+          echo "=== Artifacts copied ==="
+          ls -lh artifacts/linux/ || echo "No artifacts found"
 
       - name: Upload Linux artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: linux-x86_64
-          path: |
-            crates/libretune-app/src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/appimage/**
-            crates/libretune-app/src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/deb/**
-            crates/libretune-app/src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/**
+          path: crates/libretune-app/artifacts/linux/*
           if-no-files-found: warn
           retention-days: 30
 
@@ -109,22 +118,31 @@ jobs:
         working-directory: crates/libretune-app
         run: npx tauri build --target x86_64-pc-windows-msvc
 
-      - name: List build outputs (debug)
+      - name: Prepare artifacts directory
         working-directory: crates/libretune-app
         run: |
-          echo "=== Checking bundle directory structure ==="
-          dir /s /b src-tauri\target\x86_64-pc-windows-msvc\release\bundle 2>nul || echo Bundle directory not found
-          echo "=== Bundle subdirectories ==="
-          dir src-tauri\target\x86_64-pc-windows-msvc\release\bundle 2>nul || echo Bundle directory not found
+          mkdir artifacts\windows
+
+      - name: Copy Windows artifacts
+        working-directory: crates/libretune-app
+        run: |
+          # Copy NSIS installer if it exists
+          if exist "src-tauri\target\x86_64-pc-windows-msvc\release\bundle\nsis" (
+            xcopy /E /I /Y "src-tauri\target\x86_64-pc-windows-msvc\release\bundle\nsis\*" "artifacts\windows\" 2>nul || echo No NSIS files found
+          )
+          # Copy MSI installer if it exists
+          if exist "src-tauri\target\x86_64-pc-windows-msvc\release\bundle\msi" (
+            xcopy /E /I /Y "src-tauri\target\x86_64-pc-windows-msvc\release\bundle\msi\*" "artifacts\windows\" 2>nul || echo No MSI files found
+          )
+          # List what we found
+          echo === Artifacts copied ===
+          dir artifacts\windows\ || echo No artifacts found
 
       - name: Upload Windows artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: windows-x86_64
-          path: |
-            crates/libretune-app/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/**
-            crates/libretune-app/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/msi/**
-            crates/libretune-app/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/**
+          path: crates/libretune-app/artifacts/windows/*
           if-no-files-found: warn
           retention-days: 30
 
@@ -164,36 +182,39 @@ jobs:
         working-directory: crates/libretune-app
         run: npx tauri build --target x86_64-apple-darwin
 
-      - name: List build outputs (debug)
+      - name: Prepare artifacts directory
         working-directory: crates/libretune-app
         run: |
-          echo "=== Checking bundle directory structure ==="
-          find src-tauri/target/*/release/bundle -type f 2>/dev/null | head -20 || echo "No bundle files found"
-          echo "=== Bundle subdirectories ==="
-          ls -la src-tauri/target/*/release/bundle/ 2>/dev/null || echo "Bundle directories not found"
+          mkdir -p artifacts/macos
 
-      - name: Package macOS artifacts (zip .app bundles to preserve permissions)
+      - name: Copy and package macOS artifacts
         working-directory: crates/libretune-app
         run: |
+          # Copy DMG files
+          for dmg in src-tauri/target/*/release/bundle/dmg/*.dmg; do
+            if [ -f "$dmg" ]; then
+              cp "$dmg" "artifacts/macos/$(basename "$dmg")"
+            fi
+          done
+          # Zip .app bundles to preserve permissions
           for app_bundle in src-tauri/target/*/release/bundle/macos/*.app; do
             if [ -d "$app_bundle" ]; then
-              zip_name="${app_bundle%.app}.zip"
+              zip_name="artifacts/macos/$(basename "$app_bundle" .app).zip"
               echo "Zipping $app_bundle to $zip_name"
               cd "$(dirname "$app_bundle")"
-              zip -r "$(basename "$zip_name")" "$(basename "$app_bundle")"
+              zip -r "../../../$zip_name" "$(basename "$app_bundle")"
               cd - > /dev/null
             fi
           done
+          # List what we found
+          echo "=== Artifacts copied ==="
+          ls -lh artifacts/macos/ || echo "No artifacts found"
 
       - name: Upload macOS artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: macos-universal
-          path: |
-            crates/libretune-app/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/**
-            crates/libretune-app/src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/**
-            crates/libretune-app/src-tauri/target/x86_64-apple-darwin/release/bundle/macos/**
-            crates/libretune-app/src-tauri/target/x86_64-apple-darwin/release/bundle/dmg/**
+          path: crates/libretune-app/artifacts/macos/*
           if-no-files-found: warn
           retention-days: 30
 
@@ -203,7 +224,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           path: artifacts
           pattern: '*'
@@ -236,7 +257,7 @@ jobs:
       
       - name: Upload artifacts (manual build)
         if: "!startsWith(github.ref, 'refs/tags/')"
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: build-artifacts
           path: artifacts/**
