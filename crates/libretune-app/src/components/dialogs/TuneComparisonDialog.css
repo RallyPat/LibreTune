@@ -1,0 +1,94 @@
+.tune-comparison-overlay {
+  z-index: 1000;
+}
+
+.tune-comparison-dialog {
+  max-width: 600px;
+  width: 90vw;
+}
+
+.tune-choice-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-top: 24px;
+}
+
+.tune-choice-button {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 20px;
+  border: 2px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--card-bg);
+  cursor: pointer;
+  transition: all 0.2s;
+  text-align: left;
+  position: relative;
+}
+
+.tune-choice-button:hover:not(:disabled) {
+  border-color: var(--accent-color);
+  background: var(--card-hover-bg);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.tune-choice-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.tune-choice-icon {
+  flex-shrink: 0;
+  width: 48px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: var(--bg-secondary);
+}
+
+.tune-choice-project .tune-choice-icon {
+  color: var(--accent-color);
+}
+
+.tune-choice-ecu .tune-choice-icon {
+  color: #4CAF50;
+}
+
+.tune-choice-content {
+  flex: 1;
+}
+
+.tune-choice-content h3 {
+  margin: 0 0 8px 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.tune-choice-content p {
+  margin: 0;
+  font-size: 14px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.tune-choice-loader {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
