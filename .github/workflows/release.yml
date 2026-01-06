@@ -135,22 +135,23 @@ jobs:
 
       - name: Copy Windows artifacts
         working-directory: crates/libretune-app
+        shell: cmd
         run: |
-          # Copy NSIS installer if it exists (check workspace root first, then local)
+          REM Copy NSIS installer if it exists (check workspace root first, then local)
           if exist "..\..\target\x86_64-pc-windows-msvc\release\bundle\nsis" (
             for %%f in ("..\..\target\x86_64-pc-windows-msvc\release\bundle\nsis\*.exe") do copy "%%f" "artifacts\windows\" >nul 2>&1
           )
           if exist "src-tauri\target\x86_64-pc-windows-msvc\release\bundle\nsis" (
             for %%f in ("src-tauri\target\x86_64-pc-windows-msvc\release\bundle\nsis\*.exe") do copy "%%f" "artifacts\windows\" >nul 2>&1
           )
-          # Copy MSI installer if it exists
+          REM Copy MSI installer if it exists
           if exist "..\..\target\x86_64-pc-windows-msvc\release\bundle\msi" (
             for %%f in ("..\..\target\x86_64-pc-windows-msvc\release\bundle\msi\*.msi") do copy "%%f" "artifacts\windows\" >nul 2>&1
           )
           if exist "src-tauri\target\x86_64-pc-windows-msvc\release\bundle\msi" (
             for %%f in ("src-tauri\target\x86_64-pc-windows-msvc\release\bundle\msi\*.msi") do copy "%%f" "artifacts\windows\" >nul 2>&1
           )
-          # List what we found
+          REM List what we found
           echo === Artifacts copied ===
           dir artifacts\windows\ || echo No artifacts found
 
@@ -222,6 +223,8 @@ jobs:
           for app_bundle in ../../target/*/release/bundle/macos/*.app; do
             if [ -d "$app_bundle" ]; then
               zip_name="artifacts/macos/$(basename "$app_bundle" .app).zip"
+              # Ensure artifacts directory exists (we're in crates/libretune-app)
+              mkdir -p artifacts/macos
               echo "Zipping $app_bundle to $zip_name"
               cd "$(dirname "$app_bundle")"
               zip -r "../../../../crates/libretune-app/$zip_name" "$(basename "$app_bundle")"
@@ -232,6 +235,8 @@ jobs:
           for app_bundle in src-tauri/target/*/release/bundle/macos/*.app; do
             if [ -d "$app_bundle" ]; then
               zip_name="artifacts/macos/$(basename "$app_bundle" .app).zip"
+              # Ensure artifacts directory exists (we're in crates/libretune-app)
+              mkdir -p artifacts/macos
               echo "Zipping $app_bundle to $zip_name"
               cd "$(dirname "$app_bundle")"
               zip -r "../../../$zip_name" "$(basename "$app_bundle")"
