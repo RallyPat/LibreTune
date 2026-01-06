@@ -98,7 +98,8 @@ menu = "Test Menu"
             libretune_core::ini::MenuItem::Dialog {
                 label,
                 target,
-                condition,
+                enabled_condition,
+                ..
             } => {
                 // Labels should NOT start with { - that would indicate the bug
                 assert!(
@@ -110,13 +111,13 @@ menu = "Test Menu"
                 // Verify specific items
                 if target == "dwell_tblMap" {
                     assert_eq!(label, "Dwell Map", "Wrong label for dwell_tblMap");
-                    assert_eq!(condition.as_deref(), Some("useDwellMap"));
+                    assert_eq!(enabled_condition.as_deref(), Some("useDwellMap"));
                 } else if target == "stagingMap" {
                     assert_eq!(label, "Fuel Staging", "Wrong label for stagingMap");
-                    assert_eq!(condition.as_deref(), Some("stagingMode == 0"));
+                    assert_eq!(enabled_condition.as_deref(), Some("stagingMode == 0"));
                 } else if target == "normalMenu" {
                     assert_eq!(label, "Normal Label", "Wrong label for normalMenu");
-                    assert_eq!(condition.as_deref(), Some("someCondition"));
+                    assert_eq!(enabled_condition.as_deref(), Some("someCondition"));
                 }
             }
             _ => {}
@@ -159,12 +160,19 @@ menu = "Test Menu"
         libretune_core::ini::MenuItem::Dialog {
             label,
             target,
-            condition,
+            visibility_condition,
+            enabled_condition,
+            ..
         } => {
             assert_eq!(target, "dcMotorActuatorHw");
             assert_eq!(label, "DC motor actuator(s) hardware");
-            // First condition should be used
-            assert_eq!(condition.as_deref(), Some("1"));
+            // First condition "1" is filtered out as trivial, so visibility_condition is None
+            // Second condition goes to enabled_condition
+            assert_eq!(visibility_condition.as_ref(), None);
+            assert_eq!(
+                enabled_condition.as_deref(),
+                Some("uiMode == 0 || uiMode == 1")
+            );
         }
         other => panic!("Expected Dialog item, got {:?}", other),
     }

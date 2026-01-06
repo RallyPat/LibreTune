@@ -1583,7 +1583,7 @@ fn parse_user_defined_entry(
             if parts.len() >= 2 {
                 let name = parts[0].to_string();
                 let columns = parts[1].parse::<u8>().unwrap_or(2);
-                
+
                 // Check for visibility condition (last part in braces)
                 let visibility_condition = parts
                     .iter()
@@ -1714,10 +1714,11 @@ fn parse_user_defined_entry(
                     // Format: indicator = {expression}, "label_off", "label_on" [, color_off_fg, color_off_bg, color_on_fg, color_on_bg]
                     let parts = split_ini_line(value);
                     if parts.len() >= 3 {
-                        let expression = parts[0].trim_matches(|c| c == '{' || c == '}').to_string();
+                        let expression =
+                            parts[0].trim_matches(|c| c == '{' || c == '}').to_string();
                         let label_off = parts[1].trim_matches('"').to_string();
                         let label_on = parts[2].trim_matches('"').to_string();
-                        
+
                         // Optional colors (parts 3-6)
                         let color_off_fg = parts.get(3).map(|s| s.trim().to_string());
                         let color_off_bg = parts.get(4).map(|s| s.trim().to_string());
@@ -1760,7 +1761,7 @@ fn parse_controller_command_entry(def: &mut EcuDefinition, key: &str, value: &st
         let name = key.to_string();
         let label = parts[0].trim_matches('"').to_string();
         let command = parts[1].trim_matches('"').to_string();
-        
+
         // Optional enable condition (last part in braces)
         let enable_condition = parts
             .iter()
@@ -1771,12 +1772,15 @@ fn parse_controller_command_entry(def: &mut EcuDefinition, key: &str, value: &st
             })
             .map(|p| p.trim().trim_matches(|c| c == '{' || c == '}').to_string());
 
-        def.controller_commands.insert(name.clone(), ControllerCommand {
-            name,
-            label,
-            command,
-            enable_condition,
-        });
+        def.controller_commands.insert(
+            name.clone(),
+            ControllerCommand {
+                name,
+                label,
+                command,
+                enable_condition,
+            },
+        );
     }
 }
 
@@ -1788,11 +1792,11 @@ fn parse_logger_definition_entry(def: &mut EcuDefinition, key: &str, value: &str
         let name = key.to_string();
         let label = parts[0].trim_matches('"').to_string();
         let sample_rate = parts[1].parse::<f64>().unwrap_or(100.0);
-        
+
         // Channels are all parts between sample_rate and optional condition
         let mut channels = Vec::new();
         let mut enable_condition = None;
-        
+
         for part in parts.iter().skip(2) {
             let trimmed = part.trim();
             if trimmed.starts_with('{') && trimmed.ends_with('}') {
@@ -1803,13 +1807,16 @@ fn parse_logger_definition_entry(def: &mut EcuDefinition, key: &str, value: &str
             }
         }
 
-        def.logger_definitions.insert(name.clone(), LoggerDefinition {
-            name,
-            label,
-            sample_rate,
-            channels,
-            enable_condition,
-        });
+        def.logger_definitions.insert(
+            name.clone(),
+            LoggerDefinition {
+                name,
+                label,
+                sample_rate,
+                channels,
+                enable_condition,
+            },
+        );
     }
 }
 
@@ -1820,7 +1827,7 @@ fn parse_port_editor_entry(def: &mut EcuDefinition, key: &str, value: &str) {
     if !parts.is_empty() {
         let name = key.to_string();
         let label = parts[0].trim_matches('"').to_string();
-        
+
         // Optional enable condition (last part in braces)
         let enable_condition = parts
             .iter()
@@ -1831,11 +1838,14 @@ fn parse_port_editor_entry(def: &mut EcuDefinition, key: &str, value: &str) {
             })
             .map(|p| p.trim().trim_matches(|c| c == '{' || c == '}').to_string());
 
-        def.port_editors.insert(name.clone(), PortEditorConfig {
-            name,
-            label,
-            enable_condition,
-        });
+        def.port_editors.insert(
+            name.clone(),
+            PortEditorConfig {
+                name,
+                label,
+                enable_condition,
+            },
+        );
     }
 }
 
@@ -1847,7 +1857,7 @@ fn parse_reference_table_entry(def: &mut EcuDefinition, key: &str, value: &str) 
         let name = key.to_string();
         let label = parts[0].trim_matches('"').to_string();
         let table_name = parts[1].trim().to_string();
-        
+
         // Optional enable condition (last part in braces)
         let enable_condition = parts
             .iter()
@@ -1858,12 +1868,15 @@ fn parse_reference_table_entry(def: &mut EcuDefinition, key: &str, value: &str) 
             })
             .map(|p| p.trim().trim_matches(|c| c == '{' || c == '}').to_string());
 
-        def.reference_tables.insert(name.clone(), ReferenceTable {
-            name,
-            label,
-            table_name,
-            enable_condition,
-        });
+        def.reference_tables.insert(
+            name.clone(),
+            ReferenceTable {
+                name,
+                label,
+                table_name,
+                enable_condition,
+            },
+        );
     }
 }
 
@@ -1876,7 +1889,7 @@ fn parse_ftp_browser_entry(def: &mut EcuDefinition, key: &str, value: &str) {
         let label = parts[0].trim_matches('"').to_string();
         let server = parts[1].trim().to_string();
         let port = parts[2].parse::<u16>().unwrap_or(21);
-        
+
         // Optional enable condition (last part in braces)
         let enable_condition = parts
             .iter()
@@ -1887,13 +1900,16 @@ fn parse_ftp_browser_entry(def: &mut EcuDefinition, key: &str, value: &str) {
             })
             .map(|p| p.trim().trim_matches(|c| c == '{' || c == '}').to_string());
 
-        def.ftp_browsers.insert(name.clone(), FTPBrowserConfig {
-            name,
-            label,
-            server,
-            port,
-            enable_condition,
-        });
+        def.ftp_browsers.insert(
+            name.clone(),
+            FTPBrowserConfig {
+                name,
+                label,
+                server,
+                port,
+                enable_condition,
+            },
+        );
     }
 }
 
@@ -1906,11 +1922,14 @@ fn parse_datalog_view_entry(def: &mut EcuDefinition, key: &str, value: &str) {
         let label = parts[0].trim_matches('"').to_string();
         let channels: Vec<String> = parts.iter().skip(1).map(|s| s.trim().to_string()).collect();
 
-        def.datalog_views.insert(name.clone(), DatalogView {
-            name,
-            label,
-            channels,
-        });
+        def.datalog_views.insert(
+            name.clone(),
+            DatalogView {
+                name,
+                label,
+                channels,
+            },
+        );
     }
 }
 
@@ -1924,7 +1943,7 @@ fn parse_key_action_entry(def: &mut EcuDefinition, key: &str, value: &str) {
         let key_combo = parts[0].trim().to_string();
         let action = format!("showPanel:{}", parts[1].trim());
         let label = format!("Show {}", parts[1].trim());
-        
+
         def.key_actions.push(KeyAction {
             key: key_combo,
             action,
@@ -1936,7 +1955,7 @@ fn parse_key_action_entry(def: &mut EcuDefinition, key: &str, value: &str) {
         let key_combo = key.to_string();
         let action = parts[0].trim().to_string();
         let label = parts[1].trim_matches('"').to_string();
-        
+
         // Optional enable condition (last part in braces)
         let enable_condition = parts
             .iter()
