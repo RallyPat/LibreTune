@@ -150,17 +150,12 @@ pub struct EmbeddedImage {
 }
 
 /// Type of embedded resource.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub enum ResourceType {
+    #[default]
     Png,
     Gif,
     Ttf,
-}
-
-impl Default for ResourceType {
-    fn default() -> Self {
-        Self::Png
-    }
 }
 
 /// Background image display style.
@@ -174,7 +169,7 @@ pub enum BackgroundStyle {
 }
 
 /// Gauge painter type - determines how the gauge is rendered.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub enum GaugePainter {
     /// Standard analog dial gauge
     AnalogGauge,
@@ -185,6 +180,7 @@ pub enum GaugePainter {
     /// Asymmetric sweep arc gauge
     AsymmetricSweepGauge,
     /// Digital numeric readout
+    #[default]
     BasicReadout,
     /// Horizontal progress bar
     HorizontalBarGauge,
@@ -204,11 +200,6 @@ pub enum GaugePainter {
     LineGraph,
 }
 
-impl Default for GaugePainter {
-    fn default() -> Self {
-        Self::BasicReadout
-    }
-}
 
 impl GaugePainter {
     /// Parse from TunerStudio's GaugePainter string

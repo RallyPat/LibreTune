@@ -6,6 +6,7 @@ use crate::ini::EcuDefinition;
 use std::collections::HashMap;
 
 /// Manages the ECU's memory state
+#[derive(Default)]
 pub struct EcuMemory {
     /// Raw page data
     pages: HashMap<u8, Vec<u8>>,
@@ -79,15 +80,6 @@ impl EcuMemory {
     }
 }
 
-impl Default for EcuMemory {
-    fn default() -> Self {
-        Self {
-            pages: HashMap::new(),
-            page_sizes: Vec::new(),
-            n_pages: 0,
-        }
-    }
-}
 
 #[cfg(test)]
 mod tests {

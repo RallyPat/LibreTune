@@ -475,6 +475,7 @@ fn lex(input: &str) -> Vec<Token> {
 }
 
 /// Context for string function evaluation
+#[derive(Default)]
 pub struct StringContext {
     /// Function to get string value of a constant
     pub get_string_value: Option<Box<dyn Fn(&str) -> Option<String> + Send + Sync>>,
@@ -486,16 +487,6 @@ pub struct StringContext {
     pub get_working_dir: Option<Box<dyn Fn() -> String + Send + Sync>>,
 }
 
-impl Default for StringContext {
-    fn default() -> Self {
-        Self {
-            get_string_value: None,
-            get_bit_options: None,
-            get_projects_dir: None,
-            get_working_dir: None,
-        }
-    }
-}
 
 /// Evaluates a function call
 fn evaluate_function(

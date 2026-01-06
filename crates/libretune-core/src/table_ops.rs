@@ -246,7 +246,7 @@ pub fn interpolate_cells(z_values: &[Vec<f64>], selected_cells: Vec<TableCell>) 
 /// Set selected cells to a value
 pub fn set_cells_equal(z_values: &mut [Vec<f64>], selected_cells: Vec<TableCell>, value: f64) {
     for &(y, x) in selected_cells.iter() {
-        if let Some(_) = get_cell_value(z_values, y, x) {
+        if get_cell_value(z_values, y, x).is_some() {
             z_values[y][x] = value;
         }
     }

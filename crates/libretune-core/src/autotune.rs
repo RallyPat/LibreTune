@@ -92,21 +92,11 @@ pub struct AutoTuneReferenceTables {
 }
 
 /// VE Analyze runtime state
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct AutoTuneState {
     pub is_running: bool,
     pub locked_cells: Vec<(usize, usize)>,
     pub recommendations: HashMap<(usize, usize), AutoTuneRecommendation>,
-}
-
-impl Default for AutoTuneState {
-    fn default() -> Self {
-        Self {
-            is_running: false,
-            locked_cells: Vec::new(),
-            recommendations: HashMap::new(),
-        }
-    }
 }
 
 /// Data point from ECU for VE analysis

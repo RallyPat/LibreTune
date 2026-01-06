@@ -28,6 +28,7 @@ pub enum PageState {
 }
 
 /// Holds local copy of ECU data with change tracking
+#[derive(Default)]
 pub struct TuneCache {
     /// Raw page data
     pages: HashMap<u8, Vec<u8>>,
@@ -258,19 +259,6 @@ impl TuneCache {
     }
 }
 
-impl Default for TuneCache {
-    fn default() -> Self {
-        Self {
-            pages: HashMap::new(),
-            page_sizes: Vec::new(),
-            n_pages: 0,
-            page_states: HashMap::new(),
-            shadow: ShadowMemory::new(),
-            has_pending_burn: false,
-            local_values: HashMap::new(),
-        }
-    }
-}
 
 #[cfg(test)]
 mod tests {

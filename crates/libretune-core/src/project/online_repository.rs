@@ -177,13 +177,13 @@ impl OnlineIniRepository {
             .get(api_url)
             .send()
             .await
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
+            .map_err(|e| io::Error::other(e.to_string()))?;
 
         if !response.status().is_success() {
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
-                format!("GitHub API error: {}", response.status()),
-            ));
+            return Err(io::Error::other(format!(
+                "GitHub API error: {}",
+                response.status()
+            )));
         }
 
         let files: Vec<GitHubFile> = response
@@ -225,19 +225,19 @@ impl OnlineIniRepository {
             .get(&entry.download_url)
             .send()
             .await
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
+            .map_err(|e| io::Error::other(e.to_string()))?;
 
         if !response.status().is_success() {
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
-                format!("Download failed: {}", response.status()),
-            ));
+            return Err(io::Error::other(format!(
+                "Download failed: {}",
+                response.status()
+            )));
         }
 
         let content = response
             .bytes()
             .await
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
+            .map_err(|e| io::Error::other(e.to_string()))?;
 
         // Create target directory if it doesn't exist
         std::fs::create_dir_all(target_dir)?;

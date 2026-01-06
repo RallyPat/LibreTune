@@ -449,7 +449,7 @@ impl TuneFile {
         }
 
         // Start msq tag with signature
-        xml.push_str(&format!("<msq xmlns=\"http://www.msefi.com/:msq\">\n"));
+        xml.push_str("<msq xmlns=\"http://www.msefi.com/:msq\">\n");
 
         // Add versionInfo with signature
         xml.push_str(&format!(
@@ -478,7 +478,7 @@ impl TuneFile {
             let page = self.constant_pages.get(name).copied().unwrap_or(0);
             constants_by_page
                 .entry(page)
-                .or_insert_with(Vec::new)
+                .or_default()
                 .push(name.clone());
         }
 
