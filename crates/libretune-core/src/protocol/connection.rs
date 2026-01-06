@@ -10,8 +10,7 @@ use std::time::{Duration, Instant};
 use super::{
     commands::{BurnParams, ReadMemoryParams, WriteMemoryParams},
     serial::{clear_buffers, configure_port, list_ports, open_port, PortInfo},
-    Command, CommandBuilder, Packet, ProtocolError, DEFAULT_BAUD_RATE,
-    DEFAULT_TIMEOUT_MS,
+    Command, CommandBuilder, Packet, ProtocolError, DEFAULT_BAUD_RATE, DEFAULT_TIMEOUT_MS,
 };
 use crate::ini::{AdaptiveTiming, AdaptiveTimingConfig, Endianness, ProtocolSettings};
 
@@ -479,9 +478,7 @@ impl Connection {
                 );
                 return Ok(signature);
             } else {
-                eprintln!(
-                    "[DEBUG] handshake: CRC protocol failed, trying legacy"
-                );
+                eprintln!("[DEBUG] handshake: CRC protocol failed, trying legacy");
             }
         }
 

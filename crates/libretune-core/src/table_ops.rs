@@ -222,9 +222,19 @@ pub fn interpolate_cells(z_values: &[Vec<f64>], selected_cells: Vec<TableCell>) 
         get_cell_value(&mut z_values_mut, max_y, max_x),
     ];
 
-    for (y_idx, row) in result.iter_mut().enumerate().skip(min_y).take(max_y - min_y + 1) {
+    for (y_idx, row) in result
+        .iter_mut()
+        .enumerate()
+        .skip(min_y)
+        .take(max_y - min_y + 1)
+    {
         let y = y_idx;
-        for (x_idx, cell) in row.iter_mut().enumerate().skip(min_x).take(max_x - min_x + 1) {
+        for (x_idx, cell) in row
+            .iter_mut()
+            .enumerate()
+            .skip(min_x)
+            .take(max_x - min_x + 1)
+        {
             let x = x_idx;
             if corners.iter().all(|c| c.is_some()) {
                 let y_ratio = (y - min_y) as f64 / (max_y - min_y) as f64;
