@@ -4,6 +4,7 @@
 
 use serialport::{SerialPort, SerialPortInfo, SerialPortType};
 use std::collections::HashMap;
+#[cfg(target_os = "linux")]
 use std::fs;
 use std::time::Duration;
 

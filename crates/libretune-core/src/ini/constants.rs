@@ -203,10 +203,8 @@ pub fn parse_constant_line(
         constant.shape = Shape::from_ini_str(parts[3]);
     }
 
-    // Parse units (index 4 for bits, 3 for scalar)
-    let units_idx = if class == "bits" {
-        4
-    } else if class == "array" {
+    // Parse units (index 4 for bits/array, 3 for scalar)
+    let units_idx = if class == "bits" || class == "array" {
         4
     } else {
         3

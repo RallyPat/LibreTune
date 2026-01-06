@@ -160,7 +160,7 @@ fn write_gauge_cluster<W: Write>(
     // Write components
     for component in &cluster.components {
         match component {
-            DashComponent::Gauge(gauge) => write_gauge_component(writer, gauge)?,
+            DashComponent::Gauge(gauge) => write_gauge_component(writer, &*gauge)?,
             DashComponent::Indicator(indicator) => write_indicator_component(writer, indicator)?,
         }
     }
@@ -516,7 +516,7 @@ mod tests {
 
         dash.gauge_cluster
             .components
-            .push(DashComponent::Gauge(gauge));
+            .push(DashComponent::Gauge(Box::new(gauge)));
 
         let result = write_dash_file(&dash);
         assert!(result.is_ok(), "Failed to write: {:?}", result.err());
@@ -554,7 +554,7 @@ mod tests {
 
         dash.gauge_cluster
             .components
-            .push(DashComponent::Gauge(gauge));
+            .push(DashComponent::Gauge(Box::new(gauge)));
 
         // Write to XML
         let xml = write_dash_file(&dash).unwrap();

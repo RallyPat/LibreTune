@@ -255,7 +255,7 @@ fn handle_end_element(
             if let Some(gauge) = state.current_gauge.take() {
                 dash.gauge_cluster
                     .components
-                    .push(DashComponent::Gauge(gauge));
+                    .push(DashComponent::Gauge(Box::new(gauge)));
             } else if let Some(indicator) = state.current_indicator.take() {
                 dash.gauge_cluster
                     .components

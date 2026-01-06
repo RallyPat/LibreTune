@@ -41,7 +41,7 @@ impl DataLogger {
 
     /// Set the target sample rate in Hz
     pub fn set_sample_rate(&mut self, rate: f64) {
-        self.sample_rate = rate.max(1.0).min(200.0);
+        self.sample_rate = rate.clamp(1.0, 200.0);
     }
 
     /// Get the sample rate

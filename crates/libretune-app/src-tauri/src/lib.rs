@@ -272,7 +272,7 @@ fn convert_layout_to_dashfile(layout: &DashboardLayout) -> DashFile {
 
         dash.gauge_cluster
             .components
-            .push(DashComponent::Gauge(ts_gauge));
+            .push(DashComponent::Gauge(Box::new(ts_gauge)));
     }
 
     dash
@@ -293,7 +293,7 @@ fn convert_dashfile_to_layout(dash: &DashFile, name: &str) -> DashboardLayout {
     };
 
     for (idx, component) in dash.gauge_cluster.components.iter().enumerate() {
-        if let DashComponent::Gauge(g) = component {
+        if let DashComponent::Gauge(ref g) = component {
             let gauge_type = match g.gauge_painter {
                 GaugePainter::AnalogGauge
                 | GaugePainter::BasicAnalogGauge
@@ -4581,7 +4581,7 @@ fn create_tuning_dashboard() -> DashFile {
 
         dash.gauge_cluster
             .components
-            .push(DashComponent::Gauge(dash::GaugeConfig {
+            .push(DashComponent::Gauge(Box::new(dash::GaugeConfig {
                 id: id.to_string(),
                 title: title.to_string(),
                 units: units.to_string(),
@@ -4623,7 +4623,7 @@ fn create_tuning_dashboard() -> DashFile {
                     blue: 50,
                 },
                 ..Default::default()
-            }));
+            })));
     }
 
     dash

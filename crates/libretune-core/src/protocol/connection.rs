@@ -105,7 +105,7 @@ fn write_and_wait(
     let bits = (data.len() * 10) as u64;
     let bit_time_ns = 1_000_000_000u64 / (safe_baud as u64);
     let transmit_time_ns = bits * bit_time_ns;
-    let transmit_time_ms = (transmit_time_ns / 1_000_000) as u64;
+    let transmit_time_ms = transmit_time_ns / 1_000_000;
 
     // Add margin: kernel buffer processing + USB latency
     // Use caller-specified minimum or default to 10ms (was 50ms, reduced for speed)
@@ -335,7 +335,7 @@ impl Connection {
             .as_ref()
             .map(|p| p.block_read_timeout as u64)
             .unwrap_or(1000);
-        let inter_char_ms = (base_ms / 4).max(25).min(100);
+        let inter_char_ms = (base_ms / 4).clamp(25, 100);
         Duration::from_millis(inter_char_ms)
     }
 
@@ -505,7 +505,7 @@ impl Connection {
                     "[DEBUG] handshake: legacy success, signature = {:?}",
                     signature
                 );
-                return Ok(signature);
+                Ok(signature)
             }
             Err(e) => {
                 eprintln!("[DEBUG] handshake: legacy failed ({:?})", e);

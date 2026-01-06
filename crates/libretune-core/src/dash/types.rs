@@ -543,7 +543,7 @@ impl Default for IndicatorConfig {
 /// A dashboard component - either a gauge or an indicator.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum DashComponent {
-    Gauge(GaugeConfig),
+    Gauge(Box<GaugeConfig>),
     Indicator(IndicatorConfig),
 }
 

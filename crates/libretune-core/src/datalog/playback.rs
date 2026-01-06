@@ -70,6 +70,7 @@ impl LogPlayer {
     }
 
     /// Advance to the next entry
+    #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> Option<&LogEntry> {
         if self.position < self.entries.len() - 1 {
             self.position += 1;
