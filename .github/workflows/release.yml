@@ -226,8 +226,10 @@ jobs:
               # Ensure artifacts directory exists (we're in crates/libretune-app)
               mkdir -p artifacts/macos
               echo "Zipping $app_bundle to $zip_name"
+              # Use absolute path for zip output to avoid path issues after cd
+              abs_zip_path="$(pwd)/$zip_name"
               cd "$(dirname "$app_bundle")"
-              zip -r "../../../../crates/libretune-app/$zip_name" "$(basename "$app_bundle")"
+              zip -r "$abs_zip_path" "$(basename "$app_bundle")"
               cd - > /dev/null
             fi
           done
@@ -238,8 +240,10 @@ jobs:
               # Ensure artifacts directory exists (we're in crates/libretune-app)
               mkdir -p artifacts/macos
               echo "Zipping $app_bundle to $zip_name"
+              # Use absolute path for zip output to avoid path issues after cd
+              abs_zip_path="$(pwd)/$zip_name"
               cd "$(dirname "$app_bundle")"
-              zip -r "../../../$zip_name" "$(basename "$app_bundle")"
+              zip -r "$abs_zip_path" "$(basename "$app_bundle")"
               cd - > /dev/null
             fi
           done
