@@ -136,13 +136,19 @@ jobs:
       - name: Copy Windows artifacts
         working-directory: crates/libretune-app
         run: |
-          # Copy NSIS installer if it exists
+          # Copy NSIS installer if it exists (check workspace root first, then local)
+          if exist "..\..\target\x86_64-pc-windows-msvc\release\bundle\nsis" (
+            for %%f in ("..\..\target\x86_64-pc-windows-msvc\release\bundle\nsis\*.exe") do copy "%%f" "artifacts\windows\" >nul 2>&1
+          )
           if exist "src-tauri\target\x86_64-pc-windows-msvc\release\bundle\nsis" (
-            xcopy /E /I /Y "src-tauri\target\x86_64-pc-windows-msvc\release\bundle\nsis\*" "artifacts\windows\" 2>nul || echo No NSIS files found
+            for %%f in ("src-tauri\target\x86_64-pc-windows-msvc\release\bundle\nsis\*.exe") do copy "%%f" "artifacts\windows\" >nul 2>&1
           )
           # Copy MSI installer if it exists
+          if exist "..\..\target\x86_64-pc-windows-msvc\release\bundle\msi" (
+            for %%f in ("..\..\target\x86_64-pc-windows-msvc\release\bundle\msi\*.msi") do copy "%%f" "artifacts\windows\" >nul 2>&1
+          )
           if exist "src-tauri\target\x86_64-pc-windows-msvc\release\bundle\msi" (
-            xcopy /E /I /Y "src-tauri\target\x86_64-pc-windows-msvc\release\bundle\msi\*" "artifacts\windows\" 2>nul || echo No MSI files found
+            for %%f in ("src-tauri\target\x86_64-pc-windows-msvc\release\bundle\msi\*.msi") do copy "%%f" "artifacts\windows\" >nul 2>&1
           )
           # List what we found
           echo === Artifacts copied ===
@@ -200,13 +206,29 @@ jobs:
       - name: Copy and package macOS artifacts
         working-directory: crates/libretune-app
         run: |
-          # Copy DMG files
+          # Copy DMG files (check workspace root first, then local)
+          for dmg in ../../target/*/release/bundle/dmg/*.dmg; do
+            if [ -f "$dmg" ]; then
+              cp "$dmg" "artifacts/macos/$(basename "$dmg")"
+            fi
+          done
+          # Also check local src-tauri/target
           for dmg in src-tauri/target/*/release/bundle/dmg/*.dmg; do
             if [ -f "$dmg" ]; then
               cp "$dmg" "artifacts/macos/$(basename "$dmg")"
             fi
           done
-          # Zip .app bundles to preserve permissions
+          # Zip .app bundles to preserve permissions (check workspace root first)
+          for app_bundle in ../../target/*/release/bundle/macos/*.app; do
+            if [ -d "$app_bundle" ]; then
+              zip_name="artifacts/macos/$(basename "$app_bundle" .app).zip"
+              echo "Zipping $app_bundle to $zip_name"
+              cd "$(dirname "$app_bundle")"
+              zip -r "../../../../crates/libretune-app/$zip_name" "$(basename "$app_bundle")"
+              cd - > /dev/null
+            fi
+          done
+          # Also check local src-tauri/target
           for app_bundle in src-tauri/target/*/release/bundle/macos/*.app; do
             if [ -d "$app_bundle" ]; then
               zip_name="artifacts/macos/$(basename "$app_bundle" .app).zip"
