@@ -3771,7 +3771,7 @@ fn create_basic_dashboard() -> DashFile {
     // Row 1: Large RPM gauge
     dash.gauge_cluster
         .components
-        .push(DashComponent::Gauge(dash::GaugeConfig {
+        .push(DashComponent::Gauge(Box::new(dash::GaugeConfig {
             id: "rpm".to_string(),
             title: "RPM".to_string(),
             units: "".to_string(),
@@ -3822,12 +3822,12 @@ fn create_basic_dashboard() -> DashFile {
                 blue: 50,
             },
             ..Default::default()
-        }));
+        })));
 
     // Row 1: AFR gauge (digital readout)
     dash.gauge_cluster
         .components
-        .push(DashComponent::Gauge(dash::GaugeConfig {
+        .push(DashComponent::Gauge(Box::new(dash::GaugeConfig {
             id: "afr".to_string(),
             title: "AFR".to_string(),
             units: "".to_string(),
@@ -3857,12 +3857,12 @@ fn create_basic_dashboard() -> DashFile {
                 blue: 128,
             },
             ..Default::default()
-        }));
+        })));
 
     // Row 1: Coolant temp (bar gauge)
     dash.gauge_cluster
         .components
-        .push(DashComponent::Gauge(dash::GaugeConfig {
+        .push(DashComponent::Gauge(Box::new(dash::GaugeConfig {
             id: "coolant".to_string(),
             title: "COOLANT".to_string(),
             units: "°C".to_string(),
@@ -3908,12 +3908,12 @@ fn create_basic_dashboard() -> DashFile {
                 blue: 50,
             },
             ..Default::default()
-        }));
+        })));
 
     // Row 1: IAT temp (bar gauge)
     dash.gauge_cluster
         .components
-        .push(DashComponent::Gauge(dash::GaugeConfig {
+        .push(DashComponent::Gauge(Box::new(dash::GaugeConfig {
             id: "iat".to_string(),
             title: "IAT".to_string(),
             units: "°C".to_string(),
@@ -3959,12 +3959,12 @@ fn create_basic_dashboard() -> DashFile {
                 blue: 50,
             },
             ..Default::default()
-        }));
+        })));
 
     // Row 1: TPS (digital, below AFR)
     dash.gauge_cluster
         .components
-        .push(DashComponent::Gauge(dash::GaugeConfig {
+        .push(DashComponent::Gauge(Box::new(dash::GaugeConfig {
             id: "tps".to_string(),
             title: "TPS".to_string(),
             units: "%".to_string(),
@@ -3990,12 +3990,12 @@ fn create_basic_dashboard() -> DashFile {
                 blue: 255,
             },
             ..Default::default()
-        }));
+        })));
 
     // Row 2: MAP gauge
     dash.gauge_cluster
         .components
-        .push(DashComponent::Gauge(dash::GaugeConfig {
+        .push(DashComponent::Gauge(Box::new(dash::GaugeConfig {
             id: "map".to_string(),
             title: "MAP".to_string(),
             units: "kPa".to_string(),
@@ -4027,12 +4027,12 @@ fn create_basic_dashboard() -> DashFile {
                 blue: 200,
             },
             ..Default::default()
-        }));
+        })));
 
     // Row 2: Battery Voltage
     dash.gauge_cluster
         .components
-        .push(DashComponent::Gauge(dash::GaugeConfig {
+        .push(DashComponent::Gauge(Box::new(dash::GaugeConfig {
             id: "battery".to_string(),
             title: "BATTERY".to_string(),
             units: "V".to_string(),
@@ -4061,12 +4061,12 @@ fn create_basic_dashboard() -> DashFile {
                 blue: 100,
             },
             ..Default::default()
-        }));
+        })));
 
     // Row 2: Advance
     dash.gauge_cluster
         .components
-        .push(DashComponent::Gauge(dash::GaugeConfig {
+        .push(DashComponent::Gauge(Box::new(dash::GaugeConfig {
             id: "advance".to_string(),
             title: "ADVANCE".to_string(),
             units: "°".to_string(),
@@ -4092,12 +4092,12 @@ fn create_basic_dashboard() -> DashFile {
                 blue: 50,
             },
             ..Default::default()
-        }));
+        })));
 
     // Row 2: VE
     dash.gauge_cluster
         .components
-        .push(DashComponent::Gauge(dash::GaugeConfig {
+        .push(DashComponent::Gauge(Box::new(dash::GaugeConfig {
             id: "ve".to_string(),
             title: "VE".to_string(),
             units: "%".to_string(),
@@ -4123,12 +4123,12 @@ fn create_basic_dashboard() -> DashFile {
                 blue: 100,
             },
             ..Default::default()
-        }));
+        })));
 
     // Row 2: PW
     dash.gauge_cluster
         .components
-        .push(DashComponent::Gauge(dash::GaugeConfig {
+        .push(DashComponent::Gauge(Box::new(dash::GaugeConfig {
             id: "pw".to_string(),
             title: "PW".to_string(),
             units: "ms".to_string(),
@@ -4154,7 +4154,7 @@ fn create_basic_dashboard() -> DashFile {
                 blue: 200,
             },
             ..Default::default()
-        }));
+        })));
 
     dash
 }
@@ -4192,7 +4192,7 @@ fn create_racing_dashboard() -> DashFile {
     // Giant center RPM
     dash.gauge_cluster
         .components
-        .push(DashComponent::Gauge(dash::GaugeConfig {
+        .push(DashComponent::Gauge(Box::new(dash::GaugeConfig {
             id: "rpm".to_string(),
             title: "RPM".to_string(),
             units: "".to_string(),
@@ -4243,12 +4243,12 @@ fn create_racing_dashboard() -> DashFile {
                 blue: 0,
             },
             ..Default::default()
-        }));
+        })));
 
     // Oil pressure (left)
     dash.gauge_cluster
         .components
-        .push(DashComponent::Gauge(dash::GaugeConfig {
+        .push(DashComponent::Gauge(Box::new(dash::GaugeConfig {
             id: "oilpres".to_string(),
             title: "OIL".to_string(),
             units: "psi".to_string(),
@@ -4276,12 +4276,12 @@ fn create_racing_dashboard() -> DashFile {
                 blue: 100,
             },
             ..Default::default()
-        }));
+        })));
 
     // Water temp (right)
     dash.gauge_cluster
         .components
-        .push(DashComponent::Gauge(dash::GaugeConfig {
+        .push(DashComponent::Gauge(Box::new(dash::GaugeConfig {
             id: "coolant".to_string(),
             title: "H2O".to_string(),
             units: "°C".to_string(),
@@ -4309,12 +4309,12 @@ fn create_racing_dashboard() -> DashFile {
                 blue: 255,
             },
             ..Default::default()
-        }));
+        })));
 
     // Speed (bottom left)
     dash.gauge_cluster
         .components
-        .push(DashComponent::Gauge(dash::GaugeConfig {
+        .push(DashComponent::Gauge(Box::new(dash::GaugeConfig {
             id: "speed".to_string(),
             title: "SPEED".to_string(),
             units: "km/h".to_string(),
@@ -4341,12 +4341,12 @@ fn create_racing_dashboard() -> DashFile {
             },
             font_size_adjustment: 4,
             ..Default::default()
-        }));
+        })));
 
     // AFR (bottom center-left)
     dash.gauge_cluster
         .components
-        .push(DashComponent::Gauge(dash::GaugeConfig {
+        .push(DashComponent::Gauge(Box::new(dash::GaugeConfig {
             id: "afr".to_string(),
             title: "AFR".to_string(),
             units: "".to_string(),
@@ -4375,12 +4375,12 @@ fn create_racing_dashboard() -> DashFile {
             },
             font_size_adjustment: 4,
             ..Default::default()
-        }));
+        })));
 
     // Boost (bottom center-right)
     dash.gauge_cluster
         .components
-        .push(DashComponent::Gauge(dash::GaugeConfig {
+        .push(DashComponent::Gauge(Box::new(dash::GaugeConfig {
             id: "boost".to_string(),
             title: "BOOST".to_string(),
             units: "psi".to_string(),
@@ -4409,12 +4409,12 @@ fn create_racing_dashboard() -> DashFile {
             },
             font_size_adjustment: 4,
             ..Default::default()
-        }));
+        })));
 
     // Fuel level (bottom right)
     dash.gauge_cluster
         .components
-        .push(DashComponent::Gauge(dash::GaugeConfig {
+        .push(DashComponent::Gauge(Box::new(dash::GaugeConfig {
             id: "fuel".to_string(),
             title: "FUEL".to_string(),
             units: "%".to_string(),
@@ -4442,7 +4442,7 @@ fn create_racing_dashboard() -> DashFile {
                 blue: 0,
             },
             ..Default::default()
-        }));
+        })));
 
     dash
 }
