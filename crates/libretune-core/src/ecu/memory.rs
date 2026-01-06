@@ -80,7 +80,6 @@ impl EcuMemory {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;

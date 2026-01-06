@@ -487,7 +487,6 @@ pub struct StringContext {
     pub get_working_dir: Option<Box<dyn Fn() -> String + Send + Sync>>,
 }
 
-
 /// Evaluates a function call
 fn evaluate_function(
     name: &str,

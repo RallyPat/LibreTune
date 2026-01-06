@@ -200,7 +200,6 @@ pub enum GaugePainter {
     LineGraph,
 }
 
-
 impl GaugePainter {
     /// Parse from TunerStudio's GaugePainter string
     pub fn from_ts_string(s: &str) -> Self {
