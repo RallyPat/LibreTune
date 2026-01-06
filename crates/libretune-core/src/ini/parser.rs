@@ -5,12 +5,15 @@
 use regex::Regex;
 
 use super::{
-    EcuDefinition, IniError,
     constants::{parse_constant_line, parse_pc_variable_line},
-    output_channels::parse_output_channel_line,
-    tables::{TableDefinition, CurveDefinition},
     gauges::parse_gauge_line,
-    types::{SettingGroup, SettingOption, DatalogEntry, Menu, MenuItem, DialogDefinition, DialogComponent, HelpTopic, FrontPageConfig, FrontPageIndicator},
+    output_channels::parse_output_channel_line,
+    tables::{CurveDefinition, TableDefinition},
+    types::{
+        DatalogEntry, DialogComponent, DialogDefinition, FrontPageConfig, FrontPageIndicator,
+        HelpTopic, Menu, MenuItem, SettingGroup, SettingOption,
+    },
+    EcuDefinition, IniError,
 };
 
 struct ParserState {
@@ -34,35 +37,35 @@ pub fn parse_ini(content: &str) -> Result<EcuDefinition, IniError> {
         current_curve: None,
         current_help: None,
     };
-    
+
     // Preprocessor state for handling #set, #if, #else, #endif
     let mut defined_symbols: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut condition_stack: Vec<bool> = Vec::new();
-    
+
     // Pre-compile regex for line continuations
     let continuation_re = Regex::new(r"\\\s*$").unwrap();
-    
+
     let lines: Vec<&str> = content.lines().collect();
     let mut i = 0;
-    
+
     while i < lines.len() {
         let mut line = lines[i].to_string();
-        
+
         // Handle line continuations
         while continuation_re.is_match(&line) && i + 1 < lines.len() {
             line = continuation_re.replace(&line, "").to_string();
             i += 1;
             line.push_str(lines[i].trim());
         }
-        
+
         let line = strip_comment(&line);
         let line = line.trim();
-        
+
         if line.is_empty() {
             i += 1;
             continue;
         }
-        
+
         // Handle preprocessor directives (always processed regardless of condition)
         if line.starts_with("#set ") {
             let symbol = line[5..].trim().to_string();
@@ -71,7 +74,7 @@ pub fn parse_ini(content: &str) -> Result<EcuDefinition, IniError> {
             i += 1;
             continue;
         }
-        
+
         if line.starts_with("#unset ") {
             let symbol = line[7..].trim();
             eprintln!("[DEBUG] preprocessor: #unset {}", symbol);
@@ -79,7 +82,7 @@ pub fn parse_ini(content: &str) -> Result<EcuDefinition, IniError> {
             i += 1;
             continue;
         }
-        
+
         if line.starts_with("#if ") {
             let symbol = line[4..].trim();
             let is_defined = defined_symbols.contains(symbol);
@@ -88,23 +91,26 @@ pub fn parse_ini(content: &str) -> Result<EcuDefinition, IniError> {
             i += 1;
             continue;
         }
-        
+
         if line == "#else" {
             if let Some(last) = condition_stack.last_mut() {
-                eprintln!("[DEBUG] preprocessor: #else (was {}, now {})", *last, !*last);
+                eprintln!(
+                    "[DEBUG] preprocessor: #else (was {}, now {})",
+                    *last, !*last
+                );
                 *last = !*last;
             }
             i += 1;
             continue;
         }
-        
+
         if line == "#endif" {
             eprintln!("[DEBUG] preprocessor: #endif");
             condition_stack.pop();
             i += 1;
             continue;
         }
-        
+
         // Handle #define directives (only if in active branch)
         if line.starts_with("#define") {
             if condition_stack.iter().all(|&c| c) {
@@ -113,32 +119,38 @@ pub fn parse_ini(content: &str) -> Result<EcuDefinition, IniError> {
             i += 1;
             continue;
         }
-        
+
         // Skip other preprocessor directives
         if line.starts_with('#') {
             i += 1;
             continue;
         }
-        
+
         // Skip content if we're in a false branch
         if !condition_stack.iter().all(|&c| c) {
             i += 1;
             continue;
         }
-        
+
         // Check for section header
         if line.starts_with('[') && line.ends_with(']') {
-            current_section = line[1..line.len()-1].trim().to_string();
+            current_section = line[1..line.len() - 1].trim().to_string();
             i += 1;
             continue;
         }
-        
+
         // Parse key = value
         if let Some((key, value)) = parse_key_value(line) {
             match current_section.as_str() {
                 "MegaTune" => parse_megatune(&mut definition, key, value),
                 "TunerStudio" => parse_tunerstudio(&mut definition, key, value),
-                "Constants" => parse_constants_entry(&mut definition, key, value, &mut state.current_page, &mut state.last_offset),
+                "Constants" => parse_constants_entry(
+                    &mut definition,
+                    key,
+                    value,
+                    &mut state.current_page,
+                    &mut state.last_offset,
+                ),
                 "OutputChannels" => parse_output_channel_entry(&mut definition, key, value),
                 "BurstMode" => parse_burst_mode_entry(&mut definition, key, value),
                 "GaugeConfigurations" => parse_gauge_entry(&mut definition, key, value),
@@ -147,33 +159,49 @@ pub fn parse_ini(content: &str) -> Result<EcuDefinition, IniError> {
                 "Datalog" => parse_datalog_entry(&mut definition, key, value),
                 "Defaults" => parse_defaults_entry(&mut definition, key, value),
                 "Menu" => parse_menu_entry(&mut definition, key, value),
-                "UserDefined" => parse_user_defined_entry(&mut definition, key, value, &mut state.current_dialog, &mut state.current_help),
+                "UserDefined" => parse_user_defined_entry(
+                    &mut definition,
+                    key,
+                    value,
+                    &mut state.current_dialog,
+                    &mut state.current_help,
+                ),
                 "SettingContextHelp" => parse_setting_context_help(&mut definition, key, value),
                 "FrontPage" => parse_frontpage_entry(&mut definition, key, value),
                 _ => {
                     if current_section.contains("TableEditor") {
-                        parse_table_editor_entry(&mut definition, key, value, &mut state.current_table);
+                        parse_table_editor_entry(
+                            &mut definition,
+                            key,
+                            value,
+                            &mut state.current_table,
+                        );
                     } else if current_section.contains("CurveEditor") {
-                        parse_curve_editor_entry(&mut definition, key, value, &mut state.current_curve);
+                        parse_curve_editor_entry(
+                            &mut definition,
+                            key,
+                            value,
+                            &mut state.current_curve,
+                        );
                     }
                 }
             }
         }
-        
+
         i += 1;
     }
-    
+
     // Post-process: Apply variable substitution to commands that may have been parsed
     // before [PcVariables] section was encountered (e.g., queryCommand in [MegaTune])
     post_process_variable_substitution(&mut definition);
-    
+
     // Post-process menu items to fix types that couldn't be determined during initial parse
     // (e.g., help topics defined after menu section)
     post_process_menu_items(&mut definition);
-    
+
     // Post-process tables to resolve x_size/y_size from referenced constants
     post_process_table_sizes(&mut definition);
-    
+
     Ok(definition)
 }
 
@@ -182,7 +210,7 @@ pub fn parse_ini(content: &str) -> Result<EcuDefinition, IniError> {
 fn strip_comment(line: &str) -> String {
     let mut result = String::new();
     let mut in_quotes = false;
-    
+
     for ch in line.chars() {
         if ch == '"' {
             in_quotes = !in_quotes;
@@ -193,7 +221,7 @@ fn strip_comment(line: &str) -> String {
             result.push(ch);
         }
     }
-    
+
     result
 }
 
@@ -250,10 +278,13 @@ fn parse_define_directive(def: &mut EcuDefinition, line: &str) {
     // Format: #define name = value1, value2, ...
     // Or:     #define = name = value1, value2, ...
     let content = line.strip_prefix("#define").unwrap_or(line).trim();
-    
+
     // Handle both "name = values" and "= name = values" formats
-    let content = content.strip_prefix('=').map(|s| s.trim()).unwrap_or(content);
-    
+    let content = content
+        .strip_prefix('=')
+        .map(|s| s.trim())
+        .unwrap_or(content);
+
     if let Some((name, values_str)) = parse_key_value(content) {
         let values: Vec<String> = split_ini_line(values_str)
             .into_iter()
@@ -262,7 +293,10 @@ fn parse_define_directive(def: &mut EcuDefinition, line: &str) {
                 // Resolve $references to other defines
                 if v.starts_with('$') {
                     let ref_name = &v[1..];
-                    def.defines.get(ref_name).cloned().unwrap_or_else(|| vec![v])
+                    def.defines
+                        .get(ref_name)
+                        .cloned()
+                        .unwrap_or_else(|| vec![v])
                 } else if !v.is_empty() {
                     vec![v]
                 } else {
@@ -270,7 +304,7 @@ fn parse_define_directive(def: &mut EcuDefinition, line: &str) {
                 }
             })
             .collect();
-        
+
         if !name.is_empty() && !values.is_empty() {
             def.defines.insert(name.to_string(), values);
         }
@@ -278,7 +312,10 @@ fn parse_define_directive(def: &mut EcuDefinition, line: &str) {
 }
 
 /// Resolve bits field option values, expanding $references to defines
-fn resolve_bits_options(defines: &std::collections::HashMap<String, Vec<String>>, options: Vec<String>) -> Vec<String> {
+fn resolve_bits_options(
+    defines: &std::collections::HashMap<String, Vec<String>>,
+    options: Vec<String>,
+) -> Vec<String> {
     options
         .into_iter()
         .flat_map(|v| {
@@ -310,7 +347,10 @@ fn parse_megatune(def: &mut EcuDefinition, key: &str, value: &str) {
         }
         "delayafterportopen" => {
             def.protocol.delay_after_port_open = value.parse().unwrap_or(0);
-            eprintln!("[DEBUG] parse_megatune: delayAfterPortOpen = {}", def.protocol.delay_after_port_open);
+            eprintln!(
+                "[DEBUG] parse_megatune: delayAfterPortOpen = {}",
+                def.protocol.delay_after_port_open
+            );
         }
         "interwritedelay" => {
             def.protocol.inter_write_delay = value.parse().unwrap_or(0);
@@ -324,7 +364,10 @@ fn parse_megatune(def: &mut EcuDefinition, key: &str, value: &str) {
 
 /// Parse [TunerStudio] section entries
 fn parse_tunerstudio(def: &mut EcuDefinition, key: &str, value: &str) {
-    eprintln!("[DEBUG] parse_tunerstudio: key = {:?}, value = {:?}", key, value);
+    eprintln!(
+        "[DEBUG] parse_tunerstudio: key = {:?}, value = {:?}",
+        key, value
+    );
     match key.to_lowercase().as_str() {
         "inispecversion" => {
             def.ini_spec_version = value.trim_matches('"').to_string();
@@ -361,7 +404,10 @@ fn parse_tunerstudio(def: &mut EcuDefinition, key: &str, value: &str) {
         }
         "delayafterportopen" => {
             def.protocol.delay_after_port_open = value.parse().unwrap_or(0);
-            eprintln!("[DEBUG] parse_tunerstudio: delayAfterPortOpen = {}", def.protocol.delay_after_port_open);
+            eprintln!(
+                "[DEBUG] parse_tunerstudio: delayAfterPortOpen = {}",
+                def.protocol.delay_after_port_open
+            );
         }
         "interwritedelay" => {
             def.protocol.inter_write_delay = value.parse().unwrap_or(0);
@@ -371,23 +417,32 @@ fn parse_tunerstudio(def: &mut EcuDefinition, key: &str, value: &str) {
         }
         "messageenvelopeformat" => {
             def.protocol.message_envelope_format = Some(value.trim_matches('"').to_string());
-            eprintln!("[DEBUG] parse_tunerstudio: messageEnvelopeFormat = {:?}", def.protocol.message_envelope_format);
+            eprintln!(
+                "[DEBUG] parse_tunerstudio: messageEnvelopeFormat = {:?}",
+                def.protocol.message_envelope_format
+            );
         }
         _ => {}
     }
 }
 
 /// Parse [Constants] section entries
-fn parse_constants_entry(def: &mut EcuDefinition, key: &str, value: &str, current_page: &mut u8, last_offset: &mut u16) {
+fn parse_constants_entry(
+    def: &mut EcuDefinition,
+    key: &str,
+    value: &str,
+    current_page: &mut u8,
+    last_offset: &mut u16,
+) {
     let key_lower = key.to_lowercase();
-    
+
     // Check for page directive
     if key_lower == "page" {
         *current_page = value.parse().unwrap_or(0);
         *last_offset = 0; // Reset offset counter for new page
         return;
     }
-    
+
     // Check for protocol settings that appear in [Constants] section
     match key_lower.as_str() {
         "messageenvelopeformat" => {
@@ -459,7 +514,8 @@ fn parse_constants_entry(def: &mut EcuDefinition, key: &str, value: &str, curren
             return;
         }
         "writeblocks" => {
-            def.protocol.write_blocks = value.to_lowercase() == "on" || value == "1" || value.to_lowercase() == "true";
+            def.protocol.write_blocks =
+                value.to_lowercase() == "on" || value == "1" || value.to_lowercase() == "true";
             return;
         }
         "enable2ndbytecanid" => {
@@ -468,13 +524,13 @@ fn parse_constants_entry(def: &mut EcuDefinition, key: &str, value: &str, curren
         }
         _ => {}
     }
-    
+
     // Parse constant definition, passing defines for bits options resolution
     if let Some(mut constant) = parse_constant_line(key, value, *current_page, *last_offset) {
         // Update last_offset for next constant (offset + size in bytes)
         let size = constant.data_type.size_bytes() as u16 * constant.shape.element_count() as u16;
         *last_offset = constant.offset + size;
-        
+
         // Resolve $references in bit_options
         if !constant.bit_options.is_empty() {
             constant.bit_options = resolve_bits_options(&def.defines, constant.bit_options);
@@ -485,7 +541,10 @@ fn parse_constants_entry(def: &mut EcuDefinition, key: &str, value: &str, curren
 
 /// Parse a comma-separated list of command format strings
 /// Applies variable substitution for $varName references
-fn parse_command_list(value: &str, pc_variables: &std::collections::HashMap<String, u8>) -> Vec<String> {
+fn parse_command_list(
+    value: &str,
+    pc_variables: &std::collections::HashMap<String, u8>,
+) -> Vec<String> {
     split_ini_line(value)
         .into_iter()
         .map(|s| {
@@ -498,7 +557,10 @@ fn parse_command_list(value: &str, pc_variables: &std::collections::HashMap<Stri
 /// Parse page identifiers from INI format
 /// e.g., "\x00\x00", "\x00\x01" -> [[0,0], [0,1]]
 /// Also handles $variable substitution (e.g., $tsCanId -> 0x00)
-fn parse_page_identifiers(value: &str, pc_variables: &std::collections::HashMap<String, u8>) -> Vec<Vec<u8>> {
+fn parse_page_identifiers(
+    value: &str,
+    pc_variables: &std::collections::HashMap<String, u8>,
+) -> Vec<Vec<u8>> {
     split_ini_line(value)
         .into_iter()
         .map(|s| {
@@ -514,13 +576,13 @@ fn parse_escape_sequence(s: &str) -> Vec<u8> {
     let mut bytes = Vec::new();
     let chars: Vec<char> = s.chars().collect();
     let mut i = 0;
-    
+
     while i < chars.len() {
         if chars[i] == '\\' && i + 1 < chars.len() {
             match chars[i + 1] {
                 'x' | 'X' if i + 3 < chars.len() => {
                     // Parse \xNN hex byte
-                    let hex: String = chars[i+2..i+4].iter().collect();
+                    let hex: String = chars[i + 2..i + 4].iter().collect();
                     if let Ok(b) = u8::from_str_radix(&hex, 16) {
                         bytes.push(b);
                     }
@@ -552,14 +614,14 @@ fn parse_escape_sequence(s: &str) -> Vec<u8> {
             i += 1;
         }
     }
-    
+
     bytes
 }
 
 /// Parse [OutputChannels] section entries
 fn parse_output_channel_entry(def: &mut EcuDefinition, key: &str, value: &str) {
     let key_lower = key.to_lowercase();
-    
+
     // Handle metadata entries
     if key_lower == "ochblocksize" {
         def.protocol.och_block_size = value.parse().unwrap_or(0);
@@ -569,7 +631,7 @@ fn parse_output_channel_entry(def: &mut EcuDefinition, key: &str, value: &str) {
         def.protocol.och_get_command = Some(value.trim_matches('"').to_string());
         return;
     }
-    
+
     if let Some(channel) = parse_output_channel_line(key, value) {
         def.output_channels.insert(key.to_string(), channel);
     }
@@ -633,15 +695,21 @@ fn parse_pc_variable_entry(def: &mut EcuDefinition, key: &str, value: &str) {
         // Store as a constant so dialogs can look it up
         def.constants.insert(key.to_string(), constant);
     }
-    
+
     // Also store byte value for command substitution (backward compatibility)
     let parts = split_ini_line(value);
     if parts.is_empty() {
         return;
     }
-    
+
     let type_str = parts[0].trim().to_uppercase();
-    if type_str == "BITS" || type_str == "SCALAR" || type_str == "U08" || type_str == "S08" || type_str == "U16" || type_str == "S16" {
+    if type_str == "BITS"
+        || type_str == "SCALAR"
+        || type_str == "U08"
+        || type_str == "S08"
+        || type_str == "U16"
+        || type_str == "S16"
+    {
         // Default to index 0
         def.pc_variables.insert(key.to_string(), 0);
     }
@@ -651,7 +719,7 @@ fn parse_pc_variable_entry(def: &mut EcuDefinition, key: &str, value: &str) {
 /// Format: defaultValue = constantName, value
 fn parse_defaults_entry(def: &mut EcuDefinition, key: &str, value: &str) {
     let key_lower = key.to_lowercase();
-    
+
     if key_lower == "defaultvalue" {
         let parts = split_ini_line(value);
         if parts.len() >= 2 {
@@ -666,24 +734,27 @@ fn parse_defaults_entry(def: &mut EcuDefinition, key: &str, value: &str) {
 /// Substitute $variableName or \$variableName references with byte values from pc_variables
 /// In INI files, variables can appear as either $varName or \$varName (backslash-escaped)
 /// Returns the string with variable references replaced by byte values
-fn substitute_variables(input: &str, pc_variables: &std::collections::HashMap<String, u8>) -> String {
+fn substitute_variables(
+    input: &str,
+    pc_variables: &std::collections::HashMap<String, u8>,
+) -> String {
     let mut result = String::new();
     let chars: Vec<char> = input.chars().collect();
     let mut i = 0;
-    
+
     while i < chars.len() {
         // Check for \$ (escaped variable reference - common in INI files)
         if chars[i] == '\\' && i + 1 < chars.len() && chars[i + 1] == '$' {
             // Start of escaped variable reference
             let mut var_name = String::new();
             i += 2; // Skip \$
-            
+
             // Collect variable name (alphanumeric and underscore)
             while i < chars.len() && (chars[i].is_alphanumeric() || chars[i] == '_') {
                 var_name.push(chars[i]);
                 i += 1;
             }
-            
+
             if let Some(&byte_val) = pc_variables.get(&var_name) {
                 // Replace with the byte value as a character
                 result.push(byte_val as char);
@@ -697,13 +768,13 @@ fn substitute_variables(input: &str, pc_variables: &std::collections::HashMap<St
             // Start of unescaped variable reference
             let mut var_name = String::new();
             i += 1;
-            
+
             // Collect variable name (alphanumeric and underscore)
             while i < chars.len() && (chars[i].is_alphanumeric() || chars[i] == '_') {
                 var_name.push(chars[i]);
                 i += 1;
             }
-            
+
             if let Some(&byte_val) = pc_variables.get(&var_name) {
                 // Replace with the byte value as a character
                 result.push(byte_val as char);
@@ -717,7 +788,7 @@ fn substitute_variables(input: &str, pc_variables: &std::collections::HashMap<St
             i += 1;
         }
     }
-    
+
     result
 }
 
@@ -728,8 +799,14 @@ fn parse_datalog_entry(def: &mut EcuDefinition, _key: &str, value: &str) {
     if !parts.is_empty() {
         let entry = DatalogEntry {
             channel: parts[0].trim_matches('"').to_string(),
-            label: parts.get(1).map(|s| s.trim_matches('"').to_string()).unwrap_or_default(),
-            format: parts.get(2).map(|s| s.trim_matches('"').to_string()).unwrap_or_else(|| "%.2f".to_string()),
+            label: parts
+                .get(1)
+                .map(|s| s.trim_matches('"').to_string())
+                .unwrap_or_default(),
+            format: parts
+                .get(2)
+                .map(|s| s.trim_matches('"').to_string())
+                .unwrap_or_else(|| "%.2f".to_string()),
             enabled: parts.get(3).map(|s| *s != "0").unwrap_or(true),
         };
         def.datalog_entries.push(entry);
@@ -743,12 +820,15 @@ fn parse_frontpage_entry(def: &mut EcuDefinition, key: &str, value: &str) {
     if def.frontpage.is_none() {
         def.frontpage = Some(FrontPageConfig::default());
     }
-    
+
     let frontpage = def.frontpage.as_mut().unwrap();
-    
+
     // Handle gauge1-gauge8 entries
     if key.to_lowercase().starts_with("gauge") {
-        if let Some(num_str) = key.strip_prefix("gauge").or_else(|| key.strip_prefix("Gauge")) {
+        if let Some(num_str) = key
+            .strip_prefix("gauge")
+            .or_else(|| key.strip_prefix("Gauge"))
+        {
             if let Ok(num) = num_str.parse::<usize>() {
                 // Ensure vector is large enough
                 while frontpage.gauges.len() < num {
@@ -774,12 +854,12 @@ fn parse_frontpage_entry(def: &mut EcuDefinition, key: &str, value: &str) {
 /// Or:     { expression }, "off-label", { dynamic-on-label }, off-bg, off-fg, on-bg, on-fg
 fn parse_frontpage_indicator(value: &str) -> Option<FrontPageIndicator> {
     let value = value.trim();
-    
+
     // Extract the expression (between first { and matching })
     if !value.starts_with('{') {
         return None;
     }
-    
+
     let mut brace_depth = 0;
     let mut expr_end = 0;
     for (i, ch) in value.char_indices() {
@@ -795,26 +875,26 @@ fn parse_frontpage_indicator(value: &str) -> Option<FrontPageIndicator> {
             _ => {}
         }
     }
-    
+
     if expr_end == 0 {
         return None;
     }
-    
+
     let expression = value[1..expr_end].trim().to_string();
     let remaining = value[expr_end + 1..].trim();
-    
+
     // Skip the comma after expression
     let remaining = remaining.strip_prefix(',').unwrap_or(remaining).trim();
-    
+
     // Parse the remaining parts: "off-label", "on-label" or { dynamic }, off-bg, off-fg, on-bg, on-fg
     // Use a custom split that respects braces and quotes
     let parts = split_frontpage_parts(remaining);
-    
+
     if parts.len() < 6 {
         // Need at least: off-label, on-label, 4 colors
         return None;
     }
-    
+
     Some(FrontPageIndicator {
         expression,
         label_off: parts[0].trim_matches('"').to_string(),
@@ -832,7 +912,7 @@ fn split_frontpage_parts(s: &str) -> Vec<String> {
     let mut current = String::new();
     let mut in_quotes = false;
     let mut brace_depth = 0;
-    
+
     for ch in s.chars() {
         match ch {
             '"' if brace_depth == 0 => {
@@ -856,16 +936,21 @@ fn split_frontpage_parts(s: &str) -> Vec<String> {
             }
         }
     }
-    
+
     if !current.trim().is_empty() {
         parts.push(current.trim().to_string());
     }
-    
+
     parts
 }
 
 /// Parse [TableEditor] section entries
-fn parse_table_editor_entry(def: &mut EcuDefinition, key: &str, value: &str, current_table: &mut Option<String>) {
+fn parse_table_editor_entry(
+    def: &mut EcuDefinition,
+    key: &str,
+    value: &str,
+    current_table: &mut Option<String>,
+) {
     if key.eq_ignore_ascii_case("table") {
         // Format: table = tableName, mapName, "Title", page
         // Where mapName is what menus reference (e.g., veTable1Map)
@@ -876,12 +961,15 @@ fn parse_table_editor_entry(def: &mut EcuDefinition, key: &str, value: &str, cur
             // Store map_name (parts[1]) - this is what menus reference
             let map_name = parts[1].to_string();
             table.map_name = Some(map_name.clone());
-            table.title = parts.get(2).map(|s| s.trim_matches('"').to_string()).unwrap_or_default();
+            table.title = parts
+                .get(2)
+                .map(|s| s.trim_matches('"').to_string())
+                .unwrap_or_default();
             table.page = parts.get(3).and_then(|s| s.parse().ok()).unwrap_or(0);
-            
+
             // Build reverse lookup: map_name -> table name
             def.table_map_to_name.insert(map_name, table.name.clone());
-            
+
             *current_table = Some(table.name.clone());
             def.tables.insert(table.name.clone(), table);
         }
@@ -930,15 +1018,23 @@ fn parse_table_editor_entry(def: &mut EcuDefinition, key: &str, value: &str, cur
 }
 
 /// Parse [CurveEditor] section entries
-fn parse_curve_editor_entry(def: &mut EcuDefinition, key: &str, value: &str, current_curve: &mut Option<String>) {
+fn parse_curve_editor_entry(
+    def: &mut EcuDefinition,
+    key: &str,
+    value: &str,
+    current_curve: &mut Option<String>,
+) {
     if key.eq_ignore_ascii_case("curve") {
         // Format: curve = curveName, "Title"
         let parts: Vec<&str> = value.split(',').map(|s| s.trim()).collect();
         if !parts.is_empty() {
             let mut curve = CurveDefinition::default();
             curve.name = parts[0].to_string();
-            curve.title = parts.get(1).map(|s| s.trim_matches('"').to_string()).unwrap_or_default();
-            
+            curve.title = parts
+                .get(1)
+                .map(|s| s.trim_matches('"').to_string())
+                .unwrap_or_default();
+
             *current_curve = Some(curve.name.clone());
             def.curves.insert(curve.name.clone(), curve);
         }
@@ -1014,22 +1110,23 @@ fn post_process_variable_substitution(def: &mut EcuDefinition) {
     if def.pc_variables.is_empty() {
         return;
     }
-    
+
     // Substitute in query_command
     def.query_command = substitute_variables(&def.query_command, &def.pc_variables);
-    def.protocol.query_command = substitute_variables(&def.protocol.query_command, &def.pc_variables);
-    
+    def.protocol.query_command =
+        substitute_variables(&def.protocol.query_command, &def.pc_variables);
+
     // Substitute in version_info (can also contain variables)
     def.version_info = substitute_variables(&def.version_info, &def.pc_variables);
-    
+
     // Re-process page identifiers and commands if they contain unresolved variables
     // (This handles cases where PcVariables was defined after Constants)
     // Note: The initial parse already applied substitution if PcVariables was parsed first,
     // but we re-apply to handle any remaining $varName references
-    
+
     // Clone pc_variables to avoid borrow conflicts
     let pc_vars = def.pc_variables.clone();
-    
+
     for cmd in &mut def.protocol.page_read_commands {
         if cmd.contains('$') {
             *cmd = substitute_variables(cmd, &pc_vars);
@@ -1050,21 +1147,21 @@ fn post_process_variable_substitution(def: &mut EcuDefinition) {
             *cmd = substitute_variables(cmd, &pc_vars);
         }
     }
-    
+
     // Re-process page identifiers
     // This is trickier because page_identifiers are Vec<Vec<u8>>, not strings
     // We need to check if any identifier bytes look like they might be unsubstituted
     // For simplicity, if pc_variables exist and we have commands with '$', we should
     // store the original command strings and re-parse. But since we've already parsed,
     // we'll trust the initial parse worked for [Constants] section (which comes after [PcVariables])
-    
+
     // Handle och_get_command
     if let Some(ref cmd) = def.protocol.och_get_command {
         if cmd.contains('$') {
             def.protocol.och_get_command = Some(substitute_variables(cmd, &pc_vars));
         }
     }
-    
+
     // Handle burst_get_command
     if let Some(ref cmd) = def.protocol.burst_get_command {
         if cmd.contains('$') {
@@ -1077,7 +1174,13 @@ fn post_process_variable_substitution(def: &mut EcuDefinition) {
 /// This handles cases where help topics are defined after the Menu section
 fn post_process_menu_items(def: &mut EcuDefinition) {
     for menu in &mut def.menus {
-        post_process_items(&mut menu.items, &def.help_topics, &def.tables, &def.table_map_to_name, &def.curves);
+        post_process_items(
+            &mut menu.items,
+            &def.help_topics,
+            &def.tables,
+            &def.table_map_to_name,
+            &def.curves,
+        );
     }
 }
 
@@ -1090,7 +1193,12 @@ fn post_process_items(
 ) {
     for item in items {
         match item {
-            MenuItem::Dialog { label, target, visibility_condition, enabled_condition } => {
+            MenuItem::Dialog {
+                label,
+                target,
+                visibility_condition,
+                enabled_condition,
+            } => {
                 // Check if this should be a different type
                 if help_topics.contains_key(target) {
                     *item = MenuItem::Help {
@@ -1099,9 +1207,10 @@ fn post_process_items(
                         visibility_condition: visibility_condition.clone(),
                         enabled_condition: enabled_condition.clone(),
                     };
-                } else if tables.contains_key(target) 
-                       || table_map_to_name.contains_key(target)
-                       || curves.contains_key(target) {
+                } else if tables.contains_key(target)
+                    || table_map_to_name.contains_key(target)
+                    || curves.contains_key(target)
+                {
                     // Target can be either the table name or the map name
                     *item = MenuItem::Table {
                         label: label.clone(),
@@ -1111,7 +1220,9 @@ fn post_process_items(
                     };
                 }
             }
-            MenuItem::SubMenu { items: sub_items, .. } => {
+            MenuItem::SubMenu {
+                items: sub_items, ..
+            } => {
                 post_process_items(sub_items, help_topics, tables, table_map_to_name, curves);
             }
             _ => {}
@@ -1120,14 +1231,14 @@ fn post_process_items(
 }
 
 /// Post-process tables to resolve x_size and y_size from referenced constant shapes
-/// 
+///
 /// TableEditor entries reference constants by name (e.g., xBins = veRpmBins, zBins = veTable)
 /// but the table's x_size/y_size aren't set during initial parsing. This function looks up
 /// each constant and extracts dimensions from its Shape.
 fn post_process_table_sizes(def: &mut EcuDefinition) {
     // Collect table names first to avoid borrow issues
     let table_names: Vec<String> = def.tables.keys().cloned().collect();
-    
+
     for table_name in table_names {
         // Get the constant names we need to look up
         let (x_bins_name, y_bins_name, map_name) = {
@@ -1141,14 +1252,14 @@ fn post_process_table_sizes(def: &mut EcuDefinition) {
                 table.map.clone(),
             )
         };
-        
+
         // Look up x_size from x_bins constant
         let x_size = if let Some(x_const) = def.constants.get(&x_bins_name) {
             x_const.shape.x_size()
         } else {
             0
         };
-        
+
         // Look up y_size from y_bins constant (if 3D table) or map constant
         let y_size = if let Some(ref y_bins_name) = y_bins_name {
             if let Some(y_const) = def.constants.get(y_bins_name) {
@@ -1159,7 +1270,7 @@ fn post_process_table_sizes(def: &mut EcuDefinition) {
         } else {
             1 // 2D table has y_size = 1
         };
-        
+
         // Alternatively, infer from map constant shape if we have a 2D map
         let (final_x_size, final_y_size) = if let Some(map_const) = def.constants.get(&map_name) {
             match &map_const.shape {
@@ -1169,14 +1280,18 @@ fn post_process_table_sizes(def: &mut EcuDefinition) {
                 }
                 crate::ini::types::Shape::Array1D(size) => {
                     // 1D map - use x_size from bins, y_size = 1
-                    if x_size > 0 { (x_size, 1) } else { (*size, 1) }
+                    if x_size > 0 {
+                        (x_size, 1)
+                    } else {
+                        (*size, 1)
+                    }
                 }
                 crate::ini::types::Shape::Scalar => (x_size, y_size),
             }
         } else {
             (x_size, y_size)
         };
-        
+
         // Update the table - only update if we calculated a meaningful size
         // x_size defaults to 0, y_size defaults to 1 in TableDefinition::default()
         if let Some(table) = def.tables.get_mut(&table_name) {
@@ -1211,7 +1326,7 @@ fn parse_menu_entry(def: &mut EcuDefinition, key: &str, value: &str) {
             if parts.is_empty() {
                 return;
             }
-            
+
             // Handle multiple INI formats:
             // 1. Standard comma-separated: target, "Label", { condition }
             // 2. Space-separated: target    "Label", { condition }  (no comma between target and label)
@@ -1221,7 +1336,7 @@ fn parse_menu_entry(def: &mut EcuDefinition, key: &str, value: &str) {
             //   - 2 expressions = visibility (first) and enable (second)
             let (target, label, visibility_condition, enabled_condition) = {
                 let first_part = parts[0].trim();
-                
+
                 // Helper to extract condition from a part
                 let extract_condition = |s: &str| -> Option<String> {
                     let trimmed = s.trim_matches(|c| c == '{' || c == '}').trim();
@@ -1231,7 +1346,7 @@ fn parse_menu_entry(def: &mut EcuDefinition, key: &str, value: &str) {
                         Some(trimmed.to_string())
                     }
                 };
-                
+
                 // Check if first part contains both target and quoted label (space-separated format)
                 if let Some(quote_pos) = first_part.find('"') {
                     // Format 2 or 3: target "Label" in parts[0]
@@ -1243,7 +1358,7 @@ fn parse_menu_entry(def: &mut EcuDefinition, key: &str, value: &str) {
                     } else {
                         first_part[label_start..].trim_matches('"').to_string()
                     };
-                    
+
                     // Check for 2 conditions (visibility + enable)
                     let (vis_cond, en_cond) = if parts.len() >= 3 {
                         // Two conditions: first is visibility, second is enable
@@ -1259,7 +1374,7 @@ fn parse_menu_entry(def: &mut EcuDefinition, key: &str, value: &str) {
                     // Format 1: Standard comma-separated
                     let target = first_part.trim_matches('"').to_string();
                     let label = parts[1].trim_matches('"').to_string();
-                    
+
                     // Check for 2 conditions (visibility + enable)
                     let (vis_cond, en_cond) = if parts.len() >= 4 {
                         // Two conditions: first is visibility, second is enable
@@ -1276,30 +1391,50 @@ fn parse_menu_entry(def: &mut EcuDefinition, key: &str, value: &str) {
                     (first_part.to_string(), first_part.to_string(), None, None)
                 }
             };
-            
+
             // Skip invalid entries
             if target.is_empty() {
                 return;
             }
-            
+
             // Determine the correct MenuItem type based on target
             let item = if target == "std_separator" {
                 // Separator - render as visual divider, not a clickable item
                 MenuItem::Separator
             } else if target.starts_with("std_") {
                 // Built-in standard targets like std_realtime, std_ms2gentherm, etc.
-                MenuItem::Std { label, target, visibility_condition, enabled_condition }
+                MenuItem::Std {
+                    label,
+                    target,
+                    visibility_condition,
+                    enabled_condition,
+                }
             } else if def.help_topics.contains_key(&target) {
                 // Help topic reference
-                MenuItem::Help { label, target, visibility_condition, enabled_condition }
+                MenuItem::Help {
+                    label,
+                    target,
+                    visibility_condition,
+                    enabled_condition,
+                }
             } else if def.tables.contains_key(&target) || def.curves.contains_key(&target) {
                 // Table or curve reference
-                MenuItem::Table { label, target, visibility_condition, enabled_condition }
+                MenuItem::Table {
+                    label,
+                    target,
+                    visibility_condition,
+                    enabled_condition,
+                }
             } else {
                 // Default to dialog
-                MenuItem::Dialog { label, target, visibility_condition, enabled_condition }
+                MenuItem::Dialog {
+                    label,
+                    target,
+                    visibility_condition,
+                    enabled_condition,
+                }
             };
-            
+
             if let Some(menu) = def.menus.last_mut() {
                 if key == "groupchildmenu" {
                     if let Some(MenuItem::SubMenu { items, .. }) = menu.items.last_mut() {
@@ -1314,7 +1449,7 @@ fn parse_menu_entry(def: &mut EcuDefinition, key: &str, value: &str) {
             let parts = split_ini_line(value);
             if !parts.is_empty() {
                 let label = parts[0].trim_matches('"').to_string();
-                
+
                 // Extract conditions: 1 = enable, 2 = visibility + enable
                 let extract_condition = |s: &str| -> Option<String> {
                     let trimmed = s.trim_matches(|c| c == '{' || c == '}').trim();
@@ -1324,7 +1459,7 @@ fn parse_menu_entry(def: &mut EcuDefinition, key: &str, value: &str) {
                         Some(trimmed.to_string())
                     }
                 };
-                
+
                 let (visibility_condition, enabled_condition) = if parts.len() >= 3 {
                     // Two conditions: first is visibility, second is enable
                     (extract_condition(&parts[1]), extract_condition(&parts[2]))
@@ -1334,7 +1469,7 @@ fn parse_menu_entry(def: &mut EcuDefinition, key: &str, value: &str) {
                 } else {
                     (None, None)
                 };
-                
+
                 if let Some(menu) = def.menus.last_mut() {
                     menu.items.push(MenuItem::SubMenu {
                         label,
@@ -1364,7 +1499,13 @@ fn parse_setting_context_help(def: &mut EcuDefinition, key: &str, value: &str) {
 }
 
 /// Parse [UserDefined] section entries
-fn parse_user_defined_entry(def: &mut EcuDefinition, key: &str, value: &str, current_dialog: &mut Option<String>, current_help: &mut Option<String>) {
+fn parse_user_defined_entry(
+    def: &mut EcuDefinition,
+    key: &str,
+    value: &str,
+    current_dialog: &mut Option<String>,
+    current_help: &mut Option<String>,
+) {
     let key = key.to_lowercase();
     match key.as_str() {
         "help" => {
@@ -1372,8 +1513,11 @@ fn parse_user_defined_entry(def: &mut EcuDefinition, key: &str, value: &str, cur
             let parts = split_ini_line(value);
             if !parts.is_empty() {
                 let name = parts[0].to_string();
-                let title = parts.get(1).map(|s| s.trim_matches('"').to_string()).unwrap_or_else(|| name.clone());
-                
+                let title = parts
+                    .get(1)
+                    .map(|s| s.trim_matches('"').to_string())
+                    .unwrap_or_else(|| name.clone());
+
                 let help_topic = HelpTopic {
                     name: name.clone(),
                     title,
@@ -1396,7 +1540,9 @@ fn parse_user_defined_entry(def: &mut EcuDefinition, key: &str, value: &str, cur
             // Format: text = "Help text line"
             if let Some(name) = current_help {
                 if let Some(help_topic) = def.help_topics.get_mut(name) {
-                    help_topic.text_lines.push(value.trim().trim_matches('"').to_string());
+                    help_topic
+                        .text_lines
+                        .push(value.trim().trim_matches('"').to_string());
                 }
             }
         }
@@ -1404,8 +1550,11 @@ fn parse_user_defined_entry(def: &mut EcuDefinition, key: &str, value: &str, cur
             let parts = split_ini_line(value);
             if !parts.is_empty() {
                 let name = parts[0].to_string();
-                let title = parts.get(1).map(|s| s.trim_matches('"').to_string()).unwrap_or_else(|| name.clone());
-                
+                let title = parts
+                    .get(1)
+                    .map(|s| s.trim_matches('"').to_string())
+                    .unwrap_or_else(|| name.clone());
+
                 let dialog = DialogDefinition {
                     name: name.clone(),
                     title,
@@ -1421,11 +1570,12 @@ fn parse_user_defined_entry(def: &mut EcuDefinition, key: &str, value: &str, cur
                     let parts = split_ini_line(value);
                     let panel_name = parts.first().unwrap_or(&String::new()).trim().to_string();
                     // Check for visibility condition in curly braces (last part)
-                    let visibility_condition = parts.iter()
+                    let visibility_condition = parts
+                        .iter()
                         .skip(1)
                         .find(|p| p.trim().starts_with('{') && p.trim().ends_with('}'))
                         .map(|p| p.trim().trim_matches(|c| c == '{' || c == '}').to_string());
-                    dialog.components.push(DialogComponent::Panel { 
+                    dialog.components.push(DialogComponent::Panel {
                         name: panel_name,
                         visibility_condition,
                     });
@@ -1450,7 +1600,9 @@ fn parse_user_defined_entry(def: &mut EcuDefinition, key: &str, value: &str, cur
         "graphline" => {
             if let Some(name) = current_dialog {
                 if let Some(dialog) = def.dialogs.get_mut(name) {
-                    if let Some(DialogComponent::LiveGraph { channels, .. }) = dialog.components.last_mut() {
+                    if let Some(DialogComponent::LiveGraph { channels, .. }) =
+                        dialog.components.last_mut()
+                    {
                         channels.push(value.trim().to_string());
                     }
                 }
@@ -1466,7 +1618,8 @@ fn parse_user_defined_entry(def: &mut EcuDefinition, key: &str, value: &str, cur
                         // Check for conditions in curly braces
                         // Format: field = "Label", name, {visibility}, {enable}
                         // Or: field = "Label", name, {condition} (single condition = enable)
-                        let conditions: Vec<String> = parts.iter()
+                        let conditions: Vec<String> = parts
+                            .iter()
                             .skip(2)
                             .filter_map(|p| {
                                 let trimmed = p.trim();
@@ -1477,13 +1630,13 @@ fn parse_user_defined_entry(def: &mut EcuDefinition, key: &str, value: &str, cur
                                 }
                             })
                             .collect();
-                        
+
                         let visibility_condition = if conditions.len() >= 2 {
                             Some(conditions[0].clone())
                         } else {
                             None
                         };
-                        
+
                         let enabled_condition = if conditions.len() >= 2 {
                             Some(conditions[1].clone())
                         } else if conditions.len() == 1 {
@@ -1491,9 +1644,9 @@ fn parse_user_defined_entry(def: &mut EcuDefinition, key: &str, value: &str, cur
                         } else {
                             None
                         };
-                        
-                        dialog.components.push(DialogComponent::Field { 
-                            label, 
+
+                        dialog.components.push(DialogComponent::Field {
+                            label,
                             name: field_name,
                             visibility_condition,
                             enabled_condition,
@@ -1508,7 +1661,9 @@ fn parse_user_defined_entry(def: &mut EcuDefinition, key: &str, value: &str, cur
         "table" => {
             if let Some(name) = current_dialog {
                 if let Some(dialog) = def.dialogs.get_mut(name) {
-                    dialog.components.push(DialogComponent::Table { name: value.trim().to_string() });
+                    dialog.components.push(DialogComponent::Table {
+                        name: value.trim().to_string(),
+                    });
                 }
             }
         }
@@ -1533,23 +1688,26 @@ fn parse_user_defined_entry(def: &mut EcuDefinition, key: &str, value: &str, cur
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_strip_comment() {
         assert_eq!(strip_comment("value ; comment"), "value ");
-        assert_eq!(strip_comment("\"value ; with semi\""), "\"value ; with semi\"");
+        assert_eq!(
+            strip_comment("\"value ; with semi\""),
+            "\"value ; with semi\""
+        );
         // Note: # is now handled at the line level for preprocessor directives,
         // so strip_comment doesn't remove # comment lines anymore
         assert_eq!(strip_comment("# comment line"), "# comment line");
     }
-    
+
     #[test]
     fn test_parse_key_value() {
         assert_eq!(parse_key_value("key = value"), Some(("key", "value")));
         assert_eq!(parse_key_value("key=value"), Some(("key", "value")));
         assert_eq!(parse_key_value("no equals"), None);
     }
-    
+
     #[test]
     fn test_parse_basic_ini() {
         let content = r#"
@@ -1570,69 +1728,80 @@ reqFuel = scalar, U16, 0, "ms", 0.1, 0.0, 0, 25.5, 1
 [OutputChannels]
 rpm = U16, 0, "RPM", 1.0, 0.0
 "#;
-        
+
         let def = parse_ini(content).expect("Should parse successfully");
-        
+
         assert_eq!(def.signature, "speeduino 202310");
         assert_eq!(def.query_command, "Q");
         assert_eq!(def.n_pages, 2);
         assert_eq!(def.page_sizes, vec![288, 128]);
-        
+
         assert!(def.constants.contains_key("reqFuel"));
         assert!(def.output_channels.contains_key("rpm"));
     }
-    
+
     #[test]
     fn test_parse_rusefi_ini() {
         let path = "/home/pat/.gemini/antigravity/scratch/libretune/definitions/rusEFI2025062101.2025.06.22.epicECU.1005735475.ini";
         if std::path::Path::new(path).exists() {
             let content = std::fs::read_to_string(path).expect("Should read file");
             let def = parse_ini(&content).expect("Should parse successfully");
-            
-            
+
             // Check for a specific table
-            assert!(def.tables.contains_key("ignitionTableTbl") || def.tables.contains_key("ignitionTable"));
-            
+            assert!(
+                def.tables.contains_key("ignitionTableTbl")
+                    || def.tables.contains_key("ignitionTable")
+            );
+
             // Check for menus
             assert!(!def.menus.is_empty());
             assert!(def.menus.iter().any(|m| m.title.contains("Fuel")));
-            
+
             // Check for dialogs
             assert!(!def.dialogs.is_empty());
             assert!(def.dialogs.contains_key("fuel_computerDialog"));
         }
     }
-    
+
     #[test]
     fn test_substitute_variables() {
         use std::collections::HashMap;
-        
+
         let mut vars = HashMap::new();
         vars.insert("tsCanId".to_string(), 0u8);
-        
+
         // Test simple substitution (unescaped $)
         assert_eq!(substitute_variables("$tsCanId\\x04", &vars), "\x00\\x04");
-        
+
         // Test escaped \$ substitution (common in INI files)
         assert_eq!(substitute_variables(r"\$tsCanId\x04", &vars), "\x00\\x04");
-        
+
         // Test substitution at end of string
         assert_eq!(substitute_variables("prefix$tsCanId", &vars), "prefix\x00");
-        assert_eq!(substitute_variables(r"prefix\$tsCanId", &vars), "prefix\x00");
-        
+        assert_eq!(
+            substitute_variables(r"prefix\$tsCanId", &vars),
+            "prefix\x00"
+        );
+
         // Test unknown variable preserved
         assert_eq!(substitute_variables("$unknownVar", &vars), "$unknownVar");
-        assert_eq!(substitute_variables(r"\$unknownVar", &vars), r"\$unknownVar");
-        
+        assert_eq!(
+            substitute_variables(r"\$unknownVar", &vars),
+            r"\$unknownVar"
+        );
+
         // Test no variables
-        assert_eq!(substitute_variables("no variables here", &vars), "no variables here");
-        
+        assert_eq!(
+            substitute_variables("no variables here", &vars),
+            "no variables here"
+        );
+
         // Test with different CAN ID value
         vars.insert("tsCanId".to_string(), 5u8);
         assert_eq!(substitute_variables("$tsCanId\\x04", &vars), "\x05\\x04");
         assert_eq!(substitute_variables(r"\$tsCanId\x04", &vars), "\x05\\x04");
     }
-    
+
     #[test]
     fn test_pc_variables_parsing() {
         let content = r#"
@@ -1643,19 +1812,19 @@ tsCanId = bits, U08, [0:3], "CAN ID 0", "CAN ID 1", "CAN ID 2"
 pageIdentifier = "\$tsCanId\x04", "\$tsCanId\x05"
 pageReadCommand = "r%2i%2o%2c", "r%2i%2o%2c"
 "#;
-        
+
         let def = parse_ini(content).expect("Should parse successfully");
-        
+
         // Check that tsCanId was parsed with default value 0
         assert_eq!(def.pc_variables.get("tsCanId"), Some(&0u8));
-        
+
         // Check that page identifiers have $tsCanId substituted with 0x00
         // "\$tsCanId\x04" -> "\x00\x04" -> bytes [0, 4]
         assert_eq!(def.protocol.page_identifiers.len(), 2);
         assert_eq!(def.protocol.page_identifiers[0], vec![0u8, 4u8]);
         assert_eq!(def.protocol.page_identifiers[1], vec![0u8, 5u8]);
     }
-    
+
     #[test]
     fn test_query_command_substitution() {
         let content = r#"
@@ -1665,40 +1834,64 @@ queryCommand = "r\$tsCanId\x0f\x00\x00\x00\x14"
 [PcVariables]
 tsCanId = bits, U08, [0:3], "CAN ID 0", "CAN ID 1"
 "#;
-        
+
         let def = parse_ini(content).expect("Should parse successfully");
-        
+
         // queryCommand should have $tsCanId replaced with 0x00
         // "r\$tsCanId\x0f..." -> "r\x00\x0f..."
         assert!(def.query_command.starts_with("r\x00"));
     }
-    
+
     #[test]
     fn test_ms2extra_ini_parsing() {
         // Test with actual MS2Extra INI file if available
-        let path = "/home/pat/codingprojects/libretune/TunerStudioMS/config/ecuDef/MS2Extracomms342hU.ini";
+        let path =
+            "/home/pat/codingprojects/libretune/TunerStudioMS/config/ecuDef/MS2Extracomms342hU.ini";
         if std::path::Path::new(path).exists() {
             // Use EcuDefinition::from_file which handles encoding
-            let def = crate::ini::EcuDefinition::from_file(path).expect("Should parse successfully");
-            
+            let def =
+                crate::ini::EcuDefinition::from_file(path).expect("Should parse successfully");
+
             // Check that tsCanId was parsed
-            assert!(def.pc_variables.contains_key("tsCanId"), "tsCanId should be in pc_variables");
-            assert_eq!(def.pc_variables.get("tsCanId"), Some(&0u8), "tsCanId should default to 0");
-            
+            assert!(
+                def.pc_variables.contains_key("tsCanId"),
+                "tsCanId should be in pc_variables"
+            );
+            assert_eq!(
+                def.pc_variables.get("tsCanId"),
+                Some(&0u8),
+                "tsCanId should default to 0"
+            );
+
             // Check that page identifiers have been substituted
             // With tsCanId=0, pageIdentifier "\$tsCanId\x04" should become bytes [0, 4]
-            assert!(!def.protocol.page_identifiers.is_empty(), "Should have page identifiers");
-            
+            assert!(
+                !def.protocol.page_identifiers.is_empty(),
+                "Should have page identifiers"
+            );
+
             // First page identifier should start with 0x00 (the substituted tsCanId value)
             let first_id = &def.protocol.page_identifiers[0];
-            assert!(!first_id.is_empty(), "First page identifier should not be empty");
-            assert_eq!(first_id[0], 0x00, "First byte should be substituted tsCanId value (0)");
-            
+            assert!(
+                !first_id.is_empty(),
+                "First page identifier should not be empty"
+            );
+            assert_eq!(
+                first_id[0], 0x00,
+                "First byte should be substituted tsCanId value (0)"
+            );
+
             // Check that pageReadCommand was parsed and substituted
-            assert!(!def.protocol.page_read_commands.is_empty(), "Should have page read commands");
+            assert!(
+                !def.protocol.page_read_commands.is_empty(),
+                "Should have page read commands"
+            );
             let first_cmd = &def.protocol.page_read_commands[0];
             // Should start with 'r' followed by 0x00 (substituted tsCanId)
-            assert!(first_cmd.starts_with("r\x00"), "Page read command should have tsCanId substituted");
+            assert!(
+                first_cmd.starts_with("r\x00"),
+                "Page read command should have tsCanId substituted"
+            );
         }
     }
 
@@ -1716,12 +1909,18 @@ signature = "TestECU"
    queryCommand = "Q"
 #endif
 "#;
-        
+
         let def = parse_ini(content).expect("Should parse successfully");
-        
+
         // With CAN_COMMANDS set, should use the modern CRC command, not "Q"
-        assert!(!def.query_command.starts_with("Q"), "Should use CAN command, not legacy Q");
-        assert!(def.query_command.starts_with("r"), "Should start with 'r' for read command");
+        assert!(
+            !def.query_command.starts_with("Q"),
+            "Should use CAN command, not legacy Q"
+        );
+        assert!(
+            def.query_command.starts_with("r"),
+            "Should start with 'r' for read command"
+        );
     }
 
     #[test]
@@ -1736,11 +1935,14 @@ signature = "TestECU"
    queryCommand = "Q"
 #endif
 "#;
-        
+
         let def = parse_ini(content).expect("Should parse successfully");
-        
+
         // Without CAN_COMMANDS set, should use the legacy "Q" command
-        assert_eq!(def.query_command, "Q", "Should use legacy Q command when symbol not set");
+        assert_eq!(
+            def.query_command, "Q",
+            "Should use legacy Q command when symbol not set"
+        );
     }
 
     #[test]
@@ -1758,11 +1960,14 @@ signature = "TestECU"
    queryCommand = "disabled"
 #endif
 "#;
-        
+
         let def = parse_ini(content).expect("Should parse successfully");
-        
+
         // FEATURE was set then unset, so should use else branch
-        assert_eq!(def.query_command, "disabled", "Should use else branch after #unset");
+        assert_eq!(
+            def.query_command, "disabled",
+            "Should use else branch after #unset"
+        );
     }
 
     #[test]
@@ -1784,14 +1989,17 @@ table = veTable1, veTableMap, "VE Table 1"
   yBins = veFuelBins
   zBins = veTable
 "#;
-        
+
         let def = parse_ini(content).expect("Should parse successfully");
-        
+
         // Check that the table was parsed
-        assert!(def.tables.contains_key("veTable1"), "veTable1 should be parsed");
-        
+        assert!(
+            def.tables.contains_key("veTable1"),
+            "veTable1 should be parsed"
+        );
+
         let table = def.tables.get("veTable1").unwrap();
-        
+
         // Check that x_size and y_size were resolved from the constant shapes
         assert_eq!(table.x_size, 16, "x_size should be 16 from veRpmBins");
         assert_eq!(table.y_size, 16, "y_size should be 16 from veFuelBins");
@@ -1812,11 +2020,11 @@ page = 1
 table = veTable1, veTableMap, "VE Table"
   zBins = veTable
 "#;
-        
+
         let def = parse_ini(content).expect("Should parse successfully");
-        
+
         let table = def.tables.get("veTable1").unwrap();
-        
+
         // When x_bins and y_bins are not specified, infer from the 2D map
         assert_eq!(table.x_size, 12, "x_size should be 12 (cols from 8x12)");
         assert_eq!(table.y_size, 8, "y_size should be 8 (rows from 8x12)");
@@ -1842,22 +2050,22 @@ indicator = { running }, "Not Running", "Running", white, black, green, black
 indicator = { sync }, "No Sync", "Full Sync", white, black, green, black
 indicator = { (tps > tpsflood) && (rpm < crankRPM) }, "FLOOD OFF", "FLOOD CLEAR", white, black, red, black
 "#;
-        
+
         let def = parse_ini(content).expect("Should parse successfully");
-        
+
         // Check that FrontPage was parsed
         assert!(def.frontpage.is_some(), "FrontPage should be parsed");
         let frontpage = def.frontpage.unwrap();
-        
+
         // Check gauge references
         assert_eq!(frontpage.gauges.len(), 8, "Should have 8 gauges");
         assert_eq!(frontpage.gauges[0], "tachometer");
         assert_eq!(frontpage.gauges[1], "throttleGauge");
         assert_eq!(frontpage.gauges[7], "iatGauge");
-        
+
         // Check indicators
         assert_eq!(frontpage.indicators.len(), 3, "Should have 3 indicators");
-        
+
         let ind1 = &frontpage.indicators[0];
         assert_eq!(ind1.expression, "running");
         assert_eq!(ind1.label_off, "Not Running");
@@ -1866,7 +2074,7 @@ indicator = { (tps > tpsflood) && (rpm < crankRPM) }, "FLOOD OFF", "FLOOD CLEAR"
         assert_eq!(ind1.fg_off, "black");
         assert_eq!(ind1.bg_on, "green");
         assert_eq!(ind1.fg_on, "black");
-        
+
         let ind3 = &frontpage.indicators[2];
         assert_eq!(ind3.expression, "(tps > tpsflood) && (rpm < crankRPM)");
         assert_eq!(ind3.label_off, "FLOOD OFF");

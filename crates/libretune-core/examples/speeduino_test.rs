@@ -16,13 +16,13 @@
 //!   --no-dtr          Don't set DTR high (for testing)
 //!   --fast            Use minimal delays for speed testing
 
+use serialport::SerialPort;
 use std::io::{Read, Write};
 use std::time::{Duration, Instant};
-use serialport::SerialPort;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
-    
+
     // Parse arguments
     let mut port_name = "/dev/ttyACM0".to_string();
     let mut baud_rate = 115200u32;
@@ -32,7 +32,7 @@ fn main() {
     let mut test_crc = true;
     let mut set_dtr = true;
     let mut fast_mode = false;
-    
+
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
@@ -87,7 +87,7 @@ fn main() {
         }
         i += 1;
     }
-    
+
     println!("╔══════════════════════════════════════════════════════════════╗");
     println!("║           Speeduino ECU Communication Test Tool              ║");
     println!("╚══════════════════════════════════════════════════════════════╝");
@@ -102,7 +102,7 @@ fn main() {
     println!("  Test CRC:          {}", test_crc);
     println!("  Fast mode:         {}", fast_mode);
     println!();
-    
+
     // Open port
     println!("Opening serial port...");
     let mut port = match serialport::new(&port_name, baud_rate)
@@ -117,46 +117,46 @@ fn main() {
         }
     };
     println!("✓ Port opened");
-    
+
     // Configure port
     if let Err(e) = configure_port(port.as_mut(), set_dtr) {
         eprintln!("❌ Failed to configure port: {}", e);
         return;
     }
     println!("✓ Port configured (8N1, no flow control)");
-    
+
     // Clear buffers
     if let Err(e) = port.clear(serialport::ClearBuffer::All) {
         eprintln!("⚠ Failed to clear buffers: {}", e);
     }
-    
+
     // Wait for ECU stabilization
     println!("Waiting {}ms for ECU stabilization...", delay_after_open);
     std::thread::sleep(Duration::from_millis(delay_after_open));
-    
+
     // Clear buffers again
     let _ = port.clear(serialport::ClearBuffer::All);
     std::thread::sleep(Duration::from_millis(50));
-    
+
     println!();
     println!("═══════════════════════════════════════════════════════════════");
-    
+
     // Test legacy protocol
     if test_legacy {
         println!();
         println!("📡 Testing LEGACY protocol (raw ASCII commands)...");
         println!();
-        
+
         // Test 'Q' command (query signature)
         test_legacy_command(&mut port, b'Q', "Query signature", timeout_ms);
-        
+
         // Test 'F' command (protocol version - always allowed)
         test_legacy_command(&mut port, b'F', "Protocol version", timeout_ms);
-        
+
         // Test 'S' command (signature - rusEFI style)
         test_legacy_command(&mut port, b'S', "Signature (rusEFI)", timeout_ms);
     }
-    
+
     // Test CRC protocol
     if test_crc {
         println!();
@@ -164,17 +164,17 @@ fn main() {
         println!();
         println!("📡 Testing CRC protocol (msEnvelope_1.0)...");
         println!();
-        
+
         // Test 'Q' command with CRC wrapper
         test_crc_command(&mut port, &[b'Q'], "Query signature (CRC)", timeout_ms);
-        
+
         // Test 'F' command with CRC wrapper
         test_crc_command(&mut port, &[b'F'], "Protocol version (CRC)", timeout_ms);
-        
+
         // Test 'S' command with CRC wrapper
         test_crc_command(&mut port, &[b'S'], "Signature (CRC)", timeout_ms);
     }
-    
+
     // Dynamic timing test
     if !fast_mode && test_legacy {
         println!();
@@ -182,10 +182,10 @@ fn main() {
         println!();
         println!("⏱  Testing dynamic timing (finding minimum working delay)...");
         println!();
-        
+
         test_dynamic_timing(&mut port, timeout_ms);
     }
-    
+
     println!();
     println!("═══════════════════════════════════════════════════════════════");
     println!("                         Tests Complete                         ");
@@ -218,7 +218,7 @@ fn configure_port(port: &mut dyn SerialPort, set_dtr: bool) -> Result<(), String
         .map_err(|e| e.to_string())?;
     port.set_flow_control(serialport::FlowControl::None)
         .map_err(|e| e.to_string())?;
-    
+
     if set_dtr {
         // Set DTR high to maintain connection and prevent Arduino reset
         if let Err(e) = port.write_data_terminal_ready(true) {
@@ -226,7 +226,7 @@ fn configure_port(port: &mut dyn SerialPort, set_dtr: bool) -> Result<(), String
         } else {
             println!("  ✓ DTR set high");
         }
-        
+
         // Set RTS high for proper signaling
         if let Err(e) = port.write_request_to_send(true) {
             eprintln!("  ⚠ Failed to set RTS: {} (continuing anyway)", e);
@@ -234,17 +234,25 @@ fn configure_port(port: &mut dyn SerialPort, set_dtr: bool) -> Result<(), String
             println!("  ✓ RTS set high");
         }
     }
-    
+
     Ok(())
 }
 
-fn test_legacy_command(port: &mut Box<dyn SerialPort>, cmd: u8, description: &str, timeout_ms: u64) {
-    println!("  Testing '{}' (0x{:02X}) - {}...", cmd as char, cmd, description);
-    
+fn test_legacy_command(
+    port: &mut Box<dyn SerialPort>,
+    cmd: u8,
+    description: &str,
+    timeout_ms: u64,
+) {
+    println!(
+        "  Testing '{}' (0x{:02X}) - {}...",
+        cmd as char, cmd, description
+    );
+
     // Clear buffers
     let _ = port.clear(serialport::ClearBuffer::All);
     std::thread::sleep(Duration::from_millis(10));
-    
+
     // Send command
     let start = Instant::now();
     if let Err(e) = port.write_all(&[cmd]) {
@@ -255,11 +263,11 @@ fn test_legacy_command(port: &mut Box<dyn SerialPort>, cmd: u8, description: &st
         println!("    ❌ Flush failed: {}", e);
         return;
     }
-    
+
     // Read response
     let response = read_with_timeout(port, timeout_ms);
     let elapsed = start.elapsed();
-    
+
     if response.is_empty() {
         println!("    ❌ No response (timeout after {:?})", elapsed);
     } else {
@@ -270,17 +278,22 @@ fn test_legacy_command(port: &mut Box<dyn SerialPort>, cmd: u8, description: &st
     }
 }
 
-fn test_crc_command(port: &mut Box<dyn SerialPort>, payload: &[u8], description: &str, timeout_ms: u64) {
+fn test_crc_command(
+    port: &mut Box<dyn SerialPort>,
+    payload: &[u8],
+    description: &str,
+    timeout_ms: u64,
+) {
     println!("  Testing {:02x?} - {}...", payload, description);
-    
+
     // Build CRC packet
     let packet = build_crc_packet(payload);
     println!("    Sending packet: {:02x?}", packet);
-    
+
     // Clear buffers
     let _ = port.clear(serialport::ClearBuffer::All);
     std::thread::sleep(Duration::from_millis(10));
-    
+
     // Send packet
     let start = Instant::now();
     if let Err(e) = port.write_all(&packet) {
@@ -291,19 +304,22 @@ fn test_crc_command(port: &mut Box<dyn SerialPort>, payload: &[u8], description:
         println!("    ❌ Flush failed: {}", e);
         return;
     }
-    
+
     // Read response header (2 bytes length)
     let mut header = [0u8; 2];
     match read_exact_with_timeout(port, &mut header, timeout_ms) {
         Ok(elapsed_header) => {
             let length = u16::from_be_bytes(header) as usize;
-            println!("    Got header in {:?}: length = {}", elapsed_header, length);
-            
+            println!(
+                "    Got header in {:?}: length = {}",
+                elapsed_header, length
+            );
+
             if length > 1024 {
                 println!("    ❌ Invalid length (too large)");
                 return;
             }
-            
+
             // Read payload + CRC (4 bytes)
             let mut payload_and_crc = vec![0u8; length + 4];
             match read_exact_with_timeout(port, &mut payload_and_crc, timeout_ms) {
@@ -311,13 +327,16 @@ fn test_crc_command(port: &mut Box<dyn SerialPort>, payload: &[u8], description:
                     let elapsed = start.elapsed();
                     let payload_data = &payload_and_crc[..length];
                     let crc_bytes = &payload_and_crc[length..];
-                    
+
                     // Verify CRC
                     let received_crc = u32::from_be_bytes([
-                        crc_bytes[0], crc_bytes[1], crc_bytes[2], crc_bytes[3]
+                        crc_bytes[0],
+                        crc_bytes[1],
+                        crc_bytes[2],
+                        crc_bytes[3],
                     ]);
                     let expected_crc = calculate_crc(payload_data);
-                    
+
                     if received_crc == expected_crc {
                         let as_string = String::from_utf8_lossy(payload_data);
                         println!("    ✅ Got {} bytes in {:?} (CRC valid)", length, elapsed);
@@ -331,7 +350,11 @@ fn test_crc_command(port: &mut Box<dyn SerialPort>, payload: &[u8], description:
                     }
                 }
                 Err(e) => {
-                    println!("    ❌ Failed to read payload: {} (after {:?})", e, start.elapsed());
+                    println!(
+                        "    ❌ Failed to read payload: {} (after {:?})",
+                        e,
+                        start.elapsed()
+                    );
                 }
             }
         }
@@ -339,14 +362,18 @@ fn test_crc_command(port: &mut Box<dyn SerialPort>, payload: &[u8], description:
             // Maybe it responded in legacy mode?
             let elapsed = start.elapsed();
             println!("    ❌ No CRC header received: {} (after {:?})", e, elapsed);
-            
+
             // Check if there's any data at all (legacy response?)
             std::thread::sleep(Duration::from_millis(100));
             let available = port.bytes_to_read().unwrap_or(0);
             if available > 0 {
                 let mut buf = vec![0u8; available as usize];
                 if let Ok(n) = port.read(&mut buf) {
-                    println!("    ℹ Found {} bytes (maybe legacy response?): {:02x?}", n, &buf[..n]);
+                    println!(
+                        "    ℹ Found {} bytes (maybe legacy response?): {:02x?}",
+                        n,
+                        &buf[..n]
+                    );
                     println!("       As string: {:?}", String::from_utf8_lossy(&buf[..n]));
                 }
             }
@@ -356,14 +383,14 @@ fn test_crc_command(port: &mut Box<dyn SerialPort>, payload: &[u8], description:
 
 fn test_dynamic_timing(port: &mut Box<dyn SerialPort>, base_timeout_ms: u64) {
     let delays = [0, 10, 25, 50, 100, 200, 500, 1000];
-    
+
     for delay in delays {
         println!("  Testing with {}ms pre-send delay...", delay);
-        
+
         // Clear and wait
         let _ = port.clear(serialport::ClearBuffer::All);
         std::thread::sleep(Duration::from_millis(delay));
-        
+
         // Send 'Q' command
         let start = Instant::now();
         if port.write_all(&[b'Q']).is_err() {
@@ -371,11 +398,11 @@ fn test_dynamic_timing(port: &mut Box<dyn SerialPort>, base_timeout_ms: u64) {
             continue;
         }
         let _ = port.flush();
-        
+
         // Read response
         let response = read_with_timeout(port, base_timeout_ms);
         let elapsed = start.elapsed();
-        
+
         if response.is_empty() {
             println!("    ❌ No response");
         } else if response.starts_with(b"speeduino") {
@@ -383,14 +410,17 @@ fn test_dynamic_timing(port: &mut Box<dyn SerialPort>, base_timeout_ms: u64) {
             println!("       → Minimum working delay: {}ms", delay);
             return;
         } else {
-            println!("    ⚠ Got {} bytes but unexpected: {:?}", 
-                    response.len(), String::from_utf8_lossy(&response));
+            println!(
+                "    ⚠ Got {} bytes but unexpected: {:?}",
+                response.len(),
+                String::from_utf8_lossy(&response)
+            );
         }
-        
+
         // Small delay between tests
         std::thread::sleep(Duration::from_millis(100));
     }
-    
+
     println!("  ⚠ Could not find working delay");
 }
 
@@ -401,12 +431,12 @@ fn read_with_timeout(port: &mut Box<dyn SerialPort>, timeout_ms: u64) -> Vec<u8>
     let timeout = Duration::from_millis(timeout_ms);
     let inter_char_timeout = Duration::from_millis(100);
     let mut last_data_time = Instant::now();
-    
+
     loop {
         if start.elapsed() > timeout {
             break;
         }
-        
+
         match port.bytes_to_read() {
             Ok(available) if available > 0 => {
                 let to_read = std::cmp::min(available as usize, buffer.len());
@@ -430,20 +460,24 @@ fn read_with_timeout(port: &mut Box<dyn SerialPort>, timeout_ms: u64) -> Vec<u8>
             }
         }
     }
-    
+
     response
 }
 
-fn read_exact_with_timeout(port: &mut Box<dyn SerialPort>, buf: &mut [u8], timeout_ms: u64) -> Result<Duration, String> {
+fn read_exact_with_timeout(
+    port: &mut Box<dyn SerialPort>,
+    buf: &mut [u8],
+    timeout_ms: u64,
+) -> Result<Duration, String> {
     let start = Instant::now();
     let timeout = Duration::from_millis(timeout_ms);
     let mut offset = 0;
-    
+
     while offset < buf.len() {
         if start.elapsed() > timeout {
             return Err(format!("timeout after {} of {} bytes", offset, buf.len()));
         }
-        
+
         match port.bytes_to_read() {
             Ok(available) if available > 0 => {
                 let to_read = std::cmp::min(available as usize, buf.len() - offset);
@@ -461,28 +495,28 @@ fn read_exact_with_timeout(port: &mut Box<dyn SerialPort>, buf: &mut [u8], timeo
             Err(e) => return Err(e.to_string()),
         }
     }
-    
+
     Ok(start.elapsed())
 }
 
 fn build_crc_packet(payload: &[u8]) -> Vec<u8> {
     let mut packet = Vec::with_capacity(2 + payload.len() + 4);
-    
+
     // Length (2 bytes, big-endian)
     let len = payload.len() as u16;
     packet.push((len >> 8) as u8);
     packet.push((len & 0xFF) as u8);
-    
+
     // Payload
     packet.extend_from_slice(payload);
-    
+
     // CRC32 (4 bytes, big-endian)
     let crc = calculate_crc(payload);
     packet.push((crc >> 24) as u8);
     packet.push((crc >> 16) as u8);
     packet.push((crc >> 8) as u8);
     packet.push(crc as u8);
-    
+
     packet
 }
 

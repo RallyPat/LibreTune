@@ -19,10 +19,10 @@
 //!
 //! This matches TunerStudio's project layout for familiarity.
 
+mod online_repository;
 mod project;
 mod repository;
-mod online_repository;
 
-pub use project::{Project, ProjectConfig, ProjectSettings, ConnectionSettings, ProjectInfo};
-pub use repository::{IniRepository, IniEntry};
-pub use online_repository::{OnlineIniRepository, OnlineIniEntry, IniSource};
+pub use online_repository::{IniSource, OnlineIniEntry, OnlineIniRepository};
+pub use project::{ConnectionSettings, Project, ProjectConfig, ProjectInfo, ProjectSettings};
+pub use repository::{IniEntry, IniRepository};

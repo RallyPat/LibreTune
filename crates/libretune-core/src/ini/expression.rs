@@ -1,10 +1,10 @@
 //! INI Expression Parser and Evaluator
-//! 
+//!
 //! This module implements a parser and evaluator for expressions used in ECU INI files
 //! for conditional visibility, computed channels, and indicators.
 
-use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 /// Values supported in expressions
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -18,7 +18,13 @@ impl Value {
     pub fn as_f64(&self) -> f64 {
         match self {
             Value::Number(n) => *n,
-            Value::Bool(b) => if *b { 1.0 } else { 0.0 },
+            Value::Bool(b) => {
+                if *b {
+                    1.0
+                } else {
+                    0.0
+                }
+            }
             Value::String(_) => 0.0,
         }
     }
@@ -35,16 +41,32 @@ impl Value {
 /// Binary operators
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum BinOp {
-    Add, Sub, Mul, Div, Mod,
-    Eq, Ne, Lt, Gt, Le, Ge,
-    And, Or,
-    BitAnd, BitOr, BitXor, Shl, Shr,
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Mod,
+    Eq,
+    Ne,
+    Lt,
+    Gt,
+    Le,
+    Ge,
+    And,
+    Or,
+    BitAnd,
+    BitOr,
+    BitXor,
+    Shl,
+    Shr,
 }
 
 /// Unary operators
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum UnaryOp {
-    Neg, Not, BitNot,
+    Neg,
+    Not,
+    BitNot,
 }
 
 /// Expression AST
@@ -69,12 +91,28 @@ enum Token {
     Number(f64),
     Ident(String),
     String(String),
-    Plus, Minus, Star, Slash, Percent,
-    EqEq, Ne, Lt, Gt, Le, Ge,
-    AmpAmp, PipePipe, Bang,
-    Amp, Pipe, Caret, Tilde,
-    Shl, Shr,
-    LParen, RParen,
+    Plus,
+    Minus,
+    Star,
+    Slash,
+    Percent,
+    EqEq,
+    Ne,
+    Lt,
+    Gt,
+    Le,
+    Ge,
+    AmpAmp,
+    PipePipe,
+    Bang,
+    Amp,
+    Pipe,
+    Caret,
+    Tilde,
+    Shl,
+    Shr,
+    LParen,
+    RParen,
     Comma,
 }
 
@@ -147,9 +185,13 @@ impl<'a> Parser<'a> {
     }
 
     fn match_equality_op(&mut self) -> Option<BinOp> {
-        if self.match_token(Token::EqEq) { Some(BinOp::Eq) }
-        else if self.match_token(Token::Ne) { Some(BinOp::Ne) }
-        else { None }
+        if self.match_token(Token::EqEq) {
+            Some(BinOp::Eq)
+        } else if self.match_token(Token::Ne) {
+            Some(BinOp::Ne)
+        } else {
+            None
+        }
     }
 
     fn parse_comparison(&mut self) -> Result<Expr, String> {
@@ -162,11 +204,17 @@ impl<'a> Parser<'a> {
     }
 
     fn match_comparison_op(&mut self) -> Option<BinOp> {
-        if self.match_token(Token::Lt) { Some(BinOp::Lt) }
-        else if self.match_token(Token::Gt) { Some(BinOp::Gt) }
-        else if self.match_token(Token::Le) { Some(BinOp::Le) }
-        else if self.match_token(Token::Ge) { Some(BinOp::Ge) }
-        else { None }
+        if self.match_token(Token::Lt) {
+            Some(BinOp::Lt)
+        } else if self.match_token(Token::Gt) {
+            Some(BinOp::Gt)
+        } else if self.match_token(Token::Le) {
+            Some(BinOp::Le)
+        } else if self.match_token(Token::Ge) {
+            Some(BinOp::Ge)
+        } else {
+            None
+        }
     }
 
     fn parse_shift(&mut self) -> Result<Expr, String> {
@@ -179,9 +227,13 @@ impl<'a> Parser<'a> {
     }
 
     fn match_shift_op(&mut self) -> Option<BinOp> {
-        if self.match_token(Token::Shl) { Some(BinOp::Shl) }
-        else if self.match_token(Token::Shr) { Some(BinOp::Shr) }
-        else { None }
+        if self.match_token(Token::Shl) {
+            Some(BinOp::Shl)
+        } else if self.match_token(Token::Shr) {
+            Some(BinOp::Shr)
+        } else {
+            None
+        }
     }
 
     fn parse_additive(&mut self) -> Result<Expr, String> {
@@ -194,9 +246,13 @@ impl<'a> Parser<'a> {
     }
 
     fn match_additive_op(&mut self) -> Option<BinOp> {
-        if self.match_token(Token::Plus) { Some(BinOp::Add) }
-        else if self.match_token(Token::Minus) { Some(BinOp::Sub) }
-        else { None }
+        if self.match_token(Token::Plus) {
+            Some(BinOp::Add)
+        } else if self.match_token(Token::Minus) {
+            Some(BinOp::Sub)
+        } else {
+            None
+        }
     }
 
     fn parse_multiplicative(&mut self) -> Result<Expr, String> {
@@ -209,10 +265,15 @@ impl<'a> Parser<'a> {
     }
 
     fn match_multiplicative_op(&mut self) -> Option<BinOp> {
-        if self.match_token(Token::Star) { Some(BinOp::Mul) }
-        else if self.match_token(Token::Slash) { Some(BinOp::Div) }
-        else if self.match_token(Token::Percent) { Some(BinOp::Mod) }
-        else { None }
+        if self.match_token(Token::Star) {
+            Some(BinOp::Mul)
+        } else if self.match_token(Token::Slash) {
+            Some(BinOp::Div)
+        } else if self.match_token(Token::Percent) {
+            Some(BinOp::Mod)
+        } else {
+            None
+        }
     }
 
     fn parse_unary(&mut self) -> Result<Expr, String> {
@@ -233,10 +294,10 @@ impl<'a> Parser<'a> {
             Some(Token::Number(n)) => Ok(Expr::Literal(Value::Number(*n))),
             Some(Token::Ident(s)) => {
                 let s_clone = s.clone();
-                if s == "true" { 
-                    Ok(Expr::Literal(Value::Bool(true))) 
-                } else if s == "false" { 
-                    Ok(Expr::Literal(Value::Bool(false))) 
+                if s == "true" {
+                    Ok(Expr::Literal(Value::Bool(true)))
+                } else if s == "false" {
+                    Ok(Expr::Literal(Value::Bool(false)))
                 } else if self.match_token(Token::LParen) {
                     // Function call: name(arg1, arg2, ...)
                     let mut args = Vec::new();
@@ -361,7 +422,9 @@ fn lex(input: &str) -> Vec<Token> {
             '"' => {
                 let mut s = String::new();
                 for next_ch in chars.by_ref() {
-                    if next_ch == '"' { break; }
+                    if next_ch == '"' {
+                        break;
+                    }
                     s.push(next_ch);
                 }
                 tokens.push(Token::String(s));
@@ -436,23 +499,27 @@ impl Default for StringContext {
 
 /// Evaluates a function call
 fn evaluate_function(
-    name: &str, 
-    args: &[Expr], 
+    name: &str,
+    args: &[Expr],
     context: &HashMap<String, f64>,
-    string_context: Option<&StringContext>
+    string_context: Option<&StringContext>,
 ) -> Result<Value, String> {
     let name_lower = name.to_lowercase();
-    
+
     match name_lower.as_str() {
         // Math functions (single argument)
-        "abs" | "round" | "floor" | "ceil" | "sqrt" | "log" | "exp" | 
-        "sin" | "cos" | "tan" | "asin" | "acos" | "atan" => {
+        "abs" | "round" | "floor" | "ceil" | "sqrt" | "log" | "exp" | "sin" | "cos" | "tan"
+        | "asin" | "acos" | "atan" => {
             if args.len() != 1 {
-                return Err(format!("Function {} requires 1 argument, got {}", name, args.len()));
+                return Err(format!(
+                    "Function {} requires 1 argument, got {}",
+                    name,
+                    args.len()
+                ));
             }
             let arg = evaluate(&args[0], context, string_context)?;
             let x = arg.as_f64();
-            
+
             match name_lower.as_str() {
                 "abs" => Ok(Value::Number(x.abs())),
                 "round" => Ok(Value::Number(x.round())),
@@ -473,13 +540,17 @@ fn evaluate_function(
         // Math functions (two arguments)
         "pow" | "atan2" => {
             if args.len() != 2 {
-                return Err(format!("Function {} requires 2 arguments, got {}", name, args.len()));
+                return Err(format!(
+                    "Function {} requires 2 arguments, got {}",
+                    name,
+                    args.len()
+                ));
             }
             let arg1 = evaluate(&args[0], context, string_context)?;
             let arg2 = evaluate(&args[1], context, string_context)?;
             let x = arg1.as_f64();
             let y = arg2.as_f64();
-            
+
             match name_lower.as_str() {
                 "pow" => Ok(Value::Number(x.powf(y))),
                 "atan2" => Ok(Value::Number(x.atan2(y))),
@@ -489,7 +560,10 @@ fn evaluate_function(
         // Variadic functions (2+ arguments)
         "min" => {
             if args.len() < 2 {
-                return Err(format!("Function min requires at least 2 arguments, got {}", args.len()));
+                return Err(format!(
+                    "Function min requires at least 2 arguments, got {}",
+                    args.len()
+                ));
             }
             let mut min_val = evaluate(&args[0], context, string_context)?.as_f64();
             for arg in &args[1..] {
@@ -499,7 +573,10 @@ fn evaluate_function(
         }
         "max" => {
             if args.len() < 2 {
-                return Err(format!("Function max requires at least 2 arguments, got {}", args.len()));
+                return Err(format!(
+                    "Function max requires at least 2 arguments, got {}",
+                    args.len()
+                ));
             }
             let mut max_val = evaluate(&args[0], context, string_context)?.as_f64();
             for arg in &args[1..] {
@@ -510,7 +587,10 @@ fn evaluate_function(
         // Special functions
         "isnan" => {
             if args.len() != 1 {
-                return Err(format!("Function isNaN requires 1 argument, got {}", args.len()));
+                return Err(format!(
+                    "Function isNaN requires 1 argument, got {}",
+                    args.len()
+                ));
             }
             let arg = evaluate(&args[0], context, string_context)?;
             Ok(Value::Bool(arg.as_f64().is_nan()))
@@ -524,18 +604,23 @@ fn evaluate_function(
             // bitStringValue(bitOptionsConstant, indexValue)
             // Returns the string value at index in bit_options array
             if args.len() != 2 {
-                return Err(format!("Function bitStringValue requires 2 arguments, got {}", args.len()));
+                return Err(format!(
+                    "Function bitStringValue requires 2 arguments, got {}",
+                    args.len()
+                ));
             }
-            
+
             // First arg is constant name (variable), second is index
             let constant_name = match &args[0] {
                 Expr::Variable(name) => name.clone(),
-                _ => return Err("bitStringValue first argument must be a constant name".to_string()),
+                _ => {
+                    return Err("bitStringValue first argument must be a constant name".to_string())
+                }
             };
-            
+
             let index_val = evaluate(&args[1], context, string_context)?.as_f64();
             let index = index_val as usize;
-            
+
             if let Some(ctx) = string_context {
                 if let Some(get_bit_options) = &ctx.get_bit_options {
                     if let Some(options) = get_bit_options(&constant_name) {
@@ -545,22 +630,27 @@ fn evaluate_function(
                     }
                 }
             }
-            
+
             Ok(Value::String(format!("INVALID[{}]", index)))
         }
         "stringvalue" => {
             // stringValue(constantName)
             // Returns the string value of a string constant
             if args.len() != 1 {
-                return Err(format!("Function stringValue requires 1 argument, got {}", args.len()));
+                return Err(format!(
+                    "Function stringValue requires 1 argument, got {}",
+                    args.len()
+                ));
             }
-            
+
             let constant_name = match &args[0] {
                 Expr::Variable(name) => name.clone(),
                 Expr::Literal(Value::String(s)) => s.clone(),
-                _ => return Err("stringValue argument must be a constant name or string".to_string()),
+                _ => {
+                    return Err("stringValue argument must be a constant name or string".to_string())
+                }
             };
-            
+
             if let Some(ctx) = string_context {
                 if let Some(get_string_value) = &ctx.get_string_value {
                     if let Some(value) = get_string_value(&constant_name) {
@@ -568,7 +658,7 @@ fn evaluate_function(
                     }
                 }
             }
-            
+
             Ok(Value::String(String::new()))
         }
         _ => {
@@ -602,9 +692,9 @@ fn evaluate_function(
 
 /// Evaluates an expression against a context
 pub fn evaluate(
-    expr: &Expr, 
+    expr: &Expr,
     context: &HashMap<String, f64>,
-    string_context: Option<&StringContext>
+    string_context: Option<&StringContext>,
 ) -> Result<Value, String> {
     match expr {
         Expr::Literal(v) => Ok(v.clone()),
@@ -616,9 +706,7 @@ pub fn evaluate(
                 Ok(Value::Number(0.0))
             }
         }
-        Expr::FunctionCall(name, args) => {
-            evaluate_function(name, args, context, string_context)
-        }
+        Expr::FunctionCall(name, args) => evaluate_function(name, args, context, string_context),
         Expr::Unary(op, inner) => {
             let val = evaluate(inner, context, string_context)?;
             match op {
@@ -644,8 +732,11 @@ pub fn evaluate(
                 BinOp::Mul => Ok(Value::Number(l.as_f64() * r.as_f64())),
                 BinOp::Div => {
                     let rv = r.as_f64();
-                    if rv == 0.0 { Ok(Value::Number(0.0)) }
-                    else { Ok(Value::Number(l.as_f64() / rv)) }
+                    if rv == 0.0 {
+                        Ok(Value::Number(0.0))
+                    } else {
+                        Ok(Value::Number(l.as_f64() / rv))
+                    }
                 }
                 BinOp::Mod => Ok(Value::Number(l.as_f64() % r.as_f64())),
                 BinOp::Eq => {
@@ -670,11 +761,21 @@ pub fn evaluate(
                 BinOp::Ge => Ok(Value::Bool(l.as_f64() >= r.as_f64())),
                 BinOp::And => Ok(Value::Bool(l.as_bool() && r.as_bool())),
                 BinOp::Or => Ok(Value::Bool(l.as_bool() || r.as_bool())),
-                BinOp::BitAnd => Ok(Value::Number(((l.as_f64() as i64) & (r.as_f64() as i64)) as f64)),
-                BinOp::BitOr => Ok(Value::Number(((l.as_f64() as i64) | (r.as_f64() as i64)) as f64)),
-                BinOp::BitXor => Ok(Value::Number(((l.as_f64() as i64) ^ (r.as_f64() as i64)) as f64)),
-                BinOp::Shl => Ok(Value::Number(((l.as_f64() as i64) << (r.as_f64() as i32)) as f64)),
-                BinOp::Shr => Ok(Value::Number(((l.as_f64() as i64) >> (r.as_f64() as i32)) as f64)),
+                BinOp::BitAnd => Ok(Value::Number(
+                    ((l.as_f64() as i64) & (r.as_f64() as i64)) as f64,
+                )),
+                BinOp::BitOr => Ok(Value::Number(
+                    ((l.as_f64() as i64) | (r.as_f64() as i64)) as f64,
+                )),
+                BinOp::BitXor => Ok(Value::Number(
+                    ((l.as_f64() as i64) ^ (r.as_f64() as i64)) as f64,
+                )),
+                BinOp::Shl => Ok(Value::Number(
+                    ((l.as_f64() as i64) << (r.as_f64() as i32)) as f64,
+                )),
+                BinOp::Shr => Ok(Value::Number(
+                    ((l.as_f64() as i64) >> (r.as_f64() as i32)) as f64,
+                )),
             }
         }
     }
@@ -694,7 +795,10 @@ mod tests {
         let mut p = Parser::new("1 + 2 * 3");
         let expr = p.parse().unwrap();
         let context = HashMap::new();
-        assert_eq!(evaluate_simple(&expr, &context).unwrap(), Value::Number(7.0));
+        assert_eq!(
+            evaluate_simple(&expr, &context).unwrap(),
+            Value::Number(7.0)
+        );
     }
 
     #[test]
@@ -712,9 +816,12 @@ mod tests {
         let mut context = HashMap::new();
         context.insert("rpm".to_string(), 1500.0);
         assert_eq!(evaluate_simple(&expr, &context).unwrap(), Value::Bool(true));
-        
+
         context.insert("rpm".to_string(), 500.0);
-        assert_eq!(evaluate_simple(&expr, &context).unwrap(), Value::Bool(false));
+        assert_eq!(
+            evaluate_simple(&expr, &context).unwrap(),
+            Value::Bool(false)
+        );
     }
 
     #[test]
@@ -724,8 +831,11 @@ mod tests {
         let mut context = HashMap::new();
         context.insert("flags".to_string(), 5.0); // binary 101
         assert_eq!(evaluate_simple(&expr, &context).unwrap(), Value::Bool(true));
-        
+
         context.insert("flags".to_string(), 3.0); // binary 011
-        assert_eq!(evaluate_simple(&expr, &context).unwrap(), Value::Bool(false));
+        assert_eq!(
+            evaluate_simple(&expr, &context).unwrap(),
+            Value::Bool(false)
+        );
     }
 }

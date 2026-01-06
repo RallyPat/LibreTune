@@ -2,9 +2,9 @@
 //!
 //! Supports reading/writing log files in various formats.
 
-use std::path::Path;
-use std::io::{self, BufWriter, Write};
 use std::fs::File;
+use std::io::{self, BufWriter, Write};
+use std::path::Path;
 
 use super::LogEntry;
 
@@ -26,7 +26,7 @@ impl LogFormat {
             _ => None,
         }
     }
-    
+
     /// Get the file extension for this format
     pub fn extension(&self) -> &'static str {
         match self {
@@ -45,14 +45,14 @@ pub fn write_csv<P: AsRef<Path>>(
 ) -> io::Result<()> {
     let file = File::create(path)?;
     let mut writer = BufWriter::new(file);
-    
+
     // Write header
     write!(writer, "Time")?;
     for channel in channels {
         write!(writer, ",{}", channel)?;
     }
     writeln!(writer)?;
-    
+
     // Write data rows
     for entry in entries {
         write!(writer, "{:.3}", entry.timestamp.as_secs_f64())?;
@@ -61,7 +61,7 @@ pub fn write_csv<P: AsRef<Path>>(
         }
         writeln!(writer)?;
     }
-    
+
     writer.flush()?;
     Ok(())
 }
@@ -70,11 +70,17 @@ pub fn write_csv<P: AsRef<Path>>(
 mod tests {
     use super::*;
     use std::time::Duration;
-    
+
     #[test]
     fn test_format_detection() {
-        assert_eq!(LogFormat::from_extension(Path::new("log.csv")), Some(LogFormat::Csv));
-        assert_eq!(LogFormat::from_extension(Path::new("log.mlg")), Some(LogFormat::Mlg));
+        assert_eq!(
+            LogFormat::from_extension(Path::new("log.csv")),
+            Some(LogFormat::Csv)
+        );
+        assert_eq!(
+            LogFormat::from_extension(Path::new("log.mlg")),
+            Some(LogFormat::Mlg)
+        );
         assert_eq!(LogFormat::from_extension(Path::new("log.txt")), None);
     }
 }

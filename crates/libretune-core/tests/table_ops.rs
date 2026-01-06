@@ -1,6 +1,8 @@
 //! Tests for table operations
 
-use libretune_core::table_ops::{rebin_table, smooth_table, scale_cells, set_cells_equal, interpolate_cells};
+use libretune_core::table_ops::{
+    interpolate_cells, rebin_table, scale_cells, set_cells_equal, smooth_table,
+};
 
 #[test]
 fn test_rebin_table_same_size() {
@@ -27,8 +29,14 @@ fn test_rebin_table_same_size() {
     // With same bins and interpolation, values should match
     for (y, row) in result.z_values.iter().enumerate() {
         for (x, &val) in row.iter().enumerate() {
-            assert!((val - old_z_values[y][x]).abs() < 0.01, 
-                "Mismatch at [{}, {}]: {} vs {}", x, y, val, old_z_values[y][x]);
+            assert!(
+                (val - old_z_values[y][x]).abs() < 0.01,
+                "Mismatch at [{}, {}]: {} vs {}",
+                x,
+                y,
+                val,
+                old_z_values[y][x]
+            );
         }
     }
 }
@@ -67,41 +75,41 @@ fn test_rebin_table_smaller() {
 fn test_smooth_table() {
     let z_values = vec![
         vec![10.0, 10.0, 10.0],
-        vec![10.0, 50.0, 10.0],  // Center cell is an outlier
+        vec![10.0, 50.0, 10.0], // Center cell is an outlier
         vec![10.0, 10.0, 10.0],
     ];
 
-    let selected_cells = vec![(1, 1)];  // Select the center cell
+    let selected_cells = vec![(1, 1)]; // Select the center cell
     let smoothed = smooth_table(&z_values, selected_cells, 1.0);
 
     // The center cell should be smoothed toward neighbors
-    assert!(smoothed[1][1] < 50.0, "Smoothed value should be less than original outlier");
-    assert!(smoothed[1][1] > 10.0, "Smoothed value should be greater than neighbors");
+    assert!(
+        smoothed[1][1] < 50.0,
+        "Smoothed value should be less than original outlier"
+    );
+    assert!(
+        smoothed[1][1] > 10.0,
+        "Smoothed value should be greater than neighbors"
+    );
 }
 
 #[test]
 fn test_scale_cells() {
-    let z_values = vec![
-        vec![10.0, 20.0, 30.0],
-        vec![40.0, 50.0, 60.0],
-    ];
+    let z_values = vec![vec![10.0, 20.0, 30.0], vec![40.0, 50.0, 60.0]];
 
-    let selected_cells = vec![(0, 0), (0, 1)];  // First two cells of first row (y, x)
+    let selected_cells = vec![(0, 0), (0, 1)]; // First two cells of first row (y, x)
     let scaled = scale_cells(&z_values, selected_cells, 2.0);
 
     assert!((scaled[0][0] - 20.0).abs() < 0.01);
     assert!((scaled[0][1] - 40.0).abs() < 0.01);
-    assert!((scaled[0][2] - 30.0).abs() < 0.01);  // Unselected, unchanged
+    assert!((scaled[0][2] - 30.0).abs() < 0.01); // Unselected, unchanged
 }
 
 #[test]
 fn test_set_cells_equal() {
-    let mut z_values = vec![
-        vec![10.0, 20.0, 30.0],
-        vec![40.0, 50.0, 60.0],
-    ];
+    let mut z_values = vec![vec![10.0, 20.0, 30.0], vec![40.0, 50.0, 60.0]];
 
-    let selected_cells = vec![(0, 0), (0, 1), (0, 2)];  // First row (y, x)
+    let selected_cells = vec![(0, 0), (0, 1), (0, 2)]; // First row (y, x)
     set_cells_equal(&mut z_values, selected_cells, 25.0);
 
     assert!((z_values[0][0] - 25.0).abs() < 0.01);
@@ -121,9 +129,15 @@ fn test_interpolate_cells_2d() {
 
     // Select all cells in the 3x3 grid (need at least 4 for corners)
     let selected_cells = vec![
-        (0, 0), (0, 1), (0, 2),
-        (1, 0), (1, 1), (1, 2),
-        (2, 0), (2, 1), (2, 2),
+        (0, 0),
+        (0, 1),
+        (0, 2),
+        (1, 0),
+        (1, 1),
+        (1, 2),
+        (2, 0),
+        (2, 1),
+        (2, 2),
     ];
     let result = interpolate_cells(&z_values, selected_cells);
 
@@ -132,8 +146,11 @@ fn test_interpolate_cells_2d() {
     assert!((result[0][2] - 40.0).abs() < 0.01);
     assert!((result[2][0] - 20.0).abs() < 0.01);
     assert!((result[2][2] - 80.0).abs() < 0.01);
-    
+
     // Center should be interpolated (bilinear interpolation of corners)
     // Expected: (10 + 40 + 20 + 80) / 4 = 37.5 if uniform, but bilinear will be different
-    assert!(result[1][1] > 10.0 && result[1][1] < 80.0, "Center should be between corner values");
+    assert!(
+        result[1][1] > 10.0 && result[1][1] < 80.0,
+        "Center should be between corner values"
+    );
 }

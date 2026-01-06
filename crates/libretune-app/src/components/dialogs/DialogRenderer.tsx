@@ -109,7 +109,6 @@ function DialogField({
   const [numValue, setNumValue] = useState<number | null>(null);
   const [strValue, setStrValue] = useState<string>('');
   const [selectedBit, setSelectedBit] = useState<number>(0);
-  const [isVisible, setIsVisible] = useState<boolean>(true);
   const [isEnabled, setIsEnabled] = useState<boolean>(true);
 
   useEffect(() => {
@@ -145,27 +144,7 @@ function DialogField({
     });
   }, [name]);
 
-  // Evaluate visibility condition - fields are always visible unless explicitly hidden
-  useEffect(() => {
-    if (constant?.visibility_condition) {
-      // Build context with current field value included
-      const fieldContext = { ...context };
-      if (constant.value_type === 'bits') {
-        fieldContext[name] = selectedBit;
-      } else if (constant.value_type === 'scalar' && numValue !== null) {
-        fieldContext[name] = numValue;
-      }
-      
-      invoke<boolean>('evaluate_expression', { 
-        expression: constant.visibility_condition, 
-        context: fieldContext
-      })
-        .then(setIsVisible)
-        .catch(() => setIsVisible(true)); // Show on error
-    } else {
-      setIsVisible(true); // Always visible if no condition
-    }
-  }, [constant?.visibility_condition, context, name, selectedBit, numValue, constant?.value_type]);
+  // Visibility is now handled by DialogFieldWrapper, not here
 
   // Evaluate enable condition - combine field-level condition with constant visibility_condition
   // This allows fields to be visible but disabled (per EFI Analytics spec and closed-source program suggestion)

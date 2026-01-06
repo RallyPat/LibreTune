@@ -51,7 +51,7 @@ impl DataType {
             _ => None,
         }
     }
-    
+
     /// Get the size in bytes for this data type
     pub fn size_bytes(&self) -> usize {
         match self {
@@ -64,8 +64,8 @@ impl DataType {
 
     /// Read a value from bytes at given offset
     pub fn read_from_bytes(&self, data: &[u8], offset: usize, endian: Endianness) -> Option<f64> {
-        use byteorder::{BigEndian, LittleEndian, ByteOrder};
-        
+        use byteorder::{BigEndian, ByteOrder, LittleEndian};
+
         if offset + self.size_bytes() > data.len() {
             return None;
         }
@@ -90,8 +90,8 @@ impl DataType {
 
     /// Write a value to bytes at given offset
     pub fn write_to_bytes(&self, data: &mut [u8], offset: usize, value: f64, endian: Endianness) {
-        use byteorder::{BigEndian, LittleEndian, ByteOrder};
-        
+        use byteorder::{BigEndian, ByteOrder, LittleEndian};
+
         if offset + self.size_bytes() > data.len() {
             return;
         }
@@ -110,7 +110,7 @@ impl DataType {
             (DataType::S32, Endianness::Little) => LittleEndian::write_i32(bytes, value as i32),
             (DataType::F32, Endianness::Big) => BigEndian::write_f32(bytes, value as f32),
             (DataType::F32, Endianness::Little) => LittleEndian::write_f32(bytes, value as f32),
-            (DataType::String, _) => {},
+            (DataType::String, _) => {}
         }
     }
 }
@@ -133,10 +133,10 @@ impl Shape {
         if s.is_empty() {
             return Shape::Scalar;
         }
-        
+
         // Remove brackets if present and trim whitespace
         let inner = s.trim_start_matches('[').trim_end_matches(']').trim();
-        
+
         if inner.contains('x') || inner.contains('X') {
             // 2D array
             let parts: Vec<&str> = inner.split(['x', 'X']).collect();
@@ -149,10 +149,10 @@ impl Shape {
             // 1D array
             return Shape::Array1D(size);
         }
-        
+
         Shape::Scalar
     }
-    
+
     /// Get total element count
     pub fn element_count(&self) -> usize {
         match self {
@@ -161,7 +161,7 @@ impl Shape {
             Shape::Array2D { rows, cols } => rows * cols,
         }
     }
-    
+
     /// Get the X dimension (columns for 2D, size for 1D, 1 for scalar)
     pub fn x_size(&self) -> usize {
         match self {
@@ -170,7 +170,7 @@ impl Shape {
             Shape::Array2D { cols, .. } => *cols,
         }
     }
-    
+
     /// Get the Y dimension (rows for 2D, 1 otherwise)
     pub fn y_size(&self) -> usize {
         match self {
@@ -295,26 +295,26 @@ pub enum DialogComponent {
     /// A simple text label
     Label { text: String },
     /// Reference to an indicator panel (with optional visibility condition)
-    Panel { 
+    Panel {
         name: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         visibility_condition: Option<String>,
     },
     /// A constant field with label and optional visibility/enable conditions
-    Field { 
-        label: String, 
-        name: String, 
+    Field {
+        label: String,
+        name: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         visibility_condition: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         enabled_condition: Option<String>,
     },
     /// A live graph visualization
-    LiveGraph { 
-        name: String, 
-        title: String, 
+    LiveGraph {
+        name: String,
+        title: String,
         position: String,
-        channels: Vec<String> 
+        channels: Vec<String>,
     },
     /// An embedded table editor
     Table { name: String },
@@ -487,9 +487,8 @@ pub struct AdaptiveTiming {
 impl AdaptiveTiming {
     /// Create new adaptive timing with given config
     pub fn new(config: AdaptiveTimingConfig) -> Self {
-        let initial_timeout = Duration::from_millis(
-            ((config.min_timeout_ms + config.max_timeout_ms) / 2) as u64
-        );
+        let initial_timeout =
+            Duration::from_millis(((config.min_timeout_ms + config.max_timeout_ms) / 2) as u64);
         Self {
             samples: VecDeque::with_capacity(config.sample_count),
             current_timeout: initial_timeout,
@@ -497,30 +496,30 @@ impl AdaptiveTiming {
             config,
         }
     }
-    
+
     /// Record a new response time sample and recalculate timeout
     pub fn record_response_time(&mut self, elapsed: Duration) {
         if !self.config.enabled {
             return;
         }
-        
+
         let elapsed_us = elapsed.as_micros() as u64;
-        
+
         // Remove oldest sample if at capacity
         if self.samples.len() >= self.config.sample_count {
             if let Some(old) = self.samples.pop_front() {
                 self.running_sum_us = self.running_sum_us.saturating_sub(old.as_micros() as u64);
             }
         }
-        
+
         // Add new sample
         self.samples.push_back(elapsed);
         self.running_sum_us += elapsed_us;
-        
+
         // Recalculate timeout
         self.recalculate_timeout();
     }
-    
+
     /// Get current effective timeout
     pub fn get_timeout(&self) -> Duration {
         if self.config.enabled && !self.samples.is_empty() {
@@ -529,35 +528,33 @@ impl AdaptiveTiming {
             Duration::from_millis(self.config.max_timeout_ms as u64)
         }
     }
-    
+
     /// Get current effective inter-character timeout (1/4 of main timeout, min 5ms)
     pub fn get_inter_char_timeout(&self) -> Duration {
         let main_ms = self.get_timeout().as_millis() as u64;
         Duration::from_millis(std::cmp::max(5, main_ms / 4))
     }
-    
+
     /// Get current effective minimum wait time for write_and_wait (1/3 of timeout, min 5ms)
     pub fn get_min_wait(&self) -> Duration {
         let main_ms = self.get_timeout().as_millis() as u64;
         Duration::from_millis(std::cmp::max(5, main_ms / 3))
     }
-    
+
     /// Reset adaptive timing (e.g., after communication error)
     /// Clears samples and backs off to conservative timeout
     pub fn reset_on_error(&mut self) {
         self.samples.clear();
         self.running_sum_us = 0;
         // Back off to 75% of max timeout
-        self.current_timeout = Duration::from_millis(
-            (self.config.max_timeout_ms as u64 * 3) / 4
-        );
+        self.current_timeout = Duration::from_millis((self.config.max_timeout_ms as u64 * 3) / 4);
     }
-    
+
     /// Check if adaptive timing is enabled
     pub fn is_enabled(&self) -> bool {
         self.config.enabled
     }
-    
+
     /// Enable or disable adaptive timing
     pub fn set_enabled(&mut self, enabled: bool) {
         self.config.enabled = enabled;
@@ -566,7 +563,7 @@ impl AdaptiveTiming {
             self.running_sum_us = 0;
         }
     }
-    
+
     /// Get average response time (for diagnostics)
     pub fn average_response_time(&self) -> Option<Duration> {
         if self.samples.is_empty() {
@@ -576,29 +573,29 @@ impl AdaptiveTiming {
             Some(Duration::from_micros(avg_us))
         }
     }
-    
+
     /// Get number of samples collected
     pub fn sample_count(&self) -> usize {
         self.samples.len()
     }
-    
+
     fn recalculate_timeout(&mut self) {
         if self.samples.is_empty() {
             return;
         }
-        
+
         // Calculate average in microseconds
         let avg_us = self.running_sum_us / self.samples.len() as u64;
-        
+
         // Apply multiplier
         let timeout_us = (avg_us as f32 * self.config.multiplier) as u64;
         let timeout_ms = timeout_us / 1000;
-        
+
         // Clamp to configured bounds
         let clamped_ms = timeout_ms
             .max(self.config.min_timeout_ms as u64)
             .min(self.config.max_timeout_ms as u64);
-        
+
         self.current_timeout = Duration::from_millis(clamped_ms);
     }
 }
@@ -615,69 +612,69 @@ impl Default for AdaptiveTiming {
 pub struct ProtocolSettings {
     /// Message envelope format (e.g., "msEnvelope_1.0" for CRC framing)
     pub message_envelope_format: Option<String>,
-    
+
     /// Query command to get signature (usually "S" or "Q")
     pub query_command: String,
-    
+
     /// Delay in ms after opening port before sending commands
     pub delay_after_port_open: u32,
-    
+
     /// Page identifiers for multi-page ECUs (raw byte sequences)
     pub page_identifiers: Vec<Vec<u8>>,
-    
+
     /// Page sizes in bytes for each page
     pub page_sizes: Vec<u32>,
-    
+
     /// Page read command format strings (one per page)
     /// Format: "R%2i%2o%2c" where %2i=page, %2o=offset, %2c=count
     pub page_read_commands: Vec<String>,
-    
+
     /// Page write command format strings (one per page)
     /// Format: "C%2i%2o%2c%v" where %v=value bytes
     pub page_chunk_write_commands: Vec<String>,
-    
+
     /// Burn command format strings (one per page, empty = no burn for that page)
     pub burn_commands: Vec<String>,
-    
+
     /// CRC32 check command format strings (one per page)
     pub crc32_check_commands: Vec<String>,
-    
+
     /// Command to get realtime/output channel data
     pub och_get_command: Option<String>,
-    
+
     /// Size of output channel block in bytes
     pub och_block_size: u32,
-    
+
     /// Burst mode get command (usually "A")
     pub burst_get_command: Option<String>,
-    
+
     /// Retrieve config error command
     pub retrieve_config_error: Option<String>,
-    
+
     /// Delay in ms after burn command
     pub page_activation_delay: u32,
-    
+
     /// Max bytes per read/write chunk
     pub blocking_factor: u32,
-    
+
     /// Delay in ms between consecutive writes
     pub inter_write_delay: u32,
-    
+
     /// Read timeout in ms
     pub block_read_timeout: u32,
-    
+
     /// Whether to use block writes
     pub write_blocks: bool,
-    
+
     /// Whether ECU uses CAN IDs (enable2ndByteCanID)
     pub enable_can_id: bool,
-    
+
     /// Default baud rate
     pub default_baud_rate: u32,
-    
+
     /// Default IP address for TCP connections
     pub default_ip_address: Option<String>,
-    
+
     /// Default IP port for TCP connections
     pub default_ip_port: u16,
 }
@@ -719,7 +716,7 @@ impl ProtocolSettings {
             .map(|f| f.contains("msEnvelope"))
             .unwrap_or(false)
     }
-    
+
     /// Get the number of pages
     pub fn num_pages(&self) -> usize {
         self.page_sizes.len()
@@ -729,7 +726,7 @@ impl ProtocolSettings {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_data_type_parsing() {
         assert_eq!(DataType::from_ini_str("U08"), Some(DataType::U08));
@@ -737,13 +734,19 @@ mod tests {
         assert_eq!(DataType::from_ini_str("BITS"), Some(DataType::Bits));
         assert_eq!(DataType::from_ini_str("invalid"), None);
     }
-    
+
     #[test]
     fn test_shape_parsing() {
         assert_eq!(Shape::from_ini_str(""), Shape::Scalar);
         assert_eq!(Shape::from_ini_str("[16]"), Shape::Array1D(16));
-        assert_eq!(Shape::from_ini_str("[16x16]"), Shape::Array2D { rows: 16, cols: 16 });
-        assert_eq!(Shape::from_ini_str("[8X12]"), Shape::Array2D { rows: 8, cols: 12 });
+        assert_eq!(
+            Shape::from_ini_str("[16x16]"),
+            Shape::Array2D { rows: 16, cols: 16 }
+        );
+        assert_eq!(
+            Shape::from_ini_str("[8X12]"),
+            Shape::Array2D { rows: 8, cols: 12 }
+        );
     }
 }
 
@@ -845,6 +848,5 @@ pub struct KeyAction {
     pub label: String,
     /// Enable condition
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub     enable_condition: Option<String>,
+    pub enable_condition: Option<String>,
 }
-

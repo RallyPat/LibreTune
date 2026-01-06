@@ -32,35 +32,34 @@
 //! println!("RPM: {}", data.get("rpm")?);
 //! ```
 
-pub mod ini;
-pub mod protocol;
-pub mod ecu;
-pub mod datalog;
-pub mod tune;
 pub mod autotune;
-pub mod dashboard;
 pub mod dash;
-pub mod table_ops;
-pub mod project;
+pub mod dashboard;
+pub mod datalog;
 pub mod demo;
+pub mod ecu;
+pub mod ini;
+pub mod project;
+pub mod protocol;
+pub mod table_ops;
+pub mod tune;
 pub mod unit_conversion;
 
 /// Re-export commonly used types
 pub mod prelude {
-    pub use crate::ini::{EcuDefinition, Constant, OutputChannel, TableDefinition};
-    pub use crate::protocol::{Connection, ConnectionState};
-    pub use crate::ecu::{EcuMemory, Value};
-    pub use crate::datalog::{DataLogger, LogEntry};
     pub use crate::autotune::{
-        AutoTuneState, AutoTuneSettings, AutoTuneFilters, 
-        AutoTuneAuthorityLimits, AutoTuneRecommendation
+        AutoTuneAuthorityLimits, AutoTuneFilters, AutoTuneRecommendation, AutoTuneSettings,
+        AutoTuneState,
     };
     pub use crate::dashboard::{
-        DashboardLayout, GaugeConfig, GaugeType,
-        get_dashboard_file, get_dashboard_file_path
+        get_dashboard_file, get_dashboard_file_path, DashboardLayout, GaugeConfig, GaugeType,
     };
-    pub use crate::tune::{TuneFile, TuneCache, PageState};
-    pub use crate::project::{Project, ProjectConfig, IniRepository, IniEntry};
+    pub use crate::datalog::{DataLogger, LogEntry};
+    pub use crate::ecu::{EcuMemory, Value};
+    pub use crate::ini::{Constant, EcuDefinition, OutputChannel, TableDefinition};
+    pub use crate::project::{IniEntry, IniRepository, Project, ProjectConfig};
+    pub use crate::protocol::{Connection, ConnectionState};
+    pub use crate::tune::{PageState, TuneCache, TuneFile};
 }
 
 /// Library version

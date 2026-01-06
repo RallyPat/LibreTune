@@ -29,6 +29,7 @@ import DialogRenderer, { DialogDefinition as RendererDialogDef } from "./compone
 import HelpViewer, { HelpTopicData } from "./components/dialogs/HelpViewer";
 import SignatureMismatchDialog, { SignatureMismatchInfo } from "./components/dialogs/SignatureMismatchDialog";
 import TuneMismatchDialog, { TuneMismatchInfo } from "./components/dialogs/TuneMismatchDialog";
+import TuneComparisonDialog from "./components/dialogs/TuneComparisonDialog";
 import "./themes/base.css";
 
 // Backend types
@@ -246,6 +247,9 @@ function AppContent() {
   // Tune mismatch dialog state
   const [tuneMismatchOpen, setTuneMismatchOpen] = useState(false);
   const [tuneMismatchInfo, setTuneMismatchInfo] = useState<TuneMismatchInfo | null>(null);
+  
+  // Tune comparison dialog state
+  const [tuneComparisonOpen, setTuneComparisonOpen] = useState(false);
   
   // Sync status tracking (for partial sync warning)
   const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);

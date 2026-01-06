@@ -94,7 +94,7 @@ pub fn parse_gauge_file(xml: &str) -> Result<GaugeFile, DashParseError> {
         match reader.read_event_into(&mut buf) {
             Ok(Event::Start(ref e)) => {
                 let name = String::from_utf8_lossy(e.name().as_ref()).to_string();
-                
+
                 if name == "gauge" {
                     if !in_outer_gauge {
                         in_outer_gauge = true;
@@ -126,7 +126,7 @@ pub fn parse_gauge_file(xml: &str) -> Result<GaugeFile, DashParseError> {
             }
             Ok(Event::End(ref e)) => {
                 let name = String::from_utf8_lossy(e.name().as_ref()).to_string();
-                
+
                 if name == "gauge" {
                     if in_inner_gauge {
                         in_inner_gauge = false;
@@ -148,7 +148,9 @@ pub fn parse_gauge_file(xml: &str) -> Result<GaugeFile, DashParseError> {
                 } else if state.in_dash_comp {
                     // Handle color end
                     if is_color_property(&name) {
-                        if let (Some(color), Some(prop)) = (state.current_color.take(), state.color_property.take()) {
+                        if let (Some(color), Some(prop)) =
+                            (state.current_color.take(), state.color_property.take())
+                        {
                             if let Some(ref mut gauge) = state.current_gauge {
                                 set_gauge_color(gauge, &prop, color);
                             }
@@ -204,7 +206,7 @@ fn handle_start_element<R: BufRead>(
             state.in_dash_comp = true;
             let comp_type = get_attribute(e, "type").unwrap_or_default();
             state.current_dash_comp_type = Some(comp_type.clone());
-            
+
             match comp_type.as_str() {
                 "Gauge" | "com.efiAnalytics.tunerStudio.Gauge" => {
                     state.current_gauge = Some(GaugeConfig::default());
@@ -251,9 +253,13 @@ fn handle_end_element(
         }
         "dashComp" => {
             if let Some(gauge) = state.current_gauge.take() {
-                dash.gauge_cluster.components.push(DashComponent::Gauge(gauge));
+                dash.gauge_cluster
+                    .components
+                    .push(DashComponent::Gauge(gauge));
             } else if let Some(indicator) = state.current_indicator.take() {
-                dash.gauge_cluster.components.push(DashComponent::Indicator(indicator));
+                dash.gauge_cluster
+                    .components
+                    .push(DashComponent::Indicator(indicator));
             }
             state.in_dash_comp = false;
             state.current_dash_comp_type = None;
@@ -269,7 +275,9 @@ fn handle_end_element(
             if state.in_dash_comp {
                 // Handle color end
                 if is_color_property(&name) {
-                    if let (Some(color), Some(prop)) = (state.current_color.take(), state.color_property.take()) {
+                    if let (Some(color), Some(prop)) =
+                        (state.current_color.take(), state.color_property.take())
+                    {
                         if let Some(ref mut gauge) = state.current_gauge {
                             set_gauge_color(gauge, &prop, color);
                         } else if let Some(ref mut indicator) = state.current_indicator {
@@ -390,15 +398,24 @@ fn parse_gauge_cluster_attributes(e: &BytesStart) -> GaugeCluster {
 }
 
 fn is_color_property(name: &str) -> bool {
-    matches!(name,
-        "BackColor" | "FontColor" | "TrimColor" | "WarnColor" | "CriticalColor" | "NeedleColor" |
-        "OnTextColor" | "OffTextColor" | "OnBackgroundColor" | "OffBackgroundColor"
+    matches!(
+        name,
+        "BackColor"
+            | "FontColor"
+            | "TrimColor"
+            | "WarnColor"
+            | "CriticalColor"
+            | "NeedleColor"
+            | "OnTextColor"
+            | "OffTextColor"
+            | "OnBackgroundColor"
+            | "OffBackgroundColor"
     )
 }
 
 fn parse_color_attributes(e: &BytesStart) -> TsColor {
     let mut color = TsColor::default();
-    
+
     if let Some(val) = get_attribute(e, "alpha") {
         color.alpha = val.parse().unwrap_or(255);
     }
@@ -411,7 +428,7 @@ fn parse_color_attributes(e: &BytesStart) -> TsColor {
     if let Some(val) = get_attribute(e, "blue") {
         color.blue = val.parse().unwrap_or(0);
     }
-    
+
     color
 }
 
@@ -439,7 +456,7 @@ fn set_indicator_color(indicator: &mut IndicatorConfig, prop: &str, color: TsCol
 
 fn set_gauge_property(gauge: &mut GaugeConfig, prop: &str, value: &str) {
     let value = value.trim();
-    
+
     match prop {
         "Id" => gauge.id = value.to_string(),
         "Title" => gauge.title = value.to_string(),
@@ -448,8 +465,20 @@ fn set_gauge_property(gauge: &mut GaugeConfig, prop: &str, value: &str) {
         "OutputChannel" => gauge.output_channel = value.to_string(),
         "Min" => gauge.min = value.parse().unwrap_or(0.0),
         "Max" => gauge.max = value.parse().unwrap_or(100.0),
-        "MinVP" => gauge.min_vp = if value.is_empty() { None } else { Some(value.to_string()) },
-        "MaxVP" => gauge.max_vp = if value.is_empty() { None } else { Some(value.to_string()) },
+        "MinVP" => {
+            gauge.min_vp = if value.is_empty() {
+                None
+            } else {
+                Some(value.to_string())
+            }
+        }
+        "MaxVP" => {
+            gauge.max_vp = if value.is_empty() {
+                None
+            } else {
+                Some(value.to_string())
+            }
+        }
         "DefaultMin" => gauge.default_min = value.parse().ok(),
         "DefaultMax" => gauge.default_max = value.parse().ok(),
         "PegLimits" => gauge.peg_limits = value.parse().unwrap_or(true),
@@ -457,10 +486,34 @@ fn set_gauge_property(gauge: &mut GaugeConfig, prop: &str, value: &str) {
         "HighWarning" => gauge.high_warning = value.parse().ok(),
         "LowCritical" => gauge.low_critical = value.parse().ok(),
         "HighCritical" => gauge.high_critical = value.parse().ok(),
-        "LowWarningVP" => gauge.low_warning_vp = if value.is_empty() { None } else { Some(value.to_string()) },
-        "HighWarningVP" => gauge.high_warning_vp = if value.is_empty() { None } else { Some(value.to_string()) },
-        "LowCriticalVP" => gauge.low_critical_vp = if value.is_empty() { None } else { Some(value.to_string()) },
-        "HighCriticalVP" => gauge.high_critical_vp = if value.is_empty() { None } else { Some(value.to_string()) },
+        "LowWarningVP" => {
+            gauge.low_warning_vp = if value.is_empty() {
+                None
+            } else {
+                Some(value.to_string())
+            }
+        }
+        "HighWarningVP" => {
+            gauge.high_warning_vp = if value.is_empty() {
+                None
+            } else {
+                Some(value.to_string())
+            }
+        }
+        "LowCriticalVP" => {
+            gauge.low_critical_vp = if value.is_empty() {
+                None
+            } else {
+                Some(value.to_string())
+            }
+        }
+        "HighCriticalVP" => {
+            gauge.high_critical_vp = if value.is_empty() {
+                None
+            } else {
+                Some(value.to_string())
+            }
+        }
         "ValueDigits" => gauge.value_digits = value.parse().unwrap_or(0),
         "LabelDigits" => gauge.label_digits = value.parse().unwrap_or(0),
         "FontFamily" => gauge.font_family = value.to_string(),
@@ -481,14 +534,38 @@ fn set_gauge_property(gauge: &mut GaugeConfig, prop: &str, value: &str) {
         "ShortestSize" => gauge.shortest_size = value.parse().unwrap_or(50),
         "ShapeLockedToAspect" => gauge.shape_locked_to_aspect = value.parse().unwrap_or(false),
         "AntialiasingOn" => gauge.antialiasing_on = value.parse().unwrap_or(true),
-        "BackgroundImageFileName" => gauge.background_image_file_name = if value == "null" || value.is_empty() { None } else { Some(value.to_string()) },
-        "NeedleImageFileName" => gauge.needle_image_file_name = if value == "null" || value.is_empty() { None } else { Some(value.to_string()) },
+        "BackgroundImageFileName" => {
+            gauge.background_image_file_name = if value == "null" || value.is_empty() {
+                None
+            } else {
+                Some(value.to_string())
+            }
+        }
+        "NeedleImageFileName" => {
+            gauge.needle_image_file_name = if value == "null" || value.is_empty() {
+                None
+            } else {
+                Some(value.to_string())
+            }
+        }
         "ShowHistory" => gauge.show_history = value.parse().unwrap_or(false),
         "HistoryValue" => gauge.history_value = value.parse().unwrap_or(0.0),
         "HistoryDelay" => gauge.history_delay = value.parse().unwrap_or(15000),
         "NeedleSmoothing" => gauge.needle_smoothing = value.parse().unwrap_or(1),
-        "ShortClickAction" => gauge.short_click_action = if value == "null" || value.is_empty() { None } else { Some(value.to_string()) },
-        "LongClickAction" => gauge.long_click_action = if value == "null" || value.is_empty() { None } else { Some(value.to_string()) },
+        "ShortClickAction" => {
+            gauge.short_click_action = if value == "null" || value.is_empty() {
+                None
+            } else {
+                Some(value.to_string())
+            }
+        }
+        "LongClickAction" => {
+            gauge.long_click_action = if value == "null" || value.is_empty() {
+                None
+            } else {
+                Some(value.to_string())
+            }
+        }
         "DisplayValueAt180" => gauge.display_value_at_180 = value.parse().unwrap_or(false),
         "GaugeStyle" => gauge.gauge_style = value.to_string(),
         "GaugePainter" => gauge.gauge_painter = GaugePainter::from_ts_string(value),
@@ -499,15 +576,27 @@ fn set_gauge_property(gauge: &mut GaugeConfig, prop: &str, value: &str) {
 
 fn set_indicator_property(indicator: &mut IndicatorConfig, prop: &str, value: &str) {
     let value = value.trim();
-    
+
     match prop {
         "Id" => indicator.id = value.to_string(),
         "Value" => indicator.value = value.parse().unwrap_or(0.0),
         "OutputChannel" => indicator.output_channel = value.to_string(),
         "OnText" => indicator.on_text = value.to_string(),
         "OffText" => indicator.off_text = value.to_string(),
-        "OnImageFileName" => indicator.on_image_file_name = if value == "null" || value.is_empty() { None } else { Some(value.to_string()) },
-        "OffImageFileName" => indicator.off_image_file_name = if value == "null" || value.is_empty() { None } else { Some(value.to_string()) },
+        "OnImageFileName" => {
+            indicator.on_image_file_name = if value == "null" || value.is_empty() {
+                None
+            } else {
+                Some(value.to_string())
+            }
+        }
+        "OffImageFileName" => {
+            indicator.off_image_file_name = if value == "null" || value.is_empty() {
+                None
+            } else {
+                Some(value.to_string())
+            }
+        }
         "RelativeX" => indicator.relative_x = value.parse().unwrap_or(0.0),
         "RelativeY" => indicator.relative_y = value.parse().unwrap_or(0.0),
         "RelativeWidth" => indicator.relative_width = value.parse().unwrap_or(0.1),
@@ -515,9 +604,27 @@ fn set_indicator_property(indicator: &mut IndicatorConfig, prop: &str, value: &s
         "FontFamily" => indicator.font_family = value.to_string(),
         "ItalicFont" => indicator.italic_font = value.parse().unwrap_or(false),
         "AntialiasingOn" => indicator.antialiasing_on = value.parse().unwrap_or(true),
-        "ShortClickAction" => indicator.short_click_action = if value == "null" || value.is_empty() { None } else { Some(value.to_string()) },
-        "LongClickAction" => indicator.long_click_action = if value == "null" || value.is_empty() { None } else { Some(value.to_string()) },
-        "EcuConfigurationName" => indicator.ecu_configuration_name = if value.is_empty() { None } else { Some(value.to_string()) },
+        "ShortClickAction" => {
+            indicator.short_click_action = if value == "null" || value.is_empty() {
+                None
+            } else {
+                Some(value.to_string())
+            }
+        }
+        "LongClickAction" => {
+            indicator.long_click_action = if value == "null" || value.is_empty() {
+                None
+            } else {
+                Some(value.to_string())
+            }
+        }
+        "EcuConfigurationName" => {
+            indicator.ecu_configuration_name = if value.is_empty() {
+                None
+            } else {
+                Some(value.to_string())
+            }
+        }
         "Painter" => indicator.indicator_painter = IndicatorPainter::from_ts_string(value),
         "RunDemo" => indicator.run_demo = value.parse().unwrap_or(false),
         _ => {}
@@ -563,12 +670,12 @@ mod tests {
 
         let result = parse_dash_file(xml);
         assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
-        
+
         let dash = result.unwrap();
         assert_eq!(dash.bibliography.author, "Test");
         assert_eq!(dash.version_info.file_format, "3.0");
         assert_eq!(dash.gauge_cluster.components.len(), 1);
-        
+
         if let DashComponent::Gauge(ref gauge) = dash.gauge_cluster.components[0] {
             assert_eq!(gauge.title, "RPM");
             assert_eq!(gauge.output_channel, "rpm");
@@ -587,7 +694,7 @@ mod tests {
         assert_eq!(color.red, 0);
         assert_eq!(color.green, 0);
         assert_eq!(color.blue, 0);
-        
+
         let color = TsColor::from_argb_int(-65536);
         assert_eq!(color.alpha, 255);
         assert_eq!(color.red, 255);
@@ -597,9 +704,21 @@ mod tests {
 
     #[test]
     fn test_gauge_painter_parsing() {
-        assert_eq!(GaugePainter::from_ts_string("Analog Gauge"), GaugePainter::AnalogGauge);
-        assert_eq!(GaugePainter::from_ts_string("Basic Readout"), GaugePainter::BasicReadout);
-        assert_eq!(GaugePainter::from_ts_string("Asymetric Sweep Gauge"), GaugePainter::AsymmetricSweepGauge);
-        assert_eq!(GaugePainter::from_ts_string("Horizontal Bar Gauge"), GaugePainter::HorizontalBarGauge);
+        assert_eq!(
+            GaugePainter::from_ts_string("Analog Gauge"),
+            GaugePainter::AnalogGauge
+        );
+        assert_eq!(
+            GaugePainter::from_ts_string("Basic Readout"),
+            GaugePainter::BasicReadout
+        );
+        assert_eq!(
+            GaugePainter::from_ts_string("Asymetric Sweep Gauge"),
+            GaugePainter::AsymmetricSweepGauge
+        );
+        assert_eq!(
+            GaugePainter::from_ts_string("Horizontal Bar Gauge"),
+            GaugePainter::HorizontalBarGauge
+        );
     }
 }

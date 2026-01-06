@@ -36,7 +36,10 @@ impl TsColor {
         if self.alpha == 255 {
             format!("#{:02x}{:02x}{:02x}", self.red, self.green, self.blue)
         } else {
-            format!("#{:02x}{:02x}{:02x}{:02x}", self.red, self.green, self.blue, self.alpha)
+            format!(
+                "#{:02x}{:02x}{:02x}{:02x}",
+                self.red, self.green, self.blue, self.alpha
+            )
         }
     }
 
@@ -48,26 +51,78 @@ impl TsColor {
                 let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
                 let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
                 let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
-                Some(Self { alpha: 255, red: r, green: g, blue: b })
+                Some(Self {
+                    alpha: 255,
+                    red: r,
+                    green: g,
+                    blue: b,
+                })
             }
             8 => {
                 let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
                 let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
                 let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
                 let a = u8::from_str_radix(&hex[6..8], 16).ok()?;
-                Some(Self { alpha: a, red: r, green: g, blue: b })
+                Some(Self {
+                    alpha: a,
+                    red: r,
+                    green: g,
+                    blue: b,
+                })
             }
             _ => None,
         }
     }
 
     /// Common colors
-    pub fn black() -> Self { Self { alpha: 255, red: 0, green: 0, blue: 0 } }
-    pub fn white() -> Self { Self { alpha: 255, red: 255, green: 255, blue: 255 } }
-    pub fn red() -> Self { Self { alpha: 255, red: 255, green: 0, blue: 0 } }
-    pub fn yellow() -> Self { Self { alpha: 255, red: 255, green: 255, blue: 0 } }
-    pub fn green() -> Self { Self { alpha: 255, red: 0, green: 255, blue: 0 } }
-    pub fn transparent() -> Self { Self { alpha: 0, red: 0, green: 0, blue: 0 } }
+    pub fn black() -> Self {
+        Self {
+            alpha: 255,
+            red: 0,
+            green: 0,
+            blue: 0,
+        }
+    }
+    pub fn white() -> Self {
+        Self {
+            alpha: 255,
+            red: 255,
+            green: 255,
+            blue: 255,
+        }
+    }
+    pub fn red() -> Self {
+        Self {
+            alpha: 255,
+            red: 255,
+            green: 0,
+            blue: 0,
+        }
+    }
+    pub fn yellow() -> Self {
+        Self {
+            alpha: 255,
+            red: 255,
+            green: 255,
+            blue: 0,
+        }
+    }
+    pub fn green() -> Self {
+        Self {
+            alpha: 255,
+            red: 0,
+            green: 255,
+            blue: 0,
+        }
+    }
+    pub fn transparent() -> Self {
+        Self {
+            alpha: 0,
+            red: 0,
+            green: 0,
+            blue: 0,
+        }
+    }
 }
 
 /// Bibliography metadata for dashboard files.
@@ -103,7 +158,9 @@ pub enum ResourceType {
 }
 
 impl Default for ResourceType {
-    fn default() -> Self { Self::Png }
+    fn default() -> Self {
+        Self::Png
+    }
 }
 
 /// Background image display style.
@@ -148,7 +205,9 @@ pub enum GaugePainter {
 }
 
 impl Default for GaugePainter {
-    fn default() -> Self { Self::BasicReadout }
+    fn default() -> Self {
+        Self::BasicReadout
+    }
 }
 
 impl GaugePainter {
@@ -235,7 +294,7 @@ pub struct GaugeConfig {
     // Range
     pub min: f64,
     pub max: f64,
-    pub min_vp: Option<String>,  // ValueProvider - can be ECU variable name
+    pub min_vp: Option<String>, // ValueProvider - can be ECU variable name
     pub max_vp: Option<String>,
     pub default_min: Option<f64>,
     pub default_max: Option<f64>,
@@ -274,7 +333,7 @@ pub struct GaugeConfig {
     pub counter_clockwise: bool,
 
     // Tick marks
-    pub major_ticks: f64,  // -1.0 = auto
+    pub major_ticks: f64, // -1.0 = auto
     pub minor_ticks: f64,
 
     // Layout (relative 0.0-1.0)
@@ -344,10 +403,20 @@ impl Default for GaugeConfig {
             high_critical_vp: None,
             back_color: TsColor::black(),
             font_color: TsColor::white(),
-            trim_color: TsColor { alpha: 255, red: 102, green: 102, blue: 153 },
+            trim_color: TsColor {
+                alpha: 255,
+                red: 102,
+                green: 102,
+                blue: 153,
+            },
             warn_color: TsColor::yellow(),
             critical_color: TsColor::red(),
-            needle_color: TsColor { alpha: 255, red: 255, green: 102, blue: 0 },
+            needle_color: TsColor {
+                alpha: 255,
+                red: 255,
+                green: 102,
+                blue: 0,
+            },
             value_digits: 0,
             label_digits: 0,
             font_family: String::new(),
@@ -453,7 +522,12 @@ impl Default for IndicatorConfig {
             on_text: "ON".to_string(),
             off_text: "OFF".to_string(),
             on_text_color: TsColor::black(),
-            off_text_color: TsColor { alpha: 255, red: 51, green: 51, blue: 51 },
+            off_text_color: TsColor {
+                alpha: 255,
+                red: 51,
+                green: 51,
+                blue: 51,
+            },
             on_background_color: TsColor::green(),
             off_background_color: TsColor::transparent(),
             on_image_file_name: None,
