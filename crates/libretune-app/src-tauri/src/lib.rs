@@ -2339,6 +2339,19 @@ async fn get_dialog_definition(
 }
 
 #[tauri::command]
+async fn get_indicator_panel(
+    state: tauri::State<'_, AppState>,
+    name: String,
+) -> Result<libretune_core::ini::IndicatorPanel, String> {
+    let def_guard = state.definition.lock().await;
+    let def = def_guard.as_ref().ok_or("Definition not loaded")?;
+    def.indicator_panels
+        .get(&name)
+        .cloned()
+        .ok_or_else(|| format!("IndicatorPanel {} not found", name))
+}
+
+#[tauri::command]
 async fn get_help_topic(
     state: tauri::State<'_, AppState>,
     name: String,
@@ -7211,6 +7224,7 @@ pub fn run() {
             update_table_data,
             get_menu_tree,
             get_dialog_definition,
+            get_indicator_panel,
             // INI / protocol defaults
             get_protocol_defaults,
             get_help_topic,

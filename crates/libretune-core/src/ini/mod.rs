@@ -103,6 +103,30 @@ pub struct EcuDefinition {
 
     /// FrontPage configuration for default dashboard layout
     pub frontpage: Option<FrontPageConfig>,
+
+    /// Indicator panels (groups of boolean indicators)
+    pub indicator_panels: HashMap<String, IndicatorPanel>,
+
+    /// Controller commands
+    pub controller_commands: HashMap<String, ControllerCommand>,
+
+    /// Logger definitions
+    pub logger_definitions: HashMap<String, LoggerDefinition>,
+
+    /// Port editor configurations
+    pub port_editors: HashMap<String, PortEditorConfig>,
+
+    /// Reference tables
+    pub reference_tables: HashMap<String, ReferenceTable>,
+
+    /// FTP browser configurations
+    pub ftp_browsers: HashMap<String, FTPBrowserConfig>,
+
+    /// Datalog views
+    pub datalog_views: HashMap<String, DatalogView>,
+
+    /// Key actions (keyboard shortcuts)
+    pub key_actions: Vec<KeyAction>,
 }
 
 impl EcuDefinition {
@@ -203,6 +227,14 @@ impl Default for EcuDefinition {
             pc_variables: HashMap::new(),
             default_values: HashMap::new(),
             frontpage: None,
+            indicator_panels: HashMap::new(),
+            controller_commands: HashMap::new(),
+            logger_definitions: HashMap::new(),
+            port_editors: HashMap::new(),
+            reference_tables: HashMap::new(),
+            ftp_browsers: HashMap::new(),
+            datalog_views: HashMap::new(),
+            key_actions: Vec::new(),
         }
     }
 }

@@ -424,6 +424,21 @@ function Indicator({ comp, context }: { comp: DialogComponent; context: Record<s
   );
 }
 
+interface IndicatorPanel {
+  name: string;
+  columns: number;
+  visibility_condition?: string;
+  indicators: Array<{
+    expression: string;
+    label_off: string;
+    label_on: string;
+    color_off_fg?: string;
+    color_off_bg?: string;
+    color_on_fg?: string;
+    color_on_bg?: string;
+  }>;
+}
+
 function RecursivePanel({
   name,
   openTable,
@@ -436,36 +451,45 @@ function RecursivePanel({
   onUpdate?: () => void;
 }) {
   const [definition, setDefinition] = useState<DialogDefinition | null>(null);
+  const [indicatorPanel, setIndicatorPanel] = useState<IndicatorPanel | null>(null);
   const [tableInfo, setTableInfo] = useState<TableInfo | null>(null);
   const [curveData, setCurveData] = useState<CurveData | null>(null);
-  const [panelType, setPanelType] = useState<'loading' | 'dialog' | 'table' | 'curve' | 'unknown'>('loading');
+  const [panelType, setPanelType] = useState<'loading' | 'dialog' | 'indicatorPanel' | 'table' | 'curve' | 'unknown'>('loading');
 
   useEffect(() => {
-    // First try as dialog
-    invoke<DialogDefinition>('get_dialog_definition', { name })
-      .then((def) => {
-        setDefinition(def);
-        setPanelType('dialog');
+    // First try as indicatorPanel
+    invoke<IndicatorPanel>('get_indicator_panel', { name })
+      .then((panel) => {
+        setIndicatorPanel(panel);
+        setPanelType('indicatorPanel');
       })
       .catch(() => {
-        // Not a dialog, try as table (lightweight check)
-        invoke<TableInfo>('get_table_info', { tableName: name })
-          .then((info) => {
-            setTableInfo(info);
-            setPanelType('table');
+        // Not an indicatorPanel, try as dialog
+        invoke<DialogDefinition>('get_dialog_definition', { name })
+          .then((def) => {
+            setDefinition(def);
+            setPanelType('dialog');
           })
-          .catch((err) => {
-            console.debug(`Panel '${name}' is not a table:`, err);
-            // Not a table, try as curve
-            invoke<CurveData>('get_curve_data', { curveName: name })
-              .then((data) => {
-                setCurveData(data);
-                setPanelType('curve');
+          .catch(() => {
+            // Not a dialog, try as table (lightweight check)
+            invoke<TableInfo>('get_table_info', { tableName: name })
+              .then((info) => {
+                setTableInfo(info);
+                setPanelType('table');
               })
-              .catch((err2) => {
-                console.debug(`Panel '${name}' is not a curve:`, err2);
-                // Neither dialog nor table nor curve
-                setPanelType('unknown');
+              .catch((err) => {
+                console.debug(`Panel '${name}' is not a table:`, err);
+                // Not a table, try as curve
+                invoke<CurveData>('get_curve_data', { curveName: name })
+                  .then((data) => {
+                    setCurveData(data);
+                    setPanelType('curve');
+                  })
+                  .catch((err2) => {
+                    console.debug(`Panel '${name}' is not a curve:`, err2);
+                    // Neither indicatorPanel nor dialog nor table nor curve
+                    setPanelType('unknown');
+                  });
               });
           });
       });
@@ -497,6 +521,11 @@ function RecursivePanel({
     );
   }
 
+  // Render as indicatorPanel
+  if (panelType === 'indicatorPanel' && indicatorPanel) {
+    return <IndicatorPanelRenderer panel={indicatorPanel} context={context} />;
+  }
+
   // Render as dialog
   if (panelType === 'dialog' && definition) {
     return (
@@ -513,6 +542,70 @@ function RecursivePanel({
 
   // Unknown panel type - show nothing or a placeholder
   return null;
+}
+
+function IndicatorPanelRenderer({
+  panel,
+  context,
+}: {
+  panel: IndicatorPanel;
+  context: Record<string, number>;
+}) {
+  const [indicatorValues, setIndicatorValues] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    // Evaluate all indicator expressions
+    const evaluations = panel.indicators.map((ind) =>
+      invoke<boolean>('evaluate_expression', {
+        expression: ind.expression,
+        context,
+      })
+        .then((value) => ({ expression: ind.expression, value }))
+        .catch(() => ({ expression: ind.expression, value: false }))
+    );
+
+    Promise.all(evaluations).then((results) => {
+      const values: Record<string, boolean> = {};
+      results.forEach(({ expression, value }) => {
+        values[expression] = value;
+      });
+      setIndicatorValues(values);
+    });
+  }, [panel.indicators, context]);
+
+  const columns = panel.columns || 2;
+  const gridStyle: React.CSSProperties = {
+    display: 'grid',
+    gridTemplateColumns: `repeat(${columns}, 1fr)`,
+    gap: '8px',
+  };
+
+  return (
+    <div className="indicator-panel">
+      <div style={gridStyle}>
+        {panel.indicators.map((ind, i) => {
+          const isOn = indicatorValues[ind.expression] || false;
+          const fgColor = isOn ? (ind.color_on_fg || 'red') : (ind.color_off_fg || 'white');
+          const bgColor = isOn ? (ind.color_on_bg || 'black') : (ind.color_off_bg || 'black');
+          
+          return (
+            <div key={i} className="indicator-field">
+              <div
+                className={`indicator-light ${isOn ? 'on' : 'off'}`}
+                style={{
+                  background: isOn ? fgColor : bgColor,
+                  boxShadow: isOn ? `0 0 8px ${fgColor}` : 'none',
+                }}
+              />
+              <span className="indicator-label" style={{ color: fgColor }}>
+                {isOn ? ind.label_on : ind.label_off}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
 
 function DialogFieldWrapper({ 

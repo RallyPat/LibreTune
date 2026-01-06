@@ -837,6 +837,43 @@ pub struct DatalogView {
     pub channels: Vec<String>,
 }
 
+/// Indicator panel definition (group of boolean indicators)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IndicatorPanel {
+    /// Panel name/ID
+    pub name: String,
+    /// Number of columns for layout
+    pub columns: u8,
+    /// Optional visibility condition
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub visibility_condition: Option<String>,
+    /// Indicators within this panel
+    pub indicators: Vec<IndicatorDefinition>,
+}
+
+/// Individual indicator within an indicator panel
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IndicatorDefinition {
+    /// Expression to evaluate (boolean)
+    pub expression: String,
+    /// Label when indicator is off
+    pub label_off: String,
+    /// Label when indicator is on
+    pub label_on: String,
+    /// Optional foreground color when off (default: white)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub color_off_fg: Option<String>,
+    /// Optional background color when off (default: black)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub color_off_bg: Option<String>,
+    /// Optional foreground color when on (default: red)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub color_on_fg: Option<String>,
+    /// Optional background color when on (default: black)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub color_on_bg: Option<String>,
+}
+
 /// Key action (keyboard shortcut) definition
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KeyAction {

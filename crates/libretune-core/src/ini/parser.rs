@@ -10,8 +10,10 @@ use super::{
     output_channels::parse_output_channel_line,
     tables::{CurveDefinition, TableDefinition},
     types::{
-        DatalogEntry, DialogComponent, DialogDefinition, FrontPageConfig, FrontPageIndicator,
-        HelpTopic, Menu, MenuItem, SettingGroup, SettingOption,
+        ControllerCommand, DatalogEntry, DatalogView, DialogComponent, DialogDefinition,
+        FTPBrowserConfig, FrontPageConfig, FrontPageIndicator, HelpTopic, IndicatorDefinition,
+        IndicatorPanel, KeyAction, LoggerDefinition, Menu, MenuItem, PortEditorConfig,
+        ReferenceTable, SettingGroup, SettingOption,
     },
     EcuDefinition, IniError,
 };
@@ -21,6 +23,7 @@ struct ParserState {
     last_offset: u16,
     current_table: Option<String>,
     current_dialog: Option<String>,
+    current_indicator_panel: Option<String>,
     current_curve: Option<String>,
     current_help: Option<String>,
 }
@@ -34,6 +37,7 @@ pub fn parse_ini(content: &str) -> Result<EcuDefinition, IniError> {
         last_offset: 0,
         current_table: None,
         current_dialog: None,
+        current_indicator_panel: None,
         current_curve: None,
         current_help: None,
     };
@@ -164,10 +168,18 @@ pub fn parse_ini(content: &str) -> Result<EcuDefinition, IniError> {
                     key,
                     value,
                     &mut state.current_dialog,
+                    &mut state.current_indicator_panel,
                     &mut state.current_help,
                 ),
                 "SettingContextHelp" => parse_setting_context_help(&mut definition, key, value),
                 "FrontPage" => parse_frontpage_entry(&mut definition, key, value),
+                "ControllerCommands" => parse_controller_command_entry(&mut definition, key, value),
+                "LoggerDefinition" => parse_logger_definition_entry(&mut definition, key, value),
+                "PortEditor" => parse_port_editor_entry(&mut definition, key, value),
+                "ReferenceTables" => parse_reference_table_entry(&mut definition, key, value),
+                "FTPBrowser" => parse_ftp_browser_entry(&mut definition, key, value),
+                "DatalogViews" => parse_datalog_view_entry(&mut definition, key, value),
+                "KeyActions" => parse_key_action_entry(&mut definition, key, value),
                 _ => {
                     if current_section.contains("TableEditor") {
                         parse_table_editor_entry(
@@ -1504,6 +1516,7 @@ fn parse_user_defined_entry(
     key: &str,
     value: &str,
     current_dialog: &mut Option<String>,
+    current_indicator_panel: &mut Option<String>,
     current_help: &mut Option<String>,
 ) {
     let key = key.to_lowercase();
@@ -1546,7 +1559,7 @@ fn parse_user_defined_entry(
                 }
             }
         }
-        "dialog" | "indicatorpanel" => {
+        "dialog" => {
             let parts = split_ini_line(value);
             if !parts.is_empty() {
                 let name = parts[0].to_string();
@@ -1562,6 +1575,33 @@ fn parse_user_defined_entry(
                 };
                 def.dialogs.insert(name.clone(), dialog);
                 *current_dialog = Some(name);
+            }
+        }
+        "indicatorpanel" => {
+            // Format: indicatorPanel = name, columns [, {visibility_condition}]
+            let parts = split_ini_line(value);
+            if parts.len() >= 2 {
+                let name = parts[0].to_string();
+                let columns = parts[1].parse::<u8>().unwrap_or(2);
+                
+                // Check for visibility condition (last part in braces)
+                let visibility_condition = parts
+                    .iter()
+                    .skip(2)
+                    .find(|p| {
+                        let trimmed = p.trim();
+                        trimmed.starts_with('{') && trimmed.ends_with('}')
+                    })
+                    .map(|p| p.trim().trim_matches(|c| c == '{' || c == '}').to_string());
+
+                let panel = IndicatorPanel {
+                    name: name.clone(),
+                    columns,
+                    visibility_condition,
+                    indicators: Vec::new(),
+                };
+                def.indicator_panels.insert(name.clone(), panel);
+                *current_indicator_panel = Some(name);
             }
         }
         "panel" => {
@@ -1668,7 +1708,34 @@ fn parse_user_defined_entry(
             }
         }
         "indicator" => {
-            if let Some(name) = current_dialog {
+            // Check if we're in an indicatorPanel or a dialog
+            if let Some(panel_name) = current_indicator_panel {
+                if let Some(panel) = def.indicator_panels.get_mut(panel_name) {
+                    // Format: indicator = {expression}, "label_off", "label_on" [, color_off_fg, color_off_bg, color_on_fg, color_on_bg]
+                    let parts = split_ini_line(value);
+                    if parts.len() >= 3 {
+                        let expression = parts[0].trim_matches(|c| c == '{' || c == '}').to_string();
+                        let label_off = parts[1].trim_matches('"').to_string();
+                        let label_on = parts[2].trim_matches('"').to_string();
+                        
+                        // Optional colors (parts 3-6)
+                        let color_off_fg = parts.get(3).map(|s| s.trim().to_string());
+                        let color_off_bg = parts.get(4).map(|s| s.trim().to_string());
+                        let color_on_fg = parts.get(5).map(|s| s.trim().to_string());
+                        let color_on_bg = parts.get(6).map(|s| s.trim().to_string());
+
+                        panel.indicators.push(IndicatorDefinition {
+                            expression,
+                            label_off,
+                            label_on,
+                            color_off_fg,
+                            color_off_bg,
+                            color_on_fg,
+                            color_on_bg,
+                        });
+                    }
+                }
+            } else if let Some(name) = current_dialog {
                 if let Some(dialog) = def.dialogs.get_mut(name) {
                     let parts = split_ini_line(value);
                     if parts.len() >= 3 {
@@ -1682,6 +1749,210 @@ fn parse_user_defined_entry(
             }
         }
         _ => {}
+    }
+}
+
+/// Parse a [ControllerCommands] section entry
+/// Format: cmd_name = "Label", "command_string" [, {enable_condition}]
+fn parse_controller_command_entry(def: &mut EcuDefinition, key: &str, value: &str) {
+    let parts = split_ini_line(value);
+    if parts.len() >= 2 {
+        let name = key.to_string();
+        let label = parts[0].trim_matches('"').to_string();
+        let command = parts[1].trim_matches('"').to_string();
+        
+        // Optional enable condition (last part in braces)
+        let enable_condition = parts
+            .iter()
+            .skip(2)
+            .find(|p| {
+                let trimmed = p.trim();
+                trimmed.starts_with('{') && trimmed.ends_with('}')
+            })
+            .map(|p| p.trim().trim_matches(|c| c == '{' || c == '}').to_string());
+
+        def.controller_commands.insert(name.clone(), ControllerCommand {
+            name,
+            label,
+            command,
+            enable_condition,
+        });
+    }
+}
+
+/// Parse a [LoggerDefinition] section entry
+/// Format: logger_name = "Label", sample_rate, channel1, channel2, ... [, {enable_condition}]
+fn parse_logger_definition_entry(def: &mut EcuDefinition, key: &str, value: &str) {
+    let parts = split_ini_line(value);
+    if parts.len() >= 3 {
+        let name = key.to_string();
+        let label = parts[0].trim_matches('"').to_string();
+        let sample_rate = parts[1].parse::<f64>().unwrap_or(100.0);
+        
+        // Channels are all parts between sample_rate and optional condition
+        let mut channels = Vec::new();
+        let mut enable_condition = None;
+        
+        for part in parts.iter().skip(2) {
+            let trimmed = part.trim();
+            if trimmed.starts_with('{') && trimmed.ends_with('}') {
+                enable_condition = Some(trimmed.trim_matches(|c| c == '{' || c == '}').to_string());
+                break;
+            } else {
+                channels.push(trimmed.to_string());
+            }
+        }
+
+        def.logger_definitions.insert(name.clone(), LoggerDefinition {
+            name,
+            label,
+            sample_rate,
+            channels,
+            enable_condition,
+        });
+    }
+}
+
+/// Parse a [PortEditor] section entry
+/// Format: port_name = "Label" [, {enable_condition}]
+fn parse_port_editor_entry(def: &mut EcuDefinition, key: &str, value: &str) {
+    let parts = split_ini_line(value);
+    if !parts.is_empty() {
+        let name = key.to_string();
+        let label = parts[0].trim_matches('"').to_string();
+        
+        // Optional enable condition (last part in braces)
+        let enable_condition = parts
+            .iter()
+            .skip(1)
+            .find(|p| {
+                let trimmed = p.trim();
+                trimmed.starts_with('{') && trimmed.ends_with('}')
+            })
+            .map(|p| p.trim().trim_matches(|c| c == '{' || c == '}').to_string());
+
+        def.port_editors.insert(name.clone(), PortEditorConfig {
+            name,
+            label,
+            enable_condition,
+        });
+    }
+}
+
+/// Parse a [ReferenceTables] section entry
+/// Format: ref_name = "Label", table_name [, {enable_condition}]
+fn parse_reference_table_entry(def: &mut EcuDefinition, key: &str, value: &str) {
+    let parts = split_ini_line(value);
+    if parts.len() >= 2 {
+        let name = key.to_string();
+        let label = parts[0].trim_matches('"').to_string();
+        let table_name = parts[1].trim().to_string();
+        
+        // Optional enable condition (last part in braces)
+        let enable_condition = parts
+            .iter()
+            .skip(2)
+            .find(|p| {
+                let trimmed = p.trim();
+                trimmed.starts_with('{') && trimmed.ends_with('}')
+            })
+            .map(|p| p.trim().trim_matches(|c| c == '{' || c == '}').to_string());
+
+        def.reference_tables.insert(name.clone(), ReferenceTable {
+            name,
+            label,
+            table_name,
+            enable_condition,
+        });
+    }
+}
+
+/// Parse a [FTPBrowser] section entry
+/// Format: browser_name = "Label", server, port [, {enable_condition}]
+fn parse_ftp_browser_entry(def: &mut EcuDefinition, key: &str, value: &str) {
+    let parts = split_ini_line(value);
+    if parts.len() >= 3 {
+        let name = key.to_string();
+        let label = parts[0].trim_matches('"').to_string();
+        let server = parts[1].trim().to_string();
+        let port = parts[2].parse::<u16>().unwrap_or(21);
+        
+        // Optional enable condition (last part in braces)
+        let enable_condition = parts
+            .iter()
+            .skip(3)
+            .find(|p| {
+                let trimmed = p.trim();
+                trimmed.starts_with('{') && trimmed.ends_with('}')
+            })
+            .map(|p| p.trim().trim_matches(|c| c == '{' || c == '}').to_string());
+
+        def.ftp_browsers.insert(name.clone(), FTPBrowserConfig {
+            name,
+            label,
+            server,
+            port,
+            enable_condition,
+        });
+    }
+}
+
+/// Parse a [DatalogViews] section entry
+/// Format: view_name = "Label", channel1, channel2, ...
+fn parse_datalog_view_entry(def: &mut EcuDefinition, key: &str, value: &str) {
+    let parts = split_ini_line(value);
+    if parts.len() >= 2 {
+        let name = key.to_string();
+        let label = parts[0].trim_matches('"').to_string();
+        let channels: Vec<String> = parts.iter().skip(1).map(|s| s.trim().to_string()).collect();
+
+        def.datalog_views.insert(name.clone(), DatalogView {
+            name,
+            label,
+            channels,
+        });
+    }
+}
+
+/// Parse a [KeyActions] section entry
+/// Format: key = action, "Label" [, {enable_condition}]
+/// Or: showPanel = key, panel_name
+fn parse_key_action_entry(def: &mut EcuDefinition, key: &str, value: &str) {
+    let parts = split_ini_line(value);
+    if key.eq_ignore_ascii_case("showPanel") && parts.len() >= 2 {
+        // Special case: showPanel = key, panel_name
+        let key_combo = parts[0].trim().to_string();
+        let action = format!("showPanel:{}", parts[1].trim());
+        let label = format!("Show {}", parts[1].trim());
+        
+        def.key_actions.push(KeyAction {
+            key: key_combo,
+            action,
+            label,
+            enable_condition: None,
+        });
+    } else if parts.len() >= 2 {
+        // Format: key = action, "Label" [, {enable_condition}]
+        let key_combo = key.to_string();
+        let action = parts[0].trim().to_string();
+        let label = parts[1].trim_matches('"').to_string();
+        
+        // Optional enable condition (last part in braces)
+        let enable_condition = parts
+            .iter()
+            .skip(2)
+            .find(|p| {
+                let trimmed = p.trim();
+                trimmed.starts_with('{') && trimmed.ends_with('}')
+            })
+            .map(|p| p.trim().trim_matches(|c| c == '{' || c == '}').to_string());
+
+        def.key_actions.push(KeyAction {
+            key: key_combo,
+            action,
+            label,
+            enable_condition,
+        });
     }
 }
 
