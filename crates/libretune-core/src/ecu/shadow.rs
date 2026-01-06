@@ -20,24 +20,24 @@ impl ShadowMemory {
             original: Vec::new(),
         }
     }
-    
+
     /// Mark a range as dirty
     pub fn mark_dirty(&mut self, page: u8, offset: u16, length: u16) {
         for i in 0..length {
             self.dirty.insert((page, offset + i));
         }
     }
-    
+
     /// Check if a position is dirty
     pub fn is_dirty(&self, page: u8, offset: u16) -> bool {
         self.dirty.contains(&(page, offset))
     }
-    
+
     /// Check if any changes are pending
     pub fn has_changes(&self) -> bool {
         !self.dirty.is_empty()
     }
-    
+
     /// Get all dirty pages
     pub fn dirty_pages(&self) -> Vec<u8> {
         let mut pages: Vec<u8> = self.dirty.iter().map(|(p, _)| *p).collect();
@@ -45,12 +45,12 @@ impl ShadowMemory {
         pages.dedup();
         pages
     }
-    
+
     /// Clear all dirty flags
     pub fn clear(&mut self) {
         self.dirty.clear();
     }
-    
+
     /// Count of dirty bytes
     pub fn dirty_count(&self) -> usize {
         self.dirty.len()
@@ -66,20 +66,20 @@ impl Default for ShadowMemory {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_dirty_tracking() {
         let mut shadow = ShadowMemory::new();
-        
+
         assert!(!shadow.has_changes());
-        
+
         shadow.mark_dirty(0, 10, 4);
-        
+
         assert!(shadow.has_changes());
         assert!(shadow.is_dirty(0, 10));
         assert!(shadow.is_dirty(0, 13));
         assert!(!shadow.is_dirty(0, 14));
-        
+
         shadow.clear();
         assert!(!shadow.has_changes());
     }

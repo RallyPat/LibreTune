@@ -9,34 +9,34 @@ use serde::{Deserialize, Serialize};
 pub struct GaugeConfig {
     /// Gauge name/identifier
     pub name: String,
-    
+
     /// Output channel to display
     pub channel: String,
-    
+
     /// Display title
     pub title: String,
-    
+
     /// Unit label
     pub units: String,
-    
+
     /// Low warning threshold
     pub low_warning: f64,
-    
+
     /// Low danger threshold  
     pub low_danger: f64,
-    
+
     /// High warning threshold
     pub high_warning: f64,
-    
+
     /// High danger threshold
     pub high_danger: f64,
-    
+
     /// Minimum display value
     pub lo: f64,
-    
+
     /// Maximum display value
     pub hi: f64,
-    
+
     /// Decimal digits for display
     pub digits: u8,
 }
@@ -58,18 +58,18 @@ impl GaugeConfig {
             digits: 0,
         }
     }
-    
+
     /// Check if a value is in the danger zone
     pub fn is_danger(&self, value: f64) -> bool {
         value <= self.low_danger || value >= self.high_danger
     }
-    
+
     /// Check if a value is in the warning zone
     pub fn is_warning(&self, value: f64) -> bool {
-        (value <= self.low_warning && value > self.low_danger) ||
-        (value >= self.high_warning && value < self.high_danger)
+        (value <= self.low_warning && value > self.low_danger)
+            || (value >= self.high_warning && value < self.high_danger)
     }
-    
+
     /// Check if a value is in the normal range
     pub fn is_normal(&self, value: f64) -> bool {
         value > self.low_warning && value < self.high_warning
@@ -83,17 +83,17 @@ impl Default for GaugeConfig {
 }
 
 /// Parse a gauge configuration line
-/// 
+///
 /// Format: name = channel, title, units, lo, hi, loD, loW, hiW, hiD, digits
 pub fn parse_gauge_line(name: &str, value: &str) -> Option<GaugeConfig> {
     let parts: Vec<&str> = value.split(',').map(|s| s.trim()).collect();
-    
+
     if parts.is_empty() {
         return None;
     }
-    
+
     let mut gauge = GaugeConfig::new(name, parts[0].trim_matches('"'));
-    
+
     if parts.len() > 1 {
         gauge.title = parts[1].trim_matches('"').to_string();
     }
@@ -121,14 +121,14 @@ pub fn parse_gauge_line(name: &str, value: &str) -> Option<GaugeConfig> {
     if parts.len() > 9 {
         gauge.digits = parts[9].parse().unwrap_or(0);
     }
-    
+
     Some(gauge)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_gauge_zones() {
         let mut gauge = GaugeConfig::new("rpm", "rpm");
@@ -136,17 +136,20 @@ mod tests {
         gauge.low_warning = 800.0;
         gauge.high_warning = 6500.0;
         gauge.high_danger = 7000.0;
-        
+
         assert!(gauge.is_danger(400.0));
         assert!(gauge.is_danger(7500.0));
         assert!(gauge.is_warning(600.0));
         assert!(gauge.is_warning(6800.0));
         assert!(gauge.is_normal(3000.0));
     }
-    
+
     #[test]
     fn test_parse_gauge_line() {
-        let gauge = parse_gauge_line("rpmGauge", "rpm, \"Engine Speed\", \"RPM\", 0, 8000, 300, 600, 6500, 7000, 0");
+        let gauge = parse_gauge_line(
+            "rpmGauge",
+            "rpm, \"Engine Speed\", \"RPM\", 0, 8000, 300, 600, 6500, 7000, 0",
+        );
         assert!(gauge.is_some());
         let gauge = gauge.unwrap();
         assert_eq!(gauge.channel, "rpm");

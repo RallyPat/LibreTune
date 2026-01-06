@@ -2,10 +2,10 @@
 //!
 //! Handles loading, saving, and comparing tune files.
 
-mod file;
-mod diff;
 mod cache;
+mod diff;
+mod file;
 
-pub use file::{TuneFile, TuneValue};
+pub use cache::{PageState, TuneCache};
 pub use diff::TuneDiff;
-pub use cache::{TuneCache, PageState};
+pub use file::{TuneFile, TuneValue};

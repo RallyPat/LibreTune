@@ -1,4 +1,4 @@
-use libretune_core::autotune::{AutoTuneState, VEDataPoint, AutoTuneFilters};
+use libretune_core::autotune::{AutoTuneFilters, AutoTuneState, VEDataPoint};
 
 #[test]
 fn heatmap_entries_accumulate_hits_and_compute_change() {
@@ -12,13 +12,38 @@ fn heatmap_entries_accumulate_hits_and_compute_change() {
 
     // Simulate a few data points in same cell with different AFRs leading to change
     let pts = vec![
-        VEDataPoint { rpm: 1000.0, map: 10.0, afr: 14.7, ve: 50.0, clt: 170.0 },
-        VEDataPoint { rpm: 1000.0, map: 10.0, afr: 13.0, ve: 50.0, clt: 170.0 },
-        VEDataPoint { rpm: 1000.0, map: 10.0, afr: 12.0, ve: 50.0, clt: 170.0 },
+        VEDataPoint {
+            rpm: 1000.0,
+            map: 10.0,
+            afr: 14.7,
+            ve: 50.0,
+            clt: 170.0,
+        },
+        VEDataPoint {
+            rpm: 1000.0,
+            map: 10.0,
+            afr: 13.0,
+            ve: 50.0,
+            clt: 170.0,
+        },
+        VEDataPoint {
+            rpm: 1000.0,
+            map: 10.0,
+            afr: 12.0,
+            ve: 50.0,
+            clt: 170.0,
+        },
     ];
 
     for p in pts.into_iter() {
-        state.add_data_point(p, &table_x, &table_y, &Default::default(), &filters, &Default::default());
+        state.add_data_point(
+            p,
+            &table_x,
+            &table_y,
+            &Default::default(),
+            &filters,
+            &Default::default(),
+        );
     }
 
     let recs = state.get_recommendations();

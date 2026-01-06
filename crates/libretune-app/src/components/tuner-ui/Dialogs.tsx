@@ -426,13 +426,26 @@ export function NewTuneDialog({ isOpen, onClose, onCreated }: NewTuneDialogProps
 // Settings Dialog
 // =============================================================================
 
+interface CurrentProject {
+  name: string;
+  path: string;
+  signature: string;
+  has_tune: boolean;
+  tune_modified: boolean;
+  connection: {
+    port: string | null;
+    baud_rate: number;
+  };
+}
+
 interface SettingsDialogProps extends DialogProps {
   theme: string;
   onThemeChange: (theme: string) => void;
   onSettingsChange?: (settings: { units?: string; autoBurnOnClose?: boolean; demoMode?: boolean; indicatorColumnCount?: string; indicatorFillEmpty?: boolean; indicatorTextFit?: string }) => void;
+  currentProject?: CurrentProject | null;
 }
 
-export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettingsChange }: SettingsDialogProps) {
+export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettingsChange, currentProject }: SettingsDialogProps) {
   const [localTheme, setLocalTheme] = useState(theme);
   const [localUnits, setLocalUnits] = useState('metric');
   const [autoBurnOnClose, setAutoBurnOnClose] = useState(false);
@@ -441,6 +454,8 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
   const [indicatorColumnCount, setIndicatorColumnCount] = useState('auto');
   const [indicatorFillEmpty, setIndicatorFillEmpty] = useState(false);
   const [indicatorTextFit, setIndicatorTextFit] = useState('scale');
+  const [currentIniPath, setCurrentIniPath] = useState<string | null>(null);
+  const [switchingIni, setSwitchingIni] = useState(false);
 
   useEffect(() => {
     setLocalTheme(theme);
@@ -452,6 +467,7 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
         setIndicatorColumnCount(settings.indicator_column_count || 'auto');
         setIndicatorFillEmpty(settings.indicator_fill_empty || false);
         setIndicatorTextFit(settings.indicator_text_fit || 'scale');
+        setCurrentIniPath(settings.last_ini_path || null);
       }).catch(console.error);
 
       // Load demo mode state (runtime flag)
@@ -472,6 +488,47 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
       setDemoLoading(false);
     }
   }, [onSettingsChange]);
+
+  const handleSwitchIni = useCallback(async () => {
+    if (!currentProject) {
+      alert('No project is currently open');
+      return;
+    }
+
+    setSwitchingIni(true);
+    try {
+      const selected = await open({
+        title: 'Select ECU Definition File',
+        multiple: false,
+        filters: [
+          { name: 'INI Files', extensions: ['ini'] },
+          { name: 'All Files', extensions: ['*'] },
+        ],
+      });
+
+      if (selected && typeof selected === 'string') {
+        // Update the project's INI file
+        await invoke('update_project_ini', { 
+          iniPath: selected, 
+          forceResync: false 
+        });
+        
+        setCurrentIniPath(selected);
+        
+        // Show success message with helpful info
+        const message = 'ECU definition updated successfully!\n\n' +
+          'The project tune has been re-applied with the new definition. ' +
+          'If tables appear empty, you may need to load a matching MSQ file ' +
+          'that was created with this INI definition.';
+        alert(message);
+      }
+    } catch (e) {
+      console.error('Failed to switch INI:', e);
+      alert(`Failed to switch INI file: ${e}`);
+    } finally {
+      setSwitchingIni(false);
+    }
+  }, [currentProject]);
 
   const handleApply = useCallback(async () => {
     onThemeChange(localTheme);
@@ -551,6 +608,34 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
             </label>
             <span className="dialog-form-note">Simulate ECU data for testing (runtime-only)</span>
           </div>
+
+          {currentProject && (
+            <>
+              <h3 style={{ marginTop: '1.5rem', marginBottom: '0.5rem' }}>Project Settings</h3>
+              
+              <div className="dialog-form-group">
+                <label>ECU Definition (INI File)</label>
+                <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                  <input
+                    type="text"
+                    value={currentIniPath ? currentIniPath.split(/[\\/]/).pop() || currentIniPath : 'Not set'}
+                    readOnly
+                    style={{ flex: 1, padding: '0.5rem', fontSize: '0.9rem', backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border-color)', borderRadius: '4px' }}
+                  />
+                  <button
+                    onClick={handleSwitchIni}
+                    disabled={switchingIni}
+                    style={{ padding: '0.5rem 1rem', fontSize: '0.9rem', whiteSpace: 'nowrap' }}
+                  >
+                    {switchingIni ? 'Switching...' : 'Switch INI...'}
+                  </button>
+                </div>
+                <span className="dialog-form-note">
+                  Switch to a different ECU definition file. The project tune will be re-applied automatically.
+                </span>
+              </div>
+            </>
+          )}
 
           <h3 style={{ marginTop: '1.5rem', marginBottom: '0.5rem' }}>Indicator Panel</h3>
           

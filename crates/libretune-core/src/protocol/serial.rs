@@ -3,30 +3,31 @@
 //! Provides low-level serial port access for ECU communication.
 
 use serialport::{SerialPort, SerialPortInfo, SerialPortType};
-use std::time::Duration;
-use std::fs;
 use std::collections::HashMap;
+#[cfg(target_os = "linux")]
+use std::fs;
+use std::time::Duration;
 
-use super::{ProtocolError, DEFAULT_BAUD_RATE, DEFAULT_TIMEOUT_MS};
+use super::{ProtocolError, DEFAULT_BAUD_RATE};
 
 /// Information about an available serial port
 #[derive(Debug, Clone)]
 pub struct PortInfo {
     /// Port name (e.g., "/dev/ttyUSB0" or "COM3")
     pub name: String,
-    
+
     /// USB vendor ID (if USB device)
     pub vid: Option<u16>,
-    
+
     /// USB product ID (if USB device)
     pub pid: Option<u16>,
-    
+
     /// Manufacturer name (if available)
     pub manufacturer: Option<String>,
-    
+
     /// Product name (if available)
     pub product: Option<String>,
-    
+
     /// Serial number (if available)
     pub serial_number: Option<String>,
 }
@@ -43,7 +44,7 @@ impl From<SerialPortInfo> for PortInfo {
             ),
             _ => (None, None, None, None, None),
         };
-        
+
         Self {
             name: info.port_name,
             vid,
@@ -76,7 +77,10 @@ fn port_sort_key(name: &str) -> (u8, usize, String) {
 pub fn list_ports() -> Vec<PortInfo> {
     // Collect from serialport API
     let mut map: HashMap<String, PortInfo> = HashMap::new();
-    for info in serialport::available_ports().unwrap_or_default().into_iter() {
+    for info in serialport::available_ports()
+        .unwrap_or_default()
+        .into_iter()
+    {
         let p = PortInfo::from(info);
         map.entry(p.name.clone()).or_insert(p);
     }
@@ -108,12 +112,9 @@ pub fn list_ports() -> Vec<PortInfo> {
 }
 
 /// Open a serial port with default settings
-pub fn open_port(
-    name: &str,
-    baud_rate: Option<u32>,
-) -> Result<Box<dyn SerialPort>, ProtocolError> {
+pub fn open_port(name: &str, baud_rate: Option<u32>) -> Result<Box<dyn SerialPort>, ProtocolError> {
     let baud = baud_rate.unwrap_or(DEFAULT_BAUD_RATE);
-    
+
     // Use short timeout (100ms) for responsive non-blocking reads
     // This matches the behavior that works in standalone test
     serialport::new(name, baud)
@@ -133,23 +134,29 @@ pub fn configure_port(port: &mut dyn SerialPort) -> Result<(), ProtocolError> {
         .map_err(|e| ProtocolError::SerialError(e.to_string()))?;
     port.set_flow_control(serialport::FlowControl::None)
         .map_err(|e| ProtocolError::SerialError(e.to_string()))?;
-    
+
     // Set DTR high to maintain connection and prevent Arduino-based ECU reset
     // Opening a serial port typically toggles DTR which triggers bootloader reset
     // Keeping DTR asserted prevents this and maintains stable connection
     if let Err(e) = port.write_data_terminal_ready(true) {
-        eprintln!("[DEBUG] configure_port: failed to set DTR high: {} (continuing)", e);
+        eprintln!(
+            "[DEBUG] configure_port: failed to set DTR high: {} (continuing)",
+            e
+        );
     } else {
         eprintln!("[DEBUG] configure_port: DTR set high");
     }
-    
+
     // Set RTS high for proper flow control signaling
     if let Err(e) = port.write_request_to_send(true) {
-        eprintln!("[DEBUG] configure_port: failed to set RTS high: {} (continuing)", e);
+        eprintln!(
+            "[DEBUG] configure_port: failed to set RTS high: {} (continuing)",
+            e
+        );
     } else {
         eprintln!("[DEBUG] configure_port: RTS set high");
     }
-    
+
     Ok(())
 }
 
@@ -162,7 +169,7 @@ pub fn clear_buffers(port: &mut dyn SerialPort) -> Result<(), ProtocolError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_list_ports() {
         // This test just ensures the function doesn't panic

@@ -2,36 +2,36 @@
 //!
 //! Parses the [OutputChannels] section which defines real-time data from the ECU.
 
-use serde::{Deserialize, Serialize};
 use super::types::DataType;
+use serde::{Deserialize, Serialize};
 
 /// An output channel (real-time data) definition
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OutputChannel {
     /// Channel name/identifier
     pub name: String,
-    
+
     /// Human-readable label
     pub label: Option<String>,
-    
+
     /// Data type
     pub data_type: DataType,
-    
+
     /// Byte offset in the output data block
     pub offset: u16,
-    
+
     /// For bits type: bit position
     pub bit_position: Option<u8>,
-    
+
     /// Unit of measurement
     pub units: String,
-    
+
     /// Scale factor
     pub scale: f64,
-    
+
     /// Translation offset
     pub translate: f64,
-    
+
     /// Expression for computed channels
     pub expression: Option<String>,
 }
@@ -51,17 +51,17 @@ impl OutputChannel {
             expression: None,
         }
     }
-    
+
     /// Convert a raw value to display value
     pub fn raw_to_display(&self, raw: f64) -> f64 {
         raw * self.scale + self.translate
     }
-    
+
     /// Check if this is a computed channel (has expression)
     pub fn is_computed(&self) -> bool {
         self.expression.is_some()
     }
-    
+
     /// Size in bytes for this channel (0 for computed)
     pub fn size_bytes(&self) -> usize {
         if self.is_computed() || self.data_type == DataType::Bits {
@@ -78,8 +78,10 @@ impl OutputChannel {
             return None;
         }
 
-        let raw = self.data_type.read_from_bytes(data, self.offset as usize, endian)?;
-        
+        let raw = self
+            .data_type
+            .read_from_bytes(data, self.offset as usize, endian)?;
+
         if self.data_type == DataType::Bits {
             if let Some(pos) = self.bit_position {
                 // Prevent shift overflow - if bit position >= 8, treat as invalid
@@ -93,7 +95,7 @@ impl OutputChannel {
                 }
             }
         }
-        
+
         Some(self.raw_to_display(raw))
     }
 }
@@ -115,22 +117,27 @@ impl Default for OutputChannel {
 }
 
 /// Parse an output channel definition line
-/// 
+///
 /// Format: name = type, offset, units, scale, translate
 /// Format (Modern): name = scalar, type, offset, units, scale, translate
 /// Format (Bits): name = bits, type, offset, [start:end]
 /// Or: name = { expression }, units
 pub fn parse_output_channel_line(name: &str, value: &str) -> Option<OutputChannel> {
     let value = value.trim();
-    
+
     // Check for computed channel (expression in braces)
     if value.starts_with('{') {
         // Computed channel
         if let Some(end_brace) = value.find('}') {
             let expression = value[1..end_brace].trim().to_string();
             let rest = value[end_brace + 1..].trim().trim_start_matches(',').trim();
-            let units = rest.split(',').next().unwrap_or("").trim().trim_matches('"');
-            
+            let units = rest
+                .split(',')
+                .next()
+                .unwrap_or("")
+                .trim()
+                .trim_matches('"');
+
             return Some(OutputChannel {
                 name: name.to_string(),
                 label: None,
@@ -145,10 +152,10 @@ pub fn parse_output_channel_line(name: &str, value: &str) -> Option<OutputChanne
         }
         return None;
     }
-    
+
     // Regular channel
     let mut parts: Vec<&str> = value.split(',').map(|s| s.trim()).collect();
-    
+
     if parts.len() < 2 {
         return None;
     }
@@ -157,7 +164,7 @@ pub fn parse_output_channel_line(name: &str, value: &str) -> Option<OutputChanne
     let first = parts[0].to_lowercase();
     let is_bits_prefix = first == "bits";
     let is_scalar_prefix = first == "scalar";
-    
+
     if is_bits_prefix || is_scalar_prefix {
         parts.remove(0);
     }
@@ -165,13 +172,13 @@ pub fn parse_output_channel_line(name: &str, value: &str) -> Option<OutputChanne
     if parts.len() < 2 {
         return None;
     }
-    
+
     let data_type_str = parts[0];
     let data_type = DataType::from_ini_str(data_type_str)?;
     let offset: u16 = parts[1].parse().ok()?;
-    
+
     let mut channel = OutputChannel::new(name, data_type, offset);
-    
+
     if is_bits_prefix {
         channel.data_type = DataType::Bits;
         if parts.len() > 2 {
@@ -200,14 +207,14 @@ pub fn parse_output_channel_line(name: &str, value: &str) -> Option<OutputChanne
             channel.translate = parts[4].parse().unwrap_or(0.0);
         }
     }
-    
+
     Some(channel)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_parse_simple_channel() {
         let ch = parse_output_channel_line("rpm", "U16, 0, \"RPM\", 1.0, 0.0");
@@ -218,7 +225,7 @@ mod tests {
         assert_eq!(ch.offset, 0);
         assert_eq!(ch.units, "RPM");
     }
-    
+
     #[test]
     fn test_parse_computed_channel() {
         let ch = parse_output_channel_line("afr", "{ ego1 / 10.0 }, \"AFR\"");

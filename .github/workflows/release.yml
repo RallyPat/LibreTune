@@ -1,0 +1,190 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'  # Trigger on version tags like v1.0.0
+  workflow_dispatch:  # Allow manual triggering
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  create-release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    outputs:
+      tag_name: ${{ steps.get_version.outputs.VERSION || 'manual' }}
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Get version from tag
+        id: get_version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+
+  build-linux:
+    name: Build Linux
+    needs: create-release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libgtk-3-dev \
+            libudev-dev
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: crates/libretune-app/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: crates/libretune-app
+        run: npm ci
+
+      - name: Build Tauri app (Linux)
+        working-directory: crates/libretune-app
+        run: npx tauri build --target x86_64-unknown-linux-gnu
+
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-x86_64
+          path: crates/libretune-app/src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/**
+          retention-days: 30
+
+  build-windows:
+    name: Build Windows
+    needs: create-release
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: crates/libretune-app/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: crates/libretune-app
+        run: npm ci
+
+      - name: Build Tauri app (Windows)
+        working-directory: crates/libretune-app
+        run: npx tauri build --target x86_64-pc-windows-msvc
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-x86_64
+          path: crates/libretune-app/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/**
+          retention-days: 30
+
+  build-macos:
+    name: Build macOS
+    needs: create-release
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: crates/libretune-app/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: crates/libretune-app
+        run: npm ci
+
+      - name: Build Tauri app (macOS ARM)
+        working-directory: crates/libretune-app
+        run: npx tauri build --target aarch64-apple-darwin
+
+      - name: Build Tauri app (macOS Intel)
+        working-directory: crates/libretune-app
+        run: npx tauri build --target x86_64-apple-darwin
+
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-universal
+          path: |
+            crates/libretune-app/src-tauri/target/aarch64-apple-darwin/release/bundle/**
+            crates/libretune-app/src-tauri/target/x86_64-apple-darwin/release/bundle/**
+          retention-days: 30
+
+  upload-release:
+    name: Upload Release Assets
+    needs: [create-release, build-linux, build-windows, build-macos]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: '*'
+          merge-multiple: false
+
+      - name: Get tag name
+        id: tag
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          else
+            echo "tag=manual-$(date +%Y%m%d-%H%M%S)" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create Release (only for tags)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: Release ${{ steps.tag.outputs.tag }}
+          files: |
+            artifacts/linux-x86_64/**/*
+            artifacts/windows-x86_64/**/*
+            artifacts/macos-universal/**/*
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Upload artifacts (manual build)
+        if: "!startsWith(github.ref, 'refs/tags/')"
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-artifacts
+          path: artifacts/**
+          retention-days: 7

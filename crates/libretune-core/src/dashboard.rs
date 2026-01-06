@@ -3,7 +3,7 @@
 //! Dashboard persistence and configuration.
 //! Supports saving/loading dashboard layouts with gauge configurations.
 
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 pub use std::collections::HashMap;
 
@@ -49,7 +49,7 @@ pub struct GaugeConfig {
     pub trim_color: String,
     pub show_history: bool,
     pub show_min_max: bool,
-    
+
     // Warning light specific fields
     /// Expression that evaluates to true when light should be on (e.g., "afr < 12")
     #[serde(skip_serializing_if = "Option::is_none")]

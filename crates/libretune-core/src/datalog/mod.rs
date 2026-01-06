@@ -2,13 +2,13 @@
 //!
 //! Records and plays back ECU real-time data.
 
-mod recorder;
 mod format;
 mod playback;
+mod recorder;
 
-pub use recorder::DataLogger;
 pub use format::LogFormat;
 pub use playback::LogPlayer;
+pub use recorder::DataLogger;
 
 use serde::{Deserialize, Serialize};
 use std::time::Duration;

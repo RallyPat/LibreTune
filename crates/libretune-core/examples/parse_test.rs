@@ -19,14 +19,16 @@ fn main() {
             println!("Constants: {}", def.constants.len());
             println!("Tables: {}", def.tables.len());
             println!("Gauges: {}", def.gauges.len());
-            
+
             println!("\nTables:");
             let mut table_names: Vec<_> = def.tables.keys().collect();
             table_names.sort();
             for name in table_names.iter().take(5) {
                 let tbl = &def.tables[*name];
-                println!("  - {}: title=\"{}\", map={}, x_bins={}, y_bins={:?}", 
-                    name, tbl.title, tbl.map, tbl.x_bins, tbl.y_bins);
+                println!(
+                    "  - {}: title=\"{}\", map={}, x_bins={}, y_bins={:?}",
+                    name, tbl.title, tbl.map, tbl.x_bins, tbl.y_bins
+                );
             }
 
             // Print a few channels as a sample

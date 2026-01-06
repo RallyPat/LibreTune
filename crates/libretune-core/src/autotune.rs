@@ -8,7 +8,7 @@
 //! - Cell locking functionality
 //! - Reference tables (Lambda Delay, AFR Target)
 
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// A single cell recommendation in the VE table
@@ -92,21 +92,11 @@ pub struct AutoTuneReferenceTables {
 }
 
 /// VE Analyze runtime state
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct AutoTuneState {
     pub is_running: bool,
     pub locked_cells: Vec<(usize, usize)>,
     pub recommendations: HashMap<(usize, usize), AutoTuneRecommendation>,
-}
-
-impl Default for AutoTuneState {
-    fn default() -> Self {
-        Self {
-            is_running: false,
-            locked_cells: Vec::new(),
-            recommendations: HashMap::new(),
-        }
-    }
 }
 
 /// Data point from ECU for VE analysis
@@ -123,24 +113,24 @@ impl AutoTuneState {
     pub fn new() -> Self {
         Self::default()
     }
-    
+
     pub fn start(&mut self) {
         self.is_running = true;
         self.recommendations.clear();
     }
-    
+
     pub fn stop(&mut self) {
         self.is_running = false;
     }
-    
+
     pub fn is_cell_locked(&self, x: usize, y: usize) -> bool {
         self.locked_cells.contains(&(x, y))
     }
-    
+
     pub fn lock_cells(&mut self, cells: Vec<(usize, usize)>) {
         self.locked_cells.extend(cells);
     }
-    
+
     pub fn unlock_cells(&mut self, cells: Vec<(usize, usize)>) {
         for cell in cells {
             if let Some(pos) = self.locked_cells.iter().position(|c| c == &cell) {
@@ -148,38 +138,45 @@ impl AutoTuneState {
             }
         }
     }
-    
-    pub fn add_data_point(&mut self, point: VEDataPoint, 
-                         table_x_bins: &[f64], table_y_bins: &[f64],
-                         _settings: &AutoTuneSettings, filters: &AutoTuneFilters,
-                         _authority: &AutoTuneAuthorityLimits) {
+
+    pub fn add_data_point(
+        &mut self,
+        point: VEDataPoint,
+        table_x_bins: &[f64],
+        table_y_bins: &[f64],
+        _settings: &AutoTuneSettings,
+        filters: &AutoTuneFilters,
+        _authority: &AutoTuneAuthorityLimits,
+    ) {
         if !self.is_running {
             return;
         }
-        
+
         if !self.passes_filters(&point, filters) {
             return;
         }
-        
+
         let x_idx = self.find_bin_index(point.rpm, table_x_bins);
         let y_idx = self.find_bin_index(point.map, table_y_bins);
-        
+
         if x_idx.is_none() || y_idx.is_none() {
             return;
         }
-        
+
         let cell_x_idx = x_idx.unwrap();
         let cell_y_idx = y_idx.unwrap();
-        
+
         if self.is_cell_locked(cell_x_idx, cell_y_idx) {
             return;
         }
-        
+
         // Calculate required VE before borrowing recommendations
         let required_ve = self.calculate_required_ve(point.ve, point.afr);
-        
-        let current_recs = self.recommendations.entry((cell_x_idx, cell_y_idx)).or_insert_with(|| {
-            AutoTuneRecommendation {
+
+        let current_recs = self
+            .recommendations
+            .entry((cell_x_idx, cell_y_idx))
+            .or_insert_with(|| AutoTuneRecommendation {
                 cell_x: cell_x_idx,
                 cell_y: cell_y_idx,
                 beginning_value: point.ve,
@@ -188,43 +185,41 @@ impl AutoTuneState {
                 hit_weighting: 0.0,
                 target_afr: point.afr,
                 hit_percentage: 0.0,
-            }
-        });
-        
+            });
+
         current_recs.hit_count += 1;
-        
+
         let _delta = required_ve - current_recs.beginning_value;
-        
+
         current_recs.recommended_value = required_ve;
-        
+
         let hit_weight = 1.0;
         current_recs.hit_weighting += hit_weight;
         current_recs.hit_percentage = 100.0;
     }
-    
+
     fn find_bin_index(&self, value: f64, bins: &[f64]) -> Option<usize> {
-        bins.iter().enumerate().find(|&(_, bin)| {
-            (bin - value).abs() < 0.1
-        }).map(|(i, _)| i)
+        bins.iter()
+            .enumerate()
+            .find(|&(_, bin)| (bin - value).abs() < 0.1)
+            .map(|(i, _)| i)
     }
-    
+
     fn passes_filters(&self, point: &VEDataPoint, filters: &AutoTuneFilters) -> bool {
-        point.rpm >= filters.min_rpm
-            && point.rpm <= filters.max_rpm
-            && point.clt >= filters.min_clt
+        point.rpm >= filters.min_rpm && point.rpm <= filters.max_rpm && point.clt >= filters.min_clt
     }
-    
+
     fn calculate_required_ve(&self, current_ve: f64, actual_afr: f64) -> f64 {
         if actual_afr < 0.1 {
             return current_ve;
         }
-        
+
         let stoich = 14.7;
         let afr_ratio = actual_afr / stoich;
-        
+
         current_ve * afr_ratio
     }
-    
+
     pub fn get_recommendations(&self) -> Vec<AutoTuneRecommendation> {
         self.recommendations.values().cloned().collect()
     }

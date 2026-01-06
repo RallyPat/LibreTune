@@ -53,12 +53,16 @@ impl IniSource {
     /// Get the GitHub API URL for searching this source
     pub fn github_api_url(&self) -> Option<&'static str> {
         match self {
-            IniSource::Speeduino => Some("https://api.github.com/repos/noisymime/speeduino/contents/reference/tunerstudio"),
-            IniSource::RusEFI => Some("https://api.github.com/repos/rusefi/rusefi/contents/firmware/tunerstudio"),
+            IniSource::Speeduino => Some(
+                "https://api.github.com/repos/noisymime/speeduino/contents/reference/tunerstudio",
+            ),
+            IniSource::RusEFI => {
+                Some("https://api.github.com/repos/rusefi/rusefi/contents/firmware/tunerstudio")
+            }
             IniSource::Custom => None,
         }
     }
-    
+
     /// Get the raw content URL prefix for this source
     pub fn raw_url_prefix(&self) -> Option<&'static str> {
         match self {
@@ -67,7 +71,7 @@ impl IniSource {
             IniSource::Custom => None,
         }
     }
-    
+
     pub fn display_name(&self) -> &'static str {
         match self {
             IniSource::Speeduino => "Speeduino",
@@ -103,30 +107,35 @@ impl OnlineIniRepository {
             .user_agent("LibreTune/0.1")
             .build()
             .unwrap_or_else(|_| reqwest::Client::new());
-        
+
         OnlineIniRepository {
             client,
             cache: Vec::new(),
         }
     }
-    
+
     /// Search for INI files matching a signature
-    /// 
+    ///
     /// If signature is None, returns all known INIs from all sources.
-    pub async fn search(&mut self, signature: Option<&str>) -> Result<Vec<OnlineIniEntry>, io::Error> {
+    pub async fn search(
+        &mut self,
+        signature: Option<&str>,
+    ) -> Result<Vec<OnlineIniEntry>, io::Error> {
         // Refresh cache if empty
         if self.cache.is_empty() {
             self.refresh_cache().await?;
         }
-        
+
         match signature {
             Some(sig) => {
                 let sig_lower = sig.to_lowercase();
-                Ok(self.cache.iter()
+                Ok(self
+                    .cache
+                    .iter()
                     .filter(|e| {
                         if let Some(ref entry_sig) = e.signature {
-                            entry_sig.to_lowercase().contains(&sig_lower) ||
-                            sig_lower.contains(&entry_sig.to_lowercase())
+                            entry_sig.to_lowercase().contains(&sig_lower)
+                                || sig_lower.contains(&entry_sig.to_lowercase())
                         } else {
                             // Match by name if no signature
                             e.name.to_lowercase().contains(&sig_lower)
@@ -138,11 +147,11 @@ impl OnlineIniRepository {
             None => Ok(self.cache.clone()),
         }
     }
-    
+
     /// Refresh the cache by fetching INI lists from all sources
     async fn refresh_cache(&mut self) -> Result<(), io::Error> {
         self.cache.clear();
-        
+
         // Fetch from each source
         for source in [IniSource::Speeduino, IniSource::RusEFI] {
             match self.fetch_source_inis(source).await {
@@ -153,33 +162,37 @@ impl OnlineIniRepository {
                 }
             }
         }
-        
+
         Ok(())
     }
-    
+
     /// Fetch INI list from a specific source
     async fn fetch_source_inis(&self, source: IniSource) -> Result<Vec<OnlineIniEntry>, io::Error> {
-        let api_url = source.github_api_url()
+        let api_url = source
+            .github_api_url()
             .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "No API URL for source"))?;
-        
-        let response = self.client.get(api_url)
+
+        let response = self
+            .client
+            .get(api_url)
             .send()
             .await
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
-        
+            .map_err(|e| io::Error::other(e.to_string()))?;
+
         if !response.status().is_success() {
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
-                format!("GitHub API error: {}", response.status())
-            ));
+            return Err(io::Error::other(format!(
+                "GitHub API error: {}",
+                response.status()
+            )));
         }
-        
-        let files: Vec<GitHubFile> = response.json()
+
+        let files: Vec<GitHubFile> = response
+            .json()
             .await
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
-        
+
         let mut entries = Vec::new();
-        
+
         for file in files {
             // Only include .ini files
             if file.file_type == "file" && file.name.to_lowercase().ends_with(".ini") {
@@ -195,46 +208,59 @@ impl OnlineIniRepository {
                 }
             }
         }
-        
+
         Ok(entries)
     }
-    
+
     /// Download an INI file to the specified directory
-    /// 
+    ///
     /// Returns the path to the downloaded file.
-    pub async fn download(&self, entry: &OnlineIniEntry, target_dir: &Path) -> Result<std::path::PathBuf, io::Error> {
-        let response = self.client.get(&entry.download_url)
+    pub async fn download(
+        &self,
+        entry: &OnlineIniEntry,
+        target_dir: &Path,
+    ) -> Result<std::path::PathBuf, io::Error> {
+        let response = self
+            .client
+            .get(&entry.download_url)
             .send()
             .await
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
-        
+            .map_err(|e| io::Error::other(e.to_string()))?;
+
         if !response.status().is_success() {
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
-                format!("Download failed: {}", response.status())
-            ));
+            return Err(io::Error::other(format!(
+                "Download failed: {}",
+                response.status()
+            )));
         }
-        
-        let content = response.bytes()
+
+        let content = response
+            .bytes()
             .await
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
-        
+            .map_err(|e| io::Error::other(e.to_string()))?;
+
         // Create target directory if it doesn't exist
         std::fs::create_dir_all(target_dir)?;
-        
+
         // Generate unique filename
-        let filename = format!("{}_{}", entry.source.display_name().to_lowercase(), entry.name);
+        let filename = format!(
+            "{}_{}",
+            entry.source.display_name().to_lowercase(),
+            entry.name
+        );
         let target_path = target_dir.join(&filename);
-        
+
         std::fs::write(&target_path, &content)?;
-        
+
         Ok(target_path)
     }
-    
+
     /// Check if we have internet connectivity
     pub async fn check_connectivity(&self) -> bool {
         // Try to reach GitHub
-        match self.client.head("https://api.github.com")
+        match self
+            .client
+            .head("https://api.github.com")
             .timeout(std::time::Duration::from_secs(5))
             .send()
             .await
@@ -254,7 +280,7 @@ impl Default for OnlineIniRepository {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_ini_source_urls() {
         assert!(IniSource::Speeduino.github_api_url().is_some());

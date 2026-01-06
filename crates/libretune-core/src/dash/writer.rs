@@ -21,7 +21,11 @@ pub fn write_dash_file(dash: &DashFile) -> Result<String, DashWriteError> {
     let mut writer = Writer::new_with_indent(Vec::new(), b' ', 4);
 
     // XML declaration
-    writer.write_event(Event::Decl(BytesDecl::new("1.0", Some("UTF-8"), Some("no"))))?;
+    writer.write_event(Event::Decl(BytesDecl::new(
+        "1.0",
+        Some("UTF-8"),
+        Some("no"),
+    )))?;
 
     // Root element with namespace
     let mut root = BytesStart::new("dsh");
@@ -49,7 +53,11 @@ pub fn write_gauge_file(gauge_file: &GaugeFile) -> Result<String, DashWriteError
     let mut writer = Writer::new_with_indent(Vec::new(), b' ', 4);
 
     // XML declaration
-    writer.write_event(Event::Decl(BytesDecl::new("1.0", Some("UTF-8"), Some("no"))))?;
+    writer.write_event(Event::Decl(BytesDecl::new(
+        "1.0",
+        Some("UTF-8"),
+        Some("no"),
+    )))?;
 
     // Outer gauge element with namespace
     let mut root = BytesStart::new("gauge");
@@ -83,7 +91,10 @@ pub fn write_gauge_file(gauge_file: &GaugeFile) -> Result<String, DashWriteError
     Ok(String::from_utf8_lossy(&result).to_string())
 }
 
-fn write_bibliography<W: Write>(writer: &mut Writer<W>, bib: &Bibliography) -> Result<(), DashWriteError> {
+fn write_bibliography<W: Write>(
+    writer: &mut Writer<W>,
+    bib: &Bibliography,
+) -> Result<(), DashWriteError> {
     let mut elem = BytesStart::new("bibliography");
     elem.push_attribute(("author", bib.author.as_str()));
     elem.push_attribute(("company", bib.company.as_str()));
@@ -92,7 +103,10 @@ fn write_bibliography<W: Write>(writer: &mut Writer<W>, bib: &Bibliography) -> R
     Ok(())
 }
 
-fn write_version_info<W: Write>(writer: &mut Writer<W>, vi: &VersionInfo) -> Result<(), DashWriteError> {
+fn write_version_info<W: Write>(
+    writer: &mut Writer<W>,
+    vi: &VersionInfo,
+) -> Result<(), DashWriteError> {
     let mut elem = BytesStart::new("versionInfo");
     elem.push_attribute(("fileFormat", vi.file_format.as_str()));
     if let Some(ref sig) = vi.firmware_signature {
@@ -102,22 +116,32 @@ fn write_version_info<W: Write>(writer: &mut Writer<W>, vi: &VersionInfo) -> Res
     Ok(())
 }
 
-fn write_gauge_cluster<W: Write>(writer: &mut Writer<W>, cluster: &GaugeCluster) -> Result<(), DashWriteError> {
+fn write_gauge_cluster<W: Write>(
+    writer: &mut Writer<W>,
+    cluster: &GaugeCluster,
+) -> Result<(), DashWriteError> {
     let mut elem = BytesStart::new("gaugeCluster");
-    
-    elem.push_attribute(("antiAliasing", if cluster.anti_aliasing { "true" } else { "false" }));
+
+    elem.push_attribute((
+        "antiAliasing",
+        if cluster.anti_aliasing {
+            "true"
+        } else {
+            "false"
+        },
+    ));
     let bg_color = cluster.cluster_background_color.to_argb_int().to_string();
     elem.push_attribute(("clusterBackgroundColor", bg_color.as_str()));
-    
+
     if let Some(ref dither) = cluster.background_dither_color {
         let dither_color = dither.to_argb_int().to_string();
         elem.push_attribute(("backgroundDitherColor", dither_color.as_str()));
     }
-    
+
     if let Some(ref img) = cluster.cluster_background_image_file_name {
         elem.push_attribute(("clusterBackgroundImageFileName", img.as_str()));
     }
-    
+
     let style = match cluster.cluster_background_image_style {
         BackgroundStyle::Tile => "Tile",
         BackgroundStyle::Stretch => "Stretch",
@@ -125,7 +149,7 @@ fn write_gauge_cluster<W: Write>(writer: &mut Writer<W>, cluster: &GaugeCluster)
         BackgroundStyle::Fit => "Fit",
     };
     elem.push_attribute(("clusterBackgroundImageStyle", style));
-    
+
     writer.write_event(Event::Start(elem))?;
 
     // Write embedded images
@@ -136,7 +160,7 @@ fn write_gauge_cluster<W: Write>(writer: &mut Writer<W>, cluster: &GaugeCluster)
     // Write components
     for component in &cluster.components {
         match component {
-            DashComponent::Gauge(gauge) => write_gauge_component(writer, gauge)?,
+            DashComponent::Gauge(gauge) => write_gauge_component(writer, &*gauge)?,
             DashComponent::Indicator(indicator) => write_indicator_component(writer, indicator)?,
         }
     }
@@ -145,26 +169,32 @@ fn write_gauge_cluster<W: Write>(writer: &mut Writer<W>, cluster: &GaugeCluster)
     Ok(())
 }
 
-fn write_embedded_image<W: Write>(writer: &mut Writer<W>, img: &EmbeddedImage) -> Result<(), DashWriteError> {
+fn write_embedded_image<W: Write>(
+    writer: &mut Writer<W>,
+    img: &EmbeddedImage,
+) -> Result<(), DashWriteError> {
     let mut elem = BytesStart::new("imageFile");
     elem.push_attribute(("fileName", img.file_name.as_str()));
     elem.push_attribute(("imageId", img.image_id.as_str()));
-    
+
     let type_str = match img.resource_type {
         ResourceType::Png => "png",
         ResourceType::Gif => "gif",
         ResourceType::Ttf => "ttf",
     };
     elem.push_attribute(("type", type_str));
-    
+
     writer.write_event(Event::Start(elem))?;
     writer.write_event(Event::Text(BytesText::new(&img.data)))?;
     writer.write_event(Event::End(BytesEnd::new("imageFile")))?;
-    
+
     Ok(())
 }
 
-fn write_gauge_component<W: Write>(writer: &mut Writer<W>, gauge: &GaugeConfig) -> Result<(), DashWriteError> {
+fn write_gauge_component<W: Write>(
+    writer: &mut Writer<W>,
+    gauge: &GaugeConfig,
+) -> Result<(), DashWriteError> {
     let mut elem = BytesStart::new("dashComp");
     elem.push_attribute(("type", "Gauge"));
     writer.write_event(Event::Start(elem))?;
@@ -177,7 +207,7 @@ fn write_gauge_component<W: Write>(writer: &mut Writer<W>, gauge: &GaugeConfig) 
     write_string_property(writer, "OutputChannel", &gauge.output_channel)?;
     write_double_property(writer, "Min", gauge.min)?;
     write_double_property(writer, "Max", gauge.max)?;
-    
+
     if let Some(ref vp) = gauge.min_vp {
         write_string_property(writer, "MinVP", vp)?;
     }
@@ -190,9 +220,9 @@ fn write_gauge_component<W: Write>(writer: &mut Writer<W>, gauge: &GaugeConfig) 
     if let Some(v) = gauge.default_max {
         write_double_property(writer, "DefaultMax", v)?;
     }
-    
+
     write_boolean_property(writer, "PegLimits", gauge.peg_limits)?;
-    
+
     if let Some(v) = gauge.low_warning {
         write_double_property(writer, "LowWarning", v)?;
     }
@@ -205,7 +235,7 @@ fn write_gauge_component<W: Write>(writer: &mut Writer<W>, gauge: &GaugeConfig) 
     if let Some(v) = gauge.high_critical {
         write_double_property(writer, "HighCritical", v)?;
     }
-    
+
     if let Some(ref vp) = gauge.low_warning_vp {
         write_string_property(writer, "LowWarningVP", vp)?;
     }
@@ -218,22 +248,22 @@ fn write_gauge_component<W: Write>(writer: &mut Writer<W>, gauge: &GaugeConfig) 
     if let Some(ref vp) = gauge.high_critical_vp {
         write_string_property(writer, "HighCriticalVP", vp)?;
     }
-    
+
     write_int_property(writer, "ValueDigits", gauge.value_digits)?;
     write_int_property(writer, "LabelDigits", gauge.label_digits)?;
     write_string_property(writer, "FontFamily", &gauge.font_family)?;
     write_int_property(writer, "FontSizeAdjustment", gauge.font_size_adjustment)?;
     write_boolean_property(writer, "ItalicFont", gauge.italic_font)?;
-    
+
     write_int_property(writer, "SweepAngle", gauge.sweep_angle)?;
     write_int_property(writer, "StartAngle", gauge.start_angle)?;
     write_int_property(writer, "FaceAngle", gauge.face_angle)?;
     write_int_property(writer, "SweepBeginDegree", gauge.sweep_begin_degree)?;
     write_boolean_property(writer, "CounterClockwise", gauge.counter_clockwise)?;
-    
+
     write_double_property(writer, "MajorTicks", gauge.major_ticks)?;
     write_double_property(writer, "MinorTicks", gauge.minor_ticks)?;
-    
+
     // Colors
     write_color_property(writer, "BackColor", &gauge.back_color)?;
     write_color_property(writer, "FontColor", &gauge.font_color)?;
@@ -241,47 +271,47 @@ fn write_gauge_component<W: Write>(writer: &mut Writer<W>, gauge: &GaugeConfig) 
     write_color_property(writer, "WarnColor", &gauge.warn_color)?;
     write_color_property(writer, "CriticalColor", &gauge.critical_color)?;
     write_color_property(writer, "NeedleColor", &gauge.needle_color)?;
-    
+
     // Position
     write_double_property(writer, "RelativeX", gauge.relative_x)?;
     write_double_property(writer, "RelativeY", gauge.relative_y)?;
     write_double_property(writer, "RelativeWidth", gauge.relative_width)?;
     write_double_property(writer, "RelativeHeight", gauge.relative_height)?;
-    
+
     write_int_property(writer, "BorderWidth", gauge.border_width)?;
     write_int_property(writer, "ShortestSize", gauge.shortest_size)?;
     write_boolean_property(writer, "ShapeLockedToAspect", gauge.shape_locked_to_aspect)?;
     write_boolean_property(writer, "AntialiasingOn", gauge.antialiasing_on)?;
-    
+
     if let Some(ref img) = gauge.background_image_file_name {
         write_string_property(writer, "BackgroundImageFileName", img)?;
     } else {
         write_string_property(writer, "BackgroundImageFileName", "null")?;
     }
-    
+
     if let Some(ref img) = gauge.needle_image_file_name {
         write_string_property(writer, "NeedleImageFileName", img)?;
     } else {
         write_string_property(writer, "NeedleImageFileName", "null")?;
     }
-    
+
     write_boolean_property(writer, "ShowHistory", gauge.show_history)?;
     write_double_property(writer, "HistoryValue", gauge.history_value)?;
     write_int_property(writer, "HistoryDelay", gauge.history_delay)?;
     write_int_property(writer, "NeedleSmoothing", gauge.needle_smoothing)?;
-    
+
     if let Some(ref action) = gauge.short_click_action {
         write_string_property(writer, "ShortClickAction", action)?;
     } else {
         write_string_property(writer, "ShortClickAction", "null")?;
     }
-    
+
     if let Some(ref action) = gauge.long_click_action {
         write_string_property(writer, "LongClickAction", action)?;
     } else {
         write_string_property(writer, "LongClickAction", "null")?;
     }
-    
+
     write_boolean_property(writer, "DisplayValueAt180", gauge.display_value_at_180)?;
     write_string_property(writer, "GaugeStyle", &gauge.gauge_style)?;
     write_string_property(writer, "GaugePainter", gauge.gauge_painter.to_ts_string())?;
@@ -291,7 +321,10 @@ fn write_gauge_component<W: Write>(writer: &mut Writer<W>, gauge: &GaugeConfig) 
     Ok(())
 }
 
-fn write_indicator_component<W: Write>(writer: &mut Writer<W>, indicator: &IndicatorConfig) -> Result<(), DashWriteError> {
+fn write_indicator_component<W: Write>(
+    writer: &mut Writer<W>,
+    indicator: &IndicatorConfig,
+) -> Result<(), DashWriteError> {
     let mut elem = BytesStart::new("dashComp");
     elem.push_attribute(("type", "Indicator"));
     writer.write_event(Event::Start(elem))?;
@@ -301,59 +334,71 @@ fn write_indicator_component<W: Write>(writer: &mut Writer<W>, indicator: &Indic
     write_string_property(writer, "OutputChannel", &indicator.output_channel)?;
     write_string_property(writer, "OnText", &indicator.on_text)?;
     write_string_property(writer, "OffText", &indicator.off_text)?;
-    
+
     if let Some(ref img) = indicator.on_image_file_name {
         write_string_property(writer, "OnImageFileName", img)?;
     } else {
         write_string_property(writer, "OnImageFileName", "null")?;
     }
-    
+
     if let Some(ref img) = indicator.off_image_file_name {
         write_string_property(writer, "OffImageFileName", img)?;
     } else {
         write_string_property(writer, "OffImageFileName", "null")?;
     }
-    
+
     // Colors
     write_color_property(writer, "OnTextColor", &indicator.on_text_color)?;
     write_color_property(writer, "OffTextColor", &indicator.off_text_color)?;
     write_color_property(writer, "OnBackgroundColor", &indicator.on_background_color)?;
-    write_color_property(writer, "OffBackgroundColor", &indicator.off_background_color)?;
-    
+    write_color_property(
+        writer,
+        "OffBackgroundColor",
+        &indicator.off_background_color,
+    )?;
+
     // Position
     write_double_property(writer, "RelativeX", indicator.relative_x)?;
     write_double_property(writer, "RelativeY", indicator.relative_y)?;
     write_double_property(writer, "RelativeWidth", indicator.relative_width)?;
     write_double_property(writer, "RelativeHeight", indicator.relative_height)?;
-    
+
     write_string_property(writer, "FontFamily", &indicator.font_family)?;
     write_boolean_property(writer, "ItalicFont", indicator.italic_font)?;
     write_boolean_property(writer, "AntialiasingOn", indicator.antialiasing_on)?;
-    
+
     if let Some(ref action) = indicator.short_click_action {
         write_string_property(writer, "ShortClickAction", action)?;
     } else {
         write_string_property(writer, "ShortClickAction", "null")?;
     }
-    
+
     if let Some(ref action) = indicator.long_click_action {
         write_string_property(writer, "LongClickAction", action)?;
     } else {
         write_string_property(writer, "LongClickAction", "null")?;
     }
-    
+
     if let Some(ref name) = indicator.ecu_configuration_name {
         write_string_property(writer, "EcuConfigurationName", name)?;
     }
-    
-    write_string_property(writer, "Painter", indicator.indicator_painter.to_ts_string())?;
+
+    write_string_property(
+        writer,
+        "Painter",
+        indicator.indicator_painter.to_ts_string(),
+    )?;
     write_boolean_property(writer, "RunDemo", indicator.run_demo)?;
 
     writer.write_event(Event::End(BytesEnd::new("dashComp")))?;
     Ok(())
 }
 
-fn write_string_property<W: Write>(writer: &mut Writer<W>, name: &str, value: &str) -> Result<(), DashWriteError> {
+fn write_string_property<W: Write>(
+    writer: &mut Writer<W>,
+    name: &str,
+    value: &str,
+) -> Result<(), DashWriteError> {
     let mut elem = BytesStart::new(name);
     elem.push_attribute(("type", "String"));
     writer.write_event(Event::Start(elem))?;
@@ -362,7 +407,11 @@ fn write_string_property<W: Write>(writer: &mut Writer<W>, name: &str, value: &s
     Ok(())
 }
 
-fn write_double_property<W: Write>(writer: &mut Writer<W>, name: &str, value: f64) -> Result<(), DashWriteError> {
+fn write_double_property<W: Write>(
+    writer: &mut Writer<W>,
+    name: &str,
+    value: f64,
+) -> Result<(), DashWriteError> {
     let mut elem = BytesStart::new(name);
     elem.push_attribute(("type", "double"));
     writer.write_event(Event::Start(elem))?;
@@ -371,7 +420,11 @@ fn write_double_property<W: Write>(writer: &mut Writer<W>, name: &str, value: f6
     Ok(())
 }
 
-fn write_int_property<W: Write>(writer: &mut Writer<W>, name: &str, value: i32) -> Result<(), DashWriteError> {
+fn write_int_property<W: Write>(
+    writer: &mut Writer<W>,
+    name: &str,
+    value: i32,
+) -> Result<(), DashWriteError> {
     let mut elem = BytesStart::new(name);
     elem.push_attribute(("type", "int"));
     writer.write_event(Event::Start(elem))?;
@@ -380,16 +433,28 @@ fn write_int_property<W: Write>(writer: &mut Writer<W>, name: &str, value: i32) 
     Ok(())
 }
 
-fn write_boolean_property<W: Write>(writer: &mut Writer<W>, name: &str, value: bool) -> Result<(), DashWriteError> {
+fn write_boolean_property<W: Write>(
+    writer: &mut Writer<W>,
+    name: &str,
+    value: bool,
+) -> Result<(), DashWriteError> {
     let mut elem = BytesStart::new(name);
     elem.push_attribute(("type", "boolean"));
     writer.write_event(Event::Start(elem))?;
-    writer.write_event(Event::Text(BytesText::new(if value { "true" } else { "false" })))?;
+    writer.write_event(Event::Text(BytesText::new(if value {
+        "true"
+    } else {
+        "false"
+    })))?;
     writer.write_event(Event::End(BytesEnd::new(name)))?;
     Ok(())
 }
 
-fn write_color_property<W: Write>(writer: &mut Writer<W>, name: &str, color: &TsColor) -> Result<(), DashWriteError> {
+fn write_color_property<W: Write>(
+    writer: &mut Writer<W>,
+    name: &str,
+    color: &TsColor,
+) -> Result<(), DashWriteError> {
     let mut elem = BytesStart::new(name);
     elem.push_attribute(("type", "java.awt.Color"));
     let alpha = color.alpha.to_string();
@@ -412,7 +477,10 @@ pub fn save_dash_file(dash: &DashFile, path: &std::path::Path) -> Result<(), Das
 }
 
 /// Save a gauge template to a file.
-pub fn save_gauge_file(gauge_file: &GaugeFile, path: &std::path::Path) -> Result<(), DashWriteError> {
+pub fn save_gauge_file(
+    gauge_file: &GaugeFile,
+    path: &std::path::Path,
+) -> Result<(), DashWriteError> {
     let xml = write_gauge_file(gauge_file)?;
     std::fs::write(path, xml)?;
     Ok(())
@@ -434,7 +502,7 @@ mod tests {
             file_format: "3.0".to_string(),
             firmware_signature: Some("speeduino".to_string()),
         };
-        
+
         let mut gauge = GaugeConfig::default();
         gauge.title = "RPM".to_string();
         gauge.output_channel = "rpm".to_string();
@@ -445,12 +513,14 @@ mod tests {
         gauge.relative_y = 0.1;
         gauge.relative_width = 0.3;
         gauge.relative_height = 0.4;
-        
-        dash.gauge_cluster.components.push(DashComponent::Gauge(gauge));
-        
+
+        dash.gauge_cluster
+            .components
+            .push(DashComponent::Gauge(Box::new(gauge)));
+
         let result = write_dash_file(&dash);
         assert!(result.is_ok(), "Failed to write: {:?}", result.err());
-        
+
         let xml = result.unwrap();
         assert!(xml.contains("xmlns=\"http://www.EFIAnalytics.com/:dsh\""));
         assert!(xml.contains("author=\"Test Author\""));
@@ -467,7 +537,7 @@ mod tests {
             company: "LibreTune".to_string(),
             write_date: "2025-01-01".to_string(),
         };
-        
+
         let mut gauge = GaugeConfig::default();
         gauge.id = "gauge1".to_string();
         gauge.title = "AFR".to_string();
@@ -475,19 +545,26 @@ mod tests {
         gauge.min = 10.0;
         gauge.max = 20.0;
         gauge.gauge_painter = GaugePainter::BasicReadout;
-        gauge.back_color = TsColor { alpha: 255, red: 50, green: 50, blue: 50 };
-        
-        dash.gauge_cluster.components.push(DashComponent::Gauge(gauge));
-        
+        gauge.back_color = TsColor {
+            alpha: 255,
+            red: 50,
+            green: 50,
+            blue: 50,
+        };
+
+        dash.gauge_cluster
+            .components
+            .push(DashComponent::Gauge(Box::new(gauge)));
+
         // Write to XML
         let xml = write_dash_file(&dash).unwrap();
-        
+
         // Parse back
         let parsed = super::super::parser::parse_dash_file(&xml).unwrap();
-        
+
         assert_eq!(parsed.bibliography.author, "Roundtrip Test");
         assert_eq!(parsed.gauge_cluster.components.len(), 1);
-        
+
         if let DashComponent::Gauge(ref g) = parsed.gauge_cluster.components[0] {
             assert_eq!(g.title, "AFR");
             assert_eq!(g.output_channel, "afr");

@@ -9,59 +9,59 @@ use serde::{Deserialize, Serialize};
 pub struct TableDefinition {
     /// Table name/identifier
     pub name: String,
-    
+
     /// Map name used in menu references (from table = tableName, mapName, ...)
     /// Menus reference tables by this map_name, not the name field
     pub map_name: Option<String>,
-    
+
     /// Display title
     pub title: String,
-    
+
     /// Table type (2D or 3D)
     pub table_type: TableType,
-    
+
     /// Main map/data constant name
     pub map: String,
-    
+
     /// X-axis constant name (bins)
     pub x_bins: String,
-    
+
     /// X-axis output channel for highlighting
     pub x_output_channel: Option<String>,
-    
+
     /// Y-axis constant name (bins) - only for 3D tables
     pub y_bins: Option<String>,
-    
+
     /// Y-axis output channel for highlighting - only for 3D tables
     pub y_output_channel: Option<String>,
-    
+
     /// Page number for the table data
     pub page: u8,
-    
+
     /// Number of columns
     pub x_size: usize,
-    
+
     /// Number of rows (1 for 2D tables)
     pub y_size: usize,
-    
+
     /// Up-from color (high values)
     pub up_color: Option<String>,
-    
+
     /// Down-from color (low values)
     pub down_color: Option<String>,
-    
+
     /// Grid height for display
     pub grid_height: Option<f32>,
-    
+
     /// Grid orientation
     pub grid_orient: Option<u8>,
-    
+
     /// Help text
     pub help: Option<String>,
-    
+
     /// X-axis label (from xyLabels)
     pub x_label: Option<String>,
-    
+
     /// Y-axis label (from xyLabels)
     pub y_label: Option<String>,
 }
@@ -77,7 +77,12 @@ pub enum TableType {
 
 impl TableDefinition {
     /// Create a new 2D table definition
-    pub fn new_2d(name: impl Into<String>, map: impl Into<String>, x_bins: impl Into<String>, x_size: usize) -> Self {
+    pub fn new_2d(
+        name: impl Into<String>,
+        map: impl Into<String>,
+        x_bins: impl Into<String>,
+        x_size: usize,
+    ) -> Self {
         Self {
             name: name.into(),
             map_name: None,
@@ -100,7 +105,7 @@ impl TableDefinition {
             y_label: None,
         }
     }
-    
+
     /// Create a new 3D table definition
     pub fn new_3d(
         name: impl Into<String>,
@@ -132,12 +137,12 @@ impl TableDefinition {
             y_label: None,
         }
     }
-    
+
     /// Check if this is a 3D table
     pub fn is_3d(&self) -> bool {
         self.table_type == TableType::ThreeD
     }
-    
+
     /// Total number of cells in the table
     pub fn cell_count(&self) -> usize {
         self.x_size * self.y_size
@@ -155,41 +160,45 @@ impl Default for TableDefinition {
 pub struct CurveDefinition {
     /// Curve name/identifier
     pub name: String,
-    
+
     /// Display title
     pub title: String,
-    
+
     /// X-axis constant name (bins)
     pub x_bins: String,
-    
+
     /// X-axis output channel for highlighting
     pub x_output_channel: Option<String>,
-    
+
     /// Y-axis constant name (values)
     pub y_bins: String,
-    
+
     /// Column labels (X label, Y label)
     pub column_labels: (String, String),
-    
+
     /// X-axis range and step (min, max, step)
     pub x_axis: Option<(f32, f32, f32)>,
-    
+
     /// Y-axis range and step (min, max, step)
     pub y_axis: Option<(f32, f32, f32)>,
-    
+
     /// Size (width, height) - number of points
     pub size: Option<usize>,
-    
+
     /// Page number for the curve data
     pub page: u8,
-    
+
     /// Help text
     pub help: Option<String>,
 }
 
 impl CurveDefinition {
     /// Create a new curve definition
-    pub fn new(name: impl Into<String>, x_bins: impl Into<String>, y_bins: impl Into<String>) -> Self {
+    pub fn new(
+        name: impl Into<String>,
+        x_bins: impl Into<String>,
+        y_bins: impl Into<String>,
+    ) -> Self {
         Self {
             name: name.into(),
             title: String::new(),
@@ -215,17 +224,18 @@ impl Default for CurveDefinition {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_2d_table() {
         let table = TableDefinition::new_2d("cranking", "crankingTable", "crankingBins", 10);
         assert!(!table.is_3d());
         assert_eq!(table.cell_count(), 10);
     }
-    
+
     #[test]
     fn test_3d_table() {
-        let table = TableDefinition::new_3d("veTable1", "veTable1Map", "rpmBins", "fuelLoadBins", 16, 16);
+        let table =
+            TableDefinition::new_3d("veTable1", "veTable1Map", "rpmBins", "fuelLoadBins", 16, 16);
         assert!(table.is_3d());
         assert_eq!(table.cell_count(), 256);
     }

@@ -2,8 +2,8 @@
 //!
 //! Records real-time data from the ECU.
 
-use std::time::{Duration, Instant};
 use std::collections::VecDeque;
+use std::time::{Duration, Instant};
 
 use super::LogEntry;
 
@@ -38,17 +38,17 @@ impl DataLogger {
             last_sample: None,
         }
     }
-    
+
     /// Set the target sample rate in Hz
     pub fn set_sample_rate(&mut self, rate: f64) {
-        self.sample_rate = rate.max(1.0).min(200.0);
+        self.sample_rate = rate.clamp(1.0, 200.0);
     }
-    
+
     /// Get the sample rate
     pub fn sample_rate(&self) -> f64 {
         self.sample_rate
     }
-    
+
     /// Start recording
     pub fn start(&mut self) {
         self.start_time = Some(Instant::now());
@@ -56,25 +56,25 @@ impl DataLogger {
         self.last_sample = None;
         self.buffer.clear();
     }
-    
+
     /// Stop recording
     pub fn stop(&mut self) {
         self.is_recording = false;
     }
-    
+
     /// Check if recording is active
     pub fn is_recording(&self) -> bool {
         self.is_recording
     }
-    
+
     /// Record a sample
     pub fn record(&mut self, values: Vec<f64>) {
         if !self.is_recording {
             return;
         }
-        
+
         let now = Instant::now();
-        
+
         // Check sample rate
         let min_interval = Duration::from_secs_f64(1.0 / self.sample_rate);
         if let Some(last) = self.last_sample {
@@ -82,48 +82,47 @@ impl DataLogger {
                 return;
             }
         }
-        
-        let timestamp = self.start_time
+
+        let timestamp = self
+            .start_time
             .map(|start| now.duration_since(start))
             .unwrap_or_default();
-        
+
         let entry = LogEntry::new(timestamp, values);
-        
+
         // Manage buffer size
         if self.buffer.len() >= MAX_BUFFER_SIZE {
             self.buffer.pop_front();
         }
-        
+
         self.buffer.push_back(entry);
         self.last_sample = Some(now);
     }
-    
+
     /// Get the number of recorded entries
     pub fn entry_count(&self) -> usize {
         self.buffer.len()
     }
-    
+
     /// Get all entries
     pub fn entries(&self) -> impl Iterator<Item = &LogEntry> {
         self.buffer.iter()
     }
-    
+
     /// Get the channel names
     pub fn channels(&self) -> &[String] {
         &self.channels
     }
-    
+
     /// Clear all recorded data
     pub fn clear(&mut self) {
         self.buffer.clear();
         self.start_time = None;
     }
-    
+
     /// Get the duration of the log
     pub fn duration(&self) -> Duration {
-        self.buffer.back()
-            .map(|e| e.timestamp)
-            .unwrap_or_default()
+        self.buffer.back().map(|e| e.timestamp).unwrap_or_default()
     }
 }
 
@@ -136,19 +135,19 @@ impl Default for DataLogger {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_logger_basic() {
         let mut logger = DataLogger::new(vec!["rpm".into(), "map".into()]);
-        
+
         assert!(!logger.is_recording());
-        
+
         logger.start();
         assert!(logger.is_recording());
-        
+
         logger.record(vec![1000.0, 100.0]);
         assert_eq!(logger.entry_count(), 1);
-        
+
         logger.stop();
         assert!(!logger.is_recording());
     }

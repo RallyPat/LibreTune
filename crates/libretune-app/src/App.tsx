@@ -29,6 +29,7 @@ import DialogRenderer, { DialogDefinition as RendererDialogDef } from "./compone
 import HelpViewer, { HelpTopicData } from "./components/dialogs/HelpViewer";
 import SignatureMismatchDialog, { SignatureMismatchInfo } from "./components/dialogs/SignatureMismatchDialog";
 import TuneMismatchDialog, { TuneMismatchInfo } from "./components/dialogs/TuneMismatchDialog";
+import TuneComparisonDialog from "./components/dialogs/TuneComparisonDialog";
 import "./themes/base.css";
 
 // Backend types
@@ -247,6 +248,9 @@ function AppContent() {
   const [tuneMismatchOpen, setTuneMismatchOpen] = useState(false);
   const [tuneMismatchInfo, setTuneMismatchInfo] = useState<TuneMismatchInfo | null>(null);
   
+  // Tune comparison dialog state
+  const [tuneComparisonOpen, setTuneComparisonOpen] = useState(false);
+  
   // Sync status tracking (for partial sync warning)
   const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);
 
@@ -398,6 +402,108 @@ function AppContent() {
       if (unlisten) unlisten();
     };
   }, []);
+
+  // Listen for tune loaded events to refresh table data
+  useEffect(() => {
+    let unlisten: UnlistenFn | null = null;
+    
+    (async () => {
+      try {
+        unlisten = await listen<string>("tune:loaded", async (event) => {
+          console.log("Tune loaded from:", event.payload);
+          // Refresh ALL open tables when tune is loaded (INI updated or tune file loaded)
+          // Small delay to ensure state is current
+          await new Promise(resolve => setTimeout(resolve, 50));
+          
+          // Get current tabs and tabContents
+          const currentTabs = tabs;
+          const currentTabContents = tabContents;
+          const tabsToRefresh: string[] = [];
+          
+          for (const tab of currentTabs) {
+            const tabContent = currentTabContents[tab.id];
+            if (tabContent && tabContent.type === "table") {
+              tabsToRefresh.push(tab.id);
+            }
+          }
+          
+          if (tabsToRefresh.length > 0) {
+            console.log(`[tune:loaded] Refreshing ${tabsToRefresh.length} table(s):`, tabsToRefresh);
+            const updatedTabs = { ...currentTabContents };
+            
+            // Refresh all tables in parallel
+            await Promise.all(
+              tabsToRefresh.map(async (tabId) => {
+                try {
+                  const data = await invoke<BackendTableData>("get_table_data", { tableName: tabId });
+                  const tableData: TunerTableData = {
+                    name: data.name,
+                    xAxis: data.x_bins,
+                    yAxis: data.y_bins,
+                    zValues: data.z_values,
+                    xLabel: data.x_axis_name || "X",
+                    yLabel: data.y_axis_name || "Y",
+                    xOutputChannel: data.x_output_channel ?? undefined,
+                    yOutputChannel: data.y_output_channel ?? undefined,
+                  };
+                  updatedTabs[tabId] = { type: "table", data: tableData };
+                  console.log(`[tune:loaded] ✓ Refreshed '${tabId}': ${data.z_values.length} values`);
+                } catch (e) {
+                  console.error(`[tune:loaded] ✗ Failed to refresh '${tabId}':`, e);
+                }
+              })
+            );
+            
+            setTabContents(updatedTabs);
+            console.log(`[tune:loaded] ✓ Completed refreshing ${tabsToRefresh.length} table(s)`);
+          } else {
+            console.log("[tune:loaded] No open tables to refresh");
+          }
+        });
+      } catch (e) {
+        console.error("Failed to listen for tune:loaded events:", e);
+      }
+    })();
+    
+    return () => {
+      if (unlisten) unlisten();
+    };
+  }, [tabs, tabContents]); // Depend on tabs and tabContents to access current state
+
+  // Refresh table data when a table tab is activated
+  useEffect(() => {
+    if (!activeTabId) return;
+    
+    // Check if the active tab is a table using functional update
+    setTabContents((prev) => {
+      const tabContent = prev[activeTabId];
+      if (tabContent && tabContent.type === "table") {
+        // Refresh the active table to ensure it has fresh data
+        invoke<BackendTableData>("get_table_data", { tableName: activeTabId })
+          .then((data) => {
+            const tableData: TunerTableData = {
+              name: data.name,
+              xAxis: data.x_bins,
+              yAxis: data.y_bins,
+              zValues: data.z_values,
+              xLabel: data.x_axis_name || "X",
+              yLabel: data.y_axis_name || "Y",
+              xOutputChannel: data.x_output_channel ?? undefined,
+              yOutputChannel: data.y_output_channel ?? undefined,
+            };
+            setTabContents((prevTabContents) => ({
+              ...prevTabContents,
+              [activeTabId]: { type: "table", data: tableData },
+            }));
+            console.log(`[tab:activated] Refreshed table '${activeTabId}': ${data.z_values.length} values`);
+          })
+          .catch((e) => {
+            console.error(`[tab:activated] Failed to refresh table '${activeTabId}':`, e);
+          });
+      }
+      return prev; // Return unchanged, update happens in promise
+    });
+  }, [activeTabId]); // Only depend on activeTabId to avoid infinite loops
 
   // Realtime streaming
   useEffect(() => {
@@ -837,6 +943,7 @@ function AppContent() {
       let tableErr: unknown = null;
       try {
         console.log("[openTarget] Trying as table:", name);
+        // Always fetch fresh data from backend (reads from cache or ECU)
         const data = await invoke<BackendTableData>("get_table_data", { tableName: name });
         const tableData: TunerTableData = {
           name: data.name,
@@ -848,6 +955,8 @@ function AppContent() {
           xOutputChannel: data.x_output_channel ?? undefined,
           yOutputChannel: data.y_output_channel ?? undefined,
         };
+        
+        console.log(`[openTarget] Loaded table '${name}': ${data.z_values.length} values, ${data.x_bins.length}x${data.y_bins.length} size`);
 
         const newTab: Tab = {
           id: name,
@@ -1299,7 +1408,14 @@ function AppContent() {
             onBack={() => activeTabId && handleTabClose(activeTabId)}
             openTable={(tableName) => openTarget(tableName)}
             context={constantValues}
-            onUpdate={() => fetchConstants()}
+            onUpdate={async () => {
+              // Refresh constants and menu tree when constants are updated
+              // This ensures menu visibility conditions are re-evaluated
+              const values = await fetchConstants();
+              await fetchMenuTree(values);
+              // Update context for dialog fields
+              setConstantValues(values);
+            }}
           />
         );
       case "settings":
@@ -1365,6 +1481,7 @@ function AppContent() {
         onClose={() => setSettingsDialogOpen(false)}
         theme={theme}
         onThemeChange={(t) => setTheme(t as ThemeName)}
+        currentProject={currentProject}
         onSettingsChange={(settings) => {
           if (settings.units) setUnitsSystem(settings.units as 'metric' | 'imperial');
           if (settings.autoBurnOnClose !== undefined) setAutoBurnOnClose(settings.autoBurnOnClose);
