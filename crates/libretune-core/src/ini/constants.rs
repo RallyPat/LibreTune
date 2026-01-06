@@ -191,8 +191,8 @@ pub fn parse_constant_line(
         }
         // Collect bit options (everything after the bit spec)
         // These are the labels for each possible value (e.g., "Off", "On")
-        for i in 4..parts.len() {
-            let opt = parts[i].trim().trim_matches('"').to_string();
+        for part in parts.iter().skip(4) {
+            let opt = part.trim().trim_matches('"').to_string();
             if !opt.is_empty() && !opt.starts_with('{') {
                 // Skip empty options and visibility conditions
                 constant.bit_options.push(opt);
@@ -274,8 +274,8 @@ pub fn parse_pc_variable_line(name: &str, value: &str) -> Option<Constant> {
             }
         }
         // Collect bit options
-        for i in 3..parts.len() {
-            let opt = parts[i].trim().trim_matches('"').to_string();
+        for part in parts.iter().skip(3) {
+            let opt = part.trim().trim_matches('"').to_string();
             if !opt.is_empty() && !opt.starts_with('{') {
                 constant.bit_options.push(opt);
             }

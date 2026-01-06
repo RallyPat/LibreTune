@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 use super::{
     commands::{BurnParams, ReadMemoryParams, WriteMemoryParams},
     serial::{clear_buffers, configure_port, list_ports, open_port, PortInfo},
-    Command, CommandBuilder, Packet, PacketBuilder, ProtocolError, DEFAULT_BAUD_RATE,
+    Command, CommandBuilder, Packet, ProtocolError, DEFAULT_BAUD_RATE,
     DEFAULT_TIMEOUT_MS,
 };
 use crate::ini::{AdaptiveTiming, AdaptiveTimingConfig, Endianness, ProtocolSettings};
@@ -460,32 +460,28 @@ impl Connection {
             }
 
             let packet = Packet::new(cmd_bytes.clone());
-            match self.send_packet(packet) {
-                Ok(response_packet) => {
-                    eprintln!("[DEBUG] handshake: CRC protocol succeeded");
-                    self.use_modern_protocol = true;
+            if let Ok(response_packet) = self.send_packet(packet) {
+                eprintln!("[DEBUG] handshake: CRC protocol succeeded");
+                self.use_modern_protocol = true;
 
-                    // Handle status byte: response may start with 0x00 (success)
-                    let payload = &response_packet.payload;
-                    let signature_bytes = if !payload.is_empty() && payload[0] == 0 {
-                        &payload[1..]
-                    } else {
-                        payload.as_slice()
-                    };
+                // Handle status byte: response may start with 0x00 (success)
+                let payload = &response_packet.payload;
+                let signature_bytes = if !payload.is_empty() && payload[0] == 0 {
+                    &payload[1..]
+                } else {
+                    payload.as_slice()
+                };
 
-                    let signature = String::from_utf8_lossy(signature_bytes).trim().to_string();
-                    eprintln!(
-                        "[DEBUG] handshake: CRC success, signature = {:?}",
-                        signature
-                    );
-                    return Ok(signature);
-                }
-                Err(e) => {
-                    eprintln!(
-                        "[DEBUG] handshake: CRC protocol failed ({:?}), trying legacy",
-                        e
-                    );
-                }
+                let signature = String::from_utf8_lossy(signature_bytes).trim().to_string();
+                eprintln!(
+                    "[DEBUG] handshake: CRC success, signature = {:?}",
+                    signature
+                );
+                return Ok(signature);
+            } else {
+                eprintln!(
+                    "[DEBUG] handshake: CRC protocol failed, trying legacy"
+                );
             }
         }
 
@@ -720,6 +716,7 @@ impl Connection {
     }
 
     /// Send a legacy (ASCII) command and get response
+    #[allow(dead_code)]
     fn send_legacy_command(&mut self, cmd: Command) -> Result<Vec<u8>, ProtocolError> {
         let port = self.port.as_mut().ok_or(ProtocolError::NotConnected)?;
 
