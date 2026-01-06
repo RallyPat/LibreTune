@@ -154,6 +154,7 @@ struct ConstantInfo {
     value_type: String,  // "scalar", "string", "bits", "array"
     bit_options: Vec<String>,
     help: Option<String>,
+    visibility_condition: Option<String>,  // Expression for when field should be visible
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -520,7 +521,108 @@ async fn load_ini(app: tauri::AppHandle, state: tauri::State<'_, AppState>, path
                             continue;
                         }
                         
-                        // Skip zero-size constants
+                        // Handle bits constants specially (they're packed, size_bytes() == 0)
+                        if constant.data_type == libretune_core::ini::DataType::Bits {
+                            let cache = cache_guard.as_mut().unwrap();
+                            // Bits constants: read current byte(s), modify the bits, write back
+                            let bit_pos = constant.bit_position.unwrap_or(0);
+                            let bit_size = constant.bit_size.unwrap_or(1);
+                            
+                            // Calculate which byte(s) contain the bits
+                            let byte_offset = (bit_pos / 8) as u16;
+                            let bit_in_byte = bit_pos % 8;
+                            
+                            // Calculate how many bytes we need
+                            let bits_remaining_after_first_byte = bit_size.saturating_sub(8 - bit_in_byte);
+                            let bytes_needed = if bits_remaining_after_first_byte > 0 {
+                                1 + ((bits_remaining_after_first_byte + 7) / 8)
+                            } else {
+                                1
+                            };
+                            let bytes_needed_usize = bytes_needed as usize;
+                            
+                            // Read current byte(s) value (or 0 if not present)
+                            let read_offset = constant.offset + byte_offset;
+                            let mut current_bytes: Vec<u8> = cache.read_bytes(constant.page, read_offset, bytes_needed as u16)
+                                .map(|s| s.to_vec())
+                                .unwrap_or_else(|| vec![0u8; bytes_needed_usize]);
+                            
+                            // Ensure we have enough bytes
+                            while current_bytes.len() < bytes_needed_usize {
+                                current_bytes.push(0u8);
+                            }
+                            
+                            // Get the bit value from MSQ (index into bit_options)
+                            // MSQ can store bits constants as numeric indices, option strings, or booleans
+                            let bit_value = match tune_value {
+                                TuneValue::Scalar(v) => *v as u32,
+                                TuneValue::Array(arr) if !arr.is_empty() => arr[0] as u32,
+                                TuneValue::Bool(b) => {
+                                    // Boolean values: true = 1, false = 0
+                                    // For bits constants with 2 options (like ["false", "true"]), 
+                                    // boolean true maps to index 1, false to index 0
+                                    if *b { 1 } else { 0 }
+                                }
+                                TuneValue::String(s) => {
+                                    // Look up the string in bit_options to find its index
+                                    if let Some(index) = constant.bit_options.iter().position(|opt| opt == s) {
+                                        index as u32
+                                    } else {
+                                        // Try case-insensitive match
+                                        if let Some(index) = constant.bit_options.iter().position(|opt| opt.eq_ignore_ascii_case(s)) {
+                                            index as u32
+                                        } else {
+                                            skipped_count += 1;
+                                            continue;
+                                        }
+                                    }
+                                }
+                                _ => {
+                                    skipped_count += 1;
+                                    continue;
+                                }
+                            };
+                            
+                            // Modify the first byte
+                            let bits_in_first_byte = (8 - bit_in_byte).min(bit_size);
+                            let mask_first = if bits_in_first_byte >= 8 {
+                                0xFF
+                            } else {
+                                (1u8 << bits_in_first_byte) - 1
+                            };
+                            let value_first = (bit_value & mask_first as u32) as u8;
+                            current_bytes[0] = (current_bytes[0] & !(mask_first << bit_in_byte)) | (value_first << bit_in_byte);
+                            
+                            // If bits span multiple bytes, modify additional bytes
+                            if bits_remaining_after_first_byte > 0 {
+                                let mut bits_collected = bits_in_first_byte;
+                                for i in 1..bytes_needed_usize.min(current_bytes.len()) {
+                                    let remaining_bits = bit_size - bits_collected;
+                                    if remaining_bits == 0 {
+                                        break;
+                                    }
+                                    let bits_from_this_byte = remaining_bits.min(8);
+                                    let mask = if bits_from_this_byte >= 8 {
+                                        0xFF
+                                    } else {
+                                        (1u8 << bits_from_this_byte) - 1
+                                    };
+                                    let value_from_bit = ((bit_value >> bits_collected) & mask as u32) as u8;
+                                    current_bytes[i] = (current_bytes[i] & !mask) | value_from_bit;
+                                    bits_collected += bits_from_this_byte;
+                                }
+                            }
+                            
+                            // Write the modified byte(s) back
+                            if cache.write_bytes(constant.page, read_offset, &current_bytes) {
+                                applied_count += 1;
+                            } else {
+                                skipped_count += 1;
+                            }
+                            continue;
+                        }
+                        
+                        // Skip zero-size constants (shouldn't happen for non-bits)
                         let length = constant.size_bytes() as u16;
                         if length == 0 {
                             skipped_count += 1;
@@ -1133,9 +1235,10 @@ async fn get_table_data(
     
     drop(def_guard);
 
-    // Helper to read constant data from cache or ECU
+    // Helper to read constant data from TuneFile (offline) or ECU (online)
     fn read_const_from_source(
         constant: &Constant,
+        tune: Option<&TuneFile>,
         cache: Option<&TuneCache>,
         conn: &mut Option<&mut Connection>,
         endianness: libretune_core::ini::Endianness,
@@ -1146,6 +1249,36 @@ async fn get_table_data(
 
         if length == 0 {
             return Ok(vec![0.0; element_count]);
+        }
+        
+        // If offline, always read from TuneFile (MSQ file) - no cache fallback
+        if conn.is_none() {
+            if let Some(tune_file) = tune {
+                if let Some(tune_value) = tune_file.constants.get(&constant.name) {
+                    use libretune_core::tune::TuneValue;
+                    match tune_value {
+                        TuneValue::Array(arr) => {
+                            eprintln!("[DEBUG] read_const_from_source: CACHE HIT for '{}' (page={}, offset={}, len={}, offline mode)", 
+                                constant.name, constant.page, constant.offset, length);
+                            return Ok(arr.clone());
+                        }
+                        TuneValue::Scalar(v) => {
+                            eprintln!("[DEBUG] read_const_from_source: Found '{}' in TuneFile as Scalar({}), returning as single-element array", 
+                                constant.name, v);
+                            return Ok(vec![*v]);
+                        }
+                        _ => {
+                            eprintln!("[DEBUG] read_const_from_source: Found '{}' in TuneFile but wrong type, falling through", constant.name);
+                        }
+                    }
+                } else {
+                    eprintln!("[DEBUG] read_const_from_source: Constant '{}' not found in TuneFile, returning zeros", constant.name);
+                    return Ok(vec![0.0; element_count]);
+                }
+            } else {
+                eprintln!("[DEBUG] read_const_from_source: No TuneFile loaded, returning zeros");
+                return Ok(vec![0.0; element_count]);
+            }
         }
         
         // If connected to ECU, always read from ECU (live data)
@@ -1172,45 +1305,24 @@ async fn get_table_data(
             return Ok(values);
         }
         
-        // If offline, read from cache (MSQ data)
-        if let Some(cache) = cache {
-            if let Some(raw_data) = cache.read_bytes(constant.page, constant.offset, length) {
-                eprintln!("[DEBUG] read_const_from_source: CACHE HIT for '{}' (page={}, offset={}, len={}, offline mode)", 
-                    constant.name, constant.page, constant.offset, length);
-                let mut values = Vec::new();
-                for i in 0..element_count {
-                    let offset = i * element_size;
-                    if let Some(raw_val) = constant.data_type.read_from_bytes(raw_data, offset, endianness) {
-                        values.push(constant.raw_to_display(raw_val));
-                    } else {
-                        values.push(0.0);
-                    }
-                }
-                return Ok(values);
-            } else {
-                eprintln!("[DEBUG] read_const_from_source: CACHE MISS for '{}' (page={}, offset={}, len={}, page_state={:?})", 
-                    constant.name, constant.page, constant.offset, length, cache.page_state(constant.page));
-            }
-        } else {
-            eprintln!("[DEBUG] read_const_from_source: NO CACHE for '{}'", constant.name);
-        }
-        
-        // No cache and no connection - return zeros
+        // If offline and not in TuneFile, return zeros (should always be in TuneFile)
+        eprintln!("[DEBUG] read_const_from_source: Constant '{}' not found in TuneFile, returning zeros", constant.name);
         Ok(vec![0.0; element_count])
     }
 
-    // Get cache and connection
+    // Get tune, cache and connection
+    let tune_guard = state.current_tune.lock().await;
     let cache_guard = state.tune_cache.lock().await;
     let mut conn_guard = state.connection.lock().await;
     let mut conn = conn_guard.as_mut();
 
-    let x_bins = read_const_from_source(&x_const, cache_guard.as_ref(), &mut conn, endianness)?;
+    let x_bins = read_const_from_source(&x_const, tune_guard.as_ref(), cache_guard.as_ref(), &mut conn, endianness)?;
     let y_bins = if let Some(ref y) = y_const {
-        read_const_from_source(y, cache_guard.as_ref(), &mut conn, endianness)?
+        read_const_from_source(y, tune_guard.as_ref(), cache_guard.as_ref(), &mut conn, endianness)?
     } else {
         vec![0.0]
     };
-    let z_flat = read_const_from_source(&z_const, cache_guard.as_ref(), &mut conn, endianness)?;
+    let z_flat = read_const_from_source(&z_const, tune_guard.as_ref(), cache_guard.as_ref(), &mut conn, endianness)?;
     
     drop(cache_guard);
     drop(conn_guard);
@@ -1879,12 +1991,7 @@ async fn get_menu_tree(
     if let Some(context) = filter_context {
         let mut filtered_menus = Vec::new();
         for menu in &def.menus {
-            let mut filtered_items = Vec::new();
-            for item in &menu.items {
-                if should_show_item(item, &context) {
-                    filtered_items.push(item.clone());
-                }
-            }
+            let filtered_items = filter_menu_items(&menu.items, &context);
             if !filtered_items.is_empty() {
                 filtered_menus.push(Menu {
                     name: menu.name.clone(),
@@ -1899,24 +2006,70 @@ async fn get_menu_tree(
     }
 }
 
+fn filter_menu_items(items: &[MenuItem], context: &HashMap<String, f64>) -> Vec<MenuItem> {
+    let mut filtered = Vec::new();
+    for item in items {
+        if should_show_item(item, context) {
+            // If it's a SubMenu, recursively filter its children
+            let filtered_item = match item {
+                MenuItem::SubMenu { label, items: sub_items, visibility_condition, enabled_condition } => {
+                    let filtered_children = filter_menu_items(sub_items, context);
+                    if !filtered_children.is_empty() {
+                        MenuItem::SubMenu {
+                            label: label.clone(),
+                            items: filtered_children,
+                            visibility_condition: visibility_condition.clone(),
+                            enabled_condition: enabled_condition.clone(),
+                        }
+                    } else {
+                        continue; // Skip submenu with no visible children
+                    }
+                }
+                _ => item.clone(),
+            };
+            filtered.push(filtered_item);
+        }
+    }
+    filtered
+}
+
 fn should_show_item(item: &MenuItem, context: &HashMap<String, f64>) -> bool {
     match item {
-        MenuItem::Dialog { condition, .. } 
-        | MenuItem::Table { condition, .. } 
-        | MenuItem::SubMenu { condition, .. }
-        | MenuItem::Std { condition, .. }
-        | MenuItem::Help { condition, .. } => {
-            if let Some(cond) = condition {
-                let mut parser = libretune_core::ini::expression::Parser::new(cond);
+        MenuItem::Dialog { visibility_condition, enabled_condition, .. } 
+        | MenuItem::Table { visibility_condition, enabled_condition, .. } 
+        | MenuItem::SubMenu { visibility_condition, enabled_condition, .. }
+        | MenuItem::Std { visibility_condition, enabled_condition, .. }
+        | MenuItem::Help { visibility_condition, enabled_condition, .. } => {
+            // Evaluate visibility condition first (if present)
+            if let Some(vis_cond) = visibility_condition {
+                let mut parser = libretune_core::ini::expression::Parser::new(vis_cond);
                 if let Ok(expr) = parser.parse() {
-                    if let Ok(val) = libretune_core::ini::expression::evaluate(&expr, context) {
+                    if let Ok(val) = libretune_core::ini::expression::evaluate_simple(&expr, context) {
+                        if !val.as_bool() {
+                            return false; // Not visible
+                        }
+                    } else {
+                        return true; // Show on error
+                    }
+                } else {
+                    return true; // Show on parse error
+                }
+            }
+            
+            // If no visibility condition or visibility is true, check enabled condition
+            // For now, we use enabled_condition as a fallback visibility check
+            // (items that are disabled but visible can be shown grayed out later)
+            if let Some(en_cond) = enabled_condition {
+                let mut parser = libretune_core::ini::expression::Parser::new(en_cond);
+                if let Ok(expr) = parser.parse() {
+                    if let Ok(val) = libretune_core::ini::expression::evaluate_simple(&expr, context) {
                         return val.as_bool();
                     }
                 }
-                true // Show on error
-            } else {
-                true
+                return true; // Show on error
             }
+            
+            true // No conditions, show by default
         }
         MenuItem::Separator => true,
     }
@@ -1930,7 +2083,7 @@ async fn evaluate_expression(
 ) -> Result<bool, String> {
     let mut parser = libretune_core::ini::expression::Parser::new(&expression);
     let expr = parser.parse().map_err(|e| e)?;
-    let val = libretune_core::ini::expression::evaluate(&expr, &context).map_err(|e| e)?;
+    let val = libretune_core::ini::expression::evaluate_simple(&expr, &context).map_err(|e| e)?;
     Ok(val.as_bool())
 }
 
@@ -1978,6 +2131,12 @@ async fn get_constant(state: tauri::State<'_, AppState>, name: String) -> Result
         }
     };
     
+    eprintln!("[DEBUG] get_constant '{}': bit_options.len()={}, value_type={}", 
+        name, constant.bit_options.len(), value_type);
+    if constant.bit_options.len() > 0 && constant.bit_options.len() <= 10 {
+        eprintln!("[DEBUG] get_constant '{}': bit_options={:?}", name, constant.bit_options);
+    }
+    
     Ok(ConstantInfo {
         name: constant.name.clone(),
         label: constant.label.clone(),
@@ -1988,6 +2147,7 @@ async fn get_constant(state: tauri::State<'_, AppState>, name: String) -> Result
         value_type,
         bit_options: constant.bit_options.clone(),
         help: constant.help.clone(),
+        visibility_condition: constant.visibility_condition.clone(),
     })
 }
 
@@ -1996,6 +2156,7 @@ async fn get_constant_string_value(state: tauri::State<'_, AppState>, name: Stri
     let mut conn_guard = state.connection.lock().await;
     let def_guard = state.definition.lock().await;
     let cache_guard = state.tune_cache.lock().await;
+    let tune_guard = state.current_tune.lock().await;
     
     let def = def_guard.as_ref().ok_or("Definition not loaded")?;
     let conn = conn_guard.as_mut();
@@ -2006,6 +2167,18 @@ async fn get_constant_string_value(state: tauri::State<'_, AppState>, name: Stri
     // For string type, read the raw bytes and convert to UTF-8 string
     if constant.data_type != DataType::String {
         return Err(format!("Constant {} is not a string type", name));
+    }
+    
+    // When offline, try reading directly from TuneFile first (simpler and more reliable)
+    if conn.is_none() {
+        if let Some(tune) = tune_guard.as_ref() {
+            if let Some(tune_value) = tune.constants.get(&name) {
+                use libretune_core::tune::TuneValue;
+                if let TuneValue::String(s) = tune_value {
+                    return Ok(s.clone());
+                }
+            }
+        }
     }
     
     // Get string length from shape (e.g., Array1D(32) means 32 chars)
@@ -2030,17 +2203,7 @@ async fn get_constant_string_value(state: tauri::State<'_, AppState>, name: Stri
         return Ok(s);
     }
     
-    // If offline, read from cache (MSQ data)
-    if let Some(cache) = cache_guard.as_ref() {
-        if let Some(raw_data) = cache.read_bytes(constant.page, constant.offset, length) {
-            // Convert to string, stopping at first null byte
-            let s = String::from_utf8_lossy(raw_data);
-            let s = s.trim_end_matches('\0').to_string();
-            return Ok(s);
-        }
-    }
-    
-    // No cache and not connected - return empty string
+    // If offline and not in TuneFile, return empty string (should always be in TuneFile)
     Ok(String::new())
 }
 
@@ -2049,6 +2212,7 @@ async fn get_constant_value(state: tauri::State<'_, AppState>, name: String) -> 
     let mut conn_guard = state.connection.lock().await;
     let def_guard = state.definition.lock().await;
     let cache_guard = state.tune_cache.lock().await;
+    let tune_guard = state.current_tune.lock().await;
     
     let def = def_guard.as_ref().ok_or("Definition not loaded")?;
     let conn = conn_guard.as_mut();
@@ -2072,8 +2236,151 @@ async fn get_constant_value(state: tauri::State<'_, AppState>, name: String) -> 
         return Ok(constant.min);
     }
     
+    // When offline, ALWAYS read from TuneFile (MSQ file) - no cache fallback
+    if conn.is_none() {
+        if let Some(tune) = tune_guard.as_ref() {
+            if let Some(tune_value) = tune.constants.get(&name) {
+                use libretune_core::tune::TuneValue;
+                match tune_value {
+                    TuneValue::Scalar(v) => {
+                        // For bits constants, the value might be a string - need to look it up
+                        if constant.data_type == libretune_core::ini::DataType::Bits {
+                            // If it's already a number, return it (even if it maps to "INVALID" - that's what's in the MSQ)
+                            let index = *v as usize;
+                            if index < constant.bit_options.len() {
+                                let option_str = &constant.bit_options[index];
+                                eprintln!("[DEBUG] get_constant_value: Found '{}' in TuneFile as Scalar({}), returning as bits index (maps to '{}')", 
+                                    name, v, option_str);
+                            } else {
+                                eprintln!("[DEBUG] get_constant_value: Found '{}' in TuneFile as Scalar({}), but out of range (bit_options len={}), returning anyway", 
+                                    name, v, constant.bit_options.len());
+                            }
+                            return Ok(*v);
+                        } else {
+                            eprintln!("[DEBUG] get_constant_value: Found '{}' in TuneFile as Scalar({}), returning directly", name, v);
+                            return Ok(*v);
+                        }
+                    }
+                    TuneValue::String(s) if constant.data_type == libretune_core::ini::DataType::Bits => {
+                        // Look up string in bit_options
+                        if let Some(index) = constant.bit_options.iter().position(|opt| opt == s) {
+                            eprintln!("[DEBUG] get_constant_value: Found '{}' in TuneFile as String('{}'), matched at index {}", name, s, index);
+                            return Ok(index as f64);
+                        }
+                        // Try case-insensitive
+                        if let Some(index) = constant.bit_options.iter().position(|opt| opt.eq_ignore_ascii_case(s)) {
+                            eprintln!("[DEBUG] get_constant_value: Found '{}' in TuneFile as String('{}'), case-insensitive match at index {}", name, s, index);
+                            return Ok(index as f64);
+                        }
+                        eprintln!("[DEBUG] get_constant_value: Found '{}' in TuneFile as String('{}'), but not found in bit_options, returning 0", 
+                            name, s);
+                        return Ok(0.0);
+                    }
+                    TuneValue::String(_s) => {
+                        // Non-bits string constants - should use get_constant_string_value
+                        eprintln!("[DEBUG] get_constant_value: Found '{}' in TuneFile as String, but constant is not Bits type, returning 0", name);
+                        return Ok(0.0);
+                    }
+                    TuneValue::Array(arr) => {
+                        // For arrays, return first element or 0
+                        if !arr.is_empty() {
+                            return Ok(arr[0]);
+                        }
+                        return Ok(0.0);
+                    }
+                    TuneValue::Bool(b) => {
+                        return Ok(if *b { 1.0 } else { 0.0 });
+                    }
+                }
+            } else {
+                // Constant not in TuneFile - return 0 (or default)
+                eprintln!("[DEBUG] get_constant_value: Constant '{}' not found in TuneFile, returning 0", name);
+                return Ok(0.0);
+            }
+        } else {
+            // No tune file loaded - return 0
+            eprintln!("[DEBUG] get_constant_value: No TuneFile loaded, returning 0");
+            return Ok(0.0);
+        }
+    }
+    
+    // When online, read from ECU
+    // Handle bits constants specially (they're packed, size_bytes() == 0)
+    if constant.data_type == libretune_core::ini::DataType::Bits {
+        let bit_pos = constant.bit_position.unwrap_or(0);
+        let bit_size = constant.bit_size.unwrap_or(1);
+        
+        // Calculate which byte contains the bits and the bit position within that byte
+        let byte_offset = (bit_pos / 8) as u16;
+        let bit_in_byte = bit_pos % 8;
+        
+        // Calculate how many bytes we need to read (may span multiple bytes)
+        let bits_remaining_after_first_byte = bit_size.saturating_sub(8 - bit_in_byte);
+        let bytes_needed = if bits_remaining_after_first_byte > 0 {
+            // Need multiple bytes: first byte + additional bytes
+            1 + ((bits_remaining_after_first_byte + 7) / 8)
+        } else {
+            // All bits fit in one byte
+            1
+        };
+        
+        // Read the byte(s) containing the bits from ECU
+        let read_offset = constant.offset + byte_offset;
+        if let Some(conn) = conn {
+            let params = libretune_core::protocol::commands::ReadMemoryParams {
+                can_id: 0,
+                page: constant.page,
+                offset: read_offset,
+                length: bytes_needed as u16,
+            };
+            if let Ok(bytes) = conn.read_memory(params) {
+                if bytes.is_empty() {
+                    return Ok(0.0);
+                }
+                
+                // Extract bits from the first byte
+                let first_byte = bytes[0];
+                let bits_in_first_byte = (8 - bit_in_byte).min(bit_size);
+                let mask_first = if bits_in_first_byte >= 8 {
+                    0xFF
+                } else {
+                    (1u8 << bits_in_first_byte) - 1
+                };
+                let mut bit_val = ((first_byte >> bit_in_byte) & mask_first) as u32;
+                
+                // If bits span multiple bytes, extract from additional bytes
+                if bits_remaining_after_first_byte > 0 && bytes.len() > 1 {
+                    let mut bits_collected = bits_in_first_byte;
+                    for i in 1..bytes.len() {
+                        let remaining_bits = bit_size - bits_collected;
+                        if remaining_bits == 0 {
+                            break;
+                        }
+                        let bits_from_this_byte = remaining_bits.min(8);
+                        let mask = if bits_from_this_byte >= 8 {
+                            0xFF
+                        } else {
+                            (1u8 << bits_from_this_byte) - 1
+                        };
+                        let val_from_byte = (bytes[i] & mask) as u32;
+                        bit_val |= val_from_byte << bits_collected;
+                        bits_collected += bits_from_this_byte;
+                    }
+                }
+                
+                // Return the raw bit value (index into bit_options array)
+                eprintln!("[DEBUG] get_constant_value: Read bits constant '{}' from ECU: bit_val={}, bit_options len={}", 
+                    name, bit_val, constant.bit_options.len());
+                return Ok(bit_val as f64);
+            }
+        }
+        
+        eprintln!("[DEBUG] get_constant_value: Could not read bits constant '{}' from ECU, returning 0", name);
+        return Ok(0.0);
+    }
+    
     let length = constant.size_bytes() as u16;
-    if length == 0 { return Ok(0.0); } // Packed bits handled differently or just 0 for now
+    if length == 0 { return Ok(0.0); } // Zero-size constants (shouldn't happen for non-bits)
     
     // If connected to ECU, always read from ECU (live data)
     if let Some(conn) = conn {
@@ -2180,12 +2487,215 @@ async fn get_all_constant_values(state: tauri::State<'_, AppState>) -> Result<Ha
     let def_guard = state.definition.lock().await;
     let def = def_guard.as_ref().ok_or("Definition not loaded")?;
     
+    let mut conn_guard = state.connection.lock().await;
+    let cache_guard = state.tune_cache.lock().await;
+    let tune_guard = state.current_tune.lock().await;
+    
     let mut values = HashMap::new();
-    for (name, _) in &def.constants {
-        // Return 0 as baseline. 
-        // Real implementation would read from ECU or local tune cache.
-        values.insert(name.clone(), 0.0);
+    for (name, constant) in &def.constants {
+        // Skip array constants (only need scalars for visibility conditions)
+        if !matches!(constant.shape, libretune_core::ini::Shape::Scalar) {
+            continue;
+        }
+        
+        // Try to get the value - prioritize ECU if connected, otherwise tune file or cache
+        let value = if let Some(ref mut conn_ptr) = conn_guard.as_mut() {
+            // Online: read from ECU
+            let length = constant.size_bytes() as u16;
+            if length > 0 {
+                let params = libretune_core::protocol::commands::ReadMemoryParams {
+                    can_id: 0,
+                    page: constant.page,
+                    offset: constant.offset,
+                    length,
+                };
+                if let Ok(raw_data) = conn_ptr.read_memory(params) {
+                    if let Some(raw_val) = constant.data_type.read_from_bytes(&raw_data, 0, def.endianness) {
+                        constant.raw_to_display(raw_val)
+                    } else {
+                        0.0
+                    }
+                } else {
+                    0.0
+                }
+            } else if constant.data_type == DataType::Bits {
+                // Bits constant - read from byte and extract bits
+                let byte_offset = (constant.bit_position.unwrap_or(0) / 8) as u16;
+                let bit_in_byte = constant.bit_position.unwrap_or(0) % 8;
+                let bytes_needed = ((bit_in_byte + constant.bit_size.unwrap_or(0) + 7) / 8) as u16;
+                let params = libretune_core::protocol::commands::ReadMemoryParams {
+                    can_id: 0,
+                    page: constant.page,
+                    offset: constant.offset + byte_offset,
+                    length: bytes_needed.max(1),
+                };
+                if let Ok(raw_data) = conn_ptr.read_memory(params) {
+                    let mut bit_value = 0u64;
+                    for (i, &byte) in raw_data.iter().enumerate() {
+                        let bit_start = if i == 0 { bit_in_byte } else { 0 };
+                        let bit_end = if i == bytes_needed as usize - 1 {
+                            bit_in_byte + constant.bit_size.unwrap_or(0)
+                        } else {
+                            8
+                        };
+                        let bits = ((byte >> bit_start) & ((1u8 << (bit_end - bit_start)) - 1)) as u64;
+                        bit_value |= bits << (i * 8);
+                    }
+                    bit_value as f64
+                } else {
+                    0.0
+                }
+            } else {
+                0.0
+            }
+        } else {
+            // Offline: read from TuneFile first, then cache
+            if let Some(tune) = tune_guard.as_ref() {
+                if let Some(tune_value) = tune.constants.get(name) {
+                    use libretune_core::tune::TuneValue;
+                    match tune_value {
+                        TuneValue::Scalar(v) => *v,
+                        TuneValue::Bool(b) if constant.data_type == DataType::Bits => {
+                            // Convert boolean to index (false = 0, true = 1)
+                            // This matches the typical bit_options pattern: ["false", "true"]
+                            if *b { 1.0 } else { 0.0 }
+                        }
+                        TuneValue::String(s) if constant.data_type == DataType::Bits => {
+                            // Look up string in bit_options
+                            if let Some(index) = constant.bit_options.iter().position(|opt| opt == s) {
+                                index as f64
+                            } else if let Some(index) = constant.bit_options.iter().position(|opt| opt.eq_ignore_ascii_case(s)) {
+                                index as f64
+                            } else {
+                                0.0
+                            }
+                        }
+                        _ => 0.0,
+                    }
+                } else if let Some(cache) = cache_guard.as_ref() {
+                    // Fall back to cache
+                    let length = constant.size_bytes() as u16;
+                    if length > 0 {
+                        if let Some(raw_data) = cache.read_bytes(constant.page, constant.offset, length) {
+                            if let Some(raw_val) = constant.data_type.read_from_bytes(&raw_data, 0, def.endianness) {
+                                constant.raw_to_display(raw_val)
+                            } else {
+                                0.0
+                            }
+                        } else {
+                            0.0
+                        }
+                    } else if constant.data_type == DataType::Bits {
+                        // Bits constant from cache
+                        let byte_offset = (constant.bit_position.unwrap_or(0) / 8) as u16;
+                        let bit_in_byte = constant.bit_position.unwrap_or(0) % 8;
+                        let bytes_needed = ((bit_in_byte + constant.bit_size.unwrap_or(0) + 7) / 8) as u16;
+                        if let Some(raw_data) = cache.read_bytes(constant.page, constant.offset + byte_offset, bytes_needed.max(1)) {
+                            let mut bit_value = 0u64;
+                            for (i, &byte) in raw_data.iter().enumerate() {
+                                let bit_start = if i == 0 { bit_in_byte } else { 0 };
+                                let bit_end = if i == bytes_needed as usize - 1 {
+                                    bit_in_byte + constant.bit_size.unwrap_or(0)
+                                } else {
+                                    8
+                                };
+                                let bits = ((byte >> bit_start) & ((1u8 << (bit_end - bit_start)) - 1)) as u64;
+                                bit_value |= bits << (i * 8);
+                            }
+                            bit_value as f64
+                        } else {
+                            0.0
+                        }
+                    } else {
+                        0.0
+                    }
+                } else {
+                    // Not in TuneFile, try cache
+                    if let Some(cache) = cache_guard.as_ref() {
+                        let length = constant.size_bytes() as u16;
+                        if length > 0 {
+                            if let Some(raw_data) = cache.read_bytes(constant.page, constant.offset, length) {
+                                if let Some(raw_val) = constant.data_type.read_from_bytes(&raw_data, 0, def.endianness) {
+                                    constant.raw_to_display(raw_val)
+                                } else {
+                                    0.0
+                                }
+                            } else {
+                                0.0
+                            }
+                        } else if constant.data_type == DataType::Bits {
+                            // Bits constant from cache
+                            let byte_offset = (constant.bit_position.unwrap_or(0) / 8) as u16;
+                            let bit_in_byte = constant.bit_position.unwrap_or(0) % 8;
+                            let bytes_needed = ((bit_in_byte + constant.bit_size.unwrap_or(0) + 7) / 8) as u16;
+                            if let Some(raw_data) = cache.read_bytes(constant.page, constant.offset + byte_offset, bytes_needed.max(1)) {
+                                let mut bit_value = 0u64;
+                                for (i, &byte) in raw_data.iter().enumerate() {
+                                    let bit_start = if i == 0 { bit_in_byte } else { 0 };
+                                    let bit_end = if i == bytes_needed as usize - 1 {
+                                        bit_in_byte + constant.bit_size.unwrap_or(0)
+                                    } else {
+                                        8
+                                    };
+                                    let bits = ((byte >> bit_start) & ((1u8 << (bit_end - bit_start)) - 1)) as u64;
+                                    bit_value |= bits << (i * 8);
+                                }
+                                bit_value as f64
+                            } else {
+                                0.0
+                            }
+                        } else {
+                            0.0
+                        }
+                    } else {
+                        0.0
+                    }
+                }
+            } else if let Some(cache) = cache_guard.as_ref() {
+                // No tune file, try cache
+                let length = constant.size_bytes() as u16;
+                if length > 0 {
+                    if let Some(raw_data) = cache.read_bytes(constant.page, constant.offset, length) {
+                        if let Some(raw_val) = constant.data_type.read_from_bytes(&raw_data, 0, def.endianness) {
+                            constant.raw_to_display(raw_val)
+                        } else {
+                            0.0
+                        }
+                    } else {
+                        0.0
+                    }
+                } else if constant.data_type == DataType::Bits {
+                    // Bits constant from cache
+                    let byte_offset = (constant.bit_position.unwrap_or(0) / 8) as u16;
+                    let bit_in_byte = constant.bit_position.unwrap_or(0) % 8;
+                    let bytes_needed = ((bit_in_byte + constant.bit_size.unwrap_or(0) + 7) / 8) as u16;
+                    if let Some(raw_data) = cache.read_bytes(constant.page, constant.offset + byte_offset, bytes_needed.max(1)) {
+                        let mut bit_value = 0u64;
+                        for (i, &byte) in raw_data.iter().enumerate() {
+                            let bit_start = if i == 0 { bit_in_byte } else { 0 };
+                            let bit_end = if i == bytes_needed as usize - 1 {
+                                bit_in_byte + constant.bit_size.unwrap_or(0)
+                            } else {
+                                8
+                            };
+                            let bits = ((byte >> bit_start) & ((1u8 << (bit_end - bit_start)) - 1)) as u64;
+                            bit_value |= bits << (i * 8);
+                        }
+                        bit_value as f64
+                    } else {
+                        0.0
+                    }
+                } else {
+                    0.0
+                }
+            } else {
+                0.0
+            }
+        };
+        
+        values.insert(name.clone(), value);
     }
+    
     Ok(values)
 }
 
@@ -3382,6 +3892,58 @@ async fn save_tune(state: tauri::State<'_, AppState>, path: Option<String>) -> R
                 continue;
             }
             
+            // Handle bits constants specially - they have zero size_bytes() but we need to read them
+            if constant.data_type == libretune_core::ini::DataType::Bits {
+                // Read the byte(s) containing the bits
+                let byte_offset = (constant.bit_position.unwrap_or(0) / 8) as u16;
+                let bit_in_byte = constant.bit_position.unwrap_or(0) % 8;
+                let bit_size = constant.bit_size.unwrap_or(0);
+                let bytes_needed = ((bit_in_byte + bit_size + 7) / 8).max(1) as u16;
+                
+                if let Some(bytes) = cache.read_bytes(constant.page, constant.offset + byte_offset, bytes_needed) {
+                    // Extract the bit value
+                    let mut bit_val: u32 = 0;
+                    let mut bits_remaining = bit_size;
+                    let mut current_bit = bit_in_byte;
+                    
+                    for byte in bytes.iter().take(bytes_needed as usize) {
+                        let bits_in_this_byte = bits_remaining.min(8 - current_bit);
+                        // Safe shift: ensure we don't shift by 8 or more
+                        let mask = if bits_in_this_byte == 0 {
+                            0
+                        } else if bits_in_this_byte == 8 && current_bit == 0 {
+                            // All bits in this byte
+                            0xFFu8
+                        } else {
+                            // bits_in_this_byte is guaranteed to be < 8 here
+                            let base_mask = (1u8 << bits_in_this_byte.min(7)) - 1;
+                            base_mask << current_bit
+                        };
+                        let extracted = ((*byte & mask) >> current_bit) as u32;
+                        bit_val |= extracted << (bit_size - bits_remaining);
+                        
+                        bits_remaining = bits_remaining.saturating_sub(bits_in_this_byte);
+                        if bits_remaining == 0 {
+                            break;
+                        }
+                        current_bit = 0;
+                    }
+                    
+                    // Convert bit index to string from bit_options
+                    let bit_index = bit_val as usize;
+                    if bit_index < constant.bit_options.len() {
+                        let option_string = constant.bit_options[bit_index].clone();
+                        tune.constants.insert(name.clone(), TuneValue::String(option_string));
+                        constants_saved += 1;
+                    } else {
+                        // Out of range - save as numeric index (fallback)
+                        tune.constants.insert(name.clone(), TuneValue::Scalar(bit_val as f64));
+                        constants_saved += 1;
+                    }
+                }
+                continue;
+            }
+            
             // Skip constants with zero size
             let length = constant.size_bytes() as u16;
             if length == 0 {
@@ -3647,7 +4209,112 @@ async fn load_tune(state: tauri::State<'_, AppState>, app: tauri::AppHandle, pat
                             continue;
                         }
                         
-                        // Skip if constant has no size (packed bits or invalid)
+                        // Handle bits constants specially (they're packed, size_bytes() == 0)
+                        if constant.data_type == libretune_core::ini::DataType::Bits {
+                            // Bits constants: read current byte(s), modify the bits, write back
+                            let bit_pos = constant.bit_position.unwrap_or(0);
+                            let bit_size = constant.bit_size.unwrap_or(1);
+                            
+                            // Calculate which byte(s) contain the bits
+                            let byte_offset = (bit_pos / 8) as u16;
+                            let bit_in_byte = bit_pos % 8;
+                            
+                            // Calculate how many bytes we need
+                            let bits_remaining_after_first_byte = bit_size.saturating_sub(8 - bit_in_byte);
+                            let bytes_needed = if bits_remaining_after_first_byte > 0 {
+                                1 + ((bits_remaining_after_first_byte + 7) / 8)
+                            } else {
+                                1
+                            };
+                            let bytes_needed_usize = bytes_needed as usize;
+                            
+                            // Read current byte(s) value (or 0 if not present)
+                            let read_offset = constant.offset + byte_offset;
+                            let mut current_bytes: Vec<u8> = cache.read_bytes(constant.page, read_offset, bytes_needed as u16)
+                                .map(|s| s.to_vec())
+                                .unwrap_or_else(|| vec![0u8; bytes_needed_usize]);
+                            
+                            // Ensure we have enough bytes
+                            while current_bytes.len() < bytes_needed_usize {
+                                current_bytes.push(0u8);
+                            }
+                            
+                            // Get the bit value from MSQ (index into bit_options)
+                            // MSQ can store bits constants as numeric indices, option strings, or booleans
+                            let bit_value = match tune_value {
+                                TuneValue::Scalar(v) => *v as u32,
+                                TuneValue::Array(arr) if !arr.is_empty() => arr[0] as u32,
+                                TuneValue::Bool(b) => {
+                                    // Boolean values: true = 1, false = 0
+                                    // For bits constants with 2 options (like ["false", "true"]), 
+                                    // boolean true maps to index 1, false to index 0
+                                    if *b { 1 } else { 0 }
+                                }
+                                TuneValue::String(s) => {
+                                    // Look up the string in bit_options to find its index
+                                    if let Some(index) = constant.bit_options.iter().position(|opt| opt == s) {
+                                        index as u32
+                                    } else {
+                                        // Try case-insensitive match
+                                        if let Some(index) = constant.bit_options.iter().position(|opt| opt.eq_ignore_ascii_case(s)) {
+                                            index as u32
+                                        } else {
+                                            skipped_count += 1;
+                                            eprintln!("[DEBUG] load_tune: skipping bits constant '{}' (string '{}' not found in bit_options: {:?})", name, s, constant.bit_options);
+                                            continue;
+                                        }
+                                    }
+                                }
+                                _ => {
+                                    skipped_count += 1;
+                                    eprintln!("[DEBUG] load_tune: skipping bits constant '{}' (unsupported value type)", name);
+                                    continue;
+                                }
+                            };
+                            
+                            // Modify the first byte
+                            let bits_in_first_byte = (8 - bit_in_byte).min(bit_size);
+                            let mask_first = if bits_in_first_byte >= 8 {
+                                0xFF
+                            } else {
+                                (1u8 << bits_in_first_byte) - 1
+                            };
+                            let value_first = (bit_value & mask_first as u32) as u8;
+                            current_bytes[0] = (current_bytes[0] & !(mask_first << bit_in_byte)) | (value_first << bit_in_byte);
+                            
+                            // If bits span multiple bytes, modify additional bytes
+                            if bits_remaining_after_first_byte > 0 {
+                                let mut bits_collected = bits_in_first_byte;
+                                for i in 1..bytes_needed_usize.min(current_bytes.len()) {
+                                    let remaining_bits = bit_size - bits_collected;
+                                    if remaining_bits == 0 {
+                                        break;
+                                    }
+                                    let bits_from_this_byte = remaining_bits.min(8);
+                                    let mask = if bits_from_this_byte >= 8 {
+                                        0xFF
+                                    } else {
+                                        (1u8 << bits_from_this_byte) - 1
+                                    };
+                                    let value_from_bit = ((bit_value >> bits_collected) & mask as u32) as u8;
+                                    current_bytes[i] = (current_bytes[i] & !mask) | value_from_bit;
+                                    bits_collected += bits_from_this_byte;
+                                }
+                            }
+                            
+                            // Write the modified byte(s) back
+                            if cache.write_bytes(constant.page, read_offset, &current_bytes) {
+                                applied_count += 1;
+                                eprintln!("[DEBUG] load_tune: ✓ Applied bits constant '{}' = {} (bit_pos={}, bit_size={}, bytes={})", 
+                                    name, bit_value, bit_pos, bit_size, bytes_needed);
+                            } else {
+                                failed_count += 1;
+                                eprintln!("[DEBUG] load_tune: ✗ Failed to write bits constant '{}'", name);
+                            }
+                            continue;
+                        }
+                        
+                        // Skip if constant has no size (shouldn't happen for non-bits)
                         let length = constant.size_bytes() as u16;
                         if length == 0 {
                             zero_size_count += 1;
@@ -3810,9 +4477,24 @@ async fn load_tune(state: tauri::State<'_, AppState>, app: tauri::AppHandle, pat
         }
     }
     
-    *state.current_tune.lock().await = Some(tune);
+    *state.current_tune.lock().await = Some(tune.clone());
     *state.current_tune_path.lock().await = Some(PathBuf::from(path));
     *state.tune_modified.lock().await = false;
+    
+    // If a project is open, save the tune to the project's CurrentTune.msq
+    // This ensures it will be auto-loaded next time the project is opened
+    let proj_guard = state.current_project.lock().await;
+    if let Some(ref project) = *proj_guard {
+        let project_tune_path = project.path.join("CurrentTune.msq");
+        if let Err(e) = tune.save(&project_tune_path) {
+            eprintln!("[WARN] Failed to save tune to project folder: {}", e);
+        } else {
+            eprintln!("[INFO] ✓ Saved tune to project: {:?}", project_tune_path);
+            // Update the stored tune path to point to the project's tune file
+            *state.current_tune_path.lock().await = Some(project_tune_path);
+        }
+    }
+    drop(proj_guard);
     
     // Emit event to notify UI that tune was loaded
     let _ = app.emit("tune:loaded", "file");
@@ -4249,8 +4931,31 @@ async fn open_project(
     *proj_guard = Some(project);
     drop(proj_guard);
     
+    // Always try to load CurrentTune.msq if it exists, even if project.current_tune wasn't set
+    let tune_to_load = if let Some(tune) = project_tune {
+        Some(tune)
+    } else {
+        // Try to load tune file directly if it wasn't auto-loaded
+        let tune_path = project_path.join("CurrentTune.msq");
+        if tune_path.exists() {
+            eprintln!("[INFO] Auto-loading tune file: {:?}", tune_path);
+            match TuneFile::load(&tune_path) {
+                Ok(tune) => {
+                    eprintln!("[INFO] ✓ Successfully loaded tune file with {} constants", tune.constants.len());
+                    Some(tune)
+                }
+                Err(e) => {
+                    eprintln!("[WARN] Failed to load tune file: {}", e);
+                    None
+                }
+            }
+        } else {
+            None
+        }
+    };
+    
     // Initialize TuneCache and load project tune
-    if let Some(tune) = project_tune {
+    if let Some(tune) = tune_to_load {
         // Create TuneCache from definition
         let cache = TuneCache::from_definition(&def_clone);
         let mut cache_guard = state.tune_cache.lock().await;
@@ -4324,6 +5029,113 @@ async fn open_project(
                                 if is_ve_related {
                                     eprintln!("[DEBUG] open_project: Skipped PC variable '{}' (unsupported value type)", name);
                                 }
+                            }
+                        }
+                        continue;
+                    }
+                    
+                    // Handle bits constants specially (they're packed, size_bytes() == 0)
+                    if constant.data_type == libretune_core::ini::DataType::Bits {
+                        // Bits constants: read current byte(s), modify the bits, write back
+                        let bit_pos = constant.bit_position.unwrap_or(0);
+                        let bit_size = constant.bit_size.unwrap_or(1);
+                        
+                        // Calculate which byte(s) contain the bits
+                        let byte_offset = (bit_pos / 8) as u16;
+                        let bit_in_byte = bit_pos % 8;
+                        
+                        // Calculate how many bytes we need
+                        let bits_remaining_after_first_byte = bit_size.saturating_sub(8 - bit_in_byte);
+                        let bytes_needed = if bits_remaining_after_first_byte > 0 {
+                            1 + ((bits_remaining_after_first_byte + 7) / 8)
+                        } else {
+                            1
+                        };
+                        let bytes_needed_usize = bytes_needed as usize;
+                        
+                        // Read current byte(s) value (or 0 if not present)
+                        let read_offset = constant.offset + byte_offset;
+                        let mut current_bytes: Vec<u8> = cache.read_bytes(constant.page, read_offset, bytes_needed as u16)
+                            .map(|s| s.to_vec())
+                            .unwrap_or_else(|| vec![0u8; bytes_needed_usize]);
+                        
+                        // Ensure we have enough bytes
+                        while current_bytes.len() < bytes_needed_usize {
+                            current_bytes.push(0u8);
+                        }
+                        
+                        // Get the bit value from MSQ (index into bit_options)
+                        // MSQ can store bits constants as numeric indices or as option strings
+                        let bit_value = match tune_value {
+                            TuneValue::Scalar(v) => *v as u32,
+                            TuneValue::Array(arr) if !arr.is_empty() => arr[0] as u32,
+                            TuneValue::String(s) => {
+                                // Look up the string in bit_options to find its index
+                                if let Some(index) = constant.bit_options.iter().position(|opt| opt == s) {
+                                    index as u32
+                                } else {
+                                    // Try case-insensitive match
+                                    if let Some(index) = constant.bit_options.iter().position(|opt| opt.eq_ignore_ascii_case(s)) {
+                                        index as u32
+                                    } else {
+                                        skipped_count += 1;
+                                        if is_ve_related {
+                                            eprintln!("[DEBUG] open_project: Skipped bits constant '{}' (string '{}' not found in bit_options: {:?})", name, s, constant.bit_options);
+                                        }
+                                        continue;
+                                    }
+                                }
+                            }
+                            _ => {
+                                skipped_count += 1;
+                                if is_ve_related {
+                                    eprintln!("[DEBUG] open_project: Skipped bits constant '{}' (unsupported value type)", name);
+                                }
+                                continue;
+                            }
+                        };
+                        
+                        // Modify the first byte
+                        let bits_in_first_byte = (8 - bit_in_byte).min(bit_size);
+                        let mask_first = if bits_in_first_byte >= 8 {
+                            0xFF
+                        } else {
+                            (1u8 << bits_in_first_byte) - 1
+                        };
+                        let value_first = (bit_value & mask_first as u32) as u8;
+                        current_bytes[0] = (current_bytes[0] & !(mask_first << bit_in_byte)) | (value_first << bit_in_byte);
+                        
+                        // If bits span multiple bytes, modify additional bytes
+                        if bits_remaining_after_first_byte > 0 {
+                            let mut bits_collected = bits_in_first_byte;
+                            for i in 1..bytes_needed_usize.min(current_bytes.len()) {
+                                let remaining_bits = bit_size - bits_collected;
+                                if remaining_bits == 0 {
+                                    break;
+                                }
+                                let bits_from_this_byte = remaining_bits.min(8);
+                                let mask = if bits_from_this_byte >= 8 {
+                                    0xFF
+                                } else {
+                                    (1u8 << bits_from_this_byte) - 1
+                                };
+                                let value_from_bit = ((bit_value >> bits_collected) & mask as u32) as u8;
+                                current_bytes[i] = (current_bytes[i] & !mask) | value_from_bit;
+                                bits_collected += bits_from_this_byte;
+                            }
+                        }
+                        
+                        // Write the modified byte(s) back
+                        if cache.write_bytes(constant.page, read_offset, &current_bytes) {
+                            applied_count += 1;
+                            if is_ve_related {
+                                eprintln!("[DEBUG] open_project: Applied bits constant '{}' = {} (bit_pos={}, bit_size={}, bytes={})", 
+                                    name, bit_value, bit_pos, bit_size, bytes_needed);
+                            }
+                        } else {
+                            failed_count += 1;
+                            if is_ve_related {
+                                eprintln!("[DEBUG] open_project: Failed to write bits constant '{}'", name);
                             }
                         }
                         continue;

@@ -1090,13 +1090,14 @@ fn post_process_items(
 ) {
     for item in items {
         match item {
-            MenuItem::Dialog { label, target, condition } => {
+            MenuItem::Dialog { label, target, visibility_condition, enabled_condition } => {
                 // Check if this should be a different type
                 if help_topics.contains_key(target) {
                     *item = MenuItem::Help {
                         label: label.clone(),
                         target: target.clone(),
-                        condition: condition.clone(),
+                        visibility_condition: visibility_condition.clone(),
+                        enabled_condition: enabled_condition.clone(),
                     };
                 } else if tables.contains_key(target) 
                        || table_map_to_name.contains_key(target)
@@ -1105,7 +1106,8 @@ fn post_process_items(
                     *item = MenuItem::Table {
                         label: label.clone(),
                         target: target.clone(),
-                        condition: condition.clone(),
+                        visibility_condition: visibility_condition.clone(),
+                        enabled_condition: enabled_condition.clone(),
                     };
                 }
             }
@@ -1213,9 +1215,22 @@ fn parse_menu_entry(def: &mut EcuDefinition, key: &str, value: &str) {
             // Handle multiple INI formats:
             // 1. Standard comma-separated: target, "Label", { condition }
             // 2. Space-separated: target    "Label", { condition }  (no comma between target and label)
-            // 3. RusEFI dual-condition: target "Label", { cond1 }, { cond2 }
-            let (target, label, condition) = {
+            // 3. Dual-condition: target "Label", { visibility_cond }, { enable_cond }
+            // According to EFI Analytics spec:
+            //   - 1 expression = enable/disable condition
+            //   - 2 expressions = visibility (first) and enable (second)
+            let (target, label, visibility_condition, enabled_condition) = {
                 let first_part = parts[0].trim();
+                
+                // Helper to extract condition from a part
+                let extract_condition = |s: &str| -> Option<String> {
+                    let trimmed = s.trim_matches(|c| c == '{' || c == '}').trim();
+                    if trimmed.is_empty() || trimmed == "0" || trimmed == "1" {
+                        None
+                    } else {
+                        Some(trimmed.to_string())
+                    }
+                };
                 
                 // Check if first part contains both target and quoted label (space-separated format)
                 if let Some(quote_pos) = first_part.find('"') {
@@ -1228,24 +1243,37 @@ fn parse_menu_entry(def: &mut EcuDefinition, key: &str, value: &str) {
                     } else {
                         first_part[label_start..].trim_matches('"').to_string()
                     };
-                    // Remaining parts are conditions - use the first one
-                    let condition = parts.get(1).and_then(|s| {
-                        let trimmed = s.trim_matches(|c| c == '{' || c == '}').trim();
-                        if trimmed.is_empty() { None } else { Some(trimmed.to_string()) }
-                    });
-                    (target, label, condition)
+                    
+                    // Check for 2 conditions (visibility + enable)
+                    let (vis_cond, en_cond) = if parts.len() >= 3 {
+                        // Two conditions: first is visibility, second is enable
+                        (extract_condition(&parts[1]), extract_condition(&parts[2]))
+                    } else if parts.len() >= 2 {
+                        // One condition: it's the enable condition
+                        (None, extract_condition(&parts[1]))
+                    } else {
+                        (None, None)
+                    };
+                    (target, label, vis_cond, en_cond)
                 } else if parts.len() >= 2 {
                     // Format 1: Standard comma-separated
                     let target = first_part.trim_matches('"').to_string();
                     let label = parts[1].trim_matches('"').to_string();
-                    let condition = parts.get(2).and_then(|s| {
-                        let trimmed = s.trim_matches(|c| c == '{' || c == '}').trim();
-                        if trimmed.is_empty() { None } else { Some(trimmed.to_string()) }
-                    });
-                    (target, label, condition)
+                    
+                    // Check for 2 conditions (visibility + enable)
+                    let (vis_cond, en_cond) = if parts.len() >= 4 {
+                        // Two conditions: first is visibility, second is enable
+                        (extract_condition(&parts[2]), extract_condition(&parts[3]))
+                    } else if parts.len() >= 3 {
+                        // One condition: it's the enable condition
+                        (None, extract_condition(&parts[2]))
+                    } else {
+                        (None, None)
+                    };
+                    (target, label, vis_cond, en_cond)
                 } else {
                     // Only target, no label - use target as label
-                    (first_part.to_string(), first_part.to_string(), None)
+                    (first_part.to_string(), first_part.to_string(), None, None)
                 }
             };
             
@@ -1260,16 +1288,16 @@ fn parse_menu_entry(def: &mut EcuDefinition, key: &str, value: &str) {
                 MenuItem::Separator
             } else if target.starts_with("std_") {
                 // Built-in standard targets like std_realtime, std_ms2gentherm, etc.
-                MenuItem::Std { label, target, condition }
+                MenuItem::Std { label, target, visibility_condition, enabled_condition }
             } else if def.help_topics.contains_key(&target) {
                 // Help topic reference
-                MenuItem::Help { label, target, condition }
+                MenuItem::Help { label, target, visibility_condition, enabled_condition }
             } else if def.tables.contains_key(&target) || def.curves.contains_key(&target) {
                 // Table or curve reference
-                MenuItem::Table { label, target, condition }
+                MenuItem::Table { label, target, visibility_condition, enabled_condition }
             } else {
                 // Default to dialog
-                MenuItem::Dialog { label, target, condition }
+                MenuItem::Dialog { label, target, visibility_condition, enabled_condition }
             };
             
             if let Some(menu) = def.menus.last_mut() {
@@ -1286,12 +1314,33 @@ fn parse_menu_entry(def: &mut EcuDefinition, key: &str, value: &str) {
             let parts = split_ini_line(value);
             if !parts.is_empty() {
                 let label = parts[0].trim_matches('"').to_string();
-                let condition = parts.get(2).map(|s| s.trim_matches(|c| c == '{' || c == '}').trim().to_string());
+                
+                // Extract conditions: 1 = enable, 2 = visibility + enable
+                let extract_condition = |s: &str| -> Option<String> {
+                    let trimmed = s.trim_matches(|c| c == '{' || c == '}').trim();
+                    if trimmed.is_empty() || trimmed == "0" || trimmed == "1" {
+                        None
+                    } else {
+                        Some(trimmed.to_string())
+                    }
+                };
+                
+                let (visibility_condition, enabled_condition) = if parts.len() >= 3 {
+                    // Two conditions: first is visibility, second is enable
+                    (extract_condition(&parts[1]), extract_condition(&parts[2]))
+                } else if parts.len() >= 2 {
+                    // One condition: it's the enable condition
+                    (None, extract_condition(&parts[1]))
+                } else {
+                    (None, None)
+                };
+                
                 if let Some(menu) = def.menus.last_mut() {
                     menu.items.push(MenuItem::SubMenu {
                         label,
                         items: Vec::new(),
-                        condition,
+                        visibility_condition,
+                        enabled_condition,
                     });
                 }
             }
@@ -1371,7 +1420,15 @@ fn parse_user_defined_entry(def: &mut EcuDefinition, key: &str, value: &str, cur
                 if let Some(dialog) = def.dialogs.get_mut(name) {
                     let parts = split_ini_line(value);
                     let panel_name = parts.first().unwrap_or(&String::new()).trim().to_string();
-                    dialog.components.push(DialogComponent::Panel { name: panel_name });
+                    // Check for visibility condition in curly braces (last part)
+                    let visibility_condition = parts.iter()
+                        .skip(1)
+                        .find(|p| p.trim().starts_with('{') && p.trim().ends_with('}'))
+                        .map(|p| p.trim().trim_matches(|c| c == '{' || c == '}').to_string());
+                    dialog.components.push(DialogComponent::Panel { 
+                        name: panel_name,
+                        visibility_condition,
+                    });
                 }
             }
         }
@@ -1405,8 +1462,42 @@ fn parse_user_defined_entry(def: &mut EcuDefinition, key: &str, value: &str, cur
                     let parts = split_ini_line(value);
                     if parts.len() >= 2 {
                         let label = parts[0].trim_matches('"').to_string();
-                        let name = parts[1].trim().to_string();
-                        dialog.components.push(DialogComponent::Field { label, name });
+                        let field_name = parts[1].trim().to_string();
+                        // Check for conditions in curly braces
+                        // Format: field = "Label", name, {visibility}, {enable}
+                        // Or: field = "Label", name, {condition} (single condition = enable)
+                        let conditions: Vec<String> = parts.iter()
+                            .skip(2)
+                            .filter_map(|p| {
+                                let trimmed = p.trim();
+                                if trimmed.starts_with('{') && trimmed.ends_with('}') {
+                                    Some(trimmed.trim_matches(|c| c == '{' || c == '}').to_string())
+                                } else {
+                                    None
+                                }
+                            })
+                            .collect();
+                        
+                        let visibility_condition = if conditions.len() >= 2 {
+                            Some(conditions[0].clone())
+                        } else {
+                            None
+                        };
+                        
+                        let enabled_condition = if conditions.len() >= 2 {
+                            Some(conditions[1].clone())
+                        } else if conditions.len() == 1 {
+                            Some(conditions[0].clone())
+                        } else {
+                            None
+                        };
+                        
+                        dialog.components.push(DialogComponent::Field { 
+                            label, 
+                            name: field_name,
+                            visibility_condition,
+                            enabled_condition,
+                        });
                     } else if !parts.is_empty() {
                         let text = parts[0].trim_matches('"').to_string();
                         dialog.components.push(DialogComponent::Label { text });

@@ -1391,7 +1391,14 @@ function AppContent() {
             onBack={() => activeTabId && handleTabClose(activeTabId)}
             openTable={(tableName) => openTarget(tableName)}
             context={constantValues}
-            onUpdate={() => fetchConstants()}
+            onUpdate={async () => {
+              // Refresh constants and menu tree when constants are updated
+              // This ensures menu visibility conditions are re-evaluated
+              const values = await fetchConstants();
+              await fetchMenuTree(values);
+              // Update context for dialog fields
+              setConstantValues(values);
+            }}
           />
         );
       case "settings":

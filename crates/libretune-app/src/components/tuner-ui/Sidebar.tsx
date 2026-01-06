@@ -103,6 +103,66 @@ export function Sidebar({ items, width, onResize, onItemSelect }: SidebarProps) 
     }
   }, [searchQuery, filteredItems, savedExpandedIds]);
 
+  // Clean up stale expanded IDs when menu tree changes
+  // Remove any expanded IDs that no longer exist or belong to empty folders
+  useEffect(() => {
+    if (searchQuery.trim()) {
+      // Don't clean up during search (we want to keep expanded state for search results)
+      return;
+    }
+    
+    // Helper to check if a folder has any visible children
+    const hasVisibleChildren = (node: SidebarNode): boolean => {
+      if (!node.children || node.children.length === 0) {
+        return false;
+      }
+      // Check if any child is visible (not filtered out)
+      return node.children.some(child => {
+        if (child.children && child.children.length > 0) {
+          return hasVisibleChildren(child);
+        }
+        return true; // Leaf node is visible
+      });
+    };
+    
+    // Collect all valid folder IDs from current tree
+    const validFolderIds = collectFolderIds(items);
+    
+    // Remove any expanded IDs that don't exist anymore or belong to empty folders
+    setExpandedIds((prev) => {
+      const cleaned = new Set<string>();
+      
+      // Helper to find a node by ID
+      const findNode = (nodes: SidebarNode[], id: string): SidebarNode | null => {
+        for (const node of nodes) {
+          if (node.id === id) return node;
+          if (node.children) {
+            const found = findNode(node.children, id);
+            if (found) return found;
+          }
+        }
+        return null;
+      };
+      
+      for (const id of prev) {
+        if (!validFolderIds.has(id)) {
+          // ID doesn't exist anymore, skip it
+          continue;
+        }
+        
+        // Check if the folder has visible children
+        const node = findNode(items, id);
+        if (node && hasVisibleChildren(node)) {
+          cleaned.add(id);
+        }
+        // If folder is empty, don't add it (auto-collapse)
+      }
+      
+      // If we removed IDs, return cleaned set; otherwise return previous to avoid unnecessary updates
+      return cleaned.size !== prev.size ? cleaned : prev;
+    });
+  }, [items, searchQuery]);
+
   // Keyboard shortcut: Ctrl+K or / to focus search
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {

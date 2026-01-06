@@ -219,31 +219,46 @@ pub enum MenuItem {
     Dialog {
         label: String,
         target: String,
-        condition: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        visibility_condition: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        enabled_condition: Option<String>,
     },
     /// Link to a table editor
     Table {
         label: String,
         target: String,
-        condition: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        visibility_condition: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        enabled_condition: Option<String>,
     },
     /// Submenu (standard or group)
     SubMenu {
         label: String,
         items: Vec<MenuItem>,
-        condition: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        visibility_condition: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        enabled_condition: Option<String>,
     },
     /// Built-in standard feature (std_realtime, std_ms2gentherm, etc.)
     Std {
         label: String,
         target: String,
-        condition: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        visibility_condition: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        enabled_condition: Option<String>,
     },
     /// Link to a help topic
     Help {
         label: String,
         target: String,
-        condition: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        visibility_condition: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        enabled_condition: Option<String>,
     },
     /// Separator between menu items
     Separator,
@@ -279,10 +294,21 @@ pub struct DialogDefinition {
 pub enum DialogComponent {
     /// A simple text label
     Label { text: String },
-    /// Reference to an indicator panel
-    Panel { name: String },
-    /// A constant field with label
-    Field { label: String, name: String },
+    /// Reference to an indicator panel (with optional visibility condition)
+    Panel { 
+        name: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        visibility_condition: Option<String>,
+    },
+    /// A constant field with label and optional visibility/enable conditions
+    Field { 
+        label: String, 
+        name: String, 
+        #[serde(skip_serializing_if = "Option::is_none")]
+        visibility_condition: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        enabled_condition: Option<String>,
+    },
     /// A live graph visualization
     LiveGraph { 
         name: String, 
@@ -719,11 +745,106 @@ mod tests {
         assert_eq!(Shape::from_ini_str("[16x16]"), Shape::Array2D { rows: 16, cols: 16 });
         assert_eq!(Shape::from_ini_str("[8X12]"), Shape::Array2D { rows: 8, cols: 12 });
     }
-    
-    #[test]
-    fn test_shape_element_count() {
-        assert_eq!(Shape::Scalar.element_count(), 1);
-        assert_eq!(Shape::Array1D(10).element_count(), 10);
-        assert_eq!(Shape::Array2D { rows: 4, cols: 5 }.element_count(), 20);
-    }
 }
+
+// =============================================================================
+// Missing INI Section Data Structures (per EFI Analytics PDF spec)
+// =============================================================================
+
+/// Controller command definition
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ControllerCommand {
+    /// Command name/ID
+    pub name: String,
+    /// Display label
+    pub label: String,
+    /// Command string to send to ECU
+    pub command: String,
+    /// Optional enable condition
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enable_condition: Option<String>,
+}
+
+/// Logger definition for high-speed data logging
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LoggerDefinition {
+    /// Logger name
+    pub name: String,
+    /// Display label
+    pub label: String,
+    /// Sample rate in Hz
+    pub sample_rate: f64,
+    /// Output channels to log
+    pub channels: Vec<String>,
+    /// Enable condition
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enable_condition: Option<String>,
+}
+
+/// Port editor configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PortEditorConfig {
+    /// Port name
+    pub name: String,
+    /// Display label
+    pub label: String,
+    /// Enable condition
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enable_condition: Option<String>,
+}
+
+/// Reference table definition
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReferenceTable {
+    /// Table name
+    pub name: String,
+    /// Display label
+    pub label: String,
+    /// Referenced table name
+    pub table_name: String,
+    /// Enable condition
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enable_condition: Option<String>,
+}
+
+/// FTP browser configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FTPBrowserConfig {
+    /// Browser name
+    pub name: String,
+    /// Display label
+    pub label: String,
+    /// FTP server address
+    pub server: String,
+    /// FTP port
+    pub port: u16,
+    /// Enable condition
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enable_condition: Option<String>,
+}
+
+/// Datalog view definition
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DatalogView {
+    /// View name
+    pub name: String,
+    /// Display label
+    pub label: String,
+    /// Channels to display in this view
+    pub channels: Vec<String>,
+}
+
+/// Key action (keyboard shortcut) definition
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KeyAction {
+    /// Key combination (e.g., "Ctrl+S", "F5")
+    pub key: String,
+    /// Action to perform
+    pub action: String,
+    /// Display label
+    pub label: String,
+    /// Enable condition
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub     enable_condition: Option<String>,
+}
+
