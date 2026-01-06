@@ -66,7 +66,9 @@ jobs:
       - name: List build outputs (debug)
         working-directory: crates/libretune-app
         run: |
-          find src-tauri/target/x86_64-unknown-linux-gnu/release -type f -name "*.AppImage" -o -name "*.deb" -o -name "*.tar.gz" 2>/dev/null || true
+          echo "=== Checking bundle directory structure ==="
+          find src-tauri/target/x86_64-unknown-linux-gnu/release/bundle -type f 2>/dev/null | head -20 || echo "No bundle files found"
+          echo "=== Bundle subdirectories ==="
           ls -la src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/ 2>/dev/null || echo "Bundle directory not found"
 
       - name: Upload Linux artifacts
@@ -74,9 +76,8 @@ jobs:
         with:
           name: linux-x86_64
           path: |
-            crates/libretune-app/src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/**/*.AppImage
-            crates/libretune-app/src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/**/*.deb
-            crates/libretune-app/src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/**/*.tar.gz
+            crates/libretune-app/src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/appimage/**
+            crates/libretune-app/src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/deb/**
             crates/libretune-app/src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/**
           if-no-files-found: warn
           retention-days: 30
@@ -111,17 +112,18 @@ jobs:
       - name: List build outputs (debug)
         working-directory: crates/libretune-app
         run: |
+          echo "=== Checking bundle directory structure ==="
+          dir /s /b src-tauri\target\x86_64-pc-windows-msvc\release\bundle 2>nul || echo Bundle directory not found
+          echo "=== Bundle subdirectories ==="
           dir src-tauri\target\x86_64-pc-windows-msvc\release\bundle 2>nul || echo Bundle directory not found
-          dir /s /b src-tauri\target\x86_64-pc-windows-msvc\release\*.exe 2>nul || echo No exe files found
-          dir /s /b src-tauri\target\x86_64-pc-windows-msvc\release\*.msi 2>nul || echo No msi files found
 
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
         with:
           name: windows-x86_64
           path: |
-            crates/libretune-app/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/**/*.exe
-            crates/libretune-app/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/**/*.msi
+            crates/libretune-app/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/**
+            crates/libretune-app/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/msi/**
             crates/libretune-app/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/**
           if-no-files-found: warn
           retention-days: 30
@@ -165,20 +167,33 @@ jobs:
       - name: List build outputs (debug)
         working-directory: crates/libretune-app
         run: |
-          find src-tauri/target/*/release/bundle -type f -name "*.app" -o -name "*.dmg" 2>/dev/null || true
+          echo "=== Checking bundle directory structure ==="
+          find src-tauri/target/*/release/bundle -type f 2>/dev/null | head -20 || echo "No bundle files found"
+          echo "=== Bundle subdirectories ==="
           ls -la src-tauri/target/*/release/bundle/ 2>/dev/null || echo "Bundle directories not found"
+
+      - name: Package macOS artifacts (zip .app bundles to preserve permissions)
+        working-directory: crates/libretune-app
+        run: |
+          for app_bundle in src-tauri/target/*/release/bundle/macos/*.app; do
+            if [ -d "$app_bundle" ]; then
+              zip_name="${app_bundle%.app}.zip"
+              echo "Zipping $app_bundle to $zip_name"
+              cd "$(dirname "$app_bundle")"
+              zip -r "$(basename "$zip_name")" "$(basename "$app_bundle")"
+              cd - > /dev/null
+            fi
+          done
 
       - name: Upload macOS artifacts
         uses: actions/upload-artifact@v4
         with:
           name: macos-universal
           path: |
-            crates/libretune-app/src-tauri/target/aarch64-apple-darwin/release/bundle/**/*.app
-            crates/libretune-app/src-tauri/target/aarch64-apple-darwin/release/bundle/**/*.dmg
-            crates/libretune-app/src-tauri/target/x86_64-apple-darwin/release/bundle/**/*.app
-            crates/libretune-app/src-tauri/target/x86_64-apple-darwin/release/bundle/**/*.dmg
-            crates/libretune-app/src-tauri/target/aarch64-apple-darwin/release/bundle/**
-            crates/libretune-app/src-tauri/target/x86_64-apple-darwin/release/bundle/**
+            crates/libretune-app/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/**
+            crates/libretune-app/src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/**
+            crates/libretune-app/src-tauri/target/x86_64-apple-darwin/release/bundle/macos/**
+            crates/libretune-app/src-tauri/target/x86_64-apple-darwin/release/bundle/dmg/**
           if-no-files-found: warn
           retention-days: 30
 
