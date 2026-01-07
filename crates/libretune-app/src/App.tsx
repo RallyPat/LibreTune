@@ -1736,6 +1736,10 @@ function AppContent() {
             onBack={() => activeTabId && handleTabClose(activeTabId)}
             openTable={(tableName) => openTarget(tableName)}
             context={constantValues}
+            onOptimisticUpdate={(name, value) => {
+              // Immediately update the context so sibling fields re-evaluate their conditions
+              setConstantValues(prev => ({ ...prev, [name]: value }));
+            }}
             onUpdate={async () => {
               // Refresh constants and menu tree when constants are updated
               // This ensures menu visibility conditions are re-evaluated

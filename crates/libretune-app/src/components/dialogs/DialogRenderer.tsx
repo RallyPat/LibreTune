@@ -101,13 +101,15 @@ function DialogField({
   name, 
   onUpdate, 
   context,
-  fieldEnabledCondition 
+  fieldEnabledCondition,
+  onOptimisticUpdate 
 }: { 
   label: string; 
   name: string; 
   onUpdate?: () => void; 
   context: Record<string, number>;
   fieldEnabledCondition?: boolean; // Enable condition from DialogComponent::Field
+  onOptimisticUpdate?: (name: string, value: number) => void;
 }) {
   const [constant, setConstant] = useState<Constant | null>(null);
   const [numValue, setNumValue] = useState<number | null>(null);
@@ -322,7 +324,11 @@ function DialogField({
                 const newVal = e.target.checked ? checkedIndex : uncheckedIndex;
                 setSelectedBit(newVal);
                 invoke('update_constant', { name, value: newVal })
-                  .then(() => onUpdate?.())
+                  .then(() => {
+                    // Optimistically update context so sibling fields re-evaluate immediately
+                    onOptimisticUpdate?.(name, newVal);
+                    onUpdate?.();
+                  })
                   .catch((e) => alert('Update failed: ' + e));
               }}
             />
@@ -353,14 +359,20 @@ function DialogField({
               if (originalVal !== undefined) {
                 setSelectedBit(originalVal);
                 invoke('update_constant', { name, value: originalVal })
-                  .then(() => onUpdate?.())
+                  .then(() => {
+                    onOptimisticUpdate?.(name, originalVal);
+                    onUpdate?.();
+                  })
                   .catch((err) => alert('Update failed: ' + err));
               } else {
                 // Fallback: use the filtered value directly if not in map
                 console.warn(`[DialogField] No original index found for filtered index ${filteredVal}, using directly`);
                 setSelectedBit(filteredVal);
                 invoke('update_constant', { name, value: filteredVal })
-                  .then(() => onUpdate?.())
+                  .then(() => {
+                    onOptimisticUpdate?.(name, filteredVal);
+                    onUpdate?.();
+                  })
                   .catch((err) => alert('Update failed: ' + err));
               }
             }}
@@ -407,7 +419,10 @@ function DialogField({
           onBlur={() => {
             if (numValue !== null) {
               invoke('update_constant', { name, value: numValue })
-                .then(() => onUpdate?.())
+                .then(() => {
+                  onOptimisticUpdate?.(name, numValue);
+                  onUpdate?.();
+                })
                 .catch((e) => alert('Update failed: ' + e));
             }
           }}
@@ -728,11 +743,13 @@ function IndicatorPanelRenderer({
 function DialogFieldWrapper({ 
   comp, 
   context, 
-  onUpdate 
+  onUpdate,
+  onOptimisticUpdate 
 }: { 
   comp: DialogComponent; 
   context: Record<string, number>; 
   onUpdate?: () => void;
+  onOptimisticUpdate?: (name: string, value: number) => void;
 }) {
   const [fieldVisible, setFieldVisible] = useState<boolean>(true);
   const [fieldEnabled, setFieldEnabled] = useState<boolean>(true);
@@ -789,6 +806,7 @@ function DialogFieldWrapper({
     onUpdate={onUpdate} 
     context={context}
     fieldEnabledCondition={fieldEnabled}
+    onOptimisticUpdate={onOptimisticUpdate}
   />;
 }
 
@@ -831,14 +849,16 @@ function DialogComponentRenderer({
   openTable,
   context,
   onUpdate,
+  onOptimisticUpdate,
 }: {
   comp: DialogComponent;
   openTable: (name: string) => void;
   context: Record<string, number>;
   onUpdate?: () => void;
+  onOptimisticUpdate?: (name: string, value: number) => void;
 }) {
   if (comp.type === 'Field' && comp.name) {
-    return <DialogFieldWrapper comp={comp} context={context} onUpdate={onUpdate} />;
+    return <DialogFieldWrapper comp={comp} context={context} onUpdate={onUpdate} onOptimisticUpdate={onOptimisticUpdate} />;
   }
   if (comp.type === 'Label' && comp.text) {
     return <div className="dialog-label">{comp.text}</div>;
@@ -877,9 +897,10 @@ export interface DialogRendererProps {
   openTable: (name: string) => void;
   context: Record<string, number>;
   onUpdate?: () => void;
+  onOptimisticUpdate?: (name: string, value: number) => void;
 }
 
-export default function DialogRenderer({ definition, onBack, openTable, context, onUpdate }: DialogRendererProps) {
+export default function DialogRenderer({ definition, onBack, openTable, context, onUpdate, onOptimisticUpdate }: DialogRendererProps) {
   // The context is already dynamic - it contains the current values of all constants
   // Conditions like {cylindersCount > 5} will automatically evaluate based on the current cylindersCount value
   // This works for any cylinder count: 1, 2, 3, 4, 5, 6, 7, 8, 10, 12, etc.
@@ -897,7 +918,7 @@ export default function DialogRenderer({ definition, onBack, openTable, context,
 
       <div className="glass-card dialog-container">
         {definition.components.map((comp, i) => (
-          <DialogComponentRenderer key={i} comp={comp} openTable={openTable} context={context} onUpdate={onUpdate} />
+          <DialogComponentRenderer key={i} comp={comp} openTable={openTable} context={context} onUpdate={onUpdate} onOptimisticUpdate={onOptimisticUpdate} />
         ))}
       </div>
     </div>

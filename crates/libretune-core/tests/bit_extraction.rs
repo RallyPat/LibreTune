@@ -174,3 +174,165 @@ fn test_bytes_needed_zero_underflow() {
     let result = extract_bits(&data, 0, 0);
     assert_eq!(result, 0); // No bits extracted
 }
+
+/// Helper function that mirrors the bit write logic in update_constant
+/// Writes the given bit value to the specified position in the data buffer.
+fn write_bits(data: &mut [u8], bit_in_byte: u8, bit_size: u8, new_value: u32) {
+    let bytes_needed = ((bit_in_byte + bit_size + 7) / 8) as usize;
+    
+    if bytes_needed == 0 || data.is_empty() {
+        return;
+    }
+    
+    // Single byte case (most common for flags)
+    if bytes_needed == 1 {
+        let mask = if bit_size >= 8 {
+            0xFF
+        } else {
+            ((1u8 << bit_size) - 1) << bit_in_byte
+        };
+        data[0] = (data[0] & !mask) | (((new_value as u8) << bit_in_byte) & mask);
+    } else {
+        // Multi-byte case
+        let bits_in_first_byte = (8 - bit_in_byte).min(bit_size);
+        let mask_first = if bits_in_first_byte >= 8 {
+            0xFF
+        } else {
+            ((1u8 << bits_in_first_byte) - 1) << bit_in_byte
+        };
+        let val_first = ((new_value as u8) << bit_in_byte) & mask_first;
+        data[0] = (data[0] & !mask_first) | val_first;
+
+        let mut bits_written = bits_in_first_byte;
+        for i in 1..bytes_needed.min(data.len()) {
+            let remaining_bits = bit_size - bits_written;
+            if remaining_bits == 0 {
+                break;
+            }
+            let bits_for_this_byte = remaining_bits.min(8);
+            let mask = if bits_for_this_byte >= 8 {
+                0xFF
+            } else {
+                (1u8 << bits_for_this_byte) - 1
+            };
+            let val_for_byte = ((new_value >> bits_written) as u8) & mask;
+            data[i] = (data[i] & !mask) | val_for_byte;
+            bits_written += bits_for_this_byte;
+        }
+    }
+}
+
+#[test]
+fn test_write_bits_single_bit_at_position_1() {
+    // Test isIgnitionEnabled-style: bit position 1, bit size 1
+    // isIgnitionEnabled = bits, U32, 2084, [1:1], "false", "true"
+    let mut data = [0b00000000u8];
+    
+    // Write value 1 (true) at bit position 1
+    write_bits(&mut data, 1, 1, 1);
+    assert_eq!(data[0], 0b00000010); // Only bit 1 should be set
+    
+    // Verify read-back
+    let read_value = extract_bits(&data, 1, 1);
+    assert_eq!(read_value, 1);
+    
+    // Write value 0 (false) at bit position 1
+    write_bits(&mut data, 1, 1, 0);
+    assert_eq!(data[0], 0b00000000); // Bit 1 should be cleared
+    
+    // Verify read-back
+    let read_value = extract_bits(&data, 1, 1);
+    assert_eq!(read_value, 0);
+}
+
+#[test]
+fn test_write_bits_preserves_other_bits() {
+    // Ensure writing to one bit doesn't affect neighbors
+    let mut data = [0b11111111u8];
+    
+    // Write 0 to bit position 3
+    write_bits(&mut data, 3, 1, 0);
+    assert_eq!(data[0], 0b11110111); // Only bit 3 should be cleared
+    
+    // Write 1 to bit position 3
+    write_bits(&mut data, 3, 1, 1);
+    assert_eq!(data[0], 0b11111111); // Bit 3 should be set again
+}
+
+#[test]
+fn test_write_bits_multi_bit_field() {
+    // Test 4-bit field at position 4 (like [4:7])
+    let mut data = [0b00001111u8]; // Lower nibble set
+    
+    // Write value 0b1010 (10) to bits 4-7
+    write_bits(&mut data, 4, 4, 0b1010);
+    assert_eq!(data[0], 0b10101111); // Upper nibble = 1010, lower nibble preserved
+    
+    // Verify read-back
+    let read_value = extract_bits(&data, 4, 4);
+    assert_eq!(read_value, 0b1010);
+}
+
+#[test]
+fn test_write_bits_spanning_bytes() {
+    // Test field spanning bytes: bit position 6, size 4 (bits 6-7 of byte 0, bits 0-1 of byte 1)
+    let mut data = [0b00000000u8, 0b11111100u8]; // Byte 1 has upper bits set
+    
+    // Write value 0b1011 (11) spanning bytes
+    // Bits 0-1 (value 0b11) go to byte 0, bits 6-7
+    // Bits 2-3 (value 0b10) go to byte 1, bits 0-1
+    write_bits(&mut data, 6, 4, 0b1011);
+    
+    // Byte 0: bits 6-7 should be 0b11
+    assert_eq!(data[0] & 0b11000000, 0b11000000);
+    
+    // Byte 1: bits 0-1 should be 0b10
+    assert_eq!(data[1] & 0b00000011, 0b00000010);
+    
+    // Upper bits of byte 1 preserved
+    assert_eq!(data[1] & 0b11111100, 0b11111100);
+}
+
+#[test]
+fn test_bits_round_trip_all_positions() {
+    // Test round-trip for all single-bit positions in a byte
+    for bit_pos in 0..8u8 {
+        let mut data = [0u8];
+        
+        // Write 1
+        write_bits(&mut data, bit_pos, 1, 1);
+        let read = extract_bits(&data, bit_pos, 1);
+        assert_eq!(read, 1, "Failed at bit position {}", bit_pos);
+        
+        // Write 0
+        write_bits(&mut data, bit_pos, 1, 0);
+        let read = extract_bits(&data, bit_pos, 1);
+        assert_eq!(read, 0, "Failed at bit position {}", bit_pos);
+    }
+}
+
+#[test]
+fn test_bits_round_trip_various_sizes() {
+    // Test round-trip for various field sizes at position 0
+    for bit_size in 1..=8u8 {
+        let max_value = (1u32 << bit_size) - 1;
+        
+        for value in [0, 1, max_value / 2, max_value] {
+            let mut data = [0u8, 0u8];
+            
+            write_bits(&mut data, 0, bit_size, value);
+            let read = extract_bits(&data, 0, bit_size);
+            
+            assert_eq!(read, value as u64, 
+                "Round-trip failed for bit_size={}, value={}", bit_size, value);
+        }
+    }
+}
+
+#[test]
+fn test_write_bits_zero_size() {
+    // Writing with bit_size=0 should be a no-op
+    let mut data = [0xABu8];
+    write_bits(&mut data, 0, 0, 0xFF);
+    assert_eq!(data[0], 0xAB); // Unchanged
+}
