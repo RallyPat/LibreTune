@@ -33,6 +33,10 @@ pub struct Constant {
     /// For bits type: bit size
     pub bit_size: Option<u8>,
 
+    /// For bits type: display offset (e.g., +1 means raw 0 displays as 1)
+    /// Used in notations like [4:7+1] where the +1 is added to displayed value
+    pub display_offset: i8,
+
     /// Unit of measurement
     pub units: String,
 
@@ -76,6 +80,7 @@ impl Constant {
             shape: Shape::Scalar,
             bit_position: None,
             bit_size: None,
+            display_offset: 0,
             units: String::new(),
             scale: 1.0,
             translate: 0.0,
@@ -126,6 +131,7 @@ impl Default for Constant {
             shape: Shape::Scalar,
             bit_position: None,
             bit_size: None,
+            display_offset: 0,
             units: String::new(),
             scale: 1.0,
             translate: 0.0,
@@ -178,7 +184,8 @@ pub fn parse_constant_line(
     // Parse shape based on class and remaining parts
     if class == "bits" {
         constant.data_type = DataType::Bits;
-        // Format: bits, U08, offset, [bit_position:bit_size], "Option1", "Option2", ...
+        // Format: bits, U08, offset, [bit_position:bit_size+display_offset], "Option1", "Option2", ...
+        // Examples: [0:3], [4:7+1] (the +1 means display raw 0 as 1)
         if parts.len() > 3 {
             let bit_spec = parts[3].trim_matches(|c| c == '[' || c == ']');
             let bit_parts: Vec<&str> = bit_spec.split(':').collect();
@@ -186,7 +193,24 @@ pub fn parse_constant_line(
                 constant.bit_position = bit_parts[0].parse().ok();
             }
             if bit_parts.len() > 1 {
-                constant.bit_size = bit_parts[1].parse().ok();
+                // Check for +N or -N display offset suffix (e.g., "7+1" or "3-1")
+                let size_part = bit_parts[1];
+                if let Some(plus_pos) = size_part.find('+') {
+                    // Parse "7+1" -> bit_size=7, display_offset=+1
+                    constant.bit_size = size_part[..plus_pos].parse().ok();
+                    constant.display_offset = size_part[plus_pos + 1..].parse().unwrap_or(0);
+                } else if let Some(minus_pos) = size_part.rfind('-') {
+                    // Parse "7-1" -> bit_size=7, display_offset=-1
+                    // Use rfind to avoid negative bit indices like [-1:3]
+                    if minus_pos > 0 {
+                        constant.bit_size = size_part[..minus_pos].parse().ok();
+                        constant.display_offset = -(size_part[minus_pos + 1..].parse::<i8>().unwrap_or(0));
+                    } else {
+                        constant.bit_size = size_part.parse().ok();
+                    }
+                } else {
+                    constant.bit_size = size_part.parse().ok();
+                }
             }
         }
         // Collect bit options (everything after the bit spec)
@@ -260,7 +284,8 @@ pub fn parse_pc_variable_line(name: &str, value: &str) -> Option<Constant> {
     // Parse based on class
     if class == "bits" {
         constant.data_type = DataType::Bits;
-        // Format: bits, U08, [bit_position:bit_size], "Option1", "Option2", ...
+        // Format: bits, U08, [bit_position:bit_size+display_offset], "Option1", "Option2", ...
+        // Examples: [0:3], [4:7+1] (the +1 means display raw 0 as 1)
         if parts.len() > 2 {
             let bit_spec = parts[2].trim_matches(|c| c == '[' || c == ']');
             let bit_parts: Vec<&str> = bit_spec.split(':').collect();
@@ -268,7 +293,21 @@ pub fn parse_pc_variable_line(name: &str, value: &str) -> Option<Constant> {
                 constant.bit_position = bit_parts[0].parse().ok();
             }
             if bit_parts.len() > 1 {
-                constant.bit_size = bit_parts[1].parse().ok();
+                // Check for +N or -N display offset suffix (e.g., "7+1" or "3-1")
+                let size_part = bit_parts[1];
+                if let Some(plus_pos) = size_part.find('+') {
+                    constant.bit_size = size_part[..plus_pos].parse().ok();
+                    constant.display_offset = size_part[plus_pos + 1..].parse().unwrap_or(0);
+                } else if let Some(minus_pos) = size_part.rfind('-') {
+                    if minus_pos > 0 {
+                        constant.bit_size = size_part[..minus_pos].parse().ok();
+                        constant.display_offset = -(size_part[minus_pos + 1..].parse::<i8>().unwrap_or(0));
+                    } else {
+                        constant.bit_size = size_part.parse().ok();
+                    }
+                } else {
+                    constant.bit_size = size_part.parse().ok();
+                }
             }
         }
         // Collect bit options
@@ -413,5 +452,76 @@ mod tests {
         assert_eq!(c.bit_size, Some(3));
         assert_eq!(c.bit_options.len(), 3);
         assert_eq!(c.bit_options[0], "CAN ID 0");
+        assert_eq!(c.display_offset, 0); // No offset
+    }
+
+    #[test]
+    fn test_parse_bits_with_display_offset_positive() {
+        // Test [4:7+1] notation - display offset of +1
+        let c = parse_constant_line(
+            "nCylinders",
+            "bits, U08, 182, [4:7+1]",
+            0,
+            0,
+        );
+        assert!(c.is_some());
+        let c = c.unwrap();
+        assert_eq!(c.name, "nCylinders");
+        assert_eq!(c.data_type, DataType::Bits);
+        assert_eq!(c.bit_position, Some(4));
+        assert_eq!(c.bit_size, Some(7));
+        assert_eq!(c.display_offset, 1); // +1 display offset
+    }
+
+    #[test]
+    fn test_parse_bits_with_display_offset_negative() {
+        // Test [0:3-1] notation - display offset of -1
+        let c = parse_constant_line(
+            "someField",
+            "bits, U08, 100, [0:3-1], \"Val 0\", \"Val 1\"",
+            0,
+            0,
+        );
+        assert!(c.is_some());
+        let c = c.unwrap();
+        assert_eq!(c.name, "someField");
+        assert_eq!(c.bit_position, Some(0));
+        assert_eq!(c.bit_size, Some(3));
+        assert_eq!(c.display_offset, -1); // -1 display offset
+        assert_eq!(c.bit_options.len(), 2);
+    }
+
+    #[test]
+    fn test_parse_bits_without_display_offset() {
+        // Test [0:7] notation - no display offset
+        let c = parse_constant_line(
+            "normalBits",
+            "bits, U08, 50, [0:7], \"Off\", \"On\"",
+            0,
+            0,
+        );
+        assert!(c.is_some());
+        let c = c.unwrap();
+        assert_eq!(c.bit_position, Some(0));
+        assert_eq!(c.bit_size, Some(7));
+        assert_eq!(c.display_offset, 0); // No offset
+    }
+
+    #[test]
+    fn test_parse_bits_with_invalid_options() {
+        // Test that INVALID options are still collected (filtering happens in frontend)
+        let c = parse_constant_line(
+            "strategy",
+            "bits, U08, 10, [2:3], \"Basic\", \"INVALID\", \"INVALID\", \"Advanced\"",
+            0,
+            0,
+        );
+        assert!(c.is_some());
+        let c = c.unwrap();
+        assert_eq!(c.bit_options.len(), 4);
+        assert_eq!(c.bit_options[0], "Basic");
+        assert_eq!(c.bit_options[1], "INVALID");
+        assert_eq!(c.bit_options[2], "INVALID");
+        assert_eq!(c.bit_options[3], "Advanced");
     }
 }

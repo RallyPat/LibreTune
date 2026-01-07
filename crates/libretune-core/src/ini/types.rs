@@ -332,6 +332,30 @@ pub enum DialogComponent {
         label_off: String,
         label_on: String,
     },
+    /// A command button that sends commands to the ECU
+    CommandButton {
+        /// Button label text
+        label: String,
+        /// Name of the command in [ControllerCommands] section
+        command: String,
+        /// Optional condition expression for button enable state
+        #[serde(skip_serializing_if = "Option::is_none")]
+        enabled_condition: Option<String>,
+        /// Behavior on dialog close
+        #[serde(skip_serializing_if = "Option::is_none")]
+        on_close_behavior: Option<CommandButtonCloseAction>,
+    },
+}
+
+/// Behavior for commandButton on dialog close
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum CommandButtonCloseAction {
+    /// Execute command on close if condition is true
+    ClickOnCloseIfEnabled,
+    /// Execute command on close if condition is false
+    ClickOnCloseIfDisabled,
+    /// Always execute command on dialog close
+    ClickOnClose,
 }
 
 /// Datalog entry definition
@@ -763,17 +787,28 @@ mod tests {
 // =============================================================================
 
 /// Controller command definition
+/// Commands can be raw byte strings (with hex escapes) or references to other commands (chaining)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ControllerCommand {
     /// Command name/ID
     pub name: String,
     /// Display label
     pub label: String,
-    /// Command string to send to ECU
-    pub command: String,
+    /// Command parts - can be raw strings or command references
+    /// e.g., ["\\x00\\x01", "cmd_reset", "\\x02\\x03"]
+    pub parts: Vec<CommandPart>,
     /// Optional enable condition
     #[serde(skip_serializing_if = "Option::is_none")]
     pub enable_condition: Option<String>,
+}
+
+/// Part of a command - either raw bytes or reference to another command
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum CommandPart {
+    /// Raw byte string with potential hex escapes (e.g., "\\x00\\x01")
+    Raw(String),
+    /// Reference to another command by name (for chaining)
+    Reference(String),
 }
 
 /// Logger definition for high-speed data logging

@@ -1149,6 +1149,21 @@ impl Connection {
         // Most ECUs burn all RAM to flash with a single command
         self.burn(BurnParams { can_id: 0, page: 0 })
     }
+
+    /// Send raw bytes to ECU (for controller commands)
+    /// This is used by commandButton widgets to send arbitrary commands
+    /// WARNING: These commands bypass normal memory synchronization
+    pub fn send_raw_bytes(&mut self, bytes: &[u8]) -> Result<(), ProtocolError> {
+        if bytes.is_empty() {
+            return Ok(());
+        }
+        eprintln!(
+            "[DEBUG] send_raw_bytes: sending {} bytes: {:02x?}",
+            bytes.len(),
+            bytes
+        );
+        self.send_raw_command_no_response(bytes)
+    }
 }
 
 impl Drop for Connection {

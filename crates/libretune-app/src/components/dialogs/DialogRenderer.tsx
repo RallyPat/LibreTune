@@ -4,7 +4,7 @@ import { ArrowLeft, Activity, Grid3X3 } from 'lucide-react';
 import './DialogRenderer.css';
 
 interface DialogComponent {
-  type: 'Panel' | 'Field' | 'LiveGraph' | 'Table' | 'Label' | 'Indicator';
+  type: 'Panel' | 'Field' | 'LiveGraph' | 'Table' | 'Label' | 'Indicator' | 'CommandButton';
   name?: string;
   label?: string;
   text?: string;
@@ -17,6 +17,9 @@ interface DialogComponent {
   visibility_condition?: string;  // Visibility condition (hides field if false)
   enabled_condition?: string;     // Enable condition (disables field if false)
   condition?: string;             // Legacy: single condition (treated as enabled_condition)
+  // CommandButton specific fields
+  command?: string;               // Command name from [ControllerCommands]
+  on_close_behavior?: 'ClickOnCloseIfEnabled' | 'ClickOnCloseIfDisabled' | 'ClickOnClose';
 }
 
 interface DialogDefinition {
@@ -36,6 +39,7 @@ interface Constant {
   bit_options: string[];
   help?: string;
   visibility_condition?: string;  // Expression for when field should be visible
+  display_offset?: number;  // For bits type: offset to add to displayed value (e.g., +1 for [4:7+1])
 }
 
 interface TableInfo {
@@ -364,9 +368,19 @@ function DialogField({
             {validBitOptions.length === 0 ? (
               <option value={0}>No options available</option>
             ) : (
-              validBitOptions.map((opt, i) => (
-                <option key={i} value={i}>{opt}</option>
-              ))
+              validBitOptions.map((opt, i) => {
+                // Apply display_offset to the label if it's a numeric option
+                // For [4:7+1], raw 0 should display as "1", raw 1 as "2", etc.
+                const offset = constant.display_offset ?? 0;
+                const originalIdx = filteredToOriginalMap.get(i) ?? i;
+                const displayVal = originalIdx + offset;
+                // If the option is already a descriptive string, use it; 
+                // otherwise show the offset-adjusted value
+                const displayText = opt && opt.trim() !== '' && isNaN(Number(opt)) 
+                  ? opt 
+                  : `${displayVal}`;
+                return <option key={i} value={i}>{displayText}</option>;
+              })
             )}
           </select>
         </div>
@@ -421,6 +435,109 @@ function Indicator({ comp, context }: { comp: DialogComponent; context: Record<s
       <div className={`indicator-light ${isOn ? 'on' : 'off'}`} />
       <span className="indicator-label">{isOn ? comp.label_on : comp.label_off}</span>
     </div>
+  );
+}
+
+// Settings key for command warning preference
+const COMMAND_WARNINGS_DISABLED_KEY = 'libretune_command_warnings_disabled';
+
+function CommandButton({ comp, context }: { comp: DialogComponent; context: Record<string, number> }) {
+  const [isEnabled, setIsEnabled] = useState(true);
+  const [isExecuting, setIsExecuting] = useState(false);
+  const [showWarning, setShowWarning] = useState(false);
+  const [warningsDisabled, setWarningsDisabled] = useState(false);
+
+  // Load warning preference from localStorage
+  useEffect(() => {
+    const saved = localStorage.getItem(COMMAND_WARNINGS_DISABLED_KEY);
+    if (saved === 'true') {
+      setWarningsDisabled(true);
+    }
+  }, []);
+
+  // Evaluate enable condition
+  useEffect(() => {
+    if (comp.enabled_condition) {
+      invoke<boolean>('evaluate_expression', { expression: comp.enabled_condition, context })
+        .then(setIsEnabled)
+        .catch((err) => {
+          console.error('Error evaluating command button condition:', err);
+          setIsEnabled(true); // Default to enabled on error
+        });
+    }
+  }, [comp.enabled_condition, context]);
+
+  const executeCommand = async () => {
+    if (!comp.command || isExecuting) return;
+    
+    setIsExecuting(true);
+    try {
+      await invoke('execute_controller_command', { commandName: comp.command });
+    } catch (err) {
+      console.error('Command execution failed:', err);
+      alert(`Command failed: ${err}`);
+    } finally {
+      setIsExecuting(false);
+    }
+  };
+
+  const handleClick = () => {
+    if (!isEnabled || isExecuting) return;
+    
+    // Show warning on first use if not disabled
+    if (!warningsDisabled) {
+      setShowWarning(true);
+    } else {
+      executeCommand();
+    }
+  };
+
+  const handleWarningConfirm = (disableWarnings: boolean) => {
+    setShowWarning(false);
+    if (disableWarnings) {
+      setWarningsDisabled(true);
+      localStorage.setItem(COMMAND_WARNINGS_DISABLED_KEY, 'true');
+    }
+    executeCommand();
+  };
+
+  return (
+    <>
+      <div className="command-button-field">
+        <button
+          className={`command-button ${isExecuting ? 'executing' : ''}`}
+          onClick={handleClick}
+          disabled={!isEnabled || isExecuting}
+        >
+          {isExecuting ? 'Executing...' : comp.label}
+        </button>
+      </div>
+      
+      {showWarning && (
+        <div className="command-warning-overlay" onClick={() => setShowWarning(false)}>
+          <div className="command-warning-dialog" onClick={(e) => e.stopPropagation()}>
+            <h3>⚠️ Controller Command Warning</h3>
+            <p>
+              This button sends raw commands directly to the ECU.
+              These commands bypass normal memory synchronization and may:
+            </p>
+            <ul>
+              <li>Cause the ECU tune to become out of sync</li>
+              <li>Activate outputs (injectors, coils, etc.)</li>
+              <li>Alter ECU behavior unexpectedly</li>
+            </ul>
+            <p>Only proceed if you understand what this command does.</p>
+            <div className="command-warning-buttons">
+              <button onClick={() => setShowWarning(false)}>Cancel</button>
+              <button onClick={() => handleWarningConfirm(false)}>Execute Once</button>
+              <button onClick={() => handleWarningConfirm(true)} className="danger">
+                Always Allow
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -747,6 +864,9 @@ function DialogComponentRenderer({
   }
   if (comp.type === 'Indicator') {
     return <Indicator comp={comp} context={context} />;
+  }
+  if (comp.type === 'CommandButton' && comp.command) {
+    return <CommandButton comp={comp} context={context} />;
   }
   return null;
 }

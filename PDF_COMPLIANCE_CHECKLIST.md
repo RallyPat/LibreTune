@@ -20,6 +20,8 @@ This document tracks our implementation status against the EFI Analytics ECU Def
 - ✅ All data types: U08, S08, U16, S16, U32, S32, F32, F64, String, Bits
 - ✅ `lastOffset` keyword support
 - ✅ Bit fields with `[bit_position:bit_size]`
+- ✅ Bit fields with display offset `[bit_position:bit_size+N]` (e.g., `[4:7+1]`)
+- ✅ `INVALID` option filtering in bit field dropdowns
 - ✅ Arrays: `[rows x cols]` and `[size]`
 - ✅ Expressions in scale/offset/min/max
 - ✅ Visibility conditions
@@ -67,6 +69,7 @@ This document tracks our implementation status against the EFI Analytics ECU Def
 - ✅ `label = "Text"`
 - ✅ `table = tableName` - Table references
 - ✅ `indicator = expression, "off", "on"` - Boolean indicators
+- ✅ `commandButton = "Label", cmdName, {condition}, flags` - Command buttons
 - ✅ Field conditions evaluated (visibility/enable)
 
 ### 10. [FrontPage] Section
@@ -93,15 +96,26 @@ This document tracks our implementation status against the EFI Analytics ECU Def
 
 ### 16. Expression Functions
 - ✅ All operators: `+`, `-`, `*`, `/`, `%`, `==`, `!=`, `<`, `>`, `<=`, `>=`, `&&`, `||`, `!`
-- ✅ Math functions: `abs()`, `round()`, `floor()`, `ceil()`, `sqrt()`, `log()`, `exp()`, `sin()`, `cos()`, `tan()`, `asin()`, `acos()`, `atan()`, `atan2()`, `pow()`, `min()`, `max()`
-- ✅ Special functions: `isNaN()`, `isAdvancedMathAvailable()`
+- ✅ Math functions: `abs()`, `round()`, `floor()`, `ceil()`, `sqrt()`, `log()`, `log10()`, `exp()`, `sin()`, `cos()`, `tan()`, `asin()`, `acos()`, `atan()`, `atan2()`, `pow()`, `min()`, `max()`, `recip()`
+- ✅ Special functions: `isNaN()`, `isAdvancedMathAvailable()`, `timeNow()`, `isOnline()`
+- ✅ Conditional functions: `if(condition, trueValue, falseValue)`
+- ✅ Lookup functions: `table(incFile, input, "X")`, `arrayValue(constant, index)`
+- ✅ Stateful functions: `lastValue()`, `maxValue()`, `minValue()`, `accumulate()`, `smoothBasic()`
 - ⚠️ String functions: `bitStringValue()`, `stringValue()`, `$getProjectsDirPath()`, `$getWorkingDirPath()` - **Not yet implemented**
+
+### 17. .inc Lookup Tables
+- ✅ Format 1: TAB-separated X/Y pairs with interpolation
+- ✅ Format 2: DB/DW indexed lookup values
+- ✅ Comment handling (# and ;)
+- ✅ table() expression function integration
 
 ## ❌ Not Yet Implemented Sections
 
-### 17. [ControllerCommands] Section
-- ❌ Controller command definitions
-- ❌ User-displayed controller commands
+### 18. [ControllerCommands] Section
+- ✅ Controller command definitions parsed
+- ✅ Command chaining (one command referencing another)
+- ✅ commandButton dialog widget with execution
+- ⚠️ User-displayed controller commands menu - **Partial**
 
 ### 18. [LoggerDefinition] Section
 - ❌ Logger definitions
@@ -174,27 +188,58 @@ This document tracks our implementation status against the EFI Analytics ECU Def
 
 4. ✅ **Expression Functions** - All math functions from spec section 22.3 implemented
 
+5. ✅ **Bit Field Display Offset** - `[bit_position:bit_size+N]` notation supported
+   - Adds N to displayed value (display = raw + offset)
+   - Both + and - offsets supported
+
+6. ✅ **.inc Lookup Tables** - Full support for sensor linearization files
+   - Format 1: TAB-separated X/Y pairs with linear interpolation
+   - Format 2: DB/DW indexed lookup tables
+   - Integrated via `table(file, input, "X")` expression function
+
+7. ✅ **Conditional & Lookup Functions** - New expression functions:
+   - `if(condition, trueValue, falseValue)` - Conditional evaluation
+   - `log10(x)` - Base-10 logarithm
+   - `recip(x)` - Reciprocal (1/x)
+   - `arrayValue(constant, index)` - Array element access
+   - `timeNow()` - Current timestamp
+   - `isOnline()` - ECU connection status
+
+8. ✅ **Stateful Expression Functions** - For realtime computed channels:
+   - `lastValue(channel)` - Previous sample value
+   - `maxValue(channel)` - Maximum seen value
+   - `minValue(channel)` - Minimum seen value
+   - `accumulate(channel)` - Running total
+   - `smoothBasic(channel, samples)` - Moving average
+
+9. ✅ **Controller Commands** - Full command support:
+   - `[ControllerCommands]` section parsed with byte sequences
+   - Command chaining (one command referencing another)
+   - `commandButton` dialog widget with execution
+   - Safety warnings with user preference to disable
+
 ## Compliance Status
 
-**Overall: ~85% compliant with PDF specification**
+**Overall: ~92% compliant with PDF specification**
 
 ### Critical Sections: ✅ 100% Complete
 - [TunerStudio] / [MegaTune]
-- [Constants]
+- [Constants] (including bit offset notation)
 - [PcVariables]
 - [TableEditor]
 - [Menu]
-- [UserDefined] / [UiDialogs]
+- [UserDefined] / [UiDialogs] (including commandButton)
 - MSQ file format
 - Protocol communication
 
-### Important Sections: ⚠️ 90% Complete
-- Expression functions (missing string functions)
+### Important Sections: ✅ 95% Complete
+- Expression functions (all math, conditional, lookup, stateful - only missing string functions)
+- .inc lookup table files (Format 1 & 2)
+- [ControllerCommands] (command parsing and execution)
 - [FrontPage]
 - [OutputChannels]
 
 ### Optional Sections: ❌ 0% Complete
-- [ControllerCommands]
 - [LoggerDefinition]
 - [PortEditor]
 - [ReferenceTables]
@@ -215,7 +260,6 @@ This document tracks our implementation status against the EFI Analytics ECU Def
    - [ReferenceTables] section (if reference tables needed)
 
 3. **Low Priority:**
-   - [ControllerCommands] section
    - [FTPBrowser] section
    - [DatalogViews] section
    - [KeyActions] section

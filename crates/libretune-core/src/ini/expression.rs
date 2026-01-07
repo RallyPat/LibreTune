@@ -485,6 +485,142 @@ pub struct StringContext {
     pub get_projects_dir: Option<Box<dyn Fn() -> String + Send + Sync>>,
     /// Function to get working directory path
     pub get_working_dir: Option<Box<dyn Fn() -> String + Send + Sync>>,
+    /// Function to lookup value in .inc table file
+    /// Takes (filename, lookup_value) and returns the looked-up value
+    pub table_lookup: Option<Box<dyn Fn(&str, f64) -> Option<f64> + Send + Sync>>,
+    /// Function to check if ECU is online/connected
+    pub is_online: Option<Box<dyn Fn() -> bool + Send + Sync>>,
+    /// Start time for timeNow() function (epoch seconds)
+    pub start_time: Option<f64>,
+    /// Function to get value from a constant array with interpolation
+    /// Takes (constant_name, index) and returns interpolated value
+    pub array_value: Option<Box<dyn Fn(&str, f64) -> Option<f64> + Send + Sync>>,
+}
+
+/// Per-channel state for stateful expression functions
+#[derive(Debug, Clone, Default)]
+pub struct ChannelState {
+    /// Last value seen for this channel
+    pub last_value: Option<f64>,
+    /// Maximum value seen (with optional reset time)
+    pub max_value: Option<f64>,
+    /// Minimum value seen (with optional reset time)
+    pub min_value: Option<f64>,
+    /// Accumulated sum for this channel
+    pub accumulator: f64,
+    /// Smoothed value (rolling average)
+    pub smoothed_value: Option<f64>,
+    /// Last update timestamp (for reset timers)
+    pub last_update_time: Option<f64>,
+    /// Time when max was reset
+    pub max_reset_time: Option<f64>,
+    /// Time when min was reset
+    pub min_reset_time: Option<f64>,
+}
+
+/// Stateful context for expression evaluation
+/// Tracks per-channel values for lastValue, maxValue, minValue, accumulate, smoothBasic
+#[derive(Debug, Clone, Default)]
+pub struct ExpressionState {
+    /// Per-channel state
+    pub channels: HashMap<String, ChannelState>,
+}
+
+impl ExpressionState {
+    /// Create a new empty expression state
+    pub fn new() -> Self {
+        Self {
+            channels: HashMap::new(),
+        }
+    }
+
+    /// Update a channel's value (call this each time a new value is received)
+    pub fn update_channel(&mut self, name: &str, value: f64, current_time: f64) {
+        let state = self.channels.entry(name.to_string()).or_default();
+        
+        // Store last value
+        state.last_value = Some(value);
+        
+        // Update max (reset if timer expired)
+        if let Some(reset_time) = state.max_reset_time {
+            if current_time >= reset_time {
+                state.max_value = Some(value);
+                state.max_reset_time = None;
+            } else {
+                state.max_value = Some(state.max_value.map(|m| m.max(value)).unwrap_or(value));
+            }
+        } else {
+            state.max_value = Some(state.max_value.map(|m| m.max(value)).unwrap_or(value));
+        }
+        
+        // Update min (reset if timer expired)
+        if let Some(reset_time) = state.min_reset_time {
+            if current_time >= reset_time {
+                state.min_value = Some(value);
+                state.min_reset_time = None;
+            } else {
+                state.min_value = Some(state.min_value.map(|m| m.min(value)).unwrap_or(value));
+            }
+        } else {
+            state.min_value = Some(state.min_value.map(|m| m.min(value)).unwrap_or(value));
+        }
+        
+        state.last_update_time = Some(current_time);
+    }
+
+    /// Get the last value for a channel
+    pub fn last_value(&self, name: &str) -> Option<f64> {
+        self.channels.get(name).and_then(|s| s.last_value)
+    }
+
+    /// Get the max value for a channel
+    pub fn max_value(&self, name: &str) -> Option<f64> {
+        self.channels.get(name).and_then(|s| s.max_value)
+    }
+
+    /// Get the min value for a channel
+    pub fn min_value(&self, name: &str) -> Option<f64> {
+        self.channels.get(name).and_then(|s| s.min_value)
+    }
+
+    /// Get the accumulated value for a channel
+    pub fn accumulate(&mut self, name: &str, value: f64) -> f64 {
+        let state = self.channels.entry(name.to_string()).or_default();
+        state.accumulator += value;
+        state.accumulator
+    }
+
+    /// Get a smoothed value using exponential moving average
+    /// factor is between 0 and 1, higher = more smoothing
+    pub fn smooth_basic(&mut self, name: &str, value: f64, factor: f64) -> f64 {
+        let state = self.channels.entry(name.to_string()).or_default();
+        let factor = factor.clamp(0.0, 1.0);
+        
+        let smoothed = match state.smoothed_value {
+            Some(prev) => prev * factor + value * (1.0 - factor),
+            None => value,
+        };
+        
+        state.smoothed_value = Some(smoothed);
+        smoothed
+    }
+
+    /// Set a reset timer for max value (seconds from now)
+    pub fn set_max_reset_timer(&mut self, name: &str, current_time: f64, reset_seconds: f64) {
+        let state = self.channels.entry(name.to_string()).or_default();
+        state.max_reset_time = Some(current_time + reset_seconds);
+    }
+
+    /// Set a reset timer for min value (seconds from now)
+    pub fn set_min_reset_timer(&mut self, name: &str, current_time: f64, reset_seconds: f64) {
+        let state = self.channels.entry(name.to_string()).or_default();
+        state.min_reset_time = Some(current_time + reset_seconds);
+    }
+
+    /// Reset all state
+    pub fn reset(&mut self) {
+        self.channels.clear();
+    }
 }
 
 /// Evaluates a function call
@@ -650,6 +786,127 @@ fn evaluate_function(
             }
 
             Ok(Value::String(String::new()))
+        }
+        // table(channel, "filename.inc") - .inc file lookup with interpolation
+        "table" => {
+            if args.len() != 2 {
+                return Err(format!(
+                    "Function table requires 2 arguments (value, filename), got {}",
+                    args.len()
+                ));
+            }
+
+            // First arg is the lookup value (channel or expression)
+            let lookup_value = evaluate(&args[0], context, string_context)?.as_f64();
+
+            // Second arg is the filename (string literal or variable)
+            let filename = match &args[1] {
+                Expr::Literal(Value::String(s)) => s.clone(),
+                Expr::Variable(name) => name.clone(),
+                _ => return Err("table second argument must be a filename string".to_string()),
+            };
+
+            if let Some(ctx) = string_context {
+                if let Some(table_lookup) = &ctx.table_lookup {
+                    if let Some(result) = table_lookup(&filename, lookup_value) {
+                        return Ok(Value::Number(result));
+                    }
+                }
+            }
+
+            // Return 0 if lookup fails
+            Ok(Value::Number(0.0))
+        }
+        // log10(x) - base 10 logarithm
+        "log10" => {
+            if args.len() != 1 {
+                return Err(format!(
+                    "Function log10 requires 1 argument, got {}",
+                    args.len()
+                ));
+            }
+            let arg = evaluate(&args[0], context, string_context)?;
+            Ok(Value::Number(arg.as_f64().log10()))
+        }
+        // recip(x) - reciprocal (1/x)
+        "recip" => {
+            if args.len() != 1 {
+                return Err(format!(
+                    "Function recip requires 1 argument, got {}",
+                    args.len()
+                ));
+            }
+            let arg = evaluate(&args[0], context, string_context)?;
+            let x = arg.as_f64();
+            if x == 0.0 {
+                Ok(Value::Number(f64::INFINITY))
+            } else {
+                Ok(Value::Number(1.0 / x))
+            }
+        }
+        // if(condition, then_value, else_value) - ternary conditional
+        "if" => {
+            if args.len() != 3 {
+                return Err(format!(
+                    "Function if requires 3 arguments (condition, then, else), got {}",
+                    args.len()
+                ));
+            }
+            let condition = evaluate(&args[0], context, string_context)?.as_bool();
+            if condition {
+                evaluate(&args[1], context, string_context)
+            } else {
+                evaluate(&args[2], context, string_context)
+            }
+        }
+        // timeNow() - seconds since app start
+        "timenow" => {
+            if let Some(ctx) = string_context {
+                if let Some(start_time) = ctx.start_time {
+                    let now = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_secs_f64())
+                        .unwrap_or(0.0);
+                    return Ok(Value::Number(now - start_time));
+                }
+            }
+            Ok(Value::Number(0.0))
+        }
+        // isOnline() - check if ECU is connected
+        "isonline" => {
+            if let Some(ctx) = string_context {
+                if let Some(is_online) = &ctx.is_online {
+                    return Ok(Value::Bool(is_online()));
+                }
+            }
+            Ok(Value::Bool(false))
+        }
+        // arrayValue(constantName, index) - get interpolated value from constant array
+        "arrayvalue" => {
+            if args.len() != 2 {
+                return Err(format!(
+                    "Function arrayValue requires 2 arguments (constant, index), got {}",
+                    args.len()
+                ));
+            }
+
+            let constant_name = match &args[0] {
+                Expr::Variable(name) => name.clone(),
+                Expr::Literal(Value::String(s)) => s.clone(),
+                _ => return Err("arrayValue first argument must be a constant name".to_string()),
+            };
+
+            let index = evaluate(&args[1], context, string_context)?.as_f64();
+
+            if let Some(ctx) = string_context {
+                if let Some(array_value) = &ctx.array_value {
+                    if let Some(result) = array_value(&constant_name, index) {
+                        return Ok(Value::Number(result));
+                    }
+                }
+            }
+
+            Ok(Value::Number(0.0))
         }
         _ => {
             // Check for path functions (start with $)

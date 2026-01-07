@@ -242,3 +242,112 @@
   background: var(--bg-primary);
   border-radius: 4px;
 }
+
+/* Command Button Styles */
+.command-button-field {
+  padding: 8px 0;
+}
+
+.command-button {
+  padding: 10px 20px;
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  color: white;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.command-button:hover:not(:disabled) {
+  background: var(--accent-hover);
+  transform: translateY(-1px);
+}
+
+.command-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.command-button.executing {
+  background: var(--warning);
+  border-color: var(--warning);
+}
+
+/* Command Warning Dialog */
+.command-warning-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+}
+
+.command-warning-dialog {
+  background: var(--bg-primary);
+  border: 1px solid var(--warning);
+  border-radius: 12px;
+  padding: 24px;
+  max-width: 480px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+}
+
+.command-warning-dialog h3 {
+  margin: 0 0 16px 0;
+  color: var(--warning);
+  font-size: 18px;
+}
+
+.command-warning-dialog p {
+  margin: 0 0 12px 0;
+  color: var(--text-primary);
+  line-height: 1.5;
+}
+
+.command-warning-dialog ul {
+  margin: 0 0 16px 0;
+  padding-left: 20px;
+  color: var(--text-secondary);
+}
+
+.command-warning-dialog li {
+  margin-bottom: 6px;
+}
+
+.command-warning-buttons {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+  margin-top: 20px;
+}
+
+.command-warning-buttons button {
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-size: 14px;
+  cursor: pointer;
+  border: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  transition: all 0.2s;
+}
+
+.command-warning-buttons button:hover {
+  background: var(--bg-hover);
+}
+
+.command-warning-buttons button.danger {
+  background: var(--error);
+  border-color: var(--error);
+  color: white;
+}
+
+.command-warning-buttons button.danger:hover {
+  background: #ff6666;
+}

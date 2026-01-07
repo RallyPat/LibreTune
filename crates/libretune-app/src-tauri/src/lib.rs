@@ -11,8 +11,8 @@ use libretune_core::dashboard::{
 use libretune_core::datalog::{DataLogger, LogEntry};
 use libretune_core::demo::DemoSimulator;
 use libretune_core::ini::{
-    AdaptiveTimingConfig, Constant, DataType, DialogDefinition, EcuDefinition, HelpTopic, Menu,
-    MenuItem,
+    AdaptiveTimingConfig, CommandPart, Constant, DataType, DialogDefinition, EcuDefinition,
+    HelpTopic, Menu, MenuItem,
 };
 use libretune_core::project::{
     ConnectionSettings, IniEntry, IniRepository, IniSource, OnlineIniEntry, OnlineIniRepository,
@@ -5506,6 +5506,127 @@ async fn burn_to_ecu(state: tauri::State<'_, AppState>) -> Result<(), String> {
     Ok(())
 }
 
+/// Execute a controller command by name
+/// Resolves command chains and sends raw bytes to ECU
+#[tauri::command]
+async fn execute_controller_command(
+    state: tauri::State<'_, AppState>,
+    command_name: String,
+) -> Result<(), String> {
+    let def_guard = state.definition.lock().await;
+    let def = def_guard.as_ref().ok_or("No INI definition loaded")?;
+
+    let mut conn_guard = state.connection.lock().await;
+    let conn = conn_guard.as_mut().ok_or("Not connected to ECU")?;
+
+    // Resolve the command and get raw bytes
+    let bytes = resolve_command_bytes(def, &command_name, &mut std::collections::HashSet::new())?;
+
+    // Send bytes to ECU
+    conn.send_raw_bytes(&bytes)
+        .map_err(|e| format!("Failed to send command: {}", e))?;
+
+    Ok(())
+}
+
+/// Recursively resolve a command to raw bytes, handling command chaining
+fn resolve_command_bytes(
+    def: &EcuDefinition,
+    command_name: &str,
+    visited: &mut std::collections::HashSet<String>,
+) -> Result<Vec<u8>, String> {
+    // Prevent infinite recursion
+    if visited.contains(command_name) {
+        return Err(format!(
+            "Circular command reference detected: {}",
+            command_name
+        ));
+    }
+    visited.insert(command_name.to_string());
+
+    let cmd = def
+        .controller_commands
+        .get(command_name)
+        .ok_or_else(|| format!("Command not found: {}", command_name))?;
+
+    let mut result = Vec::new();
+
+    for part in &cmd.parts {
+        match part {
+            CommandPart::Raw(raw_str) => {
+                // Parse hex escapes and variable substitution
+                let bytes = parse_command_string(def, raw_str)?;
+                result.extend(bytes);
+            }
+            CommandPart::Reference(ref_name) => {
+                // Recursively resolve referenced command
+                let ref_bytes = resolve_command_bytes(def, ref_name, visited)?;
+                result.extend(ref_bytes);
+            }
+        }
+    }
+
+    Ok(result)
+}
+
+/// Parse a command string with hex escapes (\x00) and variable substitution ($tsCanId)
+fn parse_command_string(def: &EcuDefinition, s: &str) -> Result<Vec<u8>, String> {
+    let mut result = Vec::new();
+    let mut chars = s.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        if ch == '\\' {
+            // Escape sequence
+            match chars.next() {
+                Some('x') | Some('X') => {
+                    // Hex byte: \x00
+                    let mut hex = String::new();
+                    for _ in 0..2 {
+                        if let Some(&c) = chars.peek() {
+                            if c.is_ascii_hexdigit() {
+                                hex.push(chars.next().unwrap());
+                            } else {
+                                break;
+                            }
+                        }
+                    }
+                    if let Ok(byte) = u8::from_str_radix(&hex, 16) {
+                        result.push(byte);
+                    }
+                }
+                Some('n') => result.push(b'\n'),
+                Some('r') => result.push(b'\r'),
+                Some('t') => result.push(b'\t'),
+                Some('\\') => result.push(b'\\'),
+                Some(c) => result.push(c as u8),
+                None => {}
+            }
+        } else if ch == '$' {
+            // Variable substitution
+            let mut var_name = String::new();
+            while let Some(&c) = chars.peek() {
+                if c.is_alphanumeric() || c == '_' {
+                    var_name.push(chars.next().unwrap());
+                } else {
+                    break;
+                }
+            }
+
+            // Look up variable value
+            if let Some(&value) = def.pc_variables.get(&var_name) {
+                result.push(value);
+            } else {
+                // Variable not found - push 0 as default
+                result.push(0);
+            }
+        } else {
+            result.push(ch as u8);
+        }
+    }
+
+    Ok(result)
+}
+
 #[tauri::command]
 async fn mark_tune_modified(state: tauri::State<'_, AppState>) -> Result<(), String> {
     *state.tune_modified.lock().await = true;
@@ -7298,6 +7419,7 @@ pub fn run() {
             load_tune,
             list_tune_files,
             burn_to_ecu,
+            execute_controller_command,
             use_project_tune,
             use_ecu_tune,
             mark_tune_modified,

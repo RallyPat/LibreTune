@@ -10,10 +10,10 @@ use super::{
     output_channels::parse_output_channel_line,
     tables::{CurveDefinition, TableDefinition},
     types::{
-        ControllerCommand, DatalogEntry, DatalogView, DialogComponent, DialogDefinition,
-        FTPBrowserConfig, FrontPageConfig, FrontPageIndicator, HelpTopic, IndicatorDefinition,
-        IndicatorPanel, KeyAction, LoggerDefinition, Menu, MenuItem, PortEditorConfig,
-        ReferenceTable, SettingGroup, SettingOption,
+        CommandButtonCloseAction, CommandPart, ControllerCommand, DatalogEntry, DatalogView,
+        DialogComponent, DialogDefinition, FTPBrowserConfig, FrontPageConfig, FrontPageIndicator,
+        HelpTopic, IndicatorDefinition, IndicatorPanel, KeyAction, LoggerDefinition, Menu,
+        MenuItem, PortEditorConfig, ReferenceTable, SettingGroup, SettingOption,
     },
     EcuDefinition, IniError,
 };
@@ -1749,39 +1749,103 @@ fn parse_user_defined_entry(
                 }
             }
         }
+        "commandbutton" => {
+            // Format: commandButton = "Label", command_name [, { condition }] [, clickOnClose|clickOnCloseIfEnabled|clickOnCloseIfDisabled]
+            if let Some(name) = current_dialog {
+                if let Some(dialog) = def.dialogs.get_mut(name) {
+                    let parts = split_ini_line(value);
+                    if parts.len() >= 2 {
+                        let label = parts[0].trim_matches('"').to_string();
+                        let command = parts[1].trim().to_string();
+                        
+                        // Parse optional condition and close behavior
+                        let mut enabled_condition = None;
+                        let mut on_close_behavior = None;
+                        
+                        for part in parts.iter().skip(2) {
+                            let trimmed = part.trim();
+                            if trimmed.starts_with('{') && trimmed.ends_with('}') {
+                                enabled_condition = Some(trimmed.trim_matches(|c| c == '{' || c == '}').to_string());
+                            } else {
+                                match trimmed.to_lowercase().as_str() {
+                                    "clickoncloseifenabled" => {
+                                        on_close_behavior = Some(CommandButtonCloseAction::ClickOnCloseIfEnabled);
+                                    }
+                                    "clickoncloseifdisabled" => {
+                                        on_close_behavior = Some(CommandButtonCloseAction::ClickOnCloseIfDisabled);
+                                    }
+                                    "clickonclose" => {
+                                        on_close_behavior = Some(CommandButtonCloseAction::ClickOnClose);
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+                        
+                        dialog.components.push(DialogComponent::CommandButton {
+                            label,
+                            command,
+                            enabled_condition,
+                            on_close_behavior,
+                        });
+                    }
+                }
+            }
+        }
         _ => {}
     }
 }
 
 /// Parse a [ControllerCommands] section entry
-/// Format: cmd_name = "Label", "command_string" [, {enable_condition}]
+/// Format: cmd_name = "command_string" or cmd_name = cmd_ref1, "raw_bytes", cmd_ref2, ...
+/// Command chaining: commands can reference other commands by name
 fn parse_controller_command_entry(def: &mut EcuDefinition, key: &str, value: &str) {
     let parts = split_ini_line(value);
-    if parts.len() >= 2 {
-        let name = key.to_string();
-        let label = parts[0].trim_matches('"').to_string();
-        let command = parts[1].trim_matches('"').to_string();
-
-        // Optional enable condition (last part in braces)
-        let enable_condition = parts
-            .iter()
-            .skip(2)
-            .find(|p| {
-                let trimmed = p.trim();
-                trimmed.starts_with('{') && trimmed.ends_with('}')
-            })
-            .map(|p| p.trim().trim_matches(|c| c == '{' || c == '}').to_string());
-
-        def.controller_commands.insert(
-            name.clone(),
-            ControllerCommand {
-                name,
-                label,
-                command,
-                enable_condition,
-            },
-        );
+    if parts.is_empty() {
+        return;
     }
+    
+    let name = key.to_string();
+    let mut command_parts: Vec<CommandPart> = Vec::new();
+    let mut enable_condition = None;
+    
+    for part in &parts {
+        let trimmed = part.trim();
+        
+        // Check for enable condition (in braces)
+        if trimmed.starts_with('{') && trimmed.ends_with('}') {
+            enable_condition = Some(trimmed.trim_matches(|c| c == '{' || c == '}').to_string());
+            continue;
+        }
+        
+        // Check if it's a quoted string (raw bytes) or a command reference
+        if trimmed.starts_with('"') && trimmed.ends_with('"') {
+            // Raw command string with potential hex escapes
+            let raw = trimmed.trim_matches('"').to_string();
+            command_parts.push(CommandPart::Raw(raw));
+        } else if !trimmed.is_empty() {
+            // Command reference (another command name)
+            command_parts.push(CommandPart::Reference(trimmed.to_string()));
+        }
+    }
+    
+    // If only one part and no parts parsed yet, it might be the old format "cmd_name = raw_string"
+    if command_parts.is_empty() && !parts.is_empty() {
+        command_parts.push(CommandPart::Raw(parts[0].trim_matches('"').to_string()));
+    }
+    
+    // Use command name as label (no separate label in new format)
+    let label = name.clone();
+    
+    def.controller_commands.insert(
+        name.clone(),
+        ControllerCommand {
+            name,
+            label,
+            parts: command_parts,
+            enable_condition,
+        },
+    );
 }
 
 /// Parse a [LoggerDefinition] section entry
