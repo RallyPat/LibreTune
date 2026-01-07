@@ -6818,6 +6818,206 @@ async fn update_project_ini(
 }
 
 // =====================================================
+// Restore Points Commands
+// =====================================================
+
+/// Info about a restore point
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct RestorePointResponse {
+    pub filename: String,
+    pub path: String,
+    pub created: String,
+    pub size_bytes: u64,
+}
+
+/// Create a restore point from the current tune
+#[tauri::command]
+async fn create_restore_point(
+    state: tauri::State<'_, AppState>,
+) -> Result<RestorePointResponse, String> {
+    let proj_guard = state.current_project.lock().await;
+    let project = proj_guard
+        .as_ref()
+        .ok_or_else(|| "No project open".to_string())?;
+
+    let restore_path = project
+        .create_restore_point()
+        .map_err(|e| format!("Failed to create restore point: {}", e))?;
+
+    let metadata = std::fs::metadata(&restore_path)
+        .map_err(|e| format!("Failed to read restore point metadata: {}", e))?;
+
+    Ok(RestorePointResponse {
+        filename: restore_path
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default(),
+        path: restore_path.to_string_lossy().to_string(),
+        created: chrono::Utc::now().to_rfc3339(),
+        size_bytes: metadata.len(),
+    })
+}
+
+/// List restore points for the current project
+#[tauri::command]
+async fn list_restore_points(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<RestorePointResponse>, String> {
+    let proj_guard = state.current_project.lock().await;
+    let project = proj_guard
+        .as_ref()
+        .ok_or_else(|| "No project open".to_string())?;
+
+    let points = project
+        .list_restore_points()
+        .map_err(|e| format!("Failed to list restore points: {}", e))?;
+
+    Ok(points
+        .into_iter()
+        .map(|p| RestorePointResponse {
+            filename: p.filename,
+            path: p.path.to_string_lossy().to_string(),
+            created: p.created,
+            size_bytes: p.size_bytes,
+        })
+        .collect())
+}
+
+/// Load a restore point as the current tune
+#[tauri::command]
+async fn load_restore_point(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    filename: String,
+) -> Result<(), String> {
+    let mut proj_guard = state.current_project.lock().await;
+    let project = proj_guard
+        .as_mut()
+        .ok_or_else(|| "No project open".to_string())?;
+
+    project
+        .load_restore_point(&filename)
+        .map_err(|e| format!("Failed to load restore point: {}", e))?;
+
+    // Reload the tune into cache
+    if let Some(ref tune) = project.current_tune {
+        let def_guard = state.definition.lock().await;
+        if let Some(ref def) = *def_guard {
+            let cache = TuneCache::from_definition(def);
+            let mut cache_guard = state.tune_cache.lock().await;
+            *cache_guard = Some(cache);
+
+            if let Some(cache) = cache_guard.as_mut() {
+                // Load page data
+                for (page_num, page_data) in &tune.pages {
+                    cache.load_page(*page_num, page_data.clone());
+                }
+
+                // Apply constants
+                use libretune_core::tune::TuneValue;
+                for (name, tune_value) in &tune.constants {
+                    if let Some(constant) = def.constants.get(name) {
+                        if constant.is_pc_variable {
+                            if let TuneValue::Scalar(v) = tune_value {
+                                cache.local_values.insert(name.clone(), *v);
+                            }
+                            continue;
+                        }
+
+                        let length = constant.size_bytes() as u16;
+                        if length == 0 {
+                            continue;
+                        }
+
+                        let element_size = constant.data_type.size_bytes();
+                        let element_count = constant.shape.element_count();
+                        let mut raw_data = vec![0u8; length as usize];
+
+                        match tune_value {
+                            TuneValue::Scalar(v) => {
+                                let raw_val = constant.display_to_raw(*v);
+                                constant.data_type.write_to_bytes(
+                                    &mut raw_data,
+                                    0,
+                                    raw_val,
+                                    def.endianness,
+                                );
+                                let _ =
+                                    cache.write_bytes(constant.page, constant.offset, &raw_data);
+                            }
+                            TuneValue::Array(arr) => {
+                                for (i, val) in arr.iter().take(element_count).enumerate() {
+                                    let raw_val = constant.display_to_raw(*val);
+                                    let offset = i * element_size;
+                                    constant.data_type.write_to_bytes(
+                                        &mut raw_data,
+                                        offset,
+                                        raw_val,
+                                        def.endianness,
+                                    );
+                                }
+                                let _ =
+                                    cache.write_bytes(constant.page, constant.offset, &raw_data);
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Notify UI
+    let _ = app.emit("tune:loaded", "restore_point");
+
+    Ok(())
+}
+
+/// Delete a restore point
+#[tauri::command]
+async fn delete_restore_point(
+    state: tauri::State<'_, AppState>,
+    filename: String,
+) -> Result<(), String> {
+    let proj_guard = state.current_project.lock().await;
+    let project = proj_guard
+        .as_ref()
+        .ok_or_else(|| "No project open".to_string())?;
+
+    project
+        .delete_restore_point(&filename)
+        .map_err(|e| format!("Failed to delete restore point: {}", e))
+}
+
+/// Import a TunerStudio project
+#[tauri::command]
+async fn import_tunerstudio_project(
+    state: tauri::State<'_, AppState>,
+    source_path: String,
+) -> Result<CurrentProjectInfo, String> {
+    let project = Project::import_tunerstudio(&source_path, None)
+        .map_err(|e| format!("Failed to import TunerStudio project: {}", e))?;
+
+    let response = CurrentProjectInfo {
+        name: project.config.name.clone(),
+        path: project.path.to_string_lossy().to_string(),
+        signature: project.config.signature.clone(),
+        has_tune: project.current_tune.is_some(),
+        tune_modified: project.dirty,
+        connection: ConnectionSettingsResponse {
+            port: project.config.connection.port.clone(),
+            baud_rate: project.config.connection.baud_rate,
+        },
+    };
+
+    // Store as current project
+    let mut proj_guard = state.current_project.lock().await;
+    *proj_guard = Some(project);
+
+    Ok(response)
+}
+
+// =====================================================
 // INI Repository Commands
 // =====================================================
 
@@ -7452,6 +7652,13 @@ pub fn run() {
             close_project,
             get_current_project,
             update_project_connection,
+            // Restore points commands
+            create_restore_point,
+            list_restore_points,
+            load_restore_point,
+            delete_restore_point,
+            // TunerStudio import
+            import_tunerstudio_project,
             // INI signature management commands
             find_matching_inis,
             update_project_ini,

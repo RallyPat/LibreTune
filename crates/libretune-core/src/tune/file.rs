@@ -40,6 +40,11 @@ pub struct TuneFile {
     /// Page number for each constant (constant name -> page number)
     /// This preserves the MSQ file structure where constants are organized by page
     pub constant_pages: HashMap<String, u8>,
+
+    /// PC Variables (local-only, not stored on ECU)
+    /// These are stored on page "-1" in TunerStudio format
+    #[serde(default)]
+    pub pc_variables: HashMap<String, TuneValue>,
 }
 
 /// A value in a tune file
@@ -65,6 +70,7 @@ impl TuneFile {
             pages: HashMap::new(),
             constants: HashMap::new(),
             constant_pages: HashMap::new(),
+            pc_variables: HashMap::new(),
         }
     }
 
@@ -316,8 +322,8 @@ impl TuneFile {
                                             [value_start..value_start + close_tag]
                                             .trim();
                                         let value = parse_value(value_str);
-                                        tune.constants.insert(name.clone(), value);
-                                        tune.constant_pages.insert(name, current_page);
+                                        // Store in pc_variables, not constants
+                                        tune.pc_variables.insert(name, value);
                                         pcvars_found += 1;
                                         pc_pos = abs_pc_start + value_start + close_tag + 13;
                                         continue;
@@ -381,8 +387,8 @@ impl TuneFile {
                                     let value_str =
                                         remaining[value_start..value_start + close_tag].trim();
                                     let value = parse_value(value_str);
-                                    tune.constants.insert(name.clone(), value);
-                                    tune.constant_pages.insert(name, current_page);
+                                    // Store in pc_variables, not constants
+                                    tune.pc_variables.insert(name, value);
                                     pcvars_found += 1;
                                     search_pos = abs_start + value_start + close_tag + 13;
                                     continue;
@@ -537,6 +543,43 @@ impl TuneFile {
             ));
         }
 
+        // Add pcVariables on page -1 (TunerStudio convention)
+        if !self.pc_variables.is_empty() {
+            xml.push_str("  <page number=\"-1\">\n");
+
+            let mut pc_var_names: Vec<&String> = self.pc_variables.keys().collect();
+            pc_var_names.sort();
+
+            for name in pc_var_names {
+                if let Some(value) = self.pc_variables.get(name) {
+                    let value_str = match value {
+                        TuneValue::Scalar(v) => {
+                            let formatted = format!("{:.17}", v);
+                            let trimmed = formatted.trim_end_matches('0').trim_end_matches('.');
+                            if trimmed.is_empty() { "0".to_string() } else { trimmed.to_string() }
+                        }
+                        TuneValue::Array(arr) => arr
+                            .iter()
+                            .map(|v| {
+                                let formatted = format!("{:.17}", v);
+                                let trimmed = formatted.trim_end_matches('0').trim_end_matches('.');
+                                if trimmed.is_empty() { "0".to_string() } else { trimmed.to_string() }
+                            })
+                            .collect::<Vec<_>>()
+                            .join(" "),
+                        TuneValue::String(s) => format!("\"{}\"", s),
+                        TuneValue::Bool(b) => if *b { "true" } else { "false" }.to_string(),
+                    };
+                    xml.push_str(&format!(
+                        "    <pcVariable name=\"{}\">{}</pcVariable>\n",
+                        name, value_str
+                    ));
+                }
+            }
+
+            xml.push_str("  </page>\n");
+        }
+
         xml.push_str("</msq>\n");
 
         fs::write(path, xml)
@@ -573,6 +616,112 @@ impl TuneFile {
     pub fn get_constant(&self, name: &str) -> Option<&TuneValue> {
         self.constants.get(name)
     }
+
+    /// Set a PC variable value
+    pub fn set_pc_variable(&mut self, name: impl Into<String>, value: TuneValue) {
+        self.pc_variables.insert(name.into(), value);
+    }
+
+    /// Get a PC variable value
+    pub fn get_pc_variable(&self, name: &str) -> Option<&TuneValue> {
+        self.pc_variables.get(name)
+    }
+
+    /// Get a value (constant or PC variable)
+    pub fn get_value(&self, name: &str) -> Option<&TuneValue> {
+        self.constants
+            .get(name)
+            .or_else(|| self.pc_variables.get(name))
+    }
+
+    /// Save only PC variables to a separate file (pcVariableValues.msq format)
+    pub fn save_pc_variables<P: AsRef<Path>>(&self, path: P, signature: &str) -> io::Result<()> {
+        let mut xml = String::new();
+        xml.push_str("<?xml version=\"1.0\" encoding=\"ISO-8859-1\"?>\n");
+        xml.push_str("<msq xmlns=\"http://www.msefi.com/:msq\">\n");
+        xml.push_str(&format!(
+            "<bibliography author=\"LibreTune\" writeDate=\"{}\"/>\n",
+            Utc::now().format("%a %b %d %H:%M:%S %Y")
+        ));
+        xml.push_str(&format!(
+            "<versionInfo fileFormat=\"4.0\" signature=\"{}\"/>\n",
+            signature
+        ));
+
+        if !self.pc_variables.is_empty() {
+            xml.push_str("<page number=\"-1\">\n");
+
+            let mut names: Vec<&String> = self.pc_variables.keys().collect();
+            names.sort();
+
+            for name in names {
+                if let Some(value) = self.pc_variables.get(name) {
+                    let value_str = format_tune_value(value);
+                    xml.push_str(&format!(
+                        "<constant name=\"{}\">{}</constant>\n",
+                        name, value_str
+                    ));
+                }
+            }
+
+            xml.push_str("</page>\n");
+        }
+
+        xml.push_str("</msq>\n");
+        fs::write(path, xml)
+    }
+
+    /// Load PC variables from a separate file (pcVariableValues.msq format)
+    pub fn load_pc_variables<P: AsRef<Path>>(&mut self, path: P) -> io::Result<()> {
+        let loaded = Self::load(path)?;
+        // The file uses <constant> tags on page -1, but we parse them as constants
+        // We need to merge them into pc_variables
+        for (name, value) in loaded.constants {
+            self.pc_variables.insert(name, value);
+        }
+        // Also merge any pc_variables that were parsed
+        for (name, value) in loaded.pc_variables {
+            self.pc_variables.insert(name, value);
+        }
+        Ok(())
+    }
+}
+
+/// Format a TuneValue for XML output with high precision
+fn format_tune_value(value: &TuneValue) -> String {
+    match value {
+        TuneValue::Scalar(v) => {
+            let formatted = format!("{:.17}", v);
+            let trimmed = formatted.trim_end_matches('0').trim_end_matches('.');
+            if trimmed.is_empty() {
+                "0".to_string()
+            } else {
+                trimmed.to_string()
+            }
+        }
+        TuneValue::Array(arr) => arr
+            .iter()
+            .map(|v| {
+                let formatted = format!("{:.17}", v);
+                let trimmed = formatted.trim_end_matches('0').trim_end_matches('.');
+                if trimmed.is_empty() {
+                    "0".to_string()
+                } else {
+                    trimmed.to_string()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" "),
+        TuneValue::String(s) => format!("\"{}\"", s),
+        TuneValue::Bool(b) => {
+            if *b {
+                "true"
+            } else {
+                "false"
+            }
+            .to_string()
+        }
+    }
 }
 
 impl Default for TuneFile {
@@ -587,6 +736,7 @@ impl Default for TuneFile {
             pages: HashMap::new(),
             constants: HashMap::new(),
             constant_pages: HashMap::new(),
+            pc_variables: HashMap::new(),
         }
     }
 }

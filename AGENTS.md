@@ -179,10 +179,51 @@ Based on analysis of common ECU tuning software patterns:
 [x] INI signature mismatch detection with user notification dialog
 [x] Online INI repository search and download from GitHub (Speeduino, rusEFI)
 [x] Resilient ECU sync with partial failure handling and status bar indicator
+[x] TunerStudio project import (project.properties, restore points, pcVariables)
+[x] Java properties file parser for TunerStudio compatibility
+[x] PC variables persistence (pcVariableValues.msq)
+[x] Restore points system (create, list, load, delete, prune)
 [ ] INI version tracking in tune files
 [ ] User-driven tune migration between INI versions
+[ ] Frontend dialogs for restore points and project import
 
 ## Recent Changes (Session History)
+
+### TunerStudio Project Compatibility - Completed Jan 7, 2026
+- **Java Properties Parser** (`properties.rs`):
+  - Full Java properties file format support
+  - Backslash continuation lines, Unicode escapes (\uXXXX)
+  - Comment handling (# and !), escaped special characters
+  - TunerStudio-specific key escaping (spaces in keys like `Gauge\ Settings`)
+
+- **Restore Points System** (`project.rs`):
+  - `create_restore_point()` - Creates timestamped MSQ backup
+  - `list_restore_points()` - Lists all restore points with metadata
+  - `load_restore_point()` - Restores tune from backup
+  - `delete_restore_point()` - Removes specific restore point
+  - `prune_restore_points()` - Keeps only N most recent backups
+
+- **PC Variables Persistence** (`file.rs`, `project.rs`):
+  - Added `pc_variables: HashMap<String, TuneValue>` to TuneFile
+  - Separate parsing for `<pcVariable>` elements
+  - `save_pc_variables()` / `load_pc_variables()` for pcVariableValues.msq
+  - Page -1 convention for PC variable storage
+
+- **TunerStudio Project Import** (`project.rs`):
+  - `import_tunerstudio()` reads project.properties and converts format
+  - Copies CurrentTune.msq, pcVariableValues.msq, restore points
+  - Extracts connection settings (port, baud rate)
+  - Preserves INI file and signature
+
+- **New Tauri Commands** (`lib.rs`):
+  - `create_restore_point` - Create backup from current tune
+  - `list_restore_points` - List all backups for project
+  - `load_restore_point` - Load a backup as current tune
+  - `delete_restore_point` - Remove a backup
+  - `import_tunerstudio_project` - Import TS project folder
+
+- **Bug Fix**: Table editor blue highlighting caused by CSS `::selection`
+  - Added `user-select: none` to `.table-editor` in TableEditor.css
 
 ### Resilient ECU Sync & Mismatch Handling - Completed Jan 5, 2026
 - **Problem**: ECU protocol error (status 132) shown as scary dialog when INI doesn't match ECU

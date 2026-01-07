@@ -101,6 +101,15 @@ interface BackendTableData {
   y_output_channel?: string | null;
 }
 
+interface BackendCurveData {
+  name: string;
+  title: string;
+  x_bins: number[];
+  y_bins: number[];
+  x_label: string;
+  y_label: string;
+}
+
 interface BackendMenu {
   name: string;
   title: string;
@@ -128,7 +137,7 @@ interface ProtocolDefaults {
 
 // Tab content types
 interface TabContent {
-  type: "dashboard" | "table" | "dialog" | "settings" | "project" | "autotune" | "datalog";
+  type: "dashboard" | "table" | "curve" | "dialog" | "settings" | "project" | "autotune" | "datalog";
   data?: TunerTableData | RendererDialogDef | string;
 }
 
@@ -438,22 +447,26 @@ function AppContent() {
           // Get current tabs and tabContents
           const currentTabs = tabs;
           const currentTabContents = tabContents;
-          const tabsToRefresh: string[] = [];
+          const tablesToRefresh: string[] = [];
+          const curvesToRefresh: string[] = [];
           
           for (const tab of currentTabs) {
             const tabContent = currentTabContents[tab.id];
             if (tabContent && tabContent.type === "table") {
-              tabsToRefresh.push(tab.id);
+              tablesToRefresh.push(tab.id);
+            } else if (tabContent && tabContent.type === "curve") {
+              curvesToRefresh.push(tab.id);
             }
           }
           
-          if (tabsToRefresh.length > 0) {
-            console.log(`[tune:loaded] Refreshing ${tabsToRefresh.length} table(s):`, tabsToRefresh);
+          const totalToRefresh = tablesToRefresh.length + curvesToRefresh.length;
+          if (totalToRefresh > 0) {
+            console.log(`[tune:loaded] Refreshing ${tablesToRefresh.length} table(s) and ${curvesToRefresh.length} curve(s)`);
             const updatedTabs = { ...currentTabContents };
             
-            // Refresh all tables in parallel
-            await Promise.all(
-              tabsToRefresh.map(async (tabId) => {
+            // Refresh all tables and curves in parallel
+            await Promise.all([
+              ...tablesToRefresh.map(async (tabId) => {
                 try {
                   const data = await invoke<BackendTableData>("get_table_data", { tableName: tabId });
                   const tableData: TunerTableData = {
@@ -467,17 +480,34 @@ function AppContent() {
                     yOutputChannel: data.y_output_channel ?? undefined,
                   };
                   updatedTabs[tabId] = { type: "table", data: tableData };
-                  console.log(`[tune:loaded] ✓ Refreshed '${tabId}': ${data.z_values.length} values`);
+                  console.log(`[tune:loaded] ✓ Refreshed table '${tabId}': ${data.z_values.length} values`);
                 } catch (e) {
-                  console.error(`[tune:loaded] ✗ Failed to refresh '${tabId}':`, e);
+                  console.error(`[tune:loaded] ✗ Failed to refresh table '${tabId}':`, e);
+                }
+              }),
+              ...curvesToRefresh.map(async (tabId) => {
+                try {
+                  const data = await invoke<BackendCurveData>("get_curve_data", { curveName: tabId });
+                  const tableData: TunerTableData = {
+                    name: data.name,
+                    xAxis: data.x_bins,
+                    yAxis: [0],
+                    zValues: [data.y_bins],
+                    xLabel: data.x_label,
+                    yLabel: data.y_label,
+                  };
+                  updatedTabs[tabId] = { type: "curve", data: tableData };
+                  console.log(`[tune:loaded] ✓ Refreshed curve '${tabId}': ${data.x_bins.length} points`);
+                } catch (e) {
+                  console.error(`[tune:loaded] ✗ Failed to refresh curve '${tabId}':`, e);
                 }
               })
-            );
+            ]);
             
             setTabContents(updatedTabs);
-            console.log(`[tune:loaded] ✓ Completed refreshing ${tabsToRefresh.length} table(s)`);
+            console.log(`[tune:loaded] ✓ Completed refreshing ${totalToRefresh} item(s)`);
           } else {
-            console.log("[tune:loaded] No open tables to refresh");
+            console.log("[tune:loaded] No open tables or curves to refresh");
           }
         });
       } catch (e) {
@@ -490,11 +520,11 @@ function AppContent() {
     };
   }, [tabs, tabContents]); // Depend on tabs and tabContents to access current state
 
-  // Refresh table data when a table tab is activated
+  // Refresh table/curve data when a table or curve tab is activated
   useEffect(() => {
     if (!activeTabId) return;
     
-    // Check if the active tab is a table using functional update
+    // Check if the active tab is a table or curve using functional update
     setTabContents((prev) => {
       const tabContent = prev[activeTabId];
       if (tabContent && tabContent.type === "table") {
@@ -519,6 +549,27 @@ function AppContent() {
           })
           .catch((e) => {
             console.error(`[tab:activated] Failed to refresh table '${activeTabId}':`, e);
+          });
+      } else if (tabContent && tabContent.type === "curve") {
+        // Refresh the active curve to ensure it has fresh data
+        invoke<BackendCurveData>("get_curve_data", { curveName: activeTabId })
+          .then((data) => {
+            const tableData: TunerTableData = {
+              name: data.name,
+              xAxis: data.x_bins,
+              yAxis: [0],
+              zValues: [data.y_bins],
+              xLabel: data.x_label,
+              yLabel: data.y_label,
+            };
+            setTabContents((prevTabContents) => ({
+              ...prevTabContents,
+              [activeTabId]: { type: "curve", data: tableData },
+            }));
+            console.log(`[tab:activated] Refreshed curve '${activeTabId}': ${data.x_bins.length} points`);
+          })
+          .catch((e) => {
+            console.error(`[tab:activated] Failed to refresh curve '${activeTabId}':`, e);
           });
       }
       return prev; // Return unchanged, update happens in promise
@@ -1046,9 +1097,40 @@ function AppContent() {
       } catch (err) {
         tableErr = err;
         console.log("[openTarget] Not a table:", err);
-        // Not a table, try dialog
       }
 
+      // Try curve second
+      let curveErr: unknown = null;
+      try {
+        console.log("[openTarget] Trying as curve:", name);
+        const data = await invoke<BackendCurveData>("get_curve_data", { curveName: name });
+        // Convert curve to table format for TableEditor (1D mode)
+        const tableData: TunerTableData = {
+          name: data.name,
+          xAxis: data.x_bins,
+          yAxis: [0],  // Single row for 1D curve
+          zValues: [data.y_bins],  // Y values as single row
+          xLabel: data.x_label,
+          yLabel: data.y_label,
+        };
+        
+        console.log(`[openTarget] Loaded curve '${name}': ${data.x_bins.length} points`);
+
+        const newTab: Tab = {
+          id: name,
+          title: title || data.title || name,
+          icon: "curve",
+        };
+        setTabs([...tabs, newTab]);
+        setTabContents({ ...tabContents, [name]: { type: "curve", data: tableData } });
+        setActiveTabId(name);
+        return;
+      } catch (err) {
+        curveErr = err;
+        console.log("[openTarget] Not a curve:", err);
+      }
+
+      // Try dialog third
       try {
         console.log("[openTarget] Trying as dialog:", name);
         const def = await invoke<RendererDialogDef>("get_dialog_definition", { name });
@@ -1062,10 +1144,15 @@ function AppContent() {
         setTabContents({ ...tabContents, [name]: { type: "dialog", data: def } });
         setActiveTabId(name);
       } catch (dialogErr) {
-        console.error("[openTarget] Failed to open target:", name, "table error:", tableErr, "dialog error:", dialogErr);
+        // All three failed - show user feedback
+        console.error("[openTarget] Failed to open target:", name, 
+          "table error:", tableErr, 
+          "curve error:", curveErr, 
+          "dialog error:", dialogErr);
+        showToast(`Could not open "${title || name}" - not found as table, curve, or dialog`, "warning");
       }
     },
-    [tabs, tabContents]
+    [tabs, tabContents, showToast]
   );
 
   // Handle standard built-in targets (std_*)
@@ -1470,6 +1557,22 @@ function AppContent() {
                 setTabContents({
                   ...tabContents,
                   [activeTabId]: { type: "table", data: newData },
+                });
+              }
+            }}
+            onBurn={() => setBurnDialogOpen(true)}
+            realtimeData={realtimeData}
+          />
+        );
+      case "curve":
+        return (
+          <TableEditor
+            data={content.data as TunerTableData}
+            onChange={(newData) => {
+              if (activeTabId) {
+                setTabContents({
+                  ...tabContents,
+                  [activeTabId]: { type: "curve", data: newData },
                 });
               }
             }}

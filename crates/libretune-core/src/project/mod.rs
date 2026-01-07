@@ -12,8 +12,10 @@
 //! ├── CurrentTune.msq       # Auto-saved current tune (TunerStudio compatible)
 //! ├── datalogs/             # Data log files
 //! ├── dashboards/           # Dashboard configurations
+//! ├── restorePoints/        # Timestamped tune backups
 //! └── projectCfg/
 //!     ├── definition.ini    # Copy of ECU definition file
+//!     ├── pcVariableValues.msq  # PC variable values
 //!     └── custom.ini        # Optional user overrides
 //! ```
 //!
@@ -21,8 +23,12 @@
 
 mod online_repository;
 mod project;
+mod properties;
 mod repository;
 
 pub use online_repository::{IniSource, OnlineIniEntry, OnlineIniRepository};
-pub use project::{ConnectionSettings, Project, ProjectConfig, ProjectInfo, ProjectSettings};
+pub use project::{
+    ConnectionSettings, Project, ProjectConfig, ProjectInfo, ProjectSettings, RestorePointInfo,
+};
+pub use properties::Properties;
 pub use repository::{IniEntry, IniRepository};

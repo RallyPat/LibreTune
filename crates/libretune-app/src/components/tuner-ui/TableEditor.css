@@ -8,6 +8,7 @@
   height: 100%;
   background: var(--table-bg);
   outline: none;
+  user-select: none;
 }
 
 /* Toolbar */
@@ -224,4 +225,52 @@
   font-size: var(--font-size-sm);
   color: var(--text-secondary);
   flex-shrink: 0;
+}
+
+/* Context Menu */
+.table-context-menu {
+  position: fixed;
+  z-index: 1000;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  min-width: 220px;
+  padding: var(--space-1) 0;
+  font-size: var(--font-size-sm);
+}
+
+.context-menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  background: transparent;
+  border: none;
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+
+.context-menu-item:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+
+.context-menu-item:disabled {
+  color: var(--text-disabled);
+  cursor: not-allowed;
+}
+
+.context-menu-item .shortcut {
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
+  margin-left: var(--space-4);
+}
+
+.context-menu-separator {
+  height: 1px;
+  background: var(--border-subtle);
+  margin: var(--space-1) 0;
 }

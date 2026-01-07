@@ -43,6 +43,20 @@ interface Selection {
   end: CellPosition;
 }
 
+// Context menu state
+interface ContextMenuState {
+  x: number;
+  y: number;
+  visible: boolean;
+}
+
+// Increment settings for step operations
+interface IncrementSettings {
+  stepAmount: number;      // Amount for > < keys
+  stepCount: number;       // Multiplier when Ctrl is held
+  stepPercent: number;     // Percentage for Shift operations
+}
+
 export function TableEditor({
   data,
   onChange,
@@ -66,6 +80,29 @@ export function TableEditor({
   const [followMode, setFollowMode] = useState(false);
   const [historyTrail, setHistoryTrail] = useState<Array<{ row: number; col: number; time: number }>>([]);
   const TRAIL_DURATION_MS = 3000; // 3 second trail
+  
+  // Context menu state
+  const [contextMenu, setContextMenu] = useState<ContextMenuState>({ x: 0, y: 0, visible: false });
+  
+  // Original values for reset functionality
+  const [originalData, setOriginalData] = useState<TableData | null>(null);
+  
+  // Increment settings
+  const [incrementSettings, setIncrementSettings] = useState<IncrementSettings>({
+    stepAmount: 0.1,
+    stepCount: 10,
+    stepPercent: 1,
+  });
+  
+  // Track if heatmap coloring is enabled
+  const [heatmapEnabled, setHeatmapEnabled] = useState(true);
+  
+  // Store original data on first render
+  useEffect(() => {
+    if (!originalData) {
+      setOriginalData(JSON.parse(JSON.stringify(data)));
+    }
+  }, [data, originalData]);
 
   // Helper: Find nearest bin index for a given value
   const findNearestBinIndex = useCallback((value: number, bins: number[]): number => {
@@ -149,6 +186,8 @@ export function TableEditor({
 
   // Calculate color for value based on min/max
   const getValueColor = useCallback((value: number) => {
+    if (!heatmapEnabled) return 'var(--table-cell-bg)';
+    
     const min = data.min ?? Math.min(...data.zValues.flat());
     const max = data.max ?? Math.max(...data.zValues.flat());
     const range = max - min;
@@ -159,7 +198,7 @@ export function TableEditor({
     const r = Math.round(normalized * 200);
     const b = Math.round((1 - normalized) * 200);
     return `rgb(${r}, 60, ${b})`;
-  }, [data.min, data.max, data.zValues]);
+  }, [data.min, data.max, data.zValues, heatmapEnabled]);
 
   // Get selected cells as array of positions
   const getSelectedCells = useCallback((): CellPosition[] => {
@@ -305,6 +344,113 @@ export function TableEditor({
     
     onChange({ ...data, zValues: newZValues });
   }, [data, getSelectedCells, onChange, pushHistory]);
+
+  // Interpolate horizontal only (H key)
+  const interpolateHorizontal = useCallback(() => {
+    const cells = getSelectedCells();
+    if (cells.length < 2) return;
+    
+    pushHistory();
+    const newZValues = data.zValues.map((row) => [...row]);
+    
+    // Group by row and interpolate each row independently
+    const rowGroups = new Map<number, number[]>();
+    cells.forEach(({ row, col }) => {
+      if (!rowGroups.has(row)) rowGroups.set(row, []);
+      rowGroups.get(row)!.push(col);
+    });
+    
+    rowGroups.forEach((cols, row) => {
+      cols.sort((a, b) => a - b);
+      if (cols.length < 2) return;
+      
+      const startVal = newZValues[row][cols[0]];
+      const endVal = newZValues[row][cols[cols.length - 1]];
+      const step = (endVal - startVal) / (cols.length - 1);
+      
+      cols.forEach((col, i) => {
+        newZValues[row][col] = Number((startVal + step * i).toFixed(data.precision ?? 2));
+      });
+    });
+    
+    onChange({ ...data, zValues: newZValues });
+  }, [data, getSelectedCells, onChange, pushHistory]);
+
+  // Interpolate vertical only (V key)
+  const interpolateVertical = useCallback(() => {
+    const cells = getSelectedCells();
+    if (cells.length < 2) return;
+    
+    pushHistory();
+    const newZValues = data.zValues.map((row) => [...row]);
+    
+    // Group by column and interpolate each column independently
+    const colGroups = new Map<number, number[]>();
+    cells.forEach(({ row, col }) => {
+      if (!colGroups.has(col)) colGroups.set(col, []);
+      colGroups.get(col)!.push(row);
+    });
+    
+    colGroups.forEach((rows, col) => {
+      rows.sort((a, b) => a - b);
+      if (rows.length < 2) return;
+      
+      const startVal = newZValues[rows[0]][col];
+      const endVal = newZValues[rows[rows.length - 1]][col];
+      const step = (endVal - startVal) / (rows.length - 1);
+      
+      rows.forEach((row, i) => {
+        newZValues[row][col] = Number((startVal + step * i).toFixed(data.precision ?? 2));
+      });
+    });
+    
+    onChange({ ...data, zValues: newZValues });
+  }, [data, getSelectedCells, onChange, pushHistory]);
+
+  // Flood fill (fill up and right from selection) - F key
+  const floodFill = useCallback(() => {
+    if (!selection) return;
+    
+    pushHistory();
+    const newZValues = data.zValues.map((row) => [...row]);
+    const sourceRow = Math.min(selection.start.row, selection.end.row);
+    const sourceCol = Math.min(selection.start.col, selection.end.col);
+    const value = data.zValues[sourceRow][sourceCol];
+    
+    // Fill from source cell up to top-right corner
+    for (let row = sourceRow; row >= 0; row--) {
+      for (let col = sourceCol; col < data.zValues[0].length; col++) {
+        newZValues[row][col] = value;
+      }
+    }
+    
+    onChange({ ...data, zValues: newZValues });
+  }, [selection, data, onChange, pushHistory]);
+
+  // Reset to original values (Escape with selection)
+  const resetToOriginal = useCallback(() => {
+    const cells = getSelectedCells();
+    if (cells.length === 0 || !originalData) return;
+    
+    pushHistory();
+    const newZValues = data.zValues.map((row) => [...row]);
+    cells.forEach(({ row, col }) => {
+      if (row < originalData.zValues.length && col < originalData.zValues[0].length) {
+        newZValues[row][col] = originalData.zValues[row][col];
+      }
+    });
+    
+    onChange({ ...data, zValues: newZValues });
+  }, [data, getSelectedCells, onChange, pushHistory, originalData]);
+
+  // Select all cells (Ctrl+A)
+  const selectAll = useCallback(() => {
+    if (data.zValues.length === 0 || data.zValues[0].length === 0) return;
+    setSelection({
+      start: { row: 0, col: 0 },
+      end: { row: data.zValues.length - 1, col: data.zValues[0].length - 1 }
+    });
+  }, [data.zValues]);
 
   // Copy/paste
   const copySelection = useCallback(() => {
@@ -487,12 +633,6 @@ export function TableEditor({
           copySelection();
         }
         break;
-      case 'v':
-        if (e.ctrlKey) {
-          e.preventDefault();
-          pasteSelection();
-        }
-        break;
       case 'z':
         if (e.ctrlKey) {
           e.preventDefault();
@@ -505,6 +645,30 @@ export function TableEditor({
           redo();
         }
         break;
+      case 'a':
+        if (e.ctrlKey) {
+          e.preventDefault();
+          selectAll();
+        }
+        break;
+      case 'h':
+      case 'H':
+        e.preventDefault();
+        interpolateHorizontal();
+        break;
+      case 'v':
+        if (e.ctrlKey) {
+          e.preventDefault();
+          pasteSelection();
+        } else {
+          e.preventDefault();
+          interpolateVertical();
+        }
+        break;
+      case 'Escape':
+        e.preventDefault();
+        resetToOriginal();
+        break;
       case 'Enter':
         e.preventDefault();
         handleCellDoubleClick(row, col);
@@ -512,7 +676,8 @@ export function TableEditor({
     }
   }, [
     selection, editingCell, data, finishEdit, getSelectedCells, setEqual,
-    adjustValues, scaleValues, interpolate, smooth, copySelection, pasteSelection,
+    adjustValues, scaleValues, interpolate, interpolateHorizontal, interpolateVertical,
+    smooth, copySelection, pasteSelection, selectAll, resetToOriginal, floodFill,
     undo, redo, handleCellDoubleClick, followMode, setFollowMode
   ]);
 
@@ -545,8 +710,92 @@ export function TableEditor({
     return value.toFixed(data.precision ?? 1);
   }, [data.precision]);
 
+  // Context menu handler
+  const handleContextMenu = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    setContextMenu({ x: e.clientX, y: e.clientY, visible: true });
+  }, []);
+
+  // Close context menu
+  const closeContextMenu = useCallback(() => {
+    setContextMenu({ ...contextMenu, visible: false });
+  }, [contextMenu]);
+
+  // Close context menu on click outside
+  useEffect(() => {
+    const handleClick = () => closeContextMenu();
+    if (contextMenu.visible) {
+      document.addEventListener('click', handleClick);
+      return () => document.removeEventListener('click', handleClick);
+    }
+  }, [contextMenu.visible, closeContextMenu]);
+
   return (
-    <div className="table-editor" ref={tableRef} tabIndex={0} onKeyDown={handleKeyDown}>
+    <div 
+      className="table-editor" 
+      ref={tableRef} 
+      tabIndex={0} 
+      onKeyDown={handleKeyDown}
+      onContextMenu={handleContextMenu}
+    >
+      {/* Context Menu */}
+      {contextMenu.visible && (
+        <TableContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          onClose={closeContextMenu}
+          hasSelection={!!selection}
+          hasClipboard={!!clipboard}
+          onResetToOriginal={resetToOriginal}
+          onSetValue={() => {
+            const value = prompt('Enter value:');
+            if (value) setEqual(parseFloat(value));
+            closeContextMenu();
+          }}
+          onStepUp={() => { adjustValues(incrementSettings.stepAmount); closeContextMenu(); }}
+          onStepDown={() => { adjustValues(-incrementSettings.stepAmount); closeContextMenu(); }}
+          onAddAmount={() => {
+            const amt = prompt('Enter amount to add:');
+            if (amt) adjustValues(parseFloat(amt));
+            closeContextMenu();
+          }}
+          onSubtractAmount={() => {
+            const amt = prompt('Enter amount to subtract:');
+            if (amt) adjustValues(-parseFloat(amt));
+            closeContextMenu();
+          }}
+          onMultiplyBy={() => {
+            const factor = prompt('Enter multiplier (e.g., 1.02 for +2%):');
+            if (factor) scaleValues(parseFloat(factor));
+            closeContextMenu();
+          }}
+          onInterpolate={() => { interpolate(); closeContextMenu(); }}
+          onInterpolateHorizontal={() => { interpolateHorizontal(); closeContextMenu(); }}
+          onInterpolateVertical={() => { interpolateVertical(); closeContextMenu(); }}
+          onSmooth={() => { smooth(); closeContextMenu(); }}
+          onFloodFill={() => { floodFill(); closeContextMenu(); }}
+          onCopy={() => { copySelection(); closeContextMenu(); }}
+          onPaste={() => { pasteSelection(); closeContextMenu(); }}
+          onSetStepAmount={() => {
+            const amt = prompt('Enter step amount:', String(incrementSettings.stepAmount));
+            if (amt) setIncrementSettings({ ...incrementSettings, stepAmount: parseFloat(amt) });
+            closeContextMenu();
+          }}
+          onSetStepCount={() => {
+            const count = prompt('Enter step multiplier (Ctrl key):', String(incrementSettings.stepCount));
+            if (count) setIncrementSettings({ ...incrementSettings, stepCount: parseInt(count) });
+            closeContextMenu();
+          }}
+          onSetStepPercent={() => {
+            const pct = prompt('Enter step percent (Shift key):', String(incrementSettings.stepPercent));
+            if (pct) setIncrementSettings({ ...incrementSettings, stepPercent: parseFloat(pct) });
+            closeContextMenu();
+          }}
+          onToggleHeatmap={() => { setHeatmapEnabled(!heatmapEnabled); closeContextMenu(); }}
+          heatmapEnabled={heatmapEnabled}
+        />
+      )}
+
       {/* Toolbar */}
       <TableToolbar
         onSetEqual={() => {
@@ -838,6 +1087,139 @@ function TableToolbar({
         title={hasOutputChannels ? `Follow Mode (F) - ${followMode ? 'ON' : 'OFF'}` : 'Follow Mode unavailable (no output channels defined)'}
       >
         🎯 Follow
+      </button>
+    </div>
+  );
+}
+
+// Context menu component for table operations
+interface TableContextMenuProps {
+  x: number;
+  y: number;
+  onClose: () => void;
+  hasSelection: boolean;
+  hasClipboard: boolean;
+  onResetToOriginal: () => void;
+  onSetValue: () => void;
+  onStepUp: () => void;
+  onStepDown: () => void;
+  onAddAmount: () => void;
+  onSubtractAmount: () => void;
+  onMultiplyBy: () => void;
+  onInterpolate: () => void;
+  onInterpolateHorizontal: () => void;
+  onInterpolateVertical: () => void;
+  onSmooth: () => void;
+  onFloodFill: () => void;
+  onCopy: () => void;
+  onPaste: () => void;
+  onSetStepAmount: () => void;
+  onSetStepCount: () => void;
+  onSetStepPercent: () => void;
+  onToggleHeatmap: () => void;
+  heatmapEnabled: boolean;
+}
+
+function TableContextMenu({
+  x,
+  y,
+  onClose: _onClose,
+  hasSelection,
+  hasClipboard,
+  onResetToOriginal,
+  onSetValue,
+  onStepUp,
+  onStepDown,
+  onAddAmount,
+  onSubtractAmount,
+  onMultiplyBy,
+  onInterpolate,
+  onInterpolateHorizontal,
+  onInterpolateVertical,
+  onSmooth,
+  onFloodFill,
+  onCopy,
+  onPaste,
+  onSetStepAmount,
+  onSetStepCount,
+  onSetStepPercent,
+  onToggleHeatmap,
+  heatmapEnabled,
+}: TableContextMenuProps) {
+  return (
+    <div 
+      className="table-context-menu" 
+      style={{ left: x, top: y }}
+      onClick={(e) => e.stopPropagation()}
+    >
+      <button className="context-menu-item" onClick={onResetToOriginal} disabled={!hasSelection}>
+        Reset to Original <span className="shortcut">Esc</span>
+      </button>
+      
+      <div className="context-menu-separator" />
+      
+      <button className="context-menu-item" onClick={onSetValue} disabled={!hasSelection}>
+        Set Value <span className="shortcut">=</span>
+      </button>
+      <button className="context-menu-item" onClick={onStepUp} disabled={!hasSelection}>
+        Step Up <span className="shortcut">&gt; or ,</span>
+      </button>
+      <button className="context-menu-item" onClick={onStepDown} disabled={!hasSelection}>
+        Step Down <span className="shortcut">&lt; or .</span>
+      </button>
+      <button className="context-menu-item" onClick={onAddAmount} disabled={!hasSelection}>
+        Add Amount <span className="shortcut">+</span>
+      </button>
+      <button className="context-menu-item" onClick={onSubtractAmount} disabled={!hasSelection}>
+        Subtract Amount <span className="shortcut">-</span>
+      </button>
+      <button className="context-menu-item" onClick={onMultiplyBy} disabled={!hasSelection}>
+        Multiply By <span className="shortcut">*</span>
+      </button>
+      
+      <div className="context-menu-separator" />
+      
+      <button className="context-menu-item" onClick={onInterpolate} disabled={!hasSelection}>
+        Auto-Fill <span className="shortcut">/</span>
+      </button>
+      <button className="context-menu-item" onClick={onInterpolateHorizontal} disabled={!hasSelection}>
+        Fill Horizontal <span className="shortcut">H</span>
+      </button>
+      <button className="context-menu-item" onClick={onInterpolateVertical} disabled={!hasSelection}>
+        Fill Vertical <span className="shortcut">V</span>
+      </button>
+      <button className="context-menu-item" onClick={onSmooth} disabled={!hasSelection}>
+        Blend Selection <span className="shortcut">S</span>
+      </button>
+      <button className="context-menu-item" onClick={onFloodFill} disabled={!hasSelection}>
+        Flood Fill <span className="shortcut">F</span>
+      </button>
+      
+      <div className="context-menu-separator" />
+      
+      <button className="context-menu-item" onClick={onCopy} disabled={!hasSelection}>
+        Copy <span className="shortcut">Ctrl+C</span>
+      </button>
+      <button className="context-menu-item" onClick={onPaste} disabled={!hasClipboard}>
+        Paste <span className="shortcut">Ctrl+V</span>
+      </button>
+      
+      <div className="context-menu-separator" />
+      
+      <button className="context-menu-item" onClick={onSetStepAmount}>
+        Set Step Amount...
+      </button>
+      <button className="context-menu-item" onClick={onSetStepCount}>
+        Set Step Multiplier (Ctrl)...
+      </button>
+      <button className="context-menu-item" onClick={onSetStepPercent}>
+        Set Step Percent (Shift)...
+      </button>
+      
+      <div className="context-menu-separator" />
+      
+      <button className="context-menu-item" onClick={onToggleHeatmap}>
+        {heatmapEnabled ? '✓ ' : ''}Cell Color By Value
       </button>
     </div>
   );

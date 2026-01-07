@@ -6,6 +6,7 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
+use super::properties::Properties;
 use crate::tune::TuneFile;
 
 /// Project configuration stored in project.json
@@ -225,6 +226,115 @@ impl Project {
         Ok(project)
     }
 
+    /// Import a TunerStudio project into LibreTune format
+    ///
+    /// Reads project.properties, vehicle.properties, and copies relevant files.
+    /// Creates a new LibreTune project in the projects directory.
+    ///
+    /// # Arguments
+    /// * `ts_project_path` - Path to the TunerStudio project folder
+    /// * `target_dir` - Optional target directory (defaults to projects_dir)
+    pub fn import_tunerstudio<P: AsRef<Path>>(
+        ts_project_path: P,
+        target_dir: Option<&Path>,
+    ) -> io::Result<Self> {
+        let ts_path = ts_project_path.as_ref();
+
+        // Look for project.properties in projectCfg subfolder
+        let project_props_path = ts_path.join("projectCfg").join("project.properties");
+        if !project_props_path.exists() {
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                "Not a valid TunerStudio project: project.properties not found",
+            ));
+        }
+
+        let project_props = Properties::load(&project_props_path)?;
+
+        // Extract project name
+        let project_name = project_props
+            .get("projectName")
+            .cloned()
+            .unwrap_or_else(|| {
+                ts_path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_else(|| "Imported Project".to_string())
+            });
+
+        // Find the INI file
+        let ini_filename = project_props
+            .get("ecuConfigFile")
+            .cloned()
+            .unwrap_or_else(|| "mainController.ini".to_string());
+
+        let ini_path = ts_path.join("projectCfg").join(&ini_filename);
+        if !ini_path.exists() {
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                format!("INI file not found: {}", ini_filename),
+            ));
+        }
+
+        // Read signature from INI file
+        let ini_content = fs::read_to_string(&ini_path)?;
+        let signature = extract_signature(&ini_content).unwrap_or_default();
+
+        // Create the new LibreTune project
+        let parent = target_dir.map(|p| p.to_path_buf()).unwrap_or_else(|| {
+            Self::projects_dir().unwrap_or_else(|_| PathBuf::from("."))
+        });
+
+        let mut project = Self::create(&project_name, &ini_path, &signature, Some(&parent))?;
+
+        // Copy connection settings
+        if let Some(port) = project_props.get("commPort") {
+            project.config.connection.port = Some(port.clone());
+        }
+        if let Some(baud) = project_props.get_i32("baudRate") {
+            project.config.connection.baud_rate = baud as u32;
+        }
+
+        // Copy CurrentTune.msq if it exists
+        let ts_tune_path = ts_path.join("CurrentTune.msq");
+        if ts_tune_path.exists() {
+            let dest_tune_path = project.current_tune_path();
+            fs::copy(&ts_tune_path, &dest_tune_path)?;
+            project.load_current_tune()?;
+        }
+
+        // Copy pcVariableValues.msq if it exists
+        let ts_pc_path = ts_path.join("projectCfg").join("pcVariableValues.msq");
+        if ts_pc_path.exists() {
+            let dest_pc_path = project.pc_variables_path();
+            fs::copy(&ts_pc_path, &dest_pc_path)?;
+            // Reload tune to pick up PC variables
+            if project.current_tune.is_some() {
+                project.load_current_tune()?;
+            }
+        }
+
+        // Copy restore points if they exist
+        let ts_restore_dir = ts_path.join("restorePoints");
+        if ts_restore_dir.exists() {
+            let dest_restore_dir = project.restore_points_dir();
+            fs::create_dir_all(&dest_restore_dir)?;
+            for entry in fs::read_dir(&ts_restore_dir)? {
+                let entry = entry?;
+                let path = entry.path();
+                if path.extension().map_or(false, |e| e == "msq") {
+                    let dest = dest_restore_dir.join(path.file_name().unwrap());
+                    fs::copy(&path, &dest)?;
+                }
+            }
+        }
+
+        // Save updated config
+        project.save_config()?;
+
+        Ok(project)
+    }
+
     /// Save project configuration
     pub fn save_config(&mut self) -> io::Result<()> {
         self.config.modified = Utc::now().to_rfc3339();
@@ -247,11 +357,24 @@ impl Project {
         self.path.join("CurrentTune.msq")
     }
 
+    /// Get the path to pcVariableValues.msq
+    pub fn pc_variables_path(&self) -> PathBuf {
+        self.path.join("projectCfg").join("pcVariableValues.msq")
+    }
+
     /// Load the current tune from disk
     pub fn load_current_tune(&mut self) -> io::Result<()> {
         let tune_path = self.current_tune_path();
         if tune_path.exists() {
             self.current_tune = Some(TuneFile::load(&tune_path)?);
+
+            // Also load PC variables if they exist
+            let pc_path = self.pc_variables_path();
+            if pc_path.exists() {
+                if let Some(ref mut tune) = self.current_tune {
+                    let _ = tune.load_pc_variables(&pc_path);
+                }
+            }
         }
         Ok(())
     }
@@ -260,6 +383,11 @@ impl Project {
     pub fn save_current_tune(&self) -> io::Result<()> {
         if let Some(ref tune) = self.current_tune {
             tune.save(self.current_tune_path())?;
+
+            // Also save PC variables separately
+            if !tune.pc_variables.is_empty() {
+                let _ = tune.save_pc_variables(self.pc_variables_path(), &self.config.signature);
+            }
         }
         Ok(())
     }
@@ -270,6 +398,127 @@ impl Project {
             self.save_current_tune()?;
         }
         Ok(())
+    }
+
+    /// Get the restore points directory
+    pub fn restore_points_dir(&self) -> PathBuf {
+        self.path.join("restorePoints")
+    }
+
+    /// Create a restore point from the current tune
+    ///
+    /// Returns the path to the created restore point file.
+    /// Format: `{ProjectName}_{YYYY-MM-DD_HH.MM.SS}.msq`
+    pub fn create_restore_point(&self) -> io::Result<PathBuf> {
+        let Some(ref tune) = self.current_tune else {
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                "No tune loaded to create restore point from",
+            ));
+        };
+
+        let restore_dir = self.restore_points_dir();
+        fs::create_dir_all(&restore_dir)?;
+
+        // Generate timestamped filename
+        let timestamp = Utc::now().format("%Y-%m-%d_%H.%M.%S");
+        let safe_name: String = self
+            .config
+            .name
+            .chars()
+            .filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_')
+            .collect();
+        let filename = format!("{}_{}.msq", safe_name, timestamp);
+        let restore_path = restore_dir.join(&filename);
+
+        tune.save(&restore_path)?;
+
+        Ok(restore_path)
+    }
+
+    /// List all restore points for this project
+    pub fn list_restore_points(&self) -> io::Result<Vec<RestorePointInfo>> {
+        let restore_dir = self.restore_points_dir();
+
+        if !restore_dir.exists() {
+            return Ok(Vec::new());
+        }
+
+        let mut points = Vec::new();
+
+        for entry in fs::read_dir(&restore_dir)? {
+            let entry = entry?;
+            let path = entry.path();
+
+            if path.extension().map_or(false, |e| e == "msq") {
+                let filename = path.file_name().unwrap().to_string_lossy().to_string();
+                let metadata = entry.metadata()?;
+
+                // Try to parse timestamp from filename
+                let timestamp = parse_restore_point_timestamp(&filename);
+
+                points.push(RestorePointInfo {
+                    filename,
+                    path: path.clone(),
+                    created: timestamp,
+                    size_bytes: metadata.len(),
+                });
+            }
+        }
+
+        // Sort by created date, newest first
+        points.sort_by(|a, b| b.created.cmp(&a.created));
+
+        Ok(points)
+    }
+
+    /// Load a restore point as the current tune
+    pub fn load_restore_point(&mut self, filename: &str) -> io::Result<()> {
+        let restore_path = self.restore_points_dir().join(filename);
+
+        if !restore_path.exists() {
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                format!("Restore point not found: {}", filename),
+            ));
+        }
+
+        self.current_tune = Some(TuneFile::load(&restore_path)?);
+        self.dirty = true;
+
+        Ok(())
+    }
+
+    /// Delete a restore point
+    pub fn delete_restore_point(&self, filename: &str) -> io::Result<()> {
+        let restore_path = self.restore_points_dir().join(filename);
+
+        if !restore_path.exists() {
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                format!("Restore point not found: {}", filename),
+            ));
+        }
+
+        fs::remove_file(restore_path)
+    }
+
+    /// Prune old restore points, keeping only the most recent N
+    pub fn prune_restore_points(&self, keep_count: usize) -> io::Result<usize> {
+        let points = self.list_restore_points()?;
+
+        if points.len() <= keep_count {
+            return Ok(0);
+        }
+
+        let mut deleted = 0;
+        for point in points.into_iter().skip(keep_count) {
+            if self.delete_restore_point(&point.filename).is_ok() {
+                deleted += 1;
+            }
+        }
+
+        Ok(deleted)
     }
 
     /// List all projects in the default projects directory
@@ -317,6 +566,64 @@ pub struct ProjectInfo {
     pub path: PathBuf,
     pub signature: String,
     pub modified: String,
+}
+
+/// Info about a restore point
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RestorePointInfo {
+    /// Filename of the restore point
+    pub filename: String,
+    /// Full path to the file
+    pub path: PathBuf,
+    /// When the restore point was created (parsed from filename or file metadata)
+    pub created: String,
+    /// File size in bytes
+    pub size_bytes: u64,
+}
+
+/// Parse timestamp from restore point filename
+///
+/// Expected format: `{Name}_{YYYY-MM-DD_HH.MM.SS}.msq`
+fn parse_restore_point_timestamp(filename: &str) -> String {
+    // Try to find the timestamp pattern at the end
+    // Look for _YYYY-MM-DD_HH.MM.SS.msq
+    let without_ext = filename.strip_suffix(".msq").unwrap_or(filename);
+
+    // Find the last underscore that starts a date pattern
+    if let Some(pos) = without_ext.rfind('_') {
+        let date_part = &without_ext[..pos];
+        if let Some(date_pos) = date_part.rfind('_') {
+            // Extract YYYY-MM-DD_HH.MM.SS
+            let timestamp = &without_ext[date_pos + 1..];
+            // Convert from YYYY-MM-DD_HH.MM.SS to ISO format
+            if timestamp.len() >= 19 {
+                let date = &timestamp[0..10];
+                let time = timestamp[11..].replace('.', ":");
+                return format!("{}T{}Z", date, time);
+            }
+        }
+    }
+
+    // Fallback: use current time
+    Utc::now().to_rfc3339()
+}
+
+/// Extract the signature from an INI file content
+fn extract_signature(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let line = line.trim();
+        if line.to_lowercase().starts_with("signature") {
+            if let Some(eq_pos) = line.find('=') {
+                let value = line[eq_pos + 1..].trim();
+                // Remove quotes
+                let value = value.trim_matches('"').trim_matches('\'');
+                if !value.is_empty() {
+                    return Some(value.to_string());
+                }
+            }
+        }
+    }
+    None
 }
 
 #[cfg(test)]
