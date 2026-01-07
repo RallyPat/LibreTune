@@ -60,6 +60,17 @@ fn get_dashboards_dir(app: &tauri::AppHandle) -> PathBuf {
     get_app_data_dir(app).join("dashboards")
 }
 
+/// Create a bitmask for the given number of bits, safe from overflow.
+/// Returns 0xFF if bits >= 8, otherwise (1u8 << bits) - 1.
+#[inline]
+fn bit_mask_u8(bits: u8) -> u8 {
+    if bits >= 8 {
+        0xFF
+    } else {
+        (1u8 << bits) - 1
+    }
+}
+
 struct AppState {
     connection: Mutex<Option<Connection>>,
     definition: Mutex<Option<EcuDefinition>>,
@@ -2844,13 +2855,13 @@ async fn get_all_constant_values(
                     let mut bit_value = 0u64;
                     for (i, &byte) in raw_data.iter().enumerate() {
                         let bit_start = if i == 0 { bit_in_byte } else { 0 };
-                        let bit_end = if i == bytes_needed as usize - 1 {
+                        let bit_end = if i == bytes_needed.saturating_sub(1) as usize {
                             bit_in_byte + constant.bit_size.unwrap_or(0)
                         } else {
                             8
                         };
                         let bits =
-                            ((byte >> bit_start) & ((1u8 << (bit_end - bit_start)) - 1)) as u64;
+                            ((byte >> bit_start) & bit_mask_u8(bit_end.saturating_sub(bit_start))) as u64;
                         bit_value |= bits << (i * 8);
                     }
                     bit_value as f64
@@ -2927,13 +2938,13 @@ async fn get_all_constant_values(
                             let mut bit_value = 0u64;
                             for (i, &byte) in raw_data.iter().enumerate() {
                                 let bit_start = if i == 0 { bit_in_byte } else { 0 };
-                                let bit_end = if i == bytes_needed as usize - 1 {
+                                let bit_end = if i == bytes_needed.saturating_sub(1) as usize {
                                     bit_in_byte + constant.bit_size.unwrap_or(0)
                                 } else {
                                     8
                                 };
                                 let bits = ((byte >> bit_start)
-                                    & ((1u8 << (bit_end - bit_start)) - 1))
+                                    & bit_mask_u8(bit_end.saturating_sub(bit_start)))
                                     as u64;
                                 bit_value |= bits << (i * 8);
                             }
@@ -2978,13 +2989,13 @@ async fn get_all_constant_values(
                                 let mut bit_value = 0u64;
                                 for (i, &byte) in raw_data.iter().enumerate() {
                                     let bit_start = if i == 0 { bit_in_byte } else { 0 };
-                                    let bit_end = if i == bytes_needed as usize - 1 {
+                                    let bit_end = if i == bytes_needed.saturating_sub(1) as usize {
                                         bit_in_byte + constant.bit_size.unwrap_or(0)
                                     } else {
                                         8
                                     };
                                     let bits = ((byte >> bit_start)
-                                        & ((1u8 << (bit_end - bit_start)) - 1))
+                                        & bit_mask_u8(bit_end.saturating_sub(bit_start)))
                                         as u64;
                                     bit_value |= bits << (i * 8);
                                 }
@@ -3031,13 +3042,13 @@ async fn get_all_constant_values(
                         let mut bit_value = 0u64;
                         for (i, &byte) in raw_data.iter().enumerate() {
                             let bit_start = if i == 0 { bit_in_byte } else { 0 };
-                            let bit_end = if i == bytes_needed as usize - 1 {
+                            let bit_end = if i == bytes_needed.saturating_sub(1) as usize {
                                 bit_in_byte + constant.bit_size.unwrap_or(0)
                             } else {
                                 8
                             };
                             let bits =
-                                ((byte >> bit_start) & ((1u8 << (bit_end - bit_start)) - 1)) as u64;
+                                ((byte >> bit_start) & bit_mask_u8(bit_end.saturating_sub(bit_start))) as u64;
                             bit_value |= bits << (i * 8);
                         }
                         bit_value as f64

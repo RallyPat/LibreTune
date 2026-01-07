@@ -30,6 +30,9 @@ import HelpViewer, { HelpTopicData } from "./components/dialogs/HelpViewer";
 import SignatureMismatchDialog, { SignatureMismatchInfo } from "./components/dialogs/SignatureMismatchDialog";
 import TuneMismatchDialog, { TuneMismatchInfo } from "./components/dialogs/TuneMismatchDialog";
 import TuneComparisonDialog from "./components/dialogs/TuneComparisonDialog";
+import ErrorDetailsDialog, { useErrorDialog } from "./components/dialogs/ErrorDetailsDialog";
+import { useLoading } from "./components/LoadingContext";
+import { useToast } from "./components/ToastContext";
 import "./themes/base.css";
 
 // Backend types
@@ -131,6 +134,9 @@ interface TabContent {
 
 function AppContent() {
   const { theme, setTheme } = useTheme();
+  const { showLoading, hideLoading } = useLoading();
+  const { showToast } = useToast();
+  const { isOpen: errorDialogOpen, errorInfo, showError, hideError } = useErrorDialog();
 
   // Project state
   const [currentProject, setCurrentProject] = useState<CurrentProject | null>(null);
@@ -284,6 +290,7 @@ function AppContent() {
   }, [isTauri]);
 
   async function initializeApp() {
+    showLoading("Initializing LibreTune...");
     try {
       // Initialize INI repository
       await invoke("init_ini_repository");
@@ -319,14 +326,19 @@ function AppContent() {
       const project = await invoke<CurrentProject | null>("get_current_project");
       if (project) {
         setCurrentProject(project);
-        // Fetch menus for the project
-        const values = await fetchConstants();
-        await fetchMenuTree(values);
-        
-        // Initialize dashboard tab
-        setTabs([{ id: "dashboard", title: "Dashboard", icon: "dashboard", closable: false }]);
-        setTabContents({ dashboard: { type: "dashboard" } });
-        setActiveTabId("dashboard");
+        try {
+          // Fetch menus for the project
+          const values = await fetchConstants();
+          await fetchMenuTree(values);
+          
+          // Initialize dashboard tab
+          setTabs([{ id: "dashboard", title: "Dashboard", icon: "dashboard", closable: false }]);
+          setTabContents({ dashboard: { type: "dashboard" } });
+          setActiveTabId("dashboard");
+        } catch (menuError) {
+          console.error("Failed to load menus:", menuError);
+          showToast("Menu loading failed. Some features may be unavailable.", "warning");
+        }
       }
       
       // Refresh serial ports
@@ -335,6 +347,9 @@ function AppContent() {
       if (p.length > 0 && !selectedPort) setSelectedPort(p[0]);
     } catch (e) {
       console.error("Failed to initialize app:", e);
+      showToast("Failed to initialize application: " + e, "error");
+    } finally {
+      hideLoading();
     }
   }
 
@@ -369,7 +384,12 @@ function AppContent() {
           console.log("INI changed:", event.payload);
           if (event.payload === "resync_required" && status.state === "Connected") {
             // Re-sync ECU data with new INI (uses resilient sync)
-            await doSync();
+            showLoading("Syncing with ECU...");
+            try {
+              await doSync();
+            } finally {
+              hideLoading();
+            }
           }
         });
       } catch (e) {
@@ -380,7 +400,7 @@ function AppContent() {
     return () => {
       if (unlisten) unlisten();
     };
-  }, [status.state]);
+  }, [status.state, showLoading, hideLoading]);
   
   // Listen for tune mismatch events (after ECU sync)
   useEffect(() => {
@@ -759,7 +779,7 @@ function AppContent() {
         if (ports.length > 0) {
           const old = selectedPort;
           setSelectedPort(ports[0]);
-          alert(`Selected port '${old}' is not available; using '${ports[0]}' instead.`);
+          showToast(`Selected port '${old}' is not available; using '${ports[0]}' instead.`, "warning");
         } else {
           throw new Error('No serial ports available');
         }
@@ -788,7 +808,7 @@ function AppContent() {
       // IMPORTANT: Always check status after connection attempt, even on error
       // This ensures the UI shows the correct disconnected state
       await checkStatus();
-      alert(e);
+      showToast("Connection failed: " + e, "error");
     } finally {
       setConnecting(false);
       setSyncing(false);
@@ -824,6 +844,30 @@ function AppContent() {
     }
   }
 
+  // Helper to format error for display
+  function formatError(e: unknown): { message: string; details: string } {
+    const errorStr = String(e);
+    // Check for panic messages (Rust panics often contain "panicked" or stack traces)
+    if (errorStr.includes("panicked") || errorStr.includes("overflow") || errorStr.includes("thread")) {
+      return {
+        message: "An internal error occurred while processing the tune file. This may indicate an incompatibility between the INI definition and the tune file.",
+        details: errorStr,
+      };
+    }
+    // Check for parse errors
+    if (errorStr.includes("parse") || errorStr.includes("Parse") || errorStr.includes("invalid")) {
+      return {
+        message: "The tune file could not be parsed. It may be corrupted or use an unsupported format.",
+        details: errorStr,
+      };
+    }
+    // Default error format
+    return {
+      message: errorStr,
+      details: "",
+    };
+  }
+
   // Project management functions
   async function createProject(name: string, iniId: string, tunePath?: string) {
     try {
@@ -832,28 +876,50 @@ function AppContent() {
         iniId,
         tunePath: tunePath || null 
       });
+      
+      // Close dialog IMMEDIATELY after project is created (before any other async calls)
+      setProjectDialogOpen(false);
       setCurrentProject(project);
       
-      // Refresh menus for the new project
-      const values = await fetchConstants();
-      await fetchMenuTree(values);
+      // Show loading spinner while we fetch menus and initialize
+      showLoading("Loading project...");
       
-      // Initialize dashboard tab
-      setTabs([{ id: "dashboard", title: "Dashboard", icon: "dashboard", closable: false }]);
-      setTabContents({ dashboard: { type: "dashboard" } });
-      setActiveTabId("dashboard");
-      
-      // Refresh projects list
-      const projects = await invoke<ProjectInfo[]>("list_projects");
-      setAvailableProjects(projects);
-      
-      setProjectDialogOpen(false);
+      try {
+        // Refresh menus for the new project
+        const values = await fetchConstants();
+        await fetchMenuTree(values);
+        
+        // Initialize dashboard tab
+        setTabs([{ id: "dashboard", title: "Dashboard", icon: "dashboard", closable: false }]);
+        setTabContents({ dashboard: { type: "dashboard" } });
+        setActiveTabId("dashboard");
+        
+        // Refresh projects list
+        const projects = await invoke<ProjectInfo[]>("list_projects");
+        setAvailableProjects(projects);
+      } catch (menuError) {
+        console.error("Failed to load menus:", menuError);
+        showToast("Project created but menu loading failed. Some features may be unavailable.", "warning");
+      } finally {
+        hideLoading();
+      }
     } catch (e) {
-      alert("Failed to create project: " + e);
+      const { message, details } = formatError(e);
+      if (details) {
+        // Complex error - show detailed dialog for bug reporting
+        showError("Failed to Create Project", message, details);
+      } else {
+        // Simple error - use toast
+        showToast("Failed to create project: " + message, "error");
+      }
     }
   }
 
   async function openProject(path: string) {
+    // Close dialog immediately
+    setOpenProjectDialogOpen(false);
+    showLoading("Loading project...");
+    
     try {
       const project = await invoke<CurrentProject>("open_project", { path });
       setCurrentProject(project);
@@ -864,18 +930,28 @@ function AppContent() {
       }
       setBaudRate(project.connection.baud_rate || 115200);
       
-      // Refresh menus for the project
-      const values = await fetchConstants();
-      await fetchMenuTree(values);
-      
-      // Reset tabs to dashboard
-      setTabs([{ id: "dashboard", title: "Dashboard", icon: "dashboard", closable: false }]);
-      setTabContents({ dashboard: { type: "dashboard" } });
-      setActiveTabId("dashboard");
-      
-      setOpenProjectDialogOpen(false);
+      try {
+        // Refresh menus for the project
+        const values = await fetchConstants();
+        await fetchMenuTree(values);
+        
+        // Reset tabs to dashboard
+        setTabs([{ id: "dashboard", title: "Dashboard", icon: "dashboard", closable: false }]);
+        setTabContents({ dashboard: { type: "dashboard" } });
+        setActiveTabId("dashboard");
+      } catch (menuError) {
+        console.error("Failed to load menus:", menuError);
+        showToast("Project opened but menu loading failed. Some features may be unavailable.", "warning");
+      }
     } catch (e) {
-      alert("Failed to open project: " + e);
+      const { message, details } = formatError(e);
+      if (details) {
+        showError("Failed to Open Project", message, details);
+      } else {
+        showToast("Failed to open project: " + message, "error");
+      }
+    } finally {
+      hideLoading();
     }
   }
 
@@ -890,7 +966,7 @@ function AppContent() {
       setTabContents({});
       setActiveTabId(null);
     } catch (e) {
-      alert("Failed to close project: " + e);
+      showToast("Failed to close project: " + e, "error");
     }
   }
 
@@ -906,7 +982,7 @@ function AppContent() {
       }
     } catch (e) {
       console.error(e);
-      alert("Failed to import INI: " + e);
+      showToast("Failed to import INI: " + e, "error");
     }
   }
 
@@ -1598,6 +1674,15 @@ function AppContent() {
           await fetchMenuTree(values);
         }}
       />
+      
+      {/* Error Details Dialog - for bug reporting */}
+      <ErrorDetailsDialog
+        isOpen={errorDialogOpen}
+        onClose={hideError}
+        title={errorInfo.title}
+        message={errorInfo.message}
+        details={errorInfo.details}
+      />
     </>
   );
 }
@@ -1605,6 +1690,7 @@ function AppContent() {
 // Settings view
 function SettingsView() {
   const { theme, setTheme } = useTheme();
+  const { showToast } = useToast();
   const [demoMode, setDemoMode] = useState(false);
   const [demoLoading, setDemoLoading] = useState(false);
 
@@ -1629,7 +1715,7 @@ function SettingsView() {
       }
     } catch (err) {
       console.error("Failed to toggle demo mode:", err);
-      alert(`Failed to toggle demo mode: ${err}`);
+      showToast(`Failed to toggle demo mode: ${err}`, "error");
     } finally {
       setDemoLoading(false);
     }
