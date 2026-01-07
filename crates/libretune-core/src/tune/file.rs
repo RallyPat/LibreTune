@@ -295,6 +295,16 @@ impl TuneFile {
                                     const_remaining[name_start..name_start + name_end].to_string();
 
                                 if let Some(tag_end) = const_remaining.find('>') {
+                                    // Check for self-closing tag: <constant name="..."/>
+                                    if tag_end > 0 && const_remaining.as_bytes()[tag_end - 1] == b'/' {
+                                        // Self-closing tag - value is empty
+                                        let value = TuneValue::String(String::new());
+                                        tune.constants.insert(name.clone(), value);
+                                        tune.constant_pages.insert(name, current_page);
+                                        constants_found += 1;
+                                        const_pos = abs_const_start + tag_end + 1;
+                                        continue;
+                                    }
                                     let value_start = tag_end + 1;
                                     if let Some(close_tag) =
                                         const_remaining[value_start..].find("</constant>")
@@ -328,6 +338,15 @@ impl TuneFile {
                                     pc_remaining[name_start..name_start + name_end].to_string();
 
                                 if let Some(tag_end) = pc_remaining.find('>') {
+                                    // Check for self-closing tag: <pcVariable name="..."/>
+                                    if tag_end > 0 && pc_remaining.as_bytes()[tag_end - 1] == b'/' {
+                                        // Self-closing tag - value is empty
+                                        let value = TuneValue::String(String::new());
+                                        tune.pc_variables.insert(name, value);
+                                        pcvars_found += 1;
+                                        pc_pos = abs_pc_start + tag_end + 1;
+                                        continue;
+                                    }
                                     let value_start = tag_end + 1;
                                     if let Some(close_tag) =
                                         pc_remaining[value_start..].find("</pcVariable>")
@@ -367,6 +386,16 @@ impl TuneFile {
                             let name = remaining[name_start..name_start + name_end].to_string();
 
                             if let Some(tag_end) = remaining.find('>') {
+                                // Check for self-closing tag: <constant name="..."/>
+                                if tag_end > 0 && remaining.as_bytes()[tag_end - 1] == b'/' {
+                                    // Self-closing tag - value is empty
+                                    let value = TuneValue::String(String::new());
+                                    tune.constants.insert(name.clone(), value);
+                                    tune.constant_pages.insert(name, current_page);
+                                    constants_found += 1;
+                                    search_pos = abs_start + tag_end + 1;
+                                    continue;
+                                }
                                 let value_start = tag_end + 1;
                                 if let Some(close_tag) =
                                     remaining[value_start..].find("</constant>")
@@ -394,6 +423,15 @@ impl TuneFile {
                             let name = remaining[name_start..name_start + name_end].to_string();
 
                             if let Some(tag_end) = remaining.find('>') {
+                                // Check for self-closing tag: <pcVariable name="..."/>
+                                if tag_end > 0 && remaining.as_bytes()[tag_end - 1] == b'/' {
+                                    // Self-closing tag - value is empty
+                                    let value = TuneValue::String(String::new());
+                                    tune.pc_variables.insert(name, value);
+                                    pcvars_found += 1;
+                                    search_pos = abs_start + tag_end + 1;
+                                    continue;
+                                }
                                 let value_start = tag_end + 1;
                                 if let Some(close_tag) =
                                     remaining[value_start..].find("</pcVariable>")
@@ -766,5 +804,70 @@ mod tests {
 
         assert_eq!(tune.signature, "speeduino 202310");
         assert!(tune.get_constant("reqFuel").is_some());
+    }
+
+    #[test]
+    fn test_parse_msq_self_closing_constant() {
+        // Test that self-closing tags like <constant name="vinNumber"/> are handled correctly
+        // Previously this would grab content from the next constant, causing VIN to show XML
+        let msq_content = r#"<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE msq PUBLIC "-//rusEfi//DTD msq//EN" "msq.dtd">
+<msq version="1.0">
+  <bibliography author="LibreTune Test" tuneComment="Test tune" writeDate="2026-01-07"/>
+  <versionInfo firmwareInfo="rusEFI test"/>
+  <page number="0">
+    <constant name="vinNumber"/>
+    <constant name="engineType">25</constant>
+    <constant name="tuneHidingKey"/>
+    <constant name="someValue">42.5</constant>
+  </page>
+</msq>"#;
+
+        // Write to temp file
+        let temp_dir = std::env::temp_dir();
+        let temp_path = temp_dir.join("test_self_closing.msq");
+        std::fs::write(&temp_path, msq_content).expect("Failed to write temp file");
+
+        // Parse the MSQ
+        let result = TuneFile::load(&temp_path);
+        assert!(result.is_ok(), "Failed to parse MSQ: {:?}", result.err());
+
+        let tune = result.unwrap();
+
+        // vinNumber should be empty string, NOT "25</constant>..." or other garbage
+        let vin = tune.get_constant("vinNumber");
+        assert!(vin.is_some(), "vinNumber constant not found");
+        match vin.unwrap() {
+            TuneValue::String(s) => {
+                assert!(
+                    s.is_empty(),
+                    "vinNumber should be empty for self-closing tag, got: '{}'",
+                    s
+                );
+            }
+            other => panic!(
+                "vinNumber should be String type for self-closing tag, got: {:?}",
+                other
+            ),
+        }
+
+        // engineType should be 25
+        let engine_type = tune.get_constant("engineType");
+        assert!(engine_type.is_some(), "engineType constant not found");
+        match engine_type.unwrap() {
+            TuneValue::Scalar(v) => assert_eq!(*v, 25.0),
+            other => panic!("engineType should be Scalar, got: {:?}", other),
+        }
+
+        // someValue should be 42.5
+        let some_value = tune.get_constant("someValue");
+        assert!(some_value.is_some(), "someValue constant not found");
+        match some_value.unwrap() {
+            TuneValue::Scalar(v) => assert_eq!(*v, 42.5),
+            other => panic!("someValue should be Scalar, got: {:?}", other),
+        }
+
+        // Cleanup
+        let _ = std::fs::remove_file(&temp_path);
     }
 }

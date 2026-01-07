@@ -313,6 +313,10 @@ function DialogField({
       const checkedIndex = validIndices[1] ?? validIndices[0];
       const uncheckedIndex = validIndices[0];
       
+      // Get the option labels for display
+      const uncheckedLabel = bitOptions[uncheckedIndex]?.trim() || 'Off';
+      const checkedLabel = bitOptions[checkedIndex]?.trim() || 'On';
+      
       return (
         <div className="settings-field">
           <label>
@@ -332,7 +336,7 @@ function DialogField({
                   .catch((e) => alert('Update failed: ' + e));
               }}
             />
-            {displayLabel}
+            {displayLabel}: {uncheckedLabel} / {checkedLabel}
           </label>
         </div>
       );
@@ -571,6 +575,12 @@ interface IndicatorPanel {
   }>;
 }
 
+interface PortEditorConfig {
+  name: string;
+  label: string;
+  enable_condition?: string;
+}
+
 function RecursivePanel({
   name,
   openTable,
@@ -586,7 +596,8 @@ function RecursivePanel({
   const [indicatorPanel, setIndicatorPanel] = useState<IndicatorPanel | null>(null);
   const [tableInfo, setTableInfo] = useState<TableInfo | null>(null);
   const [curveData, setCurveData] = useState<CurveData | null>(null);
-  const [panelType, setPanelType] = useState<'loading' | 'dialog' | 'indicatorPanel' | 'table' | 'curve' | 'unknown'>('loading');
+  const [portEditor, setPortEditor] = useState<PortEditorConfig | null>(null);
+  const [panelType, setPanelType] = useState<'loading' | 'dialog' | 'indicatorPanel' | 'table' | 'curve' | 'portEditor' | 'unknown'>('loading');
 
   useEffect(() => {
     // First try as indicatorPanel
@@ -619,8 +630,17 @@ function RecursivePanel({
                   })
                   .catch((err2) => {
                     console.debug(`Panel '${name}' is not a curve:`, err2);
-                    // Neither indicatorPanel nor dialog nor table nor curve
-                    setPanelType('unknown');
+                    // Not a curve, try as portEditor
+                    invoke<PortEditorConfig>('get_port_editor', { name })
+                      .then((editor) => {
+                        setPortEditor(editor);
+                        setPanelType('portEditor');
+                      })
+                      .catch((err3) => {
+                        console.debug(`Panel '${name}' is not a portEditor:`, err3);
+                        // None of the known types
+                        setPanelType('unknown');
+                      });
                   });
               });
           });
@@ -667,6 +687,18 @@ function RecursivePanel({
           {definition.components.map((comp, i) => (
             <DialogComponentRenderer key={i} comp={comp} openTable={openTable} context={context} onUpdate={onUpdate} />
           ))}
+        </div>
+      </div>
+    );
+  }
+
+  // Render as portEditor - placeholder for programmable outputs configuration
+  if (panelType === 'portEditor' && portEditor) {
+    return (
+      <div className="embedded-port-editor">
+        <div className="port-editor-title">{portEditor.label || name}</div>
+        <div className="port-editor-placeholder">
+          Programmable Output Configuration: {portEditor.name}
         </div>
       </div>
     );

@@ -2390,6 +2390,19 @@ async fn get_indicator_panel(
 }
 
 #[tauri::command]
+async fn get_port_editor(
+    state: tauri::State<'_, AppState>,
+    name: String,
+) -> Result<libretune_core::ini::PortEditorConfig, String> {
+    let def_guard = state.definition.lock().await;
+    let def = def_guard.as_ref().ok_or("Definition not loaded")?;
+    def.port_editors
+        .get(&name)
+        .cloned()
+        .ok_or_else(|| format!("PortEditor {} not found", name))
+}
+
+#[tauri::command]
 async fn get_help_topic(
     state: tauri::State<'_, AppState>,
     name: String,
@@ -7807,6 +7820,7 @@ pub fn run() {
             get_menu_tree,
             get_dialog_definition,
             get_indicator_panel,
+            get_port_editor,
             // INI / protocol defaults
             get_protocol_defaults,
             get_help_topic,
