@@ -76,6 +76,20 @@ The project aims to provide professional ECU tuning workflow and functionality w
 - Location: `crates/libretune-app/src/components/ActionManagement.tsx`
 - Features: Action list, queue system, recording/playback
 
+### 8. Pop-out Windows (Multi-Monitor)
+- Location: `crates/libretune-app/src/PopOutWindow.tsx` - Standalone pop-out window renderer
+- Location: `crates/libretune-app/src/PopOutWindow.css` - Pop-out window styles
+- Features:
+  - Pop any tab to its own window (External Link button in tab bar)
+  - Dock-back button to return tab to main window
+  - Bidirectional sync for realtime data and table edits
+  - Window state persistence via `tauri-plugin-window-state`
+- Implementation:
+  - Hash-based routing: `#/popout?tabId=...&type=...&title=...`
+  - localStorage for initial data transfer (`popout-{tabId}` key)
+  - Tauri events for sync: `tab:dock`, `table:updated`, `realtime:update`
+  - WebviewWindow API for creating new windows
+
 ## Development Commands
 
 ### Backend (Rust)
@@ -185,9 +199,50 @@ Based on analysis of common ECU tuning software patterns:
 [x] Restore points system (create, list, load, delete, prune)
 [ ] INI version tracking in tune files
 [ ] User-driven tune migration between INI versions
-[ ] Frontend dialogs for restore points and project import
+[x] Frontend dialogs for restore points and project import
+[x] Pop-out windows for multi-monitor support (dock-back, bidirectional sync)
 
 ## Recent Changes (Session History)
+
+### Frontend Dialogs for Restore Points & Project Import - Completed Jan 7, 2026
+- **RestorePointsDialog.tsx** (new component):
+  - Lists all restore points with filename, date, and size
+  - Load button with unsaved changes warning confirmation
+  - Delete button with confirmation dialog
+  - Create restore point button
+  - Error handling and loading states
+
+- **RestorePointsDialog.css** (new styles):
+  - Glass-card overlay with backdrop blur
+  - Animated dialog appearance
+  - List items with hover effects
+  - Confirmation dialogs with warning icons
+
+- **ImportProjectWizard.tsx** (new component):
+  - Two-step wizard: Select folder → Confirm import
+  - Uses `@tauri-apps/plugin-dialog` folder picker
+  - Preview panel showing project name, INI, tune status, restore points
+  - Auto-opens imported project after completion
+
+- **ImportProjectWizard.css** (new styles):
+  - Step indicators with completion states
+  - Drag-and-drop style folder selector
+  - Preview card with details grid
+
+- **Backend additions** (`lib.rs`):
+  - `preview_tunerstudio_import` command - previews TS project before import
+  - `TunerStudioImportPreview` struct with project metadata
+  - Auto-prune in `create_restore_point` using `max_restore_points` setting
+
+- **ProjectSettings enhancement** (`project.rs`):
+  - Added `max_restore_points: u32` with default value 20
+  - Serde default function for backward compatibility
+
+- **App.tsx integration**:
+  - Added `restorePointsOpen` and `importProjectOpen` state
+  - File menu additions: "Import TunerStudio Project...", "Create Restore Point", "Restore Points..."
+  - `handleCreateRestorePoint()` function with toast notification
+  - Dialog rendering with refresh callbacks
 
 ### TunerStudio Project Compatibility - Completed Jan 7, 2026
 - **Java Properties Parser** (`properties.rs`):

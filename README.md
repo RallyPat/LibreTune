@@ -25,7 +25,7 @@ Modern, open-source ECU tuning software for EpicEFI, Speeduino, rusEFI, and othe
 - **Burn to ECU**: Write changes directly to ECU memory
 
 ### Dashboard & Gauges
-- **TunerStudio-Compatible Dashboards**: Import existing .dash files
+- **TS-Compatible Dashboards**: Import existing .dash files
 - **Multiple Gauge Types**: Analog dials, bar gauges, digital readouts, sweep gauges
 - **Customizable Layout**: Drag-and-drop gauge positioning
 - **Designer Mode**: Edit dashboard layouts visually

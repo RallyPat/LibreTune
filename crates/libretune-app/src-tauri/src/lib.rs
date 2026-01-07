@@ -6844,6 +6844,12 @@ async fn create_restore_point(
         .create_restore_point()
         .map_err(|e| format!("Failed to create restore point: {}", e))?;
 
+    // Auto-prune if max_restore_points is set
+    let max_points = project.config.settings.max_restore_points;
+    if max_points > 0 {
+        let _ = project.prune_restore_points(max_points as usize);
+    }
+
     let metadata = std::fs::metadata(&restore_path)
         .map_err(|e| format!("Failed to read restore point metadata: {}", e))?;
 
@@ -6987,6 +6993,86 @@ async fn delete_restore_point(
     project
         .delete_restore_point(&filename)
         .map_err(|e| format!("Failed to delete restore point: {}", e))
+}
+
+/// Preview data for a TunerStudio project import
+#[derive(Debug, Clone, Serialize)]
+struct TunerStudioImportPreview {
+    project_name: String,
+    ini_file: Option<String>,
+    has_tune: bool,
+    restore_point_count: usize,
+    has_pc_variables: bool,
+    connection_port: Option<String>,
+    connection_baud: Option<u32>,
+}
+
+/// Preview a TunerStudio project before importing
+#[tauri::command]
+async fn preview_tunerstudio_import(path: String) -> Result<TunerStudioImportPreview, String> {
+    use libretune_core::project::Properties;
+
+    let ts_path = std::path::Path::new(&path);
+
+    // Look for project.properties in projectCfg subfolder
+    let project_props_path = ts_path.join("projectCfg").join("project.properties");
+    if !project_props_path.exists() {
+        return Err("Not a valid TS project: project.properties not found".to_string());
+    }
+
+    let project_props =
+        Properties::load(&project_props_path).map_err(|e| format!("Failed to read project: {}", e))?;
+
+    // Extract project name
+    let project_name = project_props
+        .get("projectName")
+        .cloned()
+        .unwrap_or_else(|| {
+            ts_path
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| "Imported Project".to_string())
+        });
+
+    // Check for INI file
+    let ini_file = project_props.get("ecuConfigFile").cloned();
+
+    // Check for tune file
+    let tune_path = ts_path.join("CurrentTune.msq");
+    let has_tune = tune_path.exists();
+
+    // Count restore points
+    let restore_dir = ts_path.join("restorePoints");
+    let restore_point_count = if restore_dir.exists() {
+        std::fs::read_dir(&restore_dir)
+            .map(|entries| {
+                entries
+                    .filter_map(|e| e.ok())
+                    .filter(|e| e.path().extension().map_or(false, |ext| ext == "msq"))
+                    .count()
+            })
+            .unwrap_or(0)
+    } else {
+        0
+    };
+
+    // Check for PC variables
+    let pc_path = ts_path.join("projectCfg").join("pcVariableValues.msq");
+    let has_pc_variables = pc_path.exists();
+
+    // Connection settings
+    let connection_port = project_props.get("commPort").cloned();
+    let connection_baud = project_props.get_i32("baudRate").map(|v| v as u32);
+
+    Ok(TunerStudioImportPreview {
+        project_name,
+        ini_file,
+        has_tune,
+        restore_point_count,
+        has_pc_variables,
+        connection_port,
+        connection_baud,
+    })
 }
 
 /// Import a TunerStudio project
@@ -7658,6 +7744,7 @@ pub fn run() {
             load_restore_point,
             delete_restore_point,
             // TunerStudio import
+            preview_tunerstudio_import,
             import_tunerstudio_project,
             // INI signature management commands
             find_matching_inis,

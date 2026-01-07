@@ -1,4 +1,5 @@
 import React, { useRef, useState, useCallback, DragEvent, MouseEvent } from 'react';
+import { ExternalLink } from 'lucide-react';
 import './TabBar.css';
 
 type IconElement = React.ReactElement;
@@ -129,6 +130,19 @@ export function TabBar({
             {tab.icon && <TabIcon icon={tab.icon} />}
             <span className="tab-title">{tab.title}</span>
             {tab.dirty && <span className="tab-dirty">●</span>}
+            {onTabPopout && (
+              <button
+                className="tab-popout"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onTabPopout(tab.id);
+                }}
+                aria-label={`Pop out ${tab.title}`}
+                title="Pop out to new window"
+              >
+                <ExternalLink size={12} />
+              </button>
+            )}
             {tab.closable !== false && (
               <button
                 className="tab-close"

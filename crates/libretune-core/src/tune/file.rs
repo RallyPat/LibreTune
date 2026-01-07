@@ -75,9 +75,23 @@ impl TuneFile {
     }
 
     /// Load a tune file from disk
+    /// 
+    /// MSQ files may use ISO-8859-1 (Latin-1) encoding, so we read as bytes
+    /// and convert to UTF-8 to handle non-ASCII characters.
     pub fn load<P: AsRef<Path>>(path: P) -> io::Result<Self> {
         let path = path.as_ref();
-        let content = fs::read_to_string(path)?;
+        
+        // Read as bytes first to handle different encodings
+        let bytes = fs::read(path)?;
+        
+        // Try UTF-8 first, fall back to ISO-8859-1 (Latin-1) conversion
+        let content = match String::from_utf8(bytes.clone()) {
+            Ok(s) => s,
+            Err(_) => {
+                // ISO-8859-1 is a direct byte-to-codepoint mapping
+                bytes.iter().map(|&b| b as char).collect()
+            }
+        };
 
         // Detect format by extension
         match path

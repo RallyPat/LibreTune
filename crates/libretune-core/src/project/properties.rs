@@ -102,8 +102,14 @@ impl Properties {
     }
 
     /// Load properties from a file
+    /// 
+    /// Handles both UTF-8 and ISO-8859-1 (Latin-1) encoded files.
     pub fn load<P: AsRef<Path>>(path: P) -> io::Result<Self> {
-        let content = fs::read_to_string(path)?;
+        let bytes = fs::read(path)?;
+        let content = match String::from_utf8(bytes.clone()) {
+            Ok(s) => s,
+            Err(_) => bytes.iter().map(|&b| b as char).collect(),
+        };
         Ok(Self::parse(&content))
     }
 

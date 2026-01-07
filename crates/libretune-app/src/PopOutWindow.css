@@ -1,0 +1,110 @@
+/* Pop-out Window Styles */
+
+.popout-window {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: var(--bg-primary, #1e1e1e);
+  color: var(--text-primary, #fff);
+}
+
+.popout-loading,
+.popout-error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+}
+
+.popout-error {
+  color: var(--error, #f88);
+}
+
+.popout-error button {
+  padding: 8px 16px;
+  background: var(--accent, #4a9eff);
+  border: none;
+  border-radius: 6px;
+  color: #fff;
+  cursor: pointer;
+}
+
+/* Header bar */
+.popout-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  background: var(--surface-dark, #252525);
+  border-bottom: 1px solid var(--border-color, #3c3c3c);
+  -webkit-app-region: drag;
+}
+
+.popout-header button {
+  -webkit-app-region: no-drag;
+}
+
+.popout-title {
+  flex: 1;
+  margin: 0;
+  font-size: 14px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.popout-dock-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: var(--accent, #4a9eff);
+  border: none;
+  border-radius: 4px;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.popout-dock-btn:hover {
+  background: #3a8eef;
+}
+
+.popout-close-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px;
+  background: transparent;
+  border: 1px solid var(--border-color, #3c3c3c);
+  border-radius: 4px;
+  color: var(--text-secondary, #888);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.popout-close-btn:hover {
+  background: rgba(220, 53, 69, 0.15);
+  border-color: rgba(220, 53, 69, 0.5);
+  color: #dc3545;
+}
+
+/* Content area */
+.popout-content {
+  flex: 1;
+  overflow: auto;
+  min-height: 0;
+}
+
+.popout-unsupported {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--text-secondary, #888);
+  font-size: 16px;
+}

@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
+import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { open } from "@tauri-apps/plugin-dialog";
 import { ThemeProvider, useTheme, ThemeName } from "./themes";
 import {
@@ -30,10 +31,12 @@ import HelpViewer, { HelpTopicData } from "./components/dialogs/HelpViewer";
 import SignatureMismatchDialog, { SignatureMismatchInfo } from "./components/dialogs/SignatureMismatchDialog";
 import TuneMismatchDialog, { TuneMismatchInfo } from "./components/dialogs/TuneMismatchDialog";
 import TuneComparisonDialog from "./components/dialogs/TuneComparisonDialog";
+import RestorePointsDialog from "./components/dialogs/RestorePointsDialog";
+import ImportProjectWizard from "./components/dialogs/ImportProjectWizard";
 import ErrorDetailsDialog, { useErrorDialog } from "./components/dialogs/ErrorDetailsDialog";
 import { useLoading } from "./components/LoadingContext";
 import { useToast } from "./components/ToastContext";
-import "./themes/base.css";
+import "./styles";
 
 // Backend types
 interface ConnectionStatus {
@@ -265,6 +268,12 @@ function AppContent() {
   
   // Tune comparison dialog state
   const [tuneComparisonOpen, setTuneComparisonOpen] = useState(false);
+  
+  // Restore points dialog state
+  const [restorePointsOpen, setRestorePointsOpen] = useState(false);
+  
+  // Import project wizard state
+  const [importProjectOpen, setImportProjectOpen] = useState(false);
   
   // Sync status tracking (for partial sync warning)
   const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);
@@ -1021,6 +1030,15 @@ function AppContent() {
     }
   }
 
+  async function handleCreateRestorePoint() {
+    try {
+      const result = await invoke<{ filename: string; size: number; timestamp: string }>("create_restore_point");
+      showToast(`Restore point created: ${result.filename}`, "success");
+    } catch (e) {
+      showToast("Failed to create restore point: " + e, "error");
+    }
+  }
+
   async function importIniToRepository() {
     try {
       const selected = await open({
@@ -1239,6 +1257,132 @@ function AppContent() {
     setTabs(newTabs);
   }, []);
 
+  // Pop out a tab to its own window
+  const handleTabPopout = useCallback(
+    async (tabId: string) => {
+      const content = tabContents[tabId];
+      const tab = tabs.find((t) => t.id === tabId);
+      if (!content || !tab) return;
+
+      // Store data in localStorage for the pop-out window to retrieve
+      const storageKey = `popout-${tabId}`;
+      localStorage.setItem(storageKey, JSON.stringify({
+        data: content.data,
+      }));
+
+      // Create the pop-out window
+      const label = `popout-${tabId.replace(/[^a-zA-Z0-9]/g, '_')}`;
+      
+      // Build URL for pop-out window
+      // Use current window's origin to ensure it works in both dev and production
+      const currentOrigin = window.location.origin;
+      const hashParams = `#/popout?tabId=${encodeURIComponent(tabId)}&type=${encodeURIComponent(content.type)}&title=${encodeURIComponent(tab.title)}`;
+      const url = `${currentOrigin}/${hashParams}`;
+      
+      console.log('[handleTabPopout] Creating window with URL:', url);
+      console.log('[handleTabPopout] Current origin:', currentOrigin);
+
+      try {
+        const webview = new WebviewWindow(label, {
+          url,
+          title: tab.title,
+          width: 900,
+          height: 700,
+          center: true,
+          decorations: true,
+          // Enable devtools for debugging
+          devtools: true,
+        });
+
+        // Wait for window to be created
+        await webview.once('tauri://created', () => {
+          console.log('Pop-out window created:', label, 'url:', url);
+        });
+
+        // Log errors for debugging
+        webview.once('tauri://error', (e) => {
+          console.error('Pop-out window error:', e);
+        });
+
+        // Remove tab from main window
+        handleTabClose(tabId);
+      } catch (e) {
+        console.error('Failed to create pop-out window:', e);
+        showToast('Failed to pop out tab: ' + e, 'error');
+        // Clean up localStorage
+        localStorage.removeItem(storageKey);
+      }
+    },
+    [tabs, tabContents, handleTabClose, showToast]
+  );
+
+  // Listen for dock events from pop-out windows
+  useEffect(() => {
+    let unlisten: UnlistenFn | null = null;
+
+    (async () => {
+      try {
+        unlisten = await listen<{
+          tabId: string;
+          type: TabContent['type'];
+          title: string;
+          data: TabContent['data'];
+        }>('tab:dock', (event) => {
+          const { tabId, type, title, data } = event.payload;
+          console.log('Tab docking back:', tabId);
+
+          // Re-add the tab
+          setTabs((prev) => {
+            if (prev.find((t) => t.id === tabId)) return prev;
+            return [...prev, { id: tabId, title, icon: type === 'table' || type === 'curve' ? 'table' : type }];
+          });
+          setTabContents((prev) => ({
+            ...prev,
+            [tabId]: { type, data },
+          }));
+          setActiveTabId(tabId);
+        });
+      } catch (e) {
+        console.error('Failed to listen for tab:dock events:', e);
+      }
+    })();
+
+    return () => {
+      if (unlisten) unlisten();
+    };
+  }, []);
+
+  // Listen for table updates from pop-out windows
+  useEffect(() => {
+    let unlisten: UnlistenFn | null = null;
+
+    (async () => {
+      try {
+        unlisten = await listen<{
+          tabId: string;
+          type: TabContent['type'];
+          data: TabContent['data'];
+        }>('table:updated', (event) => {
+          const { tabId, type, data } = event.payload;
+          // Update our local state if we have this tab
+          setTabContents((prev) => {
+            if (!prev[tabId]) return prev;
+            return {
+              ...prev,
+              [tabId]: { type, data },
+            };
+          });
+        });
+      } catch (e) {
+        console.error('Failed to listen for table:updated events:', e);
+      }
+    })();
+
+    return () => {
+      if (unlisten) unlisten();
+    };
+  }, []);
+
   // Convert backend menus to menu bar format
   const menuItems: TunerMenuItem[] = useMemo(() => {
     // File menu changes based on whether a project is open
@@ -1247,20 +1391,25 @@ function AppContent() {
           // Project open - show full menu
           { id: "new-project", label: "&New Project...", onClick: () => setProjectDialogOpen(true) },
           { id: "open-project", label: "&Open Project...", onClick: () => setOpenProjectDialogOpen(true) },
+          { id: "import-project", label: "&Import TS Project...", onClick: () => setImportProjectOpen(true) },
           { id: "close-project", label: "&Close Project", onClick: closeProject },
           { id: "sep1", label: "", separator: true },
           { id: "save", label: "&Save Tune\tCtrl+S", onClick: () => setSaveDialogOpen(true) },
           { id: "saveas", label: "Save Tune &As...", onClick: () => setSaveDialogOpen(true) },
           { id: "load", label: "&Load Tune...\tCtrl+O", onClick: () => setLoadDialogOpen(true) },
           { id: "sep2", label: "", separator: true },
-          { id: "burn", label: "&Burn to ECU\tCtrl+B", onClick: () => setBurnDialogOpen(true), disabled: status.state !== "Connected" },
+          { id: "create-restore", label: "Create &Restore Point", onClick: handleCreateRestorePoint },
+          { id: "restore-points", label: "Restore &Points...", onClick: () => setRestorePointsOpen(true) },
           { id: "sep3", label: "", separator: true },
+          { id: "burn", label: "&Burn to ECU\tCtrl+B", onClick: () => setBurnDialogOpen(true), disabled: status.state !== "Connected" },
+          { id: "sep4", label: "", separator: true },
           { id: "exit", label: "E&xit", onClick: () => window.close() },
         ]
       : [
           // No project open - limited menu
           { id: "new-project", label: "&New Project...\tCtrl+N", onClick: () => setProjectDialogOpen(true) },
           { id: "open-project", label: "&Open Project...\tCtrl+O", onClick: () => setOpenProjectDialogOpen(true) },
+          { id: "import-project", label: "&Import TS Project...", onClick: () => setImportProjectOpen(true) },
           { id: "sep1", label: "", separator: true },
           { id: "import-ini", label: "&Import ECU Definition...", onClick: importIniToRepository },
           { id: "sep2", label: "", separator: true },
@@ -1623,6 +1772,7 @@ function AppContent() {
         onTabSelect={handleTabSelect}
         onTabClose={handleTabClose}
         onTabReorder={handleTabReorder}
+        onTabPopout={handleTabPopout}
         sidebarItems={sidebarItems}
         sidebarVisible={sidebarVisible}
         onSidebarToggle={() => setSidebarVisible(!sidebarVisible)}
@@ -1785,6 +1935,46 @@ function AppContent() {
         title={errorInfo.title}
         message={errorInfo.message}
         details={errorInfo.details}
+      />
+      
+      {/* Restore Points Dialog */}
+      <RestorePointsDialog
+        isOpen={restorePointsOpen}
+        onClose={() => setRestorePointsOpen(false)}
+        tuneModified={currentProject?.tune_modified || false}
+        onRestorePointLoaded={async () => {
+          // Refresh UI after loading restore point
+          const values = await fetchConstants();
+          await fetchMenuTree(values);
+          showToast("Restore point loaded successfully", "success");
+        }}
+      />
+      
+      {/* Import Project Wizard */}
+      <ImportProjectWizard
+        isOpen={importProjectOpen}
+        onClose={() => setImportProjectOpen(false)}
+        onImportComplete={async (projectPath) => {
+          showToast("Project imported successfully", "success");
+          // Refresh project list
+          const projects = await invoke<ProjectInfo[]>("list_projects");
+          setAvailableProjects(projects);
+          // Open the imported project
+          try {
+            const project = await invoke<CurrentProject>("open_project", { path: projectPath });
+            setCurrentProject(project);
+            // Fetch menus for the project
+            const values = await fetchConstants();
+            await fetchMenuTree(values);
+            // Initialize dashboard tab
+            setTabs([{ id: "dashboard", title: "Dashboard", icon: "dashboard", closable: false }]);
+            setTabContents({ dashboard: { type: "dashboard" } });
+            setActiveTabId("dashboard");
+          } catch (e) {
+            console.error("Failed to open imported project:", e);
+            showToast("Project imported but failed to open: " + e, "error");
+          }
+        }}
       />
     </>
   );

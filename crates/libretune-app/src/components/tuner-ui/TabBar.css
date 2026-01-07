@@ -131,6 +131,31 @@
   color: var(--text-primary);
 }
 
+.tab-popout {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  color: var(--text-muted);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  opacity: 0;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.tab:hover .tab-popout,
+.tab-active .tab-popout {
+  opacity: 1;
+}
+
+.tab-popout:hover {
+  background: var(--accent, #4a9eff);
+  color: #fff;
+}
+
 .tabbar-overflow {
   display: flex;
   align-items: center;

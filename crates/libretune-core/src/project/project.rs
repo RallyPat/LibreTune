@@ -64,6 +64,14 @@ pub struct ProjectSettings {
 
     /// Auto-connect on project open
     pub auto_connect: bool,
+
+    /// Maximum number of restore points to keep (0 = unlimited)
+    #[serde(default = "default_max_restore_points")]
+    pub max_restore_points: u32,
+}
+
+fn default_max_restore_points() -> u32 {
+    20
 }
 
 impl Default for ProjectSettings {
@@ -72,6 +80,7 @@ impl Default for ProjectSettings {
             auto_load_tune: true,
             auto_save_tune: true,
             auto_connect: false,
+            max_restore_points: default_max_restore_points(),
         }
     }
 }
@@ -245,7 +254,7 @@ impl Project {
         if !project_props_path.exists() {
             return Err(io::Error::new(
                 io::ErrorKind::NotFound,
-                "Not a valid TunerStudio project: project.properties not found",
+                "Not a valid TS project: project.properties not found",
             ));
         }
 
@@ -276,8 +285,12 @@ impl Project {
             ));
         }
 
-        // Read signature from INI file
-        let ini_content = fs::read_to_string(&ini_path)?;
+        // Read signature from INI file (handle ISO-8859-1 encoding)
+        let ini_bytes = fs::read(&ini_path)?;
+        let ini_content = match String::from_utf8(ini_bytes.clone()) {
+            Ok(s) => s,
+            Err(_) => ini_bytes.iter().map(|&b| b as char).collect(),
+        };
         let signature = extract_signature(&ini_content).unwrap_or_default();
 
         // Create the new LibreTune project
