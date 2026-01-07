@@ -21,6 +21,8 @@ pub enum DataType {
     S32,
     /// 32-bit floating point
     F32,
+    /// 64-bit floating point (double)
+    F64,
     /// ASCII string
     String,
     /// Bit field within a byte
@@ -46,6 +48,7 @@ impl DataType {
             "U32" | "UINT32" | "DWORD" => Some(DataType::U32),
             "S32" | "INT32" | "SDWORD" => Some(DataType::S32),
             "F32" | "FLOAT" => Some(DataType::F32),
+            "F64" | "DOUBLE" => Some(DataType::F64),
             "ASCII" | "STRING" => Some(DataType::String),
             "BITS" => Some(DataType::Bits),
             _ => None,
@@ -58,6 +61,7 @@ impl DataType {
             DataType::U08 | DataType::S08 | DataType::Bits => 1,
             DataType::U16 | DataType::S16 => 2,
             DataType::U32 | DataType::S32 | DataType::F32 => 4,
+            DataType::F64 => 8,
             DataType::String => 0, // Variable size
         }
     }
@@ -84,6 +88,8 @@ impl DataType {
             (DataType::S32, Endianness::Little) => Some(LittleEndian::read_i32(bytes) as f64),
             (DataType::F32, Endianness::Big) => Some(BigEndian::read_f32(bytes) as f64),
             (DataType::F32, Endianness::Little) => Some(LittleEndian::read_f32(bytes) as f64),
+            (DataType::F64, Endianness::Big) => Some(BigEndian::read_f64(bytes)),
+            (DataType::F64, Endianness::Little) => Some(LittleEndian::read_f64(bytes)),
             (DataType::String, _) => None,
         }
     }
@@ -110,6 +116,8 @@ impl DataType {
             (DataType::S32, Endianness::Little) => LittleEndian::write_i32(bytes, value as i32),
             (DataType::F32, Endianness::Big) => BigEndian::write_f32(bytes, value as f32),
             (DataType::F32, Endianness::Little) => LittleEndian::write_f32(bytes, value as f32),
+            (DataType::F64, Endianness::Big) => BigEndian::write_f64(bytes, value),
+            (DataType::F64, Endianness::Little) => LittleEndian::write_f64(bytes, value),
             (DataType::String, _) => {}
         }
     }

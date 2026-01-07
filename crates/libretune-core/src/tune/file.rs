@@ -495,11 +495,22 @@ impl TuneFile {
             for name in const_names {
                 if let Some(value) = self.constants.get(&name) {
                     let value_str = match value {
-                        TuneValue::Scalar(v) => format!("{}", v),
+                        TuneValue::Scalar(v) => {
+                            // Use high precision format to preserve F64 values accurately
+                            // Format with enough precision to round-trip any f64 exactly
+                            let formatted = format!("{:.17}", v);
+                            // Trim unnecessary trailing zeros for cleaner output
+                            let trimmed = formatted.trim_end_matches('0').trim_end_matches('.');
+                            if trimmed.is_empty() { "0".to_string() } else { trimmed.to_string() }
+                        },
                         TuneValue::Array(arr) => {
-                            // Format as space-separated for arrays
+                            // Format as space-separated for arrays with high precision
                             arr.iter()
-                                .map(|v| v.to_string())
+                                .map(|v| {
+                                    let formatted = format!("{:.17}", v);
+                                    let trimmed = formatted.trim_end_matches('0').trim_end_matches('.');
+                                    if trimmed.is_empty() { "0".to_string() } else { trimmed.to_string() }
+                                })
                                 .collect::<Vec<_>>()
                                 .join(" ")
                         }
@@ -549,6 +560,13 @@ impl TuneFile {
     /// Set a constant value
     pub fn set_constant(&mut self, name: impl Into<String>, value: TuneValue) {
         self.constants.insert(name.into(), value);
+    }
+
+    /// Set a constant value with its page number (preserves MSQ page structure)
+    pub fn set_constant_with_page(&mut self, name: impl Into<String>, value: TuneValue, page: u8) {
+        let name = name.into();
+        self.constants.insert(name.clone(), value);
+        self.constant_pages.insert(name, page);
     }
 
     /// Get a constant value

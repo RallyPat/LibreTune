@@ -1901,11 +1901,23 @@ async fn get_realtime_data(
     // Get raw data from ECU
     let raw_data = conn.get_realtime_data().map_err(|e| e.to_string())?;
 
-    // Parse data using output channels
+    // Two-pass approach for computed channels:
+    // Pass 1: Parse all non-computed channels
     let mut data = HashMap::new();
+    let mut computed_channels = Vec::new();
+
     for (name, channel) in &def.output_channels {
-        if let Some(val) = channel.parse(&raw_data, def.endianness) {
+        if channel.is_computed() {
+            computed_channels.push((name.clone(), channel.clone()));
+        } else if let Some(val) = channel.parse(&raw_data, def.endianness) {
             data.insert(name.clone(), val);
+        }
+    }
+
+    // Pass 2: Evaluate computed channels using parsed values as context
+    for (name, channel) in computed_channels {
+        if let Some(val) = channel.parse_with_context(&raw_data, def.endianness, &data) {
+            data.insert(name, val);
         }
     }
 
@@ -1978,12 +1990,26 @@ async fn start_realtime_stream(
                 if let (Some(conn), Some(def)) = (conn_guard.as_mut(), def_guard.as_ref()) {
                     match conn.get_realtime_data() {
                         Ok(raw) => {
+                            // Two-pass approach for computed channels:
+                            // Pass 1: Parse all non-computed channels
                             let mut data: HashMap<String, f64> = HashMap::new();
+                            let mut computed_channels = Vec::new();
+
                             for (name, channel) in &def.output_channels {
-                                if let Some(val) = channel.parse(&raw, def.endianness) {
+                                if channel.is_computed() {
+                                    computed_channels.push((name.clone(), channel.clone()));
+                                } else if let Some(val) = channel.parse(&raw, def.endianness) {
                                     data.insert(name.clone(), val);
                                 }
                             }
+
+                            // Pass 2: Evaluate computed channels using parsed values as context
+                            for (name, channel) in computed_channels {
+                                if let Some(val) = channel.parse_with_context(&raw, def.endianness, &data) {
+                                    data.insert(name, val);
+                                }
+                            }
+
                             let _ = app_handle.emit("realtime:update", &data);
                         }
                         Err(e) => {
@@ -4722,8 +4748,7 @@ async fn save_tune(
             if constant.is_pc_variable {
                 // Get PC variable from local_values
                 if let Some(value) = cache.local_values.get(name) {
-                    tune.constants
-                        .insert(name.clone(), TuneValue::Scalar(*value));
+                    tune.set_constant_with_page(name.clone(), TuneValue::Scalar(*value), constant.page);
                     constants_saved += 1;
                 }
                 continue;
@@ -4772,13 +4797,11 @@ async fn save_tune(
                     let bit_index = bit_val as usize;
                     if bit_index < constant.bit_options.len() {
                         let option_string = constant.bit_options[bit_index].clone();
-                        tune.constants
-                            .insert(name.clone(), TuneValue::String(option_string));
+                        tune.set_constant_with_page(name.clone(), TuneValue::String(option_string), constant.page);
                         constants_saved += 1;
                     } else {
                         // Out of range - save as numeric index (fallback)
-                        tune.constants
-                            .insert(name.clone(), TuneValue::Scalar(bit_val as f64));
+                        tune.set_constant_with_page(name.clone(), TuneValue::Scalar(bit_val as f64), constant.page);
                         constants_saved += 1;
                     }
                 }
@@ -4827,7 +4850,7 @@ async fn save_tune(
                     TuneValue::Array(values)
                 };
 
-                tune.constants.insert(name.clone(), tune_value);
+                tune.set_constant_with_page(name.clone(), tune_value, constant.page);
                 constants_saved += 1;
 
                 if name == "veTable" || name == "veRpmBins" || name == "veLoadBins" {

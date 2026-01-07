@@ -98,6 +98,37 @@ impl OutputChannel {
 
         Some(self.raw_to_display(raw))
     }
+
+    /// Parse value from raw bytes, with context for computed channel expressions
+    ///
+    /// For non-computed channels, behaves like `parse()`.
+    /// For computed channels, evaluates the expression using the provided context.
+    pub fn parse_with_context(
+        &self,
+        data: &[u8],
+        endian: super::Endianness,
+        context: &std::collections::HashMap<String, f64>,
+    ) -> Option<f64> {
+        if self.is_computed() {
+            // Evaluate expression using context
+            if let Some(ref expr_str) = self.expression {
+                let mut parser = super::expression::Parser::new(expr_str);
+                match parser.parse() {
+                    Ok(expr) => {
+                        match super::expression::evaluate_simple(&expr, context) {
+                            Ok(value) => return Some(value.as_f64()),
+                            Err(_) => return None,
+                        }
+                    }
+                    Err(_) => return None,
+                }
+            }
+            return None;
+        }
+
+        // For non-computed channels, use the standard parse method
+        self.parse(data, endian)
+    }
 }
 
 impl Default for OutputChannel {

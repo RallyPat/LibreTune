@@ -108,6 +108,13 @@ pub fn read_value(constant: &Constant, bytes: &[u8]) -> Option<Value> {
                 return None;
             }
         }
+        DataType::F64 => {
+            if bytes.len() >= 8 {
+                BigEndian::read_f64(bytes)
+            } else {
+                return None;
+            }
+        }
         DataType::Bits => {
             let byte = bytes.first()?;
             let bit = constant.bit_position.unwrap_or(0);
