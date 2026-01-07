@@ -136,10 +136,10 @@ fn test_extract_bits_empty_data() {
 fn test_extract_bits_insufficient_data() {
     // Data shorter than bytes_needed should not panic
     let data = [0xFF]; // Only 1 byte
-    // Requesting bits that would need 2 bytes
-    let result = extract_bits(&data, 6, 4); // Would need bytes 0 and 1
-    // Should extract what's available without panicking
-    assert!(result <= 0b11); // At most 2 bits from the available byte
+    // Requesting bits that would need 2 bytes (bit_in_byte=6, bit_size=4 spans bytes 0-1)
+    let result = extract_bits(&data, 6, 4);
+    // Extracts only available bits from byte 0: (0xFF >> 6) & 0b11 = 3
+    assert_eq!(result, 3);
 }
 
 #[test]
