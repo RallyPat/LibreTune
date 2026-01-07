@@ -29,6 +29,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use tauri::Emitter;
 use tauri::Manager;
+use tauri_plugin_window_state::{AppHandleExt, StateFlags};
 use tokio::sync::Mutex;
 
 /// Get the LibreTune app data directory (cross-platform)
@@ -5494,7 +5495,13 @@ async fn list_tune_files() -> Result<Vec<String>, String> {
 }
 
 #[tauri::command]
-async fn burn_to_ecu(state: tauri::State<'_, AppState>) -> Result<(), String> {
+async fn burn_to_ecu(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    // Save window state before critical operation (in case of crash)
+    let _ = app.save_window_state(StateFlags::all());
+
     let mut conn_guard = state.connection.lock().await;
     let conn = conn_guard.as_mut().ok_or("Not connected to ECU")?;
 
@@ -7336,6 +7343,7 @@ async fn use_ecu_tune(state: tauri::State<'_, AppState>) -> Result<(), String> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_window_state::Builder::default().build())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(AppState {
