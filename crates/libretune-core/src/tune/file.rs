@@ -74,6 +74,40 @@ impl TuneFile {
         }
     }
 
+    /// Sanitize corrupted string values that may contain raw XML fragments
+    /// This is a migration fix for tunes saved with an older buggy parser
+    /// that didn't properly detect self-closing XML tags
+    fn sanitize_corrupted_strings(&mut self) {
+        let mut fixed_count = 0;
+        
+        // Check constants
+        for (name, value) in self.constants.iter_mut() {
+            if let TuneValue::String(s) = value {
+                // Detect XML fragments that shouldn't be in string values
+                if s.starts_with('<') && (s.contains("constant") || s.contains("pcVariable")) {
+                    eprintln!("[MIGRATION] Fixing corrupted string value for '{}': was '{}'", name, s);
+                    *value = TuneValue::String(String::new());
+                    fixed_count += 1;
+                }
+            }
+        }
+        
+        // Check pcVariables too
+        for (name, value) in self.pc_variables.iter_mut() {
+            if let TuneValue::String(s) = value {
+                if s.starts_with('<') && (s.contains("constant") || s.contains("pcVariable")) {
+                    eprintln!("[MIGRATION] Fixing corrupted pcVariable value for '{}': was '{}'", name, s);
+                    *value = TuneValue::String(String::new());
+                    fixed_count += 1;
+                }
+            }
+        }
+        
+        if fixed_count > 0 {
+            eprintln!("[MIGRATION] Fixed {} corrupted string values from old parser bug", fixed_count);
+        }
+    }
+
     /// Load a tune file from disk
     /// 
     /// MSQ files may use ISO-8859-1 (Latin-1) encoding, so we read as bytes
@@ -93,8 +127,8 @@ impl TuneFile {
             }
         };
 
-        // Detect format by extension
-        match path
+        // Detect format by extension and parse
+        let mut tune = match path
             .extension()
             .and_then(|e| e.to_str())
             .map(|s| s.to_lowercase())
@@ -109,7 +143,12 @@ impl TuneFile {
                     .or_else(|_| Self::parse_msq(&content))
                     .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
             }
-        }
+        }?;
+        
+        // Sanitize any corrupted string values (migration fix for older saved tunes)
+        tune.sanitize_corrupted_strings();
+        
+        Ok(tune)
     }
 
     /// Parse MSQ XML format
