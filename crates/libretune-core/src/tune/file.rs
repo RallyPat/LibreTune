@@ -295,8 +295,10 @@ impl TuneFile {
                                     const_remaining[name_start..name_start + name_end].to_string();
 
                                 if let Some(tag_end) = const_remaining.find('>') {
-                                    // Check for self-closing tag: <constant name="..."/>
-                                    if tag_end > 0 && const_remaining.as_bytes()[tag_end - 1] == b'/' {
+                                    // Check for self-closing tag: <constant name="..."/> or <constant name="..." />
+                                    // Look at the content before '>' to see if it contains '/'
+                                    let tag_content = &const_remaining[..tag_end];
+                                    if tag_content.trim_end().ends_with('/') {
                                         // Self-closing tag - value is empty
                                         let value = TuneValue::String(String::new());
                                         tune.constants.insert(name.clone(), value);
@@ -338,8 +340,9 @@ impl TuneFile {
                                     pc_remaining[name_start..name_start + name_end].to_string();
 
                                 if let Some(tag_end) = pc_remaining.find('>') {
-                                    // Check for self-closing tag: <pcVariable name="..."/>
-                                    if tag_end > 0 && pc_remaining.as_bytes()[tag_end - 1] == b'/' {
+                                    // Check for self-closing tag: <pcVariable name="..."/> or <pcVariable name="..." />
+                                    let tag_content = &pc_remaining[..tag_end];
+                                    if tag_content.trim_end().ends_with('/') {
                                         // Self-closing tag - value is empty
                                         let value = TuneValue::String(String::new());
                                         tune.pc_variables.insert(name, value);
@@ -386,8 +389,9 @@ impl TuneFile {
                             let name = remaining[name_start..name_start + name_end].to_string();
 
                             if let Some(tag_end) = remaining.find('>') {
-                                // Check for self-closing tag: <constant name="..."/>
-                                if tag_end > 0 && remaining.as_bytes()[tag_end - 1] == b'/' {
+                                // Check for self-closing tag: <constant name="..."/> or <constant name="..." />
+                                let tag_content = &remaining[..tag_end];
+                                if tag_content.trim_end().ends_with('/') {
                                     // Self-closing tag - value is empty
                                     let value = TuneValue::String(String::new());
                                     tune.constants.insert(name.clone(), value);
@@ -423,8 +427,9 @@ impl TuneFile {
                             let name = remaining[name_start..name_start + name_end].to_string();
 
                             if let Some(tag_end) = remaining.find('>') {
-                                // Check for self-closing tag: <pcVariable name="..."/>
-                                if tag_end > 0 && remaining.as_bytes()[tag_end - 1] == b'/' {
+                                // Check for self-closing tag: <pcVariable name="..."/> or <pcVariable name="..." />
+                                let tag_content = &remaining[..tag_end];
+                                if tag_content.trim_end().ends_with('/') {
                                     // Self-closing tag - value is empty
                                     let value = TuneValue::String(String::new());
                                     tune.pc_variables.insert(name, value);

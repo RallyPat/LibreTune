@@ -138,10 +138,17 @@ interface ProtocolDefaults {
 }
 
 
+// PortEditor configuration from backend
+interface PortEditorConfig {
+  name: string;
+  label: string;
+  enable_condition?: string;
+}
+
 // Tab content types
 interface TabContent {
-  type: "dashboard" | "table" | "curve" | "dialog" | "settings" | "project" | "autotune" | "datalog";
-  data?: TunerTableData | RendererDialogDef | string;
+  type: "dashboard" | "table" | "curve" | "dialog" | "portEditor" | "settings" | "project" | "autotune" | "datalog";
+  data?: TunerTableData | RendererDialogDef | PortEditorConfig | string;
 }
 
 function AppContent() {
@@ -1149,6 +1156,7 @@ function AppContent() {
       }
 
       // Try dialog third
+      let dialogErr: unknown = null;
       try {
         console.log("[openTarget] Trying as dialog:", name);
         const def = await invoke<RendererDialogDef>("get_dialog_definition", { name });
@@ -1161,13 +1169,34 @@ function AppContent() {
         setTabs([...tabs, newTab]);
         setTabContents({ ...tabContents, [name]: { type: "dialog", data: def } });
         setActiveTabId(name);
-      } catch (dialogErr) {
-        // All three failed - show user feedback
+        return;
+      } catch (err) {
+        dialogErr = err;
+        console.log("[openTarget] Not a dialog:", err);
+      }
+
+      // Try portEditor fourth (for std_port_edit and similar)
+      try {
+        console.log("[openTarget] Trying as portEditor:", name);
+        const portEditor = await invoke<{ name: string; label: string; enable_condition?: string }>("get_port_editor", { name });
+        console.log("[openTarget] PortEditor found:", portEditor);
+        const newTab: Tab = {
+          id: name,
+          title: title || portEditor.label || name,
+          icon: "dialog",
+        };
+        setTabs([...tabs, newTab]);
+        setTabContents({ ...tabContents, [name]: { type: "portEditor", data: portEditor } });
+        setActiveTabId(name);
+        return;
+      } catch (portErr) {
+        // All four failed - show user feedback
         console.error("[openTarget] Failed to open target:", name, 
           "table error:", tableErr, 
           "curve error:", curveErr, 
-          "dialog error:", dialogErr);
-        showToast(`Could not open "${title || name}" - not found as table, curve, or dialog`, "warning");
+          "dialog error:", dialogErr,
+          "portEditor error:", portErr);
+        showToast(`Could not open "${title || name}" - not found as table, curve, dialog, or port editor`, "warning");
       }
     },
     [tabs, tabContents, showToast]
@@ -1749,6 +1778,16 @@ function AppContent() {
               setConstantValues(values);
             }}
           />
+        );
+      case "portEditor":
+        return (
+          <div className="port-editor-placeholder" style={{ padding: 24 }}>
+            <h2>{(content.data as PortEditorConfig)?.label || "Port Editor"}</h2>
+            <p>Port editor for: {(content.data as PortEditorConfig)?.name || "unknown"}</p>
+            <p style={{ color: 'var(--text-muted)', marginTop: 8 }}>
+              <em>Port editor UI is not yet implemented. This feature allows configuring ECU pin assignments.</em>
+            </p>
+          </div>
         );
       case "settings":
         return <SettingsView />;
