@@ -19,6 +19,26 @@ import { ArrowLeftToLine, X } from 'lucide-react';
 import './styles';
 import './PopOutWindow.css';
 
+// Backend response types for invoke calls
+interface BackendTableData {
+  name: string;
+  x_bins: number[];
+  y_bins: number[];
+  z_values: number[][];
+  x_axis_name?: string;
+  y_axis_name?: string;
+  x_output_channel?: string | null;
+  y_output_channel?: string | null;
+}
+
+interface BackendCurveData {
+  name: string;
+  x_bins: number[];
+  y_bins: number[];
+  x_label: string;
+  y_label: string;
+}
+
 interface PopOutData {
   tabId: string;
   type: 'dashboard' | 'table' | 'curve' | 'dialog' | 'settings' | 'autotune' | 'datalog';
@@ -135,6 +155,48 @@ export default function PopOutWindow() {
     })();
   }, [popOutData?.tabId, popOutData?.type, popOutData?.data]);
 
+  // Fetch table/curve data if type is table or curve and data is missing
+  useEffect(() => {
+    if (!popOutData || (popOutData.type !== 'table' && popOutData.type !== 'curve') || popOutData.data) return;
+
+    console.log('[PopOutWindow] Fetching table/curve data for:', popOutData.tabId);
+
+    (async () => {
+      try {
+        if (popOutData.type === 'table') {
+          const data = await invoke<BackendTableData>('get_table_data', { tableName: popOutData.tabId });
+          const tableData: TunerTableData = {
+            name: data.name,
+            xAxis: data.x_bins,
+            yAxis: data.y_bins,
+            zValues: data.z_values,
+            xLabel: data.x_axis_name || 'X',
+            yLabel: data.y_axis_name || 'Y',
+            xOutputChannel: data.x_output_channel ?? undefined,
+            yOutputChannel: data.y_output_channel ?? undefined,
+          };
+          console.log('[PopOutWindow] Fetched table data:', tableData);
+          setPopOutData(prev => prev ? { ...prev, data: tableData } : null);
+        } else {
+          const data = await invoke<BackendCurveData>('get_curve_data', { curveName: popOutData.tabId });
+          const tableData: TunerTableData = {
+            name: data.name,
+            xAxis: data.x_bins,
+            yAxis: [0],
+            zValues: [data.y_bins],
+            xLabel: data.x_label,
+            yLabel: data.y_label,
+          };
+          console.log('[PopOutWindow] Fetched curve data:', tableData);
+          setPopOutData(prev => prev ? { ...prev, data: tableData } : null);
+        }
+      } catch (e) {
+        console.error('[PopOutWindow] Failed to fetch table/curve data:', e);
+        setError(`Failed to load ${popOutData.type}: ${e}`);
+      }
+    })();
+  }, [popOutData?.tabId, popOutData?.type, popOutData?.data]);
+
   // Listen for table updates from main window
   useEffect(() => {
     if (!popOutData) return;
@@ -216,6 +278,14 @@ export default function PopOutWindow() {
       
       case 'table':
       case 'curve':
+        // Show loading while fetching data
+        if (!popOutData.data) {
+          return (
+            <div className="popout-loading">
+              <p>Loading {popOutData.type}...</p>
+            </div>
+          );
+        }
         return (
           <TableEditor
             data={popOutData.data as TunerTableData}

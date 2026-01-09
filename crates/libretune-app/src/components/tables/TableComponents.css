@@ -1,23 +1,47 @@
+/* Base container - minimal styles that don't conflict */
 .table-grid-container {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
   position: relative;
   user-select: none;
 }
 
-.table-cells {
+/* Grid layout - scoped under .table-editor-2d for specificity over tuner-ui */
+.table-editor-2d .table-grid-container {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-rows: auto 1fr;
+  grid-template-areas:
+    ". x-axis"
+    "y-axis cells";
+  gap: 2px;
+  overflow: auto;
+}
+
+.table-editor-2d .table-grid-container .y-axis-labels {
+  grid-area: y-axis;
+}
+
+.table-editor-2d .table-grid-container .x-axis-bins {
+  grid-area: x-axis;
+  margin-left: 0 !important;
+}
+
+.table-editor-2d .table-grid-container .table-cells {
+  grid-area: cells;
+}
+
+/* Table cells - scoped under .table-editor-2d to avoid collision with tuner-ui */
+.table-editor-2d .table-cells {
   display: grid;
   gap: 1px;
   background: var(--surface-dim);
   border: 1px solid var(--border);
 }
 
-.table-row {
+.table-editor-2d .table-row {
   display: contents;
 }
 
-.table-cell {
+.table-editor-2d .table-cell {
   width: 3rem;
   height: 2rem;
   display: flex;
@@ -31,16 +55,16 @@
   position: relative;
 }
 
-.table-cell.selected {
+.table-editor-2d .table-cell.selected {
   box-shadow: 0 0 0 3px var(--primary);
   z-index: 10;
 }
 
-.table-cell.selected .cell-value {
+.table-editor-2d .table-cell.selected .cell-value {
   font-weight: bold;
 }
 
-.table-cell.locked {
+.table-editor-2d .table-cell.locked {
   background: repeating-linear-gradient(
     45deg,
     var(--surface-dim),
@@ -50,7 +74,7 @@
   opacity: 0.7;
 }
 
-.lock-indicator {
+.table-editor-2d .lock-indicator {
   position: absolute;
   top: 2px;
   right: 2px;
@@ -61,7 +85,7 @@
   background: var(--surface);
 }
 
-.lock-indicator::before {
+.table-editor-2d .lock-indicator::before {
   content: '';
   position: absolute;
   top: 50%;
@@ -73,11 +97,11 @@
   border-radius: 2px;
 }
 
-.cell-value {
+.table-editor-2d .cell-value {
   pointer-events: none;
 }
 
-.cell-input {
+.table-editor-2d .cell-input {
   width: 90%;
   text-align: center;
   border: none;
@@ -88,21 +112,21 @@
   outline: none;
 }
 
-.y-axis-labels {
+.table-editor-2d .y-axis-labels {
   display: flex;
   flex-direction: column;
   gap: 1px;
   padding-right: 0.5rem;
 }
 
-.x-axis-bins {
+.table-editor-2d .x-axis-bins {
   display: flex;
   flex-direction: row;
   gap: 1px;
   padding-bottom: 0.5rem;
 }
 
-.axis-bin-label {
+.table-editor-2d .axis-bin-label {
   width: 3rem;
   height: 1.5rem;
   font-size: 0.8rem;
@@ -112,13 +136,13 @@
   color: var(--text-primary);
 }
 
-.axis-bin-label:disabled {
+.table-editor-2d .axis-bin-label:disabled {
   background: var(--surface-dim);
   color: var(--text-muted);
   cursor: not-allowed;
 }
 
-.history-trail-svg {
+.table-editor-2d .history-trail-svg {
   position: absolute;
   top: 0;
   left: 0;
@@ -128,7 +152,7 @@
   z-index: 5;
 }
 
-.history-trail-point {
+.table-editor-2d .history-trail-point {
   width: 12px;
   height: 12px;
   border-radius: 50%;
@@ -148,7 +172,8 @@
   }
 }
 
-.table-toolbar {
+/* Table toolbar - scoped under .table-editor-2d */
+.table-editor-2d .table-toolbar {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
@@ -158,12 +183,12 @@
   border-radius: var(--radius-lg);
 }
 
-.toolbar-section {
+.table-editor-2d .toolbar-section {
   display: flex;
   gap: 0.25rem;
 }
 
-.toolbar-btn {
+.table-editor-2d .toolbar-btn {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -178,28 +203,28 @@
   min-width: 2.5rem;
 }
 
-.toolbar-btn:hover:not(:disabled) {
+.table-editor-2d .toolbar-btn:hover:not(:disabled) {
   background: var(--primary);
   color: var(--surface);
   border-color: var(--primary);
 }
 
-.toolbar-btn:active:not(:disabled) {
+.table-editor-2d .toolbar-btn:active:not(:disabled) {
   transform: scale(0.95);
 }
 
-.toolbar-btn:disabled {
+.table-editor-2d .toolbar-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
 
-.hotkey-hint {
+.table-editor-2d .hotkey-hint {
   font-size: 0.7rem;
   color: var(--text-muted);
   font-weight: bold;
 }
 
-.table-context-menu {
+.table-editor-2d .table-context-menu {
   position: fixed;
   background: var(--surface);
   border: 1px solid var(--border);
@@ -222,7 +247,7 @@
   }
 }
 
-.context-menu-header {
+.table-editor-2d .context-menu-header {
   padding: 0.75rem;
   background: var(--surface-dim);
   border-bottom: 1px solid var(--border);
@@ -233,7 +258,7 @@
   gap: 0.5rem;
 }
 
-.context-menu-item {
+.table-editor-2d .context-menu-item {
   padding: 0.5rem 0.75rem;
   cursor: pointer;
   display: flex;
@@ -242,21 +267,21 @@
   transition: background 0.15s;
 }
 
-.context-menu-item:hover {
+.table-editor-2d .context-menu-item:hover {
   background: var(--surface-dim);
 }
 
-.context-menu-item.danger:hover {
+.table-editor-2d .context-menu-item.danger:hover {
   background: rgba(220, 38, 38, 0.1);
 }
 
-.context-menu-separator {
+.table-editor-2d .context-menu-separator {
   height: 1px;
   background: var(--border);
   margin: 0.25rem 0;
 }
 
-.context-shortcut {
+.table-editor-2d .context-shortcut {
   font-family: 'Courier New', monospace;
   font-size: 0.85rem;
   color: var(--text-muted);
@@ -265,14 +290,14 @@
   border-radius: var(--radius-sm);
 }
 
-.scale-input-container {
+.table-editor-2d .scale-input-container {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
   margin-top: 0.5rem;
 }
 
-.scale-input-container input {
+.table-editor-2d .scale-input-container input {
   padding: 0.25rem 0.5rem;
   font-size: 0.85rem;
   border: 1px solid var(--border);
@@ -280,7 +305,7 @@
   background: var(--surface-dim);
 }
 
-.scale-apply-btn {
+.table-editor-2d .scale-apply-btn {
   padding: 0.25rem 0.5rem;
   font-size: 0.8rem;
   background: var(--primary);
@@ -290,6 +315,6 @@
   cursor: pointer;
 }
 
-.scale-apply-btn:hover {
+.table-editor-2d .scale-apply-btn:hover {
   background: var(--primary-light);
 }

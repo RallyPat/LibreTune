@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { ArrowLeft, Save, Zap } from 'lucide-react';
+import { ArrowLeft, Save, Zap, ExternalLink } from 'lucide-react';
 import TableToolbar from './TableToolbar';
 import TableGrid from './TableGrid';
 import TableContextMenu from './TableContextMenu';
@@ -17,8 +17,11 @@ interface TableEditor2DProps {
   x_bins: number[];
   y_bins: number[];
   z_values: number[][];
-  onBack: () => void;
+  onBack?: () => void;  // Optional for embedded mode
   realtimeData?: Record<string, number>; // For live cursor position
+  embedded?: boolean;  // Compact mode for embedding in dialogs
+  onOpenInTab?: () => void;  // Callback to open in separate tab
+  onValuesChange?: (values: number[][]) => void;  // Callback when values change
 }
 
 interface RebinDialogState {
@@ -44,6 +47,9 @@ export default function TableEditor2D({
   z_values,
   onBack,
   realtimeData,
+  embedded = false,
+  onOpenInTab,
+  onValuesChange,
 }: TableEditor2DProps) {
   const [localZValues, setLocalZValues] = useState<number[][]>([...z_values]);
   const [selectedCells, setSelectedCells] = useState<Set<string>>(new Set());
@@ -248,6 +254,7 @@ export default function TableEditor2D({
     setLocalZValues(newValues);
     setSelectedCells(new Set([`${x},${y}`]));
     setCanUndo(true);
+    onValuesChange?.(newValues);
   };
 
   const handleAxisChange = (axis: 'x' | 'y', index: number, value: number) => {
@@ -474,62 +481,84 @@ export default function TableEditor2D({
   };
 
   return (
-    <div className="table-editor-2d">
-      <div className="editor-header">
-        <button className="back-btn" onClick={onBack}>
-          <ArrowLeft size={18} />
-          <span>Back</span>
-        </button>
-        <h1>{title}</h1>
-        <div className="editor-actions">
-          <button 
-            className={`action-btn ${showColorShade ? 'active' : ''}`}
-            onClick={() => setShowColorShade(!showColorShade)}
-            title="Toggle Color Shade"
-          >
-            <span className="action-icon">🎨</span>
-          </button>
-          <button 
-            className={`action-btn ${showHistoryTrail ? 'active' : ''}`}
-            onClick={() => setShowHistoryTrail(!showHistoryTrail)}
-            title="Toggle History Trail"
-          >
-            <span className="action-icon">📍</span>
-          </button>
-          <button 
-            className={`action-btn ${followMode ? 'active' : ''}`}
-            onClick={() => setFollowMode(!followMode)}
-            title="Follow Mode (F)"
-          >
-            <span className="action-icon">🎯</span>
-          </button>
-          <button className="action-btn" onClick={handleSave} title="Save (S)">
-            <Save size={18} />
-          </button>
-          <button className="action-btn" onClick={handleUndo} disabled={!canUndo} title="Undo (Ctrl+Z)">
-            <Zap size={18} />
-          </button>
+    <div className={`table-editor-2d ${embedded ? 'embedded' : 'standalone'}`}>
+      {/* Embedded mode: compact title bar with pop-out button */}
+      {embedded && (
+        <div className="embedded-header">
+          <span className="embedded-title">{title}</span>
+          {onOpenInTab && (
+            <button 
+              className="pop-out-btn" 
+              onClick={onOpenInTab}
+              title="Open in new tab"
+            >
+              <ExternalLink size={14} />
+            </button>
+          )}
         </div>
-      </div>
+      )}
 
-      <TableToolbar
-        onSetEqual={handleSetEqualWrapper}
-        onIncrease={handleIncrease}
-        onDecrease={handleDecrease}
-        onScale={handleScaleWrapper}
-        onInterpolate={handleInterpolate}
-        onSmooth={handleSmooth}
-        onRebin={() => setRebinDialog({ ...rebinDialog, show: true })}
-        onCopy={handleCopy}
-        onPaste={handlePaste}
-        onUndo={handleUndo}
-        canUndo={canUndo}
-        canPaste={clipboard.length > 0}
-        followMode={followMode}
-        onFollowModeToggle={() => setFollowMode(!followMode)}
-        showColorShade={showColorShade}
-        onColorShadeToggle={() => setShowColorShade(!showColorShade)}
-      />
+      {/* Standalone mode: full header with back button and actions */}
+      {!embedded && (
+        <div className="editor-header">
+          <button className="back-btn" onClick={onBack}>
+            <ArrowLeft size={18} />
+            <span>Back</span>
+          </button>
+          <h1>{title}</h1>
+          <div className="editor-actions">
+            <button 
+              className={`action-btn ${showColorShade ? 'active' : ''}`}
+              onClick={() => setShowColorShade(!showColorShade)}
+              title="Toggle Color Shade"
+            >
+              <span className="action-icon">🎨</span>
+            </button>
+            <button 
+              className={`action-btn ${showHistoryTrail ? 'active' : ''}`}
+              onClick={() => setShowHistoryTrail(!showHistoryTrail)}
+              title="Toggle History Trail"
+            >
+              <span className="action-icon">📍</span>
+            </button>
+            <button 
+              className={`action-btn ${followMode ? 'active' : ''}`}
+              onClick={() => setFollowMode(!followMode)}
+              title="Follow Mode (F)"
+            >
+              <span className="action-icon">🎯</span>
+            </button>
+            <button className="action-btn" onClick={handleSave} title="Save (S)">
+              <Save size={18} />
+            </button>
+            <button className="action-btn" onClick={handleUndo} disabled={!canUndo} title="Undo (Ctrl+Z)">
+              <Zap size={18} />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Toolbar: only in standalone mode */}
+      {!embedded && (
+        <TableToolbar
+          onSetEqual={handleSetEqualWrapper}
+          onIncrease={handleIncrease}
+          onDecrease={handleDecrease}
+          onScale={handleScaleWrapper}
+          onInterpolate={handleInterpolate}
+          onSmooth={handleSmooth}
+          onRebin={() => setRebinDialog({ ...rebinDialog, show: true })}
+          onCopy={handleCopy}
+          onPaste={handlePaste}
+          onUndo={handleUndo}
+          canUndo={canUndo}
+          canPaste={clipboard.length > 0}
+          followMode={followMode}
+          onFollowModeToggle={() => setFollowMode(!followMode)}
+          showColorShade={showColorShade}
+          onColorShadeToggle={() => setShowColorShade(!showColorShade)}
+        />
+      )}
 
       <div 
         className="editor-content"

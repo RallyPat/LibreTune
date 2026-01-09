@@ -217,7 +217,10 @@ export default function TableGrid({
         ))}
       </div>
 
-      <div className="x-axis-bins">
+      <div 
+        className="x-axis-bins"
+        style={{ marginLeft: '3.5rem' }}
+      >
         {x_bins.map((val, i) => (
           <input
             key={`x-${i}`}
@@ -231,7 +234,10 @@ export default function TableGrid({
         ))}
       </div>
 
-      <div className="table-cells">
+      <div 
+        className="table-cells"
+        style={{ gridTemplateColumns: `repeat(${x_bins.length}, 3rem)` }}
+      >
         {z_values.map((row, y) => (
           <div key={`row-${y}`} className="table-row">
             {row.map((value, x) => {

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { ArrowLeft, Activity, Grid3X3 } from 'lucide-react';
 import CurveEditor, { SimpleGaugeInfo } from '../curves/CurveEditor';
+import TableEditor2D from '../tables/TableEditor2D';
 import './DialogRenderer.css';
 
 interface DialogComponent {
@@ -46,6 +47,18 @@ interface Constant {
 interface TableInfo {
   name: string;
   title: string;
+}
+
+interface BackendTableData {
+  name: string;
+  title: string;
+  x_axis_name?: string;
+  y_axis_name?: string;
+  x_bins: number[];
+  y_bins: number[];
+  z_values: number[][];
+  x_output_channel?: string | null;
+  y_output_channel?: string | null;
 }
 
 interface CurveData {
@@ -560,6 +573,7 @@ function RecursivePanel({
   const [definition, setDefinition] = useState<DialogDefinition | null>(null);
   const [indicatorPanel, setIndicatorPanel] = useState<IndicatorPanel | null>(null);
   const [tableInfo, setTableInfo] = useState<TableInfo | null>(null);
+  const [tableData, setTableData] = useState<BackendTableData | null>(null);
   const [curveData, setCurveData] = useState<CurveData | null>(null);
   const [gaugeConfig, setGaugeConfig] = useState<SimpleGaugeInfo | null>(null);
   const [portEditor, setPortEditor] = useState<PortEditorConfig | null>(null);
@@ -580,11 +594,21 @@ function RecursivePanel({
             setPanelType('dialog');
           })
           .catch(() => {
-            // Not a dialog, try as table (lightweight check)
+            // Not a dialog, try as table (lightweight check first, then full data)
             invoke<TableInfo>('get_table_info', { tableName: name })
               .then((info) => {
                 setTableInfo(info);
-                setPanelType('table');
+                // Now fetch full table data for embedded rendering
+                invoke<BackendTableData>('get_table_data', { tableName: name })
+                  .then((data) => {
+                    setTableData(data);
+                    setPanelType('table');
+                  })
+                  .catch((dataErr) => {
+                    console.debug(`Could not load table data for '${name}':`, dataErr);
+                    // Still show as table but without embedded view
+                    setPanelType('table');
+                  });
               })
               .catch((err) => {
                 console.debug(`Panel '${name}' is not a table:`, err);
@@ -623,7 +647,36 @@ function RecursivePanel({
     return <div className="panel-loading">Loading {name}...</div>;
   }
 
-  // Render as clickable table link if it's a table
+  // Render as embedded table editor if we have full table data
+  if (panelType === 'table' && tableInfo && tableData) {
+    return (
+      <TableEditor2D
+        title={tableInfo.title || name}
+        table_name={tableData.name}
+        x_axis_name={tableData.x_axis_name || 'X'}
+        y_axis_name={tableData.y_axis_name || 'Y'}
+        x_bins={tableData.x_bins}
+        y_bins={tableData.y_bins}
+        z_values={tableData.z_values}
+        embedded={true}
+        realtimeData={context}
+        onOpenInTab={() => openTable(name)}
+        onValuesChange={(values) => {
+          // Save changes to backend
+          invoke('update_table_data', {
+            table_name: tableData.name,
+            z_values: values,
+          }).then(() => {
+            onUpdate?.();
+          }).catch((err) => {
+            console.error('Failed to update table:', err);
+          });
+        }}
+      />
+    );
+  }
+
+  // Fallback to clickable table link if we only have table info (no data)
   if (panelType === 'table' && tableInfo) {
     return (
       <div className="embedded-table-link" onClick={() => openTable(name)}>
@@ -872,12 +925,8 @@ function DialogComponentRenderer({
     return <div className="dialog-label">{comp.text}</div>;
   }
   if (comp.type === 'Table' && comp.name) {
-    return (
-      <div className="embedded-table-link" onClick={() => openTable(comp.name!)}>
-        <Grid3X3 size={20} />
-        <span>Open Table: {comp.name}</span>
-      </div>
-    );
+    // Use RecursivePanel to handle table rendering (embedded or link fallback)
+    return <RecursivePanel name={comp.name} openTable={openTable} context={context} onUpdate={onUpdate} />;
   }
   if (comp.type === 'LiveGraph') {
     return (

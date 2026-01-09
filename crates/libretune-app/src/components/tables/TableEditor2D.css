@@ -5,6 +5,68 @@
   height: 100%;
 }
 
+/* Standalone mode (full tab view) */
+.table-editor-2d.standalone {
+  height: 100%;
+}
+
+/* Embedded mode (in dialog) */
+.table-editor-2d.embedded {
+  flex: 1;
+  min-height: 200px;
+  width: 100%; /* Expand to fill container width */
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  gap: 0;
+}
+
+.table-editor-2d.embedded .editor-content {
+  flex: 1;
+  overflow: auto;
+  min-height: 0; /* Allow flex shrinking for proper scrolling */
+}
+
+.table-editor-2d.embedded .table-grid-container {
+  min-width: max-content;
+}
+
+/* Embedded header with pop-out button */
+.embedded-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  background: rgba(0, 0, 0, 0.3);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.embedded-title {
+  font-size: 12px;
+  font-weight: 500;
+  color: #ccc;
+}
+
+.pop-out-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  background: rgba(255, 255, 255, 0.1);
+  border: none;
+  border-radius: 4px;
+  color: #888;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.pop-out-btn:hover {
+  background: rgba(74, 158, 255, 0.3);
+  color: #4a9eff;
+}
+
 .editor-header {
   display: flex;
   justify-content: space-between;

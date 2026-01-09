@@ -32,7 +32,8 @@
   color: var(--text-primary);
 }
 
-.dialog-container {
+/* Use .dialog-view parent to override App.css max-width: 600px constraint */
+.dialog-view .dialog-container {
   flex: 1;
   overflow-y: auto;
   padding: 20px;
@@ -40,6 +41,8 @@
   flex-direction: column;
   gap: 16px;
   min-height: 0; /* Critical for nested flex scroll */
+  max-width: none; /* Override App.css 600px constraint */
+  width: 100%;
 }
 
 .settings-field {
@@ -132,7 +135,15 @@
   border: 1px solid var(--border-color);
   border-radius: 8px;
   overflow: visible; /* Changed from hidden to prevent content clipping */
-  flex-shrink: 0; /* Prevent panel from collapsing */
+  display: flex;
+  flex-direction: column;
+  min-height: 0; /* Allow flex shrinking for proper scrolling */
+  width: 100%; /* Expand to fill container width */
+}
+
+/* Allow panels with tables to grow and fill space */
+.nested-panel:has(.table-editor-2d) {
+  flex: 1;
 }
 
 .panel-title {
@@ -149,6 +160,8 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
+  flex: 1;
+  min-height: 0; /* Allow flex shrinking for proper scrolling */
 }
 
 .panel-loading {
