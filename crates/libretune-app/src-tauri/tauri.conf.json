@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "libretune-app",
+        "title": "LibreTune - Free and Open Source Tuning Suite",
         "width": 800,
         "height": 600
       }
