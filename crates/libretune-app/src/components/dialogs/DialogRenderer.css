@@ -3,6 +3,7 @@
   flex-direction: column;
   height: 100%;
   min-height: 0; /* Allow flex shrinking for proper scrolling */
+  overflow: hidden; /* Contain scrolling to dialog-container child */
   background: var(--bg-primary);
 }
 
@@ -36,47 +37,87 @@
 .dialog-view .dialog-container {
   flex: 1;
   overflow-y: auto;
+  overflow-x: hidden; /* Prevent horizontal scroll */
   padding: 20px;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 32px; /* Increased from 16px for more spacing between sections */
   min-height: 0; /* Critical for nested flex scroll */
+  max-height: 100%; /* Explicit height constraint for scroll */
   max-width: none; /* Override App.css 600px constraint */
   width: 100%;
 }
 
-.settings-field {
+/* Field layout - use .dialog-view parent for specificity over App.css */
+.dialog-view .settings-field {
   display: flex;
-  flex-direction: column;
-  gap: 6px;
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-start; /* Left-justify content */
+  gap: 12px;
+  padding: 12px 16px; /* Add padding for taller rows */
+  background: var(--bg-secondary);
+  border-radius: 4px;
 }
 
-.settings-field label {
+.dialog-view .settings-field label {
   font-size: 13px;
   color: var(--text-secondary);
   font-weight: 500;
+  text-align: left;
 }
 
-.field-input-wrap {
+.dialog-view .field-input-wrap {
   display: flex;
   align-items: center;
+  justify-content: flex-start; /* Left-justify inputs */
   gap: 8px;
 }
 
-.field-input-wrap input {
+.dialog-view .field-input-wrap input {
   flex: 1;
-  max-width: 200px;
-  padding: 8px 12px;
+  min-width: 120px;
+  max-width: 400px;
+  width: auto; /* Override App.css width: 80px */
+  padding: 12px 16px; /* Increased from 8px 12px for taller inputs */
   background: var(--bg-input);
   border: 1px solid var(--border-color);
   border-radius: 4px;
   color: var(--text-primary);
   font-size: 14px;
+  text-align: left;
 }
 
-.field-input-wrap input:focus {
+.dialog-view .field-input-wrap input:focus {
   outline: none;
   border-color: var(--accent);
+}
+
+.dialog-view .field-input-wrap input[type="text"] {
+  max-width: 500px;
+}
+
+.dialog-view .field-input-wrap select {
+  flex: 1;
+  min-width: 150px;
+  max-width: 400px;
+  padding: 12px 16px; /* Increased from 8px 12px for taller selects */
+  background: var(--bg-input);
+  border: 1.5px solid var(--border-default);
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-size: 14px;
+}
+
+.dialog-view .field-input-wrap select:focus {
+  outline: none;
+  border-color: var(--border-focus);
+}
+
+.dialog-view .settings-field input[type="checkbox"] {
+  margin-right: 8px;
+  width: 20px; /* Increased from 16px */
+  height: 20px; /* Increased from 16px */
 }
 
 .field-unit {
@@ -92,32 +133,6 @@
   font-style: italic;
 }
 
-.field-input-wrap select {
-  flex: 1;
-  max-width: 200px;
-  padding: 8px 12px;
-  background: var(--bg-input);
-  border: 1.5px solid var(--border-default);
-  border-radius: 4px;
-  color: var(--text-primary);
-  font-size: 14px;
-}
-
-.field-input-wrap select:focus {
-  outline: none;
-  border-color: var(--border-focus);
-}
-
-.field-input-wrap input[type="text"] {
-  max-width: 300px;
-}
-
-.settings-field input[type="checkbox"] {
-  margin-right: 8px;
-  width: 16px;
-  height: 16px;
-}
-
 .field-loading {
   padding: 8px 0;
   color: var(--text-muted);
@@ -130,38 +145,44 @@
   padding: 8px 0;
 }
 
-.nested-panel {
+/* Use .dialog-view parent for higher specificity over App.css */
+.dialog-view .nested-panel {
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
   border-radius: 8px;
-  overflow: visible; /* Changed from hidden to prevent content clipping */
+  overflow: hidden; /* Contain panel content */
   display: flex;
   flex-direction: column;
-  min-height: 0; /* Allow flex shrinking for proper scrolling */
+  min-height: 270px; /* Minimum height for each section panel (~50% taller) */
+  flex-shrink: 0; /* Prevent flex shrinking below min-height */
   width: 100%; /* Expand to fill container width */
+  max-width: 100%; /* Prevent horizontal overflow */
 }
 
 /* Allow panels with tables to grow and fill space */
-.nested-panel:has(.table-editor-2d) {
+.dialog-view .nested-panel:has(.table-editor-2d) {
   flex: 1;
+  min-height: 400px; /* Larger min-height for table panels */
 }
 
-.panel-title {
-  padding: 10px 16px;
+.dialog-view .panel-title {
+  padding: 16px 24px; /* Increased from 10px 16px for taller header */
   background: var(--bg-subtle);
   font-size: 14px;
   font-weight: 600;
   color: var(--text-primary);
   border-bottom: 1px solid var(--border-color);
+  text-align: right; /* Right-justify panel titles */
 }
 
 .panel-content {
-  padding: 16px;
+  padding: 24px; /* Increased from 16px for taller sections */
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 18px; /* Increased from 12px for taller sections */
   flex: 1;
   min-height: 0; /* Allow flex shrinking for proper scrolling */
+  overflow-y: auto; /* Allow panel content to scroll if needed */
 }
 
 .panel-loading {

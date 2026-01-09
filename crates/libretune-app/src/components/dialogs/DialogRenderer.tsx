@@ -580,59 +580,83 @@ function RecursivePanel({
   const [panelType, setPanelType] = useState<'loading' | 'dialog' | 'indicatorPanel' | 'table' | 'curve' | 'portEditor' | 'unknown'>('loading');
 
   useEffect(() => {
+    // Reset state when name changes and track cancellation
+    let cancelled = false;
+    
+    setPanelType('loading');
+    setDefinition(null);
+    setIndicatorPanel(null);
+    setTableInfo(null);
+    setTableData(null);
+    setCurveData(null);
+    setGaugeConfig(null);
+    setPortEditor(null);
+
     // First try as indicatorPanel
     invoke<IndicatorPanel>('get_indicator_panel', { name })
       .then((panel) => {
+        if (cancelled) return;
         setIndicatorPanel(panel);
         setPanelType('indicatorPanel');
       })
       .catch(() => {
+        if (cancelled) return;
         // Not an indicatorPanel, try as dialog
         invoke<DialogDefinition>('get_dialog_definition', { name })
           .then((def) => {
+            if (cancelled) return;
             setDefinition(def);
             setPanelType('dialog');
           })
           .catch(() => {
+            if (cancelled) return;
             // Not a dialog, try as table (lightweight check first, then full data)
             invoke<TableInfo>('get_table_info', { tableName: name })
               .then((info) => {
+                if (cancelled) return;
                 setTableInfo(info);
                 // Now fetch full table data for embedded rendering
                 invoke<BackendTableData>('get_table_data', { tableName: name })
                   .then((data) => {
+                    if (cancelled) return;
                     setTableData(data);
                     setPanelType('table');
                   })
                   .catch((dataErr) => {
+                    if (cancelled) return;
                     console.debug(`Could not load table data for '${name}':`, dataErr);
                     // Still show as table but without embedded view
                     setPanelType('table');
                   });
               })
               .catch((err) => {
+                if (cancelled) return;
                 console.debug(`Panel '${name}' is not a table:`, err);
                 // Not a table, try as curve
                 invoke<CurveData>('get_curve_data', { curveName: name })
                   .then((data) => {
+                    if (cancelled) return;
                     setCurveData(data);
                     setPanelType('curve');
                     // Fetch gauge config if curve has a gauge reference
                     if (data.gauge) {
                       invoke<SimpleGaugeInfo>('get_gauge_config', { gaugeName: data.gauge })
-                        .then(setGaugeConfig)
+                        .then((gc) => { if (!cancelled) setGaugeConfig(gc); })
                         .catch((gaugeErr) => console.debug(`Could not load gauge ${data.gauge}:`, gaugeErr));
                     }
                   })
                   .catch((err2) => {
+                    if (cancelled) return;
                     console.debug(`Panel '${name}' is not a curve:`, err2);
                     // Not a curve, try as portEditor
                     invoke<PortEditorConfig>('get_port_editor', { name })
                       .then((editor) => {
+                        if (cancelled) return;
                         setPortEditor(editor);
                         setPanelType('portEditor');
                       })
                       .catch((err3) => {
+                        if (cancelled) return;
                         console.debug(`Panel '${name}' is not a portEditor:`, err3);
                         // None of the known types
                         setPanelType('unknown');
@@ -641,6 +665,11 @@ function RecursivePanel({
               });
           });
       });
+
+    // Cleanup function to prevent state updates after unmount
+    return () => {
+      cancelled = true;
+    };
   }, [name]);
 
   if (panelType === 'loading') {
