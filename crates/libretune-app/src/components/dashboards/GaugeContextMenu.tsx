@@ -1,7 +1,7 @@
 /**
  * Gauge Context Menu
  * 
- * Right-click menu for dashboard gauges matching TunerStudio's functionality:
+ * Right-click menu for dashboard gauges matching TS functionality:
  * - LibreTune Gauges submenu (grouped by category from INI)
  * - Background settings
  * - Designer Mode toggle

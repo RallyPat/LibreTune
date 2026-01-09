@@ -112,7 +112,7 @@ export default function GaugeRenderer({ config, realtimeData = {}, onConfigChang
     // Clear canvas
     ctx.clearRect(0, 0, width, height);
 
-    // Draw TunerStudio-style gray metallic bezel
+    // Draw TS-style gray metallic bezel
     const bezelWidth = 18;
     const outerRadius = radius + bezelWidth / 2;
     const innerRadius = radius - bezelWidth / 2;
@@ -192,7 +192,7 @@ export default function GaugeRenderer({ config, realtimeData = {}, onConfigChang
       }
     }
 
-    // Draw warning zones (TunerStudio style - thicker filled arcs)
+    // Draw warning zones (TS style - thicker filled arcs)
     const zoneRadius = innerRadius - 8;
     const zoneWidth = 12;
     

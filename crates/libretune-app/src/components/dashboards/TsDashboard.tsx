@@ -1,7 +1,7 @@
 /**
- * TunerStudio Dashboard Component
+ * TS Dashboard Component
  * 
- * Renders a complete TunerStudio-compatible dashboard from a DashFile structure.
+ * Renders a complete TS-compatible dashboard from a DashFile structure.
  * Supports all gauge types, indicators, embedded images, and proper positioning.
  */
 

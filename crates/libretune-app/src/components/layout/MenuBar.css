@@ -1,4 +1,4 @@
-/* TunerStudio-style Menu Bar */
+/* TS-style Menu Bar */
 .menubar {
   grid-area: menubar;
   display: flex;

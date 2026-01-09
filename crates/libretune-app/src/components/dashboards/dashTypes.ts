@@ -1,11 +1,11 @@
 /**
- * TunerStudio Dashboard Types
+ * TS Dashboard Types
  * 
  * These types mirror the Rust dash::types structures exactly for full compatibility
- * with TunerStudio .dash and .gauge file formats.
+ * with TS .dash and .gauge file formats.
  */
 
-/** TunerStudio color format (ARGB) */
+/** TS color format (ARGB) */
 export interface TsColor {
   alpha: number;
   red: number;
@@ -78,7 +78,7 @@ export type GaugePainter =
 /** Indicator painter type */
 export type IndicatorPainter = 'BasicRectangleIndicator';
 
-/** Gauge configuration from TunerStudio .dash file */
+/** Gauge configuration from TS .dash file */
 export interface TsGaugeConfig {
   // Identification
   id: string;

@@ -1,7 +1,7 @@
 //! INI Repository Management
 //!
 //! Manages a local repository of ECU definition (INI) files,
-//! similar to TunerStudio's firmware folder.
+//! similar to TS firmware folder.
 
 use chrono::Utc;
 use serde::{Deserialize, Serialize};

@@ -92,7 +92,7 @@ export default function TableEditor2D({
     return () => clearInterval(interval);
   }, [followMode, activeCell]);
 
-  // Keyboard event handling for TunerStudio-style hotkeys
+  // Keyboard event handling for TS-style hotkeys
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       // Don't handle if typing in an input

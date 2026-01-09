@@ -1,7 +1,7 @@
 /**
- * TunerStudio Indicator Renderer
+ * TS Indicator Renderer
  * 
- * Renders boolean indicators (warning lights) based on TunerStudio's IndicatorPainter.
+ * Renders boolean indicators (warning lights) based on TS IndicatorPainter.
  */
 
 import { TsIndicatorConfig, tsColorToRgba } from '../dashboards/dashTypes';

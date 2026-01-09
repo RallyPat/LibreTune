@@ -606,10 +606,10 @@ fn parse_megatune(def: &mut EcuDefinition, key: &str, value: &str) {
     }
 }
 
-/// Parse [TunerStudio] section entries
+/// Parse [TunerStudio] section entries (INI section name - keep as-is)
 fn parse_tunerstudio(def: &mut EcuDefinition, key: &str, value: &str) {
     eprintln!(
-        "[DEBUG] parse_tunerstudio: key = {:?}, value = {:?}",
+        "[DEBUG] parse_ts: key = {:?}, value = {:?}",
         key, value
     );
     match key.to_lowercase().as_str() {
@@ -649,7 +649,7 @@ fn parse_tunerstudio(def: &mut EcuDefinition, key: &str, value: &str) {
         "delayafterportopen" => {
             def.protocol.delay_after_port_open = value.parse().unwrap_or(0);
             eprintln!(
-                "[DEBUG] parse_tunerstudio: delayAfterPortOpen = {}",
+                "[DEBUG] parse_ts: delayAfterPortOpen = {}",
                 def.protocol.delay_after_port_open
             );
         }
@@ -662,7 +662,7 @@ fn parse_tunerstudio(def: &mut EcuDefinition, key: &str, value: &str) {
         "messageenvelopeformat" => {
             def.protocol.message_envelope_format = Some(value.trim_matches('"').to_string());
             eprintln!(
-                "[DEBUG] parse_tunerstudio: messageEnvelopeFormat = {:?}",
+                "[DEBUG] parse_ts: messageEnvelopeFormat = {:?}",
                 def.protocol.message_envelope_format
             );
         }

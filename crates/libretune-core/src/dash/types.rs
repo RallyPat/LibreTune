@@ -1,6 +1,6 @@
-//! TunerStudio dashboard format data types.
+//! TS dashboard format data types.
 //!
-//! These structures match the TunerStudio XML schema exactly for full compatibility.
+//! These structures match the TS XML schema exactly for full compatibility.
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

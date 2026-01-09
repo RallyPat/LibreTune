@@ -14,6 +14,7 @@ use libretune_core::ini::{
     AdaptiveTimingConfig, CommandPart, Constant, DataType, DialogDefinition, EcuDefinition,
     HelpTopic, Menu, MenuItem,
 };
+use libretune_core::plugin::{ControllerBridge, PluginEvent, PluginInfo, PluginManager, SwingComponent};
 use libretune_core::project::{
     ConnectionSettings, IniEntry, IniRepository, IniSource, OnlineIniEntry, OnlineIniRepository,
     Project, ProjectConfig, ProjectInfo, ProjectSettings,
@@ -91,6 +92,10 @@ struct AppState {
     tune_cache: Mutex<Option<TuneCache>>,
     // Demo mode - simulates a running vehicle for UI testing
     demo_mode: Mutex<bool>,
+    // TS-compatible plugin manager (lazily initialized when plugins are loaded)
+    plugin_manager: Mutex<Option<std::sync::Arc<PluginManager>>>,
+    // Controller bridge for plugin ECU access (shared with plugin_manager)
+    controller_bridge: Mutex<Option<std::sync::Arc<ControllerBridge>>>,
 }
 
 #[derive(Serialize)]
@@ -219,7 +224,7 @@ fn load_settings(app: &tauri::AppHandle) -> Settings {
 // Dashboard Format Conversion Helpers
 // =============================================================================
 
-/// Convert legacy DashboardLayout to TunerStudio DashFile format
+/// Convert legacy DashboardLayout to TS DashFile format
 fn convert_layout_to_dashfile(layout: &DashboardLayout) -> DashFile {
     use libretune_core::dash::{BackgroundStyle, GaugeCluster};
     use libretune_core::dashboard::GaugeType;
@@ -290,7 +295,7 @@ fn convert_layout_to_dashfile(layout: &DashboardLayout) -> DashFile {
     dash
 }
 
-/// Convert TunerStudio DashFile to legacy DashboardLayout format
+/// Convert TS DashFile to legacy DashboardLayout format
 fn convert_dashfile_to_layout(dash: &DashFile, name: &str) -> DashboardLayout {
     use libretune_core::dashboard::GaugeType;
 
@@ -2134,6 +2139,11 @@ async fn start_realtime_stream(
                     let elapsed_ms = start_time.elapsed().as_millis() as u64;
                     let data = sim.update(elapsed_ms);
                     let _ = app_handle.emit("realtime:update", &data);
+                    
+                    // Forward realtime data to plugin bridge for TS-compatible plugins
+                    if let Some(ref bridge) = *app_state.controller_bridge.lock().await {
+                        bridge.update_realtime(data);
+                    }
                 }
             } else {
                 // Real ECU mode: read from connection
@@ -2166,6 +2176,11 @@ async fn start_realtime_stream(
                             }
 
                             let _ = app_handle.emit("realtime:update", &data);
+                            
+                            // Forward realtime data to plugin bridge for TS-compatible plugins
+                            if let Some(ref bridge) = *app_state.controller_bridge.lock().await {
+                                bridge.update_realtime(data);
+                            }
                         }
                         Err(e) => {
                             let _ = app_handle.emit("realtime:error", &e.to_string());
@@ -3841,10 +3856,10 @@ async fn save_dashboard_layout(
 ) -> Result<(), String> {
     let path = get_dashboard_file_path(&project_name);
 
-    // Convert DashboardLayout to TunerStudio DashFile format
+    // Convert DashboardLayout to TS DashFile format
     let dash_file = convert_layout_to_dashfile(&layout);
 
-    // Write as TunerStudio XML format
+    // Write as TS XML format
     dash::save_dash_file(&dash_file, &path)
         .map_err(|e| format!("Failed to write dashboard file: {}", e))?;
 
@@ -3861,7 +3876,7 @@ async fn load_dashboard_layout(
     let content = std::fs::read_to_string(&path)
         .map_err(|e| format!("Failed to read dashboard file: {}", e))?;
 
-    // Try TunerStudio XML format first
+    // Try TS XML format first
     if content.trim().starts_with("<?xml") || content.trim().starts_with("<dsh") {
         let dash_file = dash::parse_dash_file(&content)
             .map_err(|e| format!("Failed to parse dashboard XML: {}", e))?;
@@ -3948,10 +3963,10 @@ async fn create_default_dashboard(
     Ok(layout)
 }
 
-/// Load a TunerStudio .dash file directly from a path (for testing)
+/// Load a TS .dash file directly from a path (for testing)
 #[tauri::command]
 async fn load_tunerstudio_dash(path: String) -> Result<DashboardLayout, String> {
-    println!("[load_tunerstudio_dash] Loading from: {}", path);
+    println!("[load_ts_dash] Loading from: {}", path);
 
     let content = std::fs::read_to_string(&path)
         .map_err(|e| format!("Failed to read dashboard file: {}", e))?;
@@ -3959,15 +3974,15 @@ async fn load_tunerstudio_dash(path: String) -> Result<DashboardLayout, String> 
     let dash_file = dash::parse_dash_file(&content)
         .map_err(|e| format!("Failed to parse dashboard XML: {}", e))?;
 
-    let layout = convert_dashfile_to_layout(&dash_file, "TunerStudio Dashboard");
+    let layout = convert_dashfile_to_layout(&dash_file, "TS Dashboard");
     println!(
-        "[load_tunerstudio_dash] Loaded {} gauges",
+        "[load_ts_dash] Loaded {} gauges",
         layout.gauges.len()
     );
     Ok(layout)
 }
 
-/// Load a TunerStudio .dash file and return the full DashFile structure
+/// Load a TS .dash file and return the full DashFile structure
 #[tauri::command]
 async fn get_dash_file(path: String) -> Result<DashFile, String> {
     println!("[get_dash_file] Loading from: {}", path);
@@ -7324,9 +7339,9 @@ async fn delete_restore_point(
         .map_err(|e| format!("Failed to delete restore point: {}", e))
 }
 
-/// Preview data for a TunerStudio project import
+/// Preview data for a TS project import
 #[derive(Debug, Clone, Serialize)]
-struct TunerStudioImportPreview {
+struct TsImportPreview {
     project_name: String,
     ini_file: Option<String>,
     has_tune: bool,
@@ -7336,9 +7351,9 @@ struct TunerStudioImportPreview {
     connection_baud: Option<u32>,
 }
 
-/// Preview a TunerStudio project before importing
+/// Preview a TS project before importing
 #[tauri::command]
-async fn preview_tunerstudio_import(path: String) -> Result<TunerStudioImportPreview, String> {
+async fn preview_tunerstudio_import(path: String) -> Result<TsImportPreview, String> {
     use libretune_core::project::Properties;
 
     let ts_path = std::path::Path::new(&path);
@@ -7393,7 +7408,7 @@ async fn preview_tunerstudio_import(path: String) -> Result<TunerStudioImportPre
     let connection_port = project_props.get("commPort").cloned();
     let connection_baud = project_props.get_i32("baudRate").map(|v| v as u32);
 
-    Ok(TunerStudioImportPreview {
+    Ok(TsImportPreview {
         project_name,
         ini_file,
         has_tune,
@@ -7404,14 +7419,14 @@ async fn preview_tunerstudio_import(path: String) -> Result<TunerStudioImportPre
     })
 }
 
-/// Import a TunerStudio project
+/// Import a TS project
 #[tauri::command]
 async fn import_tunerstudio_project(
     state: tauri::State<'_, AppState>,
     source_path: String,
 ) -> Result<CurrentProjectInfo, String> {
     let project = Project::import_tunerstudio(&source_path, None)
-        .map_err(|e| format!("Failed to import TunerStudio project: {}", e))?;
+        .map_err(|e| format!("Failed to import TS project: {}", e))?;
 
     let response = CurrentProjectInfo {
         name: project.config.name.clone(),
@@ -7818,6 +7833,8 @@ mod demo_mode_tests {
             online_ini_repository: Mutex::new(OnlineIniRepository::new()),
             tune_cache: Mutex::new(None),
             demo_mode: Mutex::new(false),
+            plugin_manager: Mutex::new(None),
+            controller_bridge: Mutex::new(None),
         };
 
         let dev_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -7908,6 +7925,239 @@ async fn update_constant_string(
     Ok(())
 }
 
+// ============================================================================
+// Plugin Commands
+// ============================================================================
+
+/// Find Java binary, checking JAVA_HOME, PATH, and common locations
+fn find_java_binary() -> Result<PathBuf, String> {
+    // 1. Check JAVA_HOME environment variable
+    if let Ok(java_home) = std::env::var("JAVA_HOME") {
+        let java_path = PathBuf::from(&java_home).join("bin").join("java");
+        if java_path.exists() {
+            return Ok(java_path);
+        }
+    }
+    
+    // 2. Check PATH using which/where command
+    #[cfg(target_os = "windows")]
+    let which_cmd = "where";
+    #[cfg(not(target_os = "windows"))]
+    let which_cmd = "which";
+    
+    if let Ok(output) = std::process::Command::new(which_cmd)
+        .arg("java")
+        .output()
+    {
+        if output.status.success() {
+            let path_str = String::from_utf8_lossy(&output.stdout);
+            let path = PathBuf::from(path_str.trim());
+            if path.exists() {
+                return Ok(path);
+            }
+        }
+    }
+    
+    // 3. Check common installation locations
+    let common_locations = if cfg!(target_os = "windows") {
+        vec![
+            "C:\\Program Files\\Java\\jdk-17\\bin\\java.exe",
+            "C:\\Program Files\\Java\\jdk-11\\bin\\java.exe",
+            "C:\\Program Files\\Java\\jre-17\\bin\\java.exe",
+            "C:\\Program Files\\Java\\jre-11\\bin\\java.exe",
+        ]
+    } else if cfg!(target_os = "macos") {
+        vec![
+            "/usr/bin/java",
+            "/Library/Java/JavaVirtualMachines/temurin-17.jdk/Contents/Home/bin/java",
+            "/Library/Java/JavaVirtualMachines/temurin-11.jdk/Contents/Home/bin/java",
+        ]
+    } else {
+        vec![
+            "/usr/bin/java",
+            "/usr/lib/jvm/java-17-openjdk/bin/java",
+            "/usr/lib/jvm/java-11-openjdk/bin/java",
+        ]
+    };
+    
+    for location in common_locations {
+        let path = PathBuf::from(location);
+        if path.exists() {
+            return Ok(path);
+        }
+    }
+    
+    Err("Java not found. Please install JRE 11 or later and ensure JAVA_HOME is set or java is in PATH.".to_string())
+}
+
+/// Get the path to the bundled plugin-host.jar
+fn get_plugin_host_jar_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    // In development, use the source location
+    let dev_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("resources")
+        .join("plugin-host.jar");
+    if dev_path.exists() {
+        return Ok(dev_path);
+    }
+    
+    // In production, use the bundled resources
+    let resource_path = app
+        .path()
+        .resource_dir()
+        .map_err(|e| format!("Failed to get resource dir: {}", e))?
+        .join("resources")
+        .join("plugin-host.jar");
+    
+    if resource_path.exists() {
+        return Ok(resource_path);
+    }
+    
+    Err(format!(
+        "plugin-host.jar not found. Checked:\n  {}\n  {}",
+        dev_path.display(),
+        resource_path.display()
+    ))
+}
+
+/// Initialize the plugin manager lazily (called on first plugin load)
+async fn ensure_plugin_manager_initialized(
+    state: &AppState,
+    app: &tauri::AppHandle,
+) -> Result<std::sync::Arc<PluginManager>, String> {
+    let mut pm_guard = state.plugin_manager.lock().await;
+    
+    // Already initialized?
+    if let Some(ref pm) = *pm_guard {
+        return Ok(pm.clone());
+    }
+    
+    // Find Java binary
+    let _java_path = find_java_binary()?;
+    
+    // Get plugin-host.jar path
+    let jar_path = get_plugin_host_jar_path(app)?;
+    
+    // Create controller bridge with shared references to definition and tune
+    // For now, create with empty Arc<RwLock> - we'll update them when ECU connects
+    let definition = std::sync::Arc::new(std::sync::RwLock::new(None));
+    let tune = std::sync::Arc::new(std::sync::RwLock::new(None));
+    let bridge = std::sync::Arc::new(ControllerBridge::new(definition, tune));
+    
+    // Store bridge for realtime data updates
+    *state.controller_bridge.lock().await = Some(bridge.clone());
+    
+    // Create plugin manager
+    let pm = std::sync::Arc::new(PluginManager::new(jar_path, bridge));
+    
+    // Start the JVM host
+    pm.start().map_err(|e| format!("Failed to start plugin host: {}", e))?;
+    
+    // Store in state
+    *pm_guard = Some(pm.clone());
+    
+    Ok(pm)
+}
+
+/// Check if JRE is available and return version string
+#[tauri::command]
+fn check_jre() -> Result<String, String> {
+    find_java_binary()?;
+    
+    // Get version info
+    let output = std::process::Command::new("java")
+        .arg("-version")
+        .output()
+        .map_err(|e| format!("Failed to run java: {}", e))?;
+
+    // Java prints version to stderr
+    let version = String::from_utf8_lossy(&output.stderr);
+    if output.status.success() || version.contains("version") {
+        Ok(version.lines().next().unwrap_or("Unknown").to_string())
+    } else {
+        Err("Java not found. Please install JRE 11 or later.".to_string())
+    }
+}
+
+/// Load a TS-compatible plugin from a JAR file
+#[tauri::command]
+async fn load_plugin(
+    jar_path: String,
+    state: tauri::State<'_, AppState>,
+    app: tauri::AppHandle,
+) -> Result<PluginInfo, String> {
+    // Validate JAR exists
+    let path = std::path::Path::new(&jar_path);
+    if !path.exists() {
+        return Err(format!("JAR file not found: {}", jar_path));
+    }
+    
+    if path.extension().map(|e| e.to_ascii_lowercase()) != Some("jar".into()) {
+        return Err("File must be a JAR file".to_string());
+    }
+    
+    // Ensure plugin manager is initialized (starts JVM if needed)
+    let pm = ensure_plugin_manager_initialized(&state, &app).await?;
+    
+    // Load the plugin via JVM host
+    let info = pm.load_plugin(path).await?;
+    
+    Ok(info)
+}
+
+/// Unload a plugin
+#[tauri::command]
+async fn unload_plugin(
+    plugin_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    let pm_guard = state.plugin_manager.lock().await;
+    let pm = pm_guard.as_ref().ok_or("Plugin manager not initialized")?;
+    
+    pm.unload_plugin(&plugin_id).await?;
+    
+    Ok(())
+}
+
+/// List loaded plugins
+#[tauri::command]
+async fn list_plugins(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<PluginInfo>, String> {
+    let pm_guard = state.plugin_manager.lock().await;
+    
+    match pm_guard.as_ref() {
+        Some(pm) => Ok(pm.list_plugins()),
+        None => Ok(vec![]), // No plugins loaded yet
+    }
+}
+
+/// Get plugin UI component tree
+#[tauri::command]
+async fn get_plugin_ui(
+    plugin_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<Option<SwingComponent>, String> {
+    let pm_guard = state.plugin_manager.lock().await;
+    let pm = pm_guard.as_ref().ok_or("Plugin manager not initialized")?;
+    
+    Ok(pm.get_plugin_ui(&plugin_id))
+}
+
+/// Send an event to a plugin
+#[tauri::command]
+async fn send_plugin_event(
+    plugin_id: String,
+    event: PluginEvent,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    let pm_guard = state.plugin_manager.lock().await;
+    let pm = pm_guard.as_ref().ok_or("Plugin manager not initialized")?;
+    
+    pm.send_plugin_event(&plugin_id, event).await?;
+    
+    Ok(())
+}
+
 /// Use the project tune (discard ECU tune)
 #[tauri::command]
 async fn use_project_tune(
@@ -7976,6 +8226,8 @@ pub fn run() {
             online_ini_repository: Mutex::new(OnlineIniRepository::new()),
             tune_cache: Mutex::new(None),
             demo_mode: Mutex::new(false),
+            plugin_manager: Mutex::new(None),
+            controller_bridge: Mutex::new(None),
         })
         .invoke_handler(tauri::generate_handler![
             get_serial_ports,
@@ -8097,7 +8349,14 @@ pub fn run() {
             // Settings commands
             get_settings,
             update_setting,
-            update_constant_string
+            update_constant_string,
+            // Plugin commands
+            check_jre,
+            load_plugin,
+            unload_plugin,
+            list_plugins,
+            get_plugin_ui,
+            send_plugin_event
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

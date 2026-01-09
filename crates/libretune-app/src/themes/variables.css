@@ -1,6 +1,6 @@
 /*
  * LibreTune Theme System
- * Based on TunerStudio MS color analysis
+ * Based on TS MS color analysis
  * 
  * This file defines CSS custom properties (variables) for theming.
  * The [data-theme] attribute on <html> controls which theme is active.
@@ -57,7 +57,7 @@
 }
 
 /* =============================================
-   DARK THEME (Default - TunerStudio Classic)
+   DARK THEME (Default - TS Classic)
    ============================================= */
 [data-theme="dark"] {
   color-scheme: dark;
@@ -114,7 +114,7 @@
   --info: #2196f3;
   --info-bg: #0d47a1;
   
-  /* Gauge colors (matching TunerStudio) */
+  /* Gauge colors (matching TS) */
   --gauge-bg: #000000;
   --gauge-face: #1a1a1a;
   --gauge-bezel: #333333;

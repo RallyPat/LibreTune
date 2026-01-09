@@ -81,7 +81,7 @@ function ConnectionIcon({ connected }: { connected: boolean }) {
   );
 }
 
-// Reusable status channel indicators for realtime data (TunerStudio-style grid cells)
+// Reusable status channel indicators for realtime data (TS-style grid cells)
 export function StatusIndicator({
   label,
   value,

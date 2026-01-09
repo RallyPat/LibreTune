@@ -61,7 +61,7 @@ body {
   width: 100%;
 }
 
-/* TunerStudio-style Layout: menubar + toolbar + sidebar + content + statusbar */
+/* TS-style Layout: menubar + toolbar + sidebar + content + statusbar */
 .app-shell {
   display: grid;
   grid-template-areas:
@@ -146,7 +146,7 @@ body {
   flex: 1;
 }
 
-/* Sidebar - TunerStudio-style compact navigation */
+/* Sidebar - TS-style compact navigation */
 .sidebar {
   grid-area: sidebar;
   background-color: var(--bg-surface);
@@ -729,7 +729,7 @@ body {
   text-transform: uppercase;
 }
 
-/* Table Editor - TunerStudio style */
+/* Table Editor - TS style */
 .tuning-table {
   border-collapse: collapse;
   border-spacing: 0;
@@ -781,7 +781,7 @@ body {
   outline: none;
 }
 
-/* Buttons and Controls - TunerStudio style */
+/* Buttons and Controls - TS style */
 .primary-btn {
   background: var(--primary);
   color: #ffffff;
@@ -936,7 +936,7 @@ body {
   color: var(--text-dim);
 }
 
-/* TunerStudio-style Table Toolbar */
+/* TS-style Table Toolbar */
 .ts-toolbar {
   display: flex;
   align-items: center;
@@ -1056,7 +1056,7 @@ body {
   top: calc((var(--cursor-y) / var(--rows)) * 100%);
   transform: translate(-50%, -50%);
   
-  /* TunerStudio-style yellow/green crosshair */
+  /* TS-style yellow/green crosshair */
   border: 2px solid #00ff00;
   border-radius: 4px;
   background: rgba(0, 255, 0, 0.1);

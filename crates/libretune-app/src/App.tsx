@@ -34,6 +34,7 @@ import TuneComparisonDialog from "./components/dialogs/TuneComparisonDialog";
 import RestorePointsDialog from "./components/dialogs/RestorePointsDialog";
 import ImportProjectWizard from "./components/dialogs/ImportProjectWizard";
 import ErrorDetailsDialog, { useErrorDialog } from "./components/dialogs/ErrorDetailsDialog";
+import { PluginPanel } from "./plugin";
 import { useLoading } from "./components/LoadingContext";
 import { useToast } from "./components/ToastContext";
 import "./styles";
@@ -285,6 +286,9 @@ function AppContent() {
   
   // Import project wizard state
   const [importProjectOpen, setImportProjectOpen] = useState(false);
+  
+  // Plugin panel state
+  const [pluginPanelOpen, setPluginPanelOpen] = useState(false);
   
   // Sync status tracking (for partial sync warning)
   const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);
@@ -1552,6 +1556,8 @@ function AppContent() {
         { id: "autotune", label: "&AutoTune Live", onClick: () => openTarget("autotune", "AutoTune Live"), disabled: !currentProject },
         { id: "datalog", label: "&Data Logging", onClick: () => openTarget("datalog", "Data Logging"), disabled: !currentProject },
         { id: "sep1", label: "", separator: true },
+        { id: "plugins", label: "&Plugins...", onClick: () => setPluginPanelOpen(true) },
+        { id: "sep2", label: "", separator: true },
         { id: "connection", label: "&ECU Connection...", onClick: () => setConnectionDialogOpen(true) },
         { id: "settings", label: "&Settings...", onClick: () => setSettingsDialogOpen(true) },
       ],
@@ -2048,6 +2054,19 @@ function AppContent() {
           }
         }}
       />
+      
+      {/* Plugin Panel Dialog */}
+      {pluginPanelOpen && (
+        <div className="dialog-overlay" onClick={() => setPluginPanelOpen(false)}>
+          <div 
+            className="dialog-content plugin-dialog" 
+            onClick={(e) => e.stopPropagation()}
+            style={{ width: '900px', maxWidth: '95vw', height: '600px', maxHeight: '85vh' }}
+          >
+            <PluginPanel onClose={() => setPluginPanelOpen(false)} />
+          </div>
+        </div>
+      )}
     </>
   );
 }
@@ -2148,7 +2167,7 @@ function SettingsView() {
   );
 }
 
-// No Project View - shown when no project is open (like TunerStudio startup)
+// No Project View - shown when no project is open (like TS startup)
 function NoProjectView({
   projects,
   onNewProject,

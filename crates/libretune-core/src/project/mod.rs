@@ -9,7 +9,7 @@
 //! ```text
 //! [ProjectName]/
 //! ├── project.json          # Project metadata and settings
-//! ├── CurrentTune.msq       # Auto-saved current tune (TunerStudio compatible)
+//! ├── CurrentTune.msq       # Auto-saved current tune (TS-compatible)
 //! ├── datalogs/             # Data log files
 //! ├── dashboards/           # Dashboard configurations
 //! ├── restorePoints/        # Timestamped tune backups
@@ -19,7 +19,7 @@
 //!     └── custom.ini        # Optional user overrides
 //! ```
 //!
-//! This matches TunerStudio's project layout for familiarity.
+//! This matches TS project layout for familiarity.
 
 mod online_repository;
 mod project;

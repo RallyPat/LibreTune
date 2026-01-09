@@ -1,6 +1,6 @@
 //! Java Properties File Parser
 //!
-//! Parses TunerStudio's `.properties` files used for project configuration.
+//! Parses TS `.properties` files used for project configuration.
 //! Format: `key=value` or `key:value` with support for:
 //! - Backslash continuation lines
 //! - Unicode escapes (\uXXXX)
@@ -397,8 +397,8 @@ value3";
     }
 
     #[test]
-    fn test_tunerstudio_project_properties() {
-        // Real TunerStudio format
+    fn test_ts_project_properties() {
+        // Real TS format
         let content = r#"#Project Attributes.
 #TunerStudio by EFI Analytics, Inc
 #Last Saved on: Wed Sep 14 13:44:14 EDT 2022
@@ -448,7 +448,7 @@ finalDriveRatio=3.73
 
     #[test]
     fn test_escaped_equals_in_key() {
-        // TunerStudio uses escaped spaces in keys
+        // TS uses escaped spaces in keys
         let content = r"limitsettingsGauge\ and\ Settings\ Limits_X=2563";
         let props = Properties::parse(content);
         assert_eq!(

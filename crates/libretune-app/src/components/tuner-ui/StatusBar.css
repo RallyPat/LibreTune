@@ -100,7 +100,7 @@
 .statusbar-channel-error .statusbar-channel-value { color: var(--error); }
 .statusbar-channel-info .statusbar-channel-value { color: var(--info); }
 
-/* TunerStudio-style grid cells for realtime data */
+/* TS-style grid cells for realtime data */
 .statusbar-cell {
   display: flex;
   flex-direction: column;

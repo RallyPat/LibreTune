@@ -1,0 +1,59 @@
+plugins {
+    id 'java'
+    id 'application'
+}
+
+group = 'io.libretune'
+version = '1.0.0'
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_11
+    targetCompatibility = JavaVersion.VERSION_11
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    // JSON processing
+    implementation 'com.google.code.gson:gson:2.10.1'
+    
+    // Logging
+    implementation 'org.slf4j:slf4j-api:2.0.9'
+    implementation 'org.slf4j:slf4j-simple:2.0.9'
+    
+    // Testing
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.10.0'
+}
+
+application {
+    mainClass = 'io.libretune.pluginhost.Main'
+}
+
+jar {
+    manifest {
+        attributes(
+            'Main-Class': 'io.libretune.pluginhost.Main',
+            'Implementation-Title': 'LibreTune Plugin Host',
+            'Implementation-Version': version
+        )
+    }
+    
+    // Create fat JAR with all dependencies
+    from {
+        configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
+    }
+    
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+}
+
+test {
+    useJUnitPlatform()
+}
+
+tasks.register('runHost', JavaExec) {
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'io.libretune.pluginhost.Main'
+    standardInput = System.in
+}

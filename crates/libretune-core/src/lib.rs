@@ -39,6 +39,7 @@ pub mod datalog;
 pub mod demo;
 pub mod ecu;
 pub mod ini;
+pub mod plugin;
 pub mod project;
 pub mod protocol;
 pub mod table_ops;

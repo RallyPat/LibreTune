@@ -1,0 +1,300 @@
+/**
+ * Styles for SwingRenderer components.
+ * Translates Swing look-and-feel to modern web styling.
+ */
+
+.swing-renderer {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 14px;
+  color: var(--text-color, #e0e0e0);
+  width: 100%;
+  height: 100%;
+}
+
+/* Container styles */
+.swing-container {
+  min-width: 0;
+  min-height: 0;
+}
+
+.swing-jpanel {
+  background: transparent;
+}
+
+.swing-jscrollpane {
+  overflow: auto;
+}
+
+/* Button styles */
+.swing-button {
+  background: linear-gradient(180deg, #4a4a4a 0%, #3a3a3a 100%);
+  border: 1px solid #555;
+  border-radius: 4px;
+  color: #e0e0e0;
+  padding: 6px 16px;
+  cursor: pointer;
+  font-size: 13px;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.swing-button:hover:not(:disabled) {
+  background: linear-gradient(180deg, #555 0%, #454545 100%);
+  border-color: #666;
+}
+
+.swing-button:active:not(:disabled) {
+  background: linear-gradient(180deg, #3a3a3a 0%, #4a4a4a 100%);
+}
+
+.swing-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Label styles */
+.swing-label {
+  color: #e0e0e0;
+  white-space: nowrap;
+}
+
+/* Text input styles */
+.swing-textfield,
+.swing-textarea {
+  background: #2a2a2a;
+  border: 1px solid #444;
+  border-radius: 4px;
+  color: #e0e0e0;
+  padding: 6px 10px;
+  font-size: 13px;
+  font-family: inherit;
+}
+
+.swing-textfield:focus,
+.swing-textarea:focus {
+  outline: none;
+  border-color: #0078d4;
+  box-shadow: 0 0 0 1px #0078d4;
+}
+
+.swing-textfield:disabled,
+.swing-textarea:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.swing-textarea {
+  resize: both;
+  min-height: 60px;
+}
+
+/* Checkbox and Radio styles */
+.swing-checkbox,
+.swing-radio {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.swing-checkbox input,
+.swing-radio input {
+  width: 16px;
+  height: 16px;
+  accent-color: #0078d4;
+  cursor: pointer;
+}
+
+.swing-checkbox input:disabled,
+.swing-radio input:disabled {
+  cursor: not-allowed;
+}
+
+/* ComboBox/Select styles */
+.swing-combobox {
+  background: #2a2a2a;
+  border: 1px solid #444;
+  border-radius: 4px;
+  color: #e0e0e0;
+  padding: 6px 30px 6px 10px;
+  font-size: 13px;
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23888' d='M2 4l4 4 4-4z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+}
+
+.swing-combobox:focus {
+  outline: none;
+  border-color: #0078d4;
+}
+
+.swing-combobox:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Slider styles */
+.swing-slider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.swing-slider input[type="range"] {
+  flex: 1;
+  height: 4px;
+  background: #444;
+  border-radius: 2px;
+  appearance: none;
+}
+
+.swing-slider input[type="range"]::-webkit-slider-thumb {
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  background: #0078d4;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.swing-slider-value {
+  min-width: 40px;
+  text-align: right;
+  color: #888;
+  font-size: 12px;
+}
+
+/* ProgressBar styles */
+.swing-progressbar {
+  width: 100%;
+}
+
+.swing-progressbar progress {
+  width: 100%;
+  height: 8px;
+  border-radius: 4px;
+  overflow: hidden;
+  appearance: none;
+}
+
+.swing-progressbar progress::-webkit-progress-bar {
+  background: #333;
+  border-radius: 4px;
+}
+
+.swing-progressbar progress::-webkit-progress-value {
+  background: linear-gradient(90deg, #0078d4, #00a2ed);
+  border-radius: 4px;
+}
+
+.swing-progressbar progress.indeterminate {
+  animation: indeterminate 1.5s infinite linear;
+}
+
+@keyframes indeterminate {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+/* TabbedPane styles */
+.swing-tabbedpane {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.swing-tab-header {
+  display: flex;
+  border-bottom: 1px solid #444;
+  background: #2a2a2a;
+}
+
+.swing-tab {
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: #888;
+  padding: 10px 16px;
+  cursor: pointer;
+  font-size: 13px;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.swing-tab:hover {
+  color: #e0e0e0;
+}
+
+.swing-tab.active {
+  color: #0078d4;
+  border-bottom-color: #0078d4;
+}
+
+.swing-tab-content {
+  flex: 1;
+  overflow: auto;
+  padding: 12px;
+}
+
+/* Table styles */
+.swing-table-container {
+  overflow: auto;
+  max-height: 400px;
+}
+
+.swing-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.swing-table th,
+.swing-table td {
+  padding: 8px 12px;
+  text-align: left;
+  border-bottom: 1px solid #333;
+}
+
+.swing-table th {
+  background: #2a2a2a;
+  color: #888;
+  font-weight: 500;
+  position: sticky;
+  top: 0;
+}
+
+.swing-table tr:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.swing-table tr.selected {
+  background: rgba(0, 120, 212, 0.2);
+}
+
+.swing-table tr.selected:hover {
+  background: rgba(0, 120, 212, 0.3);
+}
+
+/* Separator styles */
+.swing-separator {
+  border: none;
+  border-top: 1px solid #444;
+  margin: 8px 0;
+}
+
+/* Filler for spacing */
+.swing-filler {
+  min-width: 1px;
+  min-height: 1px;
+}
+
+/* Unknown component fallback */
+.swing-unknown {
+  background: rgba(255, 100, 100, 0.1);
+  border: 1px dashed #f88;
+  padding: 4px 8px;
+  color: #f88;
+  font-size: 11px;
+  border-radius: 4px;
+}

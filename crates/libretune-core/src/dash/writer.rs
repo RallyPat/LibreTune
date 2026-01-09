@@ -1,6 +1,6 @@
-//! TunerStudio dashboard XML writer.
+//! TS dashboard XML writer.
 //!
-//! Writes .dash and .gauge files in TunerStudio's XML format (version 3.0).
+//! Writes .dash and .gauge files in TS XML format (version 3.0).
 
 use super::types::*;
 use quick_xml::events::{BytesDecl, BytesEnd, BytesStart, BytesText, Event};

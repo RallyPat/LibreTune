@@ -1,6 +1,6 @@
-//! TunerStudio dashboard XML parser.
+//! TS dashboard XML parser.
 //!
-//! Parses .dash and .gauge files in TunerStudio's XML format.
+//! Parses .dash and .gauge files in TS XML format.
 
 use super::types::*;
 use quick_xml::events::{BytesStart, Event};

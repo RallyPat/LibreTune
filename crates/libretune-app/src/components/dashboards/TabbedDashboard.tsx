@@ -169,7 +169,7 @@ export default function TabbedDashboard({ onClose: _onClose, realtimeData = {}, 
     return GaugeType.DigitalReadout;
   };
 
-  // Default layout positions for 8 gauges (4x2 grid matching TunerStudio FrontPage)
+  // Default layout positions for 8 gauges (4x2 grid matching TS FrontPage)
   const DEFAULT_GAUGE_POSITIONS = [
     // Row 1: gauge1-4
     { x: 0.01, y: 0.01, width: 0.24, height: 0.48 },  // gauge1 - top-left
@@ -269,20 +269,20 @@ export default function TabbedDashboard({ onClose: _onClose, realtimeData = {}, 
           // Ignore indicator loading errors
         }
 
-        // FOR TESTING: Load TunerStudio Speeduino_LED.dash directly
+        // FOR TESTING: Load TS Speeduino_LED.dash directly
         try {
-          console.log('[TabbedDashboard] Loading TunerStudio Speeduino_LED.dash for testing...');
+          console.log('[TabbedDashboard] Loading TS Speeduino_LED.dash for testing...');
           const layout = await invoke<DashboardLayout>('load_tunerstudio_dash', {
             path: '/home/pat/codingprojects/libretune/reference/TunerStudioMS/Dash/Speeduino_LED.dash'
           });
-          console.log('[TabbedDashboard] Loaded TunerStudio dash with', layout.gauges?.length, 'gauges');
+          console.log('[TabbedDashboard] Loaded TS dash with', layout.gauges?.length, 'gauges');
           if (layout && layout.gauges && layout.gauges.length > 0) {
             setDashboards([layout]);
             setCurrentDashboard(0);
             return;
           }
         } catch (e) {
-          console.error('Failed to load TunerStudio dash:', e);
+          console.error('Failed to load TS dash:', e);
         }
 
         // Fallback to minimal dashboard
@@ -365,18 +365,18 @@ export default function TabbedDashboard({ onClose: _onClose, realtimeData = {}, 
     }
   };
 
-  // Load a TunerStudio .dash file directly (for testing)
-  const handleLoadTunerStudioDash = async () => {
+  // Load a TS .dash file directly (for testing)
+  const handleLoadTsDash = async () => {
     try {
       const layout = await invoke<DashboardLayout>('load_tunerstudio_dash', {
         path: '/home/pat/codingprojects/libretune/reference/TunerStudioMS/Dash/Speeduino_LED.dash'
       });
-      console.log('[TabbedDashboard] Loaded TunerStudio dash:', JSON.stringify(layout, null, 2));
+      console.log('[TabbedDashboard] Loaded TS dash:', JSON.stringify(layout, null, 2));
       setDashboards([layout]);
       setCurrentDashboard(0);
     } catch (e) {
-      console.error('Failed to load TunerStudio dash:', e);
-      alert(`Failed to load TunerStudio dash: ${e}`);
+      console.error('Failed to load TS dash:', e);
+      alert(`Failed to load TS dash: ${e}`);
     }
   };
 
@@ -564,8 +564,8 @@ export default function TabbedDashboard({ onClose: _onClose, realtimeData = {}, 
           </button>
           <button 
             className="action-btn"
-            onClick={handleLoadTunerStudioDash}
-            title="Load TunerStudio Speeduino_LED.dash for testing"
+            onClick={handleLoadTsDash}
+            title="Load TS Speeduino_LED.dash for testing"
           >
             <FileDown size={16} />
             <span>Load TS Dash</span>

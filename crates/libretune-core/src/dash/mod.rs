@@ -1,6 +1,6 @@
-//! TunerStudio-compatible dashboard and gauge file format support.
+//! TS-compatible dashboard and gauge file format support.
 //!
-//! This module implements parsing and writing of TunerStudio's .dash and .gauge
+//! This module implements parsing and writing of TS .dash and .gauge
 //! XML file formats, enabling full compatibility with existing dashboard files.
 
 mod parser;

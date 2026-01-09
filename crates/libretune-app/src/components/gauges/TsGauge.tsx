@@ -1,7 +1,7 @@
 /**
- * TunerStudio Gauge Renderer
+ * TS Gauge Renderer
  * 
- * Renders gauges based on TunerStudio's GaugePainter types.
+ * Renders gauges based on TS GaugePainter types.
  * Uses canvas for all gauge rendering.
  */
 
@@ -249,7 +249,7 @@ export default function TsGauge({ config, value, embeddedImages }: TsGaugeProps)
     ctx.fillStyle = tsColorToRgba(config.back_color);
     ctx.fill();
 
-    // Calculate angles (TunerStudio uses degrees, canvas uses radians)
+    // Calculate angles (TS uses degrees, canvas uses radians)
     // Use defaults if values are 0 or undefined (typical analog gauge: 225° start, 270° sweep)
     const startDeg = config.start_angle || 225;
     const sweepDeg = config.sweep_angle || 270;

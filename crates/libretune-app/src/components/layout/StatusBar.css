@@ -1,4 +1,4 @@
-/* TunerStudio-style Status Bar */
+/* TS-style Status Bar */
 .statusbar {
   grid-area: statusbar;
   display: flex;
