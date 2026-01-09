@@ -111,6 +111,10 @@ interface BackendCurveData {
   y_bins: number[];
   x_label: string;
   y_label: string;
+  x_axis?: [number, number, number] | null;
+  y_axis?: [number, number, number] | null;
+  x_output_channel?: string | null;
+  gauge?: string | null;
 }
 
 interface BackendMenu {
@@ -1110,9 +1114,14 @@ function AppContent() {
         
         console.log(`[openTarget] Loaded table '${name}': ${data.z_values.length} values, ${data.x_bins.length}x${data.y_bins.length} size`);
 
+        // Format title as "Menu Label (ini_name)" when menu label is available
+        const displayTitle = title && title !== name
+          ? `${title} (${name})`
+          : data.title || name;
+
         const newTab: Tab = {
           id: name,
-          title: title || data.title || name,
+          title: displayTitle,
           icon: "table",
         };
         setTabs([...tabs, newTab]);
@@ -1141,9 +1150,14 @@ function AppContent() {
         
         console.log(`[openTarget] Loaded curve '${name}': ${data.x_bins.length} points`);
 
+        // Format title as "Menu Label (ini_name)" when menu label is available
+        const displayTitle = title && title !== name
+          ? `${title} (${name})`
+          : data.title || name;
+
         const newTab: Tab = {
           id: name,
-          title: title || data.title || name,
+          title: displayTitle,
           icon: "curve",
         };
         setTabs([...tabs, newTab]);
@@ -1161,9 +1175,15 @@ function AppContent() {
         console.log("[openTarget] Trying as dialog:", name);
         const def = await invoke<RendererDialogDef>("get_dialog_definition", { name });
         console.log("[openTarget] Dialog found:", def);
+        
+        // Format title as "Menu Label (ini_name)" when menu label is available
+        const displayTitle = title && title !== name
+          ? `${title} (${name})`
+          : def.title || name;
+
         const newTab: Tab = {
           id: name,
-          title: title || def.title || name,
+          title: displayTitle,
           icon: "dialog",
         };
         setTabs([...tabs, newTab]);
@@ -1180,9 +1200,15 @@ function AppContent() {
         console.log("[openTarget] Trying as portEditor:", name);
         const portEditor = await invoke<{ name: string; label: string; enable_condition?: string }>("get_port_editor", { name });
         console.log("[openTarget] PortEditor found:", portEditor);
+        
+        // Format title as "Menu Label (ini_name)" when menu label is available
+        const displayTitle = title && title !== name
+          ? `${title} (${name})`
+          : portEditor.label || name;
+
         const newTab: Tab = {
           id: name,
-          title: title || portEditor.label || name,
+          title: displayTitle,
           icon: "dialog",
         };
         setTabs([...tabs, newTab]);
@@ -1759,12 +1785,15 @@ function AppContent() {
           />
         );
       case "dialog":
+        // Find the active tab to get its formatted title
+        const activeTab = tabs.find(t => t.id === activeTabId);
         return (
           <DialogRenderer
             definition={content.data as RendererDialogDef}
             onBack={() => activeTabId && handleTabClose(activeTabId)}
             openTable={(tableName) => openTarget(tableName)}
             context={constantValues}
+            displayTitle={activeTab?.title}
             onOptimisticUpdate={(name, value) => {
               // Immediately update the context so sibling fields re-evaluate their conditions
               setConstantValues(prev => ({ ...prev, [name]: value }));

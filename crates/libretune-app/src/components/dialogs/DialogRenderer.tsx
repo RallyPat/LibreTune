@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { ArrowLeft, Activity, Grid3X3 } from 'lucide-react';
+import CurveEditor, { SimpleGaugeInfo } from '../curves/CurveEditor';
 import './DialogRenderer.css';
 
 interface DialogComponent {
@@ -54,46 +55,10 @@ interface CurveData {
   y_bins: number[];
   x_label: string;
   y_label: string;
-}
-
-// Simple inline curve chart renderer using SVG
-function CurveChart({ data }: { data: CurveData }) {
-  const width = 300;
-  const height = 200;
-  const padding = 40;
-  
-  const xMin = Math.min(...data.x_bins);
-  const xMax = Math.max(...data.x_bins);
-  const yMin = Math.min(...data.y_bins);
-  const yMax = Math.max(...data.y_bins);
-  
-  const xRange = xMax - xMin || 1;
-  const yRange = yMax - yMin || 1;
-  
-  const scaleX = (x: number) => padding + ((x - xMin) / xRange) * (width - 2 * padding);
-  const scaleY = (y: number) => height - padding - ((y - yMin) / yRange) * (height - 2 * padding);
-  
-  const points = data.x_bins.map((x, i) => `${scaleX(x)},${scaleY(data.y_bins[i])}`).join(' ');
-  
-  return (
-    <svg width={width} height={height} className="curve-svg">
-      {/* Grid lines */}
-      <line x1={padding} y1={height - padding} x2={width - padding} y2={height - padding} stroke="#444" />
-      <line x1={padding} y1={height - padding} x2={padding} y2={padding} stroke="#444" />
-      
-      {/* Axis labels */}
-      <text x={width / 2} y={height - 5} textAnchor="middle" fill="#aaa" fontSize="10">{data.x_label}</text>
-      <text x={10} y={height / 2} textAnchor="middle" fill="#aaa" fontSize="10" transform={`rotate(-90, 10, ${height / 2})`}>{data.y_label}</text>
-      
-      {/* Data line */}
-      <polyline points={points} fill="none" stroke="#4a9eff" strokeWidth="2" />
-      
-      {/* Data points */}
-      {data.x_bins.map((x, i) => (
-        <circle key={i} cx={scaleX(x)} cy={scaleY(data.y_bins[i])} r="4" fill="#4a9eff" />
-      ))}
-    </svg>
-  );
+  x_axis?: [number, number, number] | null;
+  y_axis?: [number, number, number] | null;
+  x_output_channel?: string | null;
+  gauge?: string | null;
 }
 
 function DialogField({ 
@@ -596,6 +561,7 @@ function RecursivePanel({
   const [indicatorPanel, setIndicatorPanel] = useState<IndicatorPanel | null>(null);
   const [tableInfo, setTableInfo] = useState<TableInfo | null>(null);
   const [curveData, setCurveData] = useState<CurveData | null>(null);
+  const [gaugeConfig, setGaugeConfig] = useState<SimpleGaugeInfo | null>(null);
   const [portEditor, setPortEditor] = useState<PortEditorConfig | null>(null);
   const [panelType, setPanelType] = useState<'loading' | 'dialog' | 'indicatorPanel' | 'table' | 'curve' | 'portEditor' | 'unknown'>('loading');
 
@@ -627,6 +593,12 @@ function RecursivePanel({
                   .then((data) => {
                     setCurveData(data);
                     setPanelType('curve');
+                    // Fetch gauge config if curve has a gauge reference
+                    if (data.gauge) {
+                      invoke<SimpleGaugeInfo>('get_gauge_config', { gaugeName: data.gauge })
+                        .then(setGaugeConfig)
+                        .catch((gaugeErr) => console.debug(`Could not load gauge ${data.gauge}:`, gaugeErr));
+                    }
                   })
                   .catch((err2) => {
                     console.debug(`Panel '${name}' is not a curve:`, err2);
@@ -664,12 +636,16 @@ function RecursivePanel({
   // Render as curve editor if it's a curve
   if (panelType === 'curve' && curveData) {
     return (
-      <div className="embedded-curve">
-        <div className="curve-title">{curveData.title || name}</div>
-        <div className="curve-chart">
-          <CurveChart data={curveData} />
-        </div>
-      </div>
+      <CurveEditor
+        data={curveData}
+        embedded={true}
+        realtimeData={context}
+        simpleGaugeInfo={gaugeConfig}
+        onValuesChange={(yBins) => {
+          console.log('Curve values changed:', yBins);
+          onUpdate?.();
+        }}
+      />
     );
   }
 
@@ -930,9 +906,11 @@ export interface DialogRendererProps {
   context: Record<string, number>;
   onUpdate?: () => void;
   onOptimisticUpdate?: (name: string, value: number) => void;
+  /** Override title for display (formatted as "Menu Label (ini_name)") */
+  displayTitle?: string;
 }
 
-export default function DialogRenderer({ definition, onBack, openTable, context, onUpdate, onOptimisticUpdate }: DialogRendererProps) {
+export default function DialogRenderer({ definition, onBack, openTable, context, onUpdate, onOptimisticUpdate, displayTitle }: DialogRendererProps) {
   // The context is already dynamic - it contains the current values of all constants
   // Conditions like {cylindersCount > 5} will automatically evaluate based on the current cylindersCount value
   // This works for any cylinder count: 1, 2, 3, 4, 5, 6, 7, 8, 10, 12, etc.
@@ -944,7 +922,7 @@ export default function DialogRenderer({ definition, onBack, openTable, context,
           <ArrowLeft size={20} />
         </button>
         <h2 className="content-title" style={{ margin: 0 }}>
-          {definition.title}
+          {displayTitle || definition.title}
         </h2>
       </div>
 

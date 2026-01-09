@@ -190,6 +190,9 @@ pub struct CurveDefinition {
 
     /// Help text
     pub help: Option<String>,
+
+    /// Gauge name for live display (from gauge = GaugeName in INI)
+    pub gauge: Option<String>,
 }
 
 impl CurveDefinition {
@@ -211,6 +214,7 @@ impl CurveDefinition {
             size: None,
             page: 0,
             help: None,
+            gauge: None,
         }
     }
 }

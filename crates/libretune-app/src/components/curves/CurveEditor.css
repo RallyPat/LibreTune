@@ -1,0 +1,330 @@
+/**
+ * CurveEditor Styles
+ * Supports both embedded (dialog) and standalone (tab) modes
+ */
+
+.curve-editor {
+  display: flex;
+  flex-direction: column;
+  background: rgba(30, 30, 35, 0.95);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+/* Standalone mode (tab view) */
+.curve-editor.standalone {
+  height: 100%;
+  min-height: 500px;
+}
+
+/* Embedded mode (in dialog) */
+.curve-editor.embedded {
+  max-width: 100%;
+  background: transparent;
+}
+
+/* Header for standalone mode */
+.curve-editor-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  background: rgba(0, 0, 0, 0.3);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.curve-editor-header .back-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  background: rgba(255, 255, 255, 0.1);
+  border: none;
+  border-radius: 6px;
+  color: #ccc;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.curve-editor-header .back-button:hover {
+  background: rgba(255, 255, 255, 0.2);
+  color: #fff;
+}
+
+.curve-editor-header .curve-title {
+  flex: 1;
+  margin: 0;
+  font-size: 16px;
+  font-weight: 500;
+  color: #fff;
+}
+
+.curve-toolbar {
+  display: flex;
+  gap: 8px;
+}
+
+.toolbar-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  background: rgba(255, 255, 255, 0.1);
+  border: none;
+  border-radius: 6px;
+  color: #ccc;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.toolbar-btn:hover {
+  background: rgba(74, 158, 255, 0.3);
+  color: #4a9eff;
+}
+
+.toolbar-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.toolbar-btn:disabled:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #ccc;
+}
+
+.toolbar-separator {
+  width: 1px;
+  height: 20px;
+  background: rgba(255, 255, 255, 0.2);
+  margin: 0 4px;
+  align-self: center;
+}
+
+/* Embedded title */
+.curve-embedded-title {
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #ddd;
+  background: rgba(0, 0, 0, 0.2);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+/* Main content area */
+.curve-content {
+  display: flex;
+  flex: 1;
+  padding: 12px;
+  gap: 16px;
+}
+
+.curve-editor.embedded .curve-content {
+  flex-direction: column;
+  padding: 8px;
+  gap: 12px;
+}
+
+/* Chart container */
+.curve-chart-container {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.curve-svg {
+  display: block;
+  background: #1a1a1a;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* Bottom section for embedded mode (gauge + table side by side) */
+.curve-bottom-section {
+  display: flex;
+  flex-direction: row;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+/* Gauge container in bottom section */
+.curve-gauge-container {
+  flex-shrink: 0;
+  width: 200px;
+  height: 200px;
+}
+
+/* Data table */
+.curve-data-table {
+  flex: 1;
+  overflow-y: auto;
+  max-height: 350px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(0, 0, 0, 0.3);
+}
+
+.curve-editor.embedded .curve-data-table {
+  max-height: 150px;
+  min-width: 0;
+  flex: 1;
+}
+
+.curve-bottom-section .curve-data-table {
+  max-height: 200px;
+}
+
+.curve-data-table table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+}
+
+.curve-data-table thead {
+  position: sticky;
+  top: 0;
+  background: rgba(40, 40, 45, 0.98);
+  z-index: 1;
+}
+
+.curve-data-table th {
+  padding: 6px 8px;
+  text-align: center;
+  font-weight: 500;
+  color: #aaa;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.curve-data-table td {
+  padding: 4px 8px;
+  text-align: center;
+  color: #ddd;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.curve-data-table tr {
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.curve-data-table tbody tr:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.curve-data-table tr.selected {
+  background: rgba(74, 158, 255, 0.2);
+}
+
+.curve-data-table tr.selected td {
+  color: #fff;
+}
+
+.curve-data-table .x-cell {
+  color: #888;
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.curve-data-table .y-cell {
+  color: #f5d742;
+  font-weight: 500;
+}
+
+.curve-data-table .y-cell input {
+  width: 100%;
+  padding: 2px 4px;
+  background: rgba(0, 0, 0, 0.5);
+  border: 1px solid #4a9eff;
+  border-radius: 3px;
+  color: #fff;
+  font-family: inherit;
+  font-size: inherit;
+  text-align: center;
+  outline: none;
+}
+
+/* Scrollbar styling */
+.curve-data-table::-webkit-scrollbar {
+  width: 8px;
+}
+
+.curve-data-table::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 4px;
+}
+
+.curve-data-table::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+}
+
+.curve-data-table::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+/* Context Menu Styles */
+.curve-context-menu {
+  position: fixed;
+  z-index: 1000;
+  min-width: 180px;
+  background: rgba(30, 30, 35, 0.98);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(16px);
+  padding: 6px 0;
+  animation: contextMenuFadeIn 0.12s ease-out;
+}
+
+@keyframes contextMenuFadeIn {
+  from {
+    opacity: 0;
+    transform: scale(0.95) translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.curve-context-menu .context-menu-section {
+  padding: 4px 0;
+}
+
+.curve-context-menu .context-menu-header {
+  padding: 4px 14px 6px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.curve-context-menu .context-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.9);
+  cursor: pointer;
+  transition: background 0.1s ease;
+}
+
+.curve-context-menu .context-menu-item:hover {
+  background: rgba(74, 158, 255, 0.2);
+}
+
+.curve-context-menu .context-menu-item input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  accent-color: #4a9eff;
+  margin: 0;
+  pointer-events: none;
+}
+
+.curve-context-menu .context-menu-divider {
+  height: 1px;
+  margin: 4px 10px;
+  background: rgba(255, 255, 255, 0.1);
+}

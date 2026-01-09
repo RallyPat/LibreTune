@@ -246,6 +246,7 @@ export default function PopOutWindow() {
               emit('action:openTable', { tableName }).catch(console.error);
             }}
             context={constantValues}
+            displayTitle={popOutData.title}
             onUpdate={async () => {
               // Refresh constants
               const values = await invoke<Record<string, number>>('get_all_constant_values');

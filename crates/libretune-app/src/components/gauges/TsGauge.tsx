@@ -257,14 +257,18 @@ export default function TsGauge({ config, value, embeddedImages }: TsGaugeProps)
     const sweepAngle = sweepDeg * Math.PI / 180;
     const endAngle = startAngle + sweepAngle;
 
-    // Draw tick marks
-    const tickRadius = radius - 15;
+    // Draw tick marks - use proportional offsets for better scaling
+    const tickRadius = radius - (radius * 0.15);
     const majorTicks = config.major_ticks > 0 ? config.major_ticks : (config.max - config.min) / 10;
     const numMajorTicks = Math.floor((config.max - config.min) / majorTicks) + 1;
 
+    // Calculate if we need to cull labels for small gauges
+    const SMALL_GAUGE_THRESHOLD = 80;
+    const cullLabels = radius < SMALL_GAUGE_THRESHOLD;
+
     ctx.strokeStyle = tsColorToRgba(config.trim_color);
     ctx.fillStyle = tsColorToRgba(config.font_color);
-    ctx.font = `${Math.max(8, radius * 0.12)}px sans-serif`;
+    ctx.font = `${Math.max(7, radius * 0.11)}px sans-serif`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
 
@@ -273,8 +277,8 @@ export default function TsGauge({ config, value, embeddedImages }: TsGaugeProps)
       const tickPercent = (tickValue - config.min) / (config.max - config.min);
       const tickAngle = startAngle + tickPercent * sweepAngle;
 
-      // Major tick line
-      const innerRadius = tickRadius - 10;
+      // Major tick line - proportional inner radius
+      const innerRadius = tickRadius - (radius * 0.10);
       ctx.beginPath();
       ctx.moveTo(
         centerX + Math.cos(tickAngle) * innerRadius,
@@ -287,13 +291,17 @@ export default function TsGauge({ config, value, embeddedImages }: TsGaugeProps)
       ctx.lineWidth = 2;
       ctx.stroke();
 
-      // Tick label
-      const labelRadius = tickRadius - 20;
-      ctx.fillText(
-        tickValue.toFixed(config.label_digits),
-        centerX + Math.cos(tickAngle) * labelRadius,
-        centerY + Math.sin(tickAngle) * labelRadius
-      );
+      // Tick label - proportional offset, with culling for small gauges
+      // Only draw first and last labels on small gauges
+      const shouldDrawLabel = !cullLabels || (i === 0 || i === numMajorTicks - 1);
+      if (shouldDrawLabel) {
+        const labelRadius = tickRadius - (radius * 0.18);
+        ctx.fillText(
+          tickValue.toFixed(config.label_digits),
+          centerX + Math.cos(tickAngle) * labelRadius,
+          centerY + Math.sin(tickAngle) * labelRadius
+        );
+      }
     }
 
     // Draw warning/critical zones as arcs

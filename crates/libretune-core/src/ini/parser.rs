@@ -1340,6 +1340,10 @@ fn parse_curve_editor_entry(
                 "topichelp" => {
                     curve.help = Some(value.trim_matches('"').to_string());
                 }
+                "gauge" => {
+                    // Format: gauge = GaugeName
+                    curve.gauge = Some(value.trim().to_string());
+                }
                 _ => {}
             }
         }
