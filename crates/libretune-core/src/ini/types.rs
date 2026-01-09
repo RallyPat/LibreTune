@@ -39,20 +39,36 @@ pub enum Endianness {
 
 impl DataType {
     /// Parse a data type from INI format string
+    /// Returns the data type and optionally an endianness override
+    /// Per-field big-endian types (BU08, BS16, etc.) override global endianness
     pub fn from_ini_str(s: &str) -> Option<Self> {
         match s.trim().to_uppercase().as_str() {
-            "U08" | "UINT8" | "BYTE" => Some(DataType::U08),
-            "S08" | "INT8" | "SBYTE" => Some(DataType::S08),
-            "U16" | "UINT16" | "WORD" => Some(DataType::U16),
-            "S16" | "INT16" | "SWORD" => Some(DataType::S16),
-            "U32" | "UINT32" | "DWORD" => Some(DataType::U32),
-            "S32" | "INT32" | "SDWORD" => Some(DataType::S32),
-            "F32" | "FLOAT" => Some(DataType::F32),
-            "F64" | "DOUBLE" => Some(DataType::F64),
+            "U08" | "UINT8" | "BYTE" | "BU08" => Some(DataType::U08),
+            "S08" | "INT8" | "SBYTE" | "BS08" => Some(DataType::S08),
+            "U16" | "UINT16" | "WORD" | "BU16" => Some(DataType::U16),
+            "S16" | "INT16" | "SWORD" | "BS16" => Some(DataType::S16),
+            "U32" | "UINT32" | "DWORD" | "BU32" => Some(DataType::U32),
+            "S32" | "INT32" | "SDWORD" | "BS32" => Some(DataType::S32),
+            "F32" | "FLOAT" | "BF32" => Some(DataType::F32),
+            "F64" | "DOUBLE" | "BF64" => Some(DataType::F64),
             "ASCII" | "STRING" => Some(DataType::String),
             "BITS" => Some(DataType::Bits),
             _ => None,
         }
+    }
+
+    /// Parse a data type and extract per-field endianness override
+    /// Types starting with 'B' (BU08, BS16, etc.) force big-endian byte order
+    /// Returns (DataType, Option<Endianness>) where the endianness is Some(Big) for B* types
+    pub fn from_ini_str_with_endianness(s: &str) -> Option<(Self, Option<Endianness>)> {
+        let s = s.trim().to_uppercase();
+        let override_endian = if s.starts_with('B') && s.len() > 1 && s.chars().nth(1).map_or(false, |c| c.is_ascii_uppercase()) {
+            // Types like BU08, BS16, BF32 force big-endian
+            Some(Endianness::Big)
+        } else {
+            None
+        };
+        Self::from_ini_str(&s).map(|dt| (dt, override_endian))
     }
 
     /// Get the size in bytes for this data type
@@ -929,4 +945,137 @@ pub struct KeyAction {
     /// Enable condition
     #[serde(skip_serializing_if = "Option::is_none")]
     pub enable_condition: Option<String>,
+}
+
+// ============================================================================
+// VeAnalyze / WueAnalyze / GammaE Section Types
+// ============================================================================
+
+/// Filter operator for VeAnalyze/WueAnalyze
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum FilterOperator {
+    /// Less than (<)
+    LessThan,
+    /// Greater than (>)
+    GreaterThan,
+    /// Equal to (=)
+    Equal,
+    /// Not equal (!=)
+    NotEqual,
+    /// Bitwise AND (&)
+    BitwiseAnd,
+    /// Bitwise OR (|)
+    BitwiseOr,
+}
+
+impl FilterOperator {
+    /// Parse a filter operator from INI string
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s.trim() {
+            "<" => Some(FilterOperator::LessThan),
+            ">" => Some(FilterOperator::GreaterThan),
+            "=" => Some(FilterOperator::Equal),
+            "!=" => Some(FilterOperator::NotEqual),
+            "&" => Some(FilterOperator::BitwiseAnd),
+            "|" => Some(FilterOperator::BitwiseOr),
+            _ => None,
+        }
+    }
+}
+
+/// VE/WUE/AFR analysis filter definition
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AnalysisFilter {
+    /// Filter identifier name
+    pub name: String,
+    /// Human-readable display name
+    pub display_name: String,
+    /// Output channel to filter on
+    pub channel: String,
+    /// Comparison operator
+    pub operator: FilterOperator,
+    /// Default threshold value
+    pub default_value: f64,
+    /// Whether the user can adjust this filter
+    pub user_adjustable: bool,
+}
+
+/// VE Analysis configuration (from [VeAnalyze] section)
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct VeAnalyzeConfig {
+    /// VE table to analyze/modify
+    pub ve_table_name: String,
+    /// Lambda/AFR target table name
+    pub target_table_name: String,
+    /// Lambda/AFR channel name for live readings
+    pub lambda_channel: String,
+    /// EGO correction channel name
+    pub ego_correction_channel: String,
+    /// Active condition expression (e.g., "{ 1 }" = always active)
+    pub active_condition: String,
+    /// Lambda target tables (primary and optional custom)
+    pub lambda_target_tables: Vec<String>,
+    /// Analysis filters
+    pub filters: Vec<AnalysisFilter>,
+    /// Options (e.g., "disableLiveUpdates", "burnOnSend")
+    pub options: Vec<String>,
+}
+
+/// WUE (Warm-Up Enrichment) Analysis configuration (from [WueAnalyze] section)
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct WueAnalyzeConfig {
+    /// WUE curve name to analyze/modify
+    pub wue_curve_name: String,
+    /// AFR temperature compensation curve
+    pub afr_temp_comp_curve: String,
+    /// Lambda/AFR target table name
+    pub target_table_name: String,
+    /// Lambda/AFR channel name
+    pub lambda_channel: String,
+    /// Coolant temperature channel
+    pub coolant_channel: String,
+    /// WUE enrichment channel
+    pub wue_channel: String,
+    /// EGO correction channel
+    pub ego_correction_channel: String,
+    /// Lambda target tables
+    pub lambda_target_tables: Vec<String>,
+    /// Percentage offset (typically 0 or 100)
+    pub wue_percent_offset: f64,
+    /// Analysis filters
+    pub filters: Vec<AnalysisFilter>,
+    /// Options
+    pub options: Vec<String>,
+}
+
+/// Gamma Enrichment Analysis configuration (from [GammaE] section)
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct GammaEConfig {
+    /// Gamma table name
+    pub gamma_table_name: String,
+    /// Lambda/AFR channel
+    pub lambda_channel: String,
+    /// Target table name
+    pub target_table_name: String,
+    /// Analysis filters
+    pub filters: Vec<AnalysisFilter>,
+    /// Options
+    pub options: Vec<String>,
+}
+
+/// maintainConstantValue definition - auto-updates constant based on expression
+/// Format: maintainConstantValue = constantName, { expression }
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MaintainConstantValue {
+    /// Name of constant to maintain
+    pub constant_name: String,
+    /// Expression to evaluate for the new value
+    pub expression: String,
+}
+
+/// requiresPowerCycle definition - marks constants that need ECU restart
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RequiresPowerCycle {
+    /// Name of constant that requires power cycle
+    pub constant_name: String,
 }

@@ -94,7 +94,15 @@ fn find_bin_index(value: f64, bins: &[f64]) -> Option<usize> {
         .map(|(i, _)| i)
 }
 
-/// Smooth table values using weighted average
+/// Smooth table values using 2D Gaussian weighted average
+///
+/// Each selected cell is replaced with a weighted average of itself and its
+/// 8 neighbors (3×3 kernel). Weights are calculated using a 2D Gaussian:
+/// `weight = exp(-distance² / (2 × σ²))` where σ = factor.
+///
+/// - `factor <= 0`: No smoothing, returns original values
+/// - `factor = 1.0`: Standard smoothing (center weighted ~1.0, neighbors ~0.6-0.37)
+/// - Higher factor: More aggressive smoothing (neighbors weighted closer to center)
 pub fn smooth_table(
     z_values: &[Vec<f64>],
     selected_cells: Vec<TableCell>,
@@ -105,69 +113,42 @@ pub fn smooth_table(
 
     let mut result = z_values.to_vec();
 
-    let weights = calculate_smoothing_weights(factor);
-    let weight_sum: f64 = weights.iter().sum();
+    // No smoothing if factor <= 0
+    if factor <= 0.0 {
+        return result;
+    }
 
-    for (y, x) in selected_cells.iter() {
-        let neighbors = get_neighbors(*y, *x, rows, cols);
-        let sum: f64 = neighbors
-            .iter()
-            .enumerate()
-            .map(|(i, (ny, nx))| {
-                if let Some(val) = get_cell_value(&mut result, *ny, *nx) {
-                    val * weights[i]
-                } else {
-                    0.0f64
+    let sigma = factor;
+    let two_sigma_sq = 2.0 * sigma * sigma;
+
+    for &(y, x) in selected_cells.iter() {
+        let mut sum = 0.0;
+        let mut weight_sum = 0.0;
+
+        // Iterate over 3×3 neighborhood including center
+        for dy in -1i32..=1i32 {
+            for dx in -1i32..=1i32 {
+                let ny = y as i32 + dy;
+                let nx = x as i32 + dx;
+
+                // Bounds check
+                if ny >= 0 && ny < rows as i32 && nx >= 0 && nx < cols as i32 {
+                    let val = z_values[ny as usize][nx as usize];
+                    // 2D Gaussian weight based on distance from center
+                    let dist_sq = (dy * dy + dx * dx) as f64;
+                    let weight = (-dist_sq / two_sigma_sq).exp();
+                    sum += val * weight;
+                    weight_sum += weight;
                 }
-            })
-            .sum();
+            }
+        }
 
-        if weight_sum > 0.0f64 {
-            result[*y][*x] = sum / weight_sum;
+        if weight_sum > 0.0 {
+            result[y][x] = sum / weight_sum;
         }
     }
 
     result
-}
-
-/// Calculate smoothing weights based on factor
-fn calculate_smoothing_weights(factor: f64) -> Vec<f64> {
-    let kernel_size = (factor * 2.0f64) as usize + 1;
-    let sigma = factor;
-    let mut weights = Vec::with_capacity(kernel_size);
-
-    let center = kernel_size / 2;
-    let two_sigma_sq = 2.0f64 * sigma * sigma;
-
-    for i in 0..kernel_size {
-        let x = i as f64 - center as f64;
-        let weight = (-x * x / two_sigma_sq).exp();
-        weights.push(weight);
-    }
-
-    weights
-}
-
-/// Get neighboring cell coordinates
-fn get_neighbors(y: usize, x: usize, rows: usize, cols: usize) -> Vec<(usize, usize)> {
-    let mut neighbors = Vec::new();
-
-    for dy in -1i32..=1i32 {
-        for dx in -1i32..=1i32 {
-            if dy == 0 && dx == 0 {
-                continue;
-            }
-
-            let ny = (y as i32 + dy) as usize;
-            let nx = (x as i32 + dx) as usize;
-
-            if ny < rows && nx < cols {
-                neighbors.push((ny, nx));
-            }
-        }
-    }
-
-    neighbors
 }
 
 /// Get a cell value safely

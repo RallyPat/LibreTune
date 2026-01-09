@@ -3,7 +3,7 @@
 //! Parses the [Constants] section which defines editable ECU parameters.
 
 use super::parser::split_ini_line;
-use super::types::{DataType, Shape};
+use super::types::{DataType, Endianness, Shape};
 use serde::{Deserialize, Serialize};
 
 /// A constant/parameter definition from the INI file
@@ -23,6 +23,11 @@ pub struct Constant {
 
     /// Data type
     pub data_type: DataType,
+
+    /// Per-field endianness override (from BU08, BS16, etc. types)
+    /// If None, use global ECU endianness
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub endianness_override: Option<Endianness>,
 
     /// Shape (scalar, 1D, 2D)
     pub shape: Shape,
@@ -77,6 +82,7 @@ impl Constant {
             page,
             offset,
             data_type,
+            endianness_override: None,
             shape: Shape::Scalar,
             bit_position: None,
             bit_size: None,
@@ -128,6 +134,7 @@ impl Default for Constant {
             page: 0,
             offset: 0,
             data_type: DataType::U08,
+            endianness_override: None,
             shape: Shape::Scalar,
             bit_position: None,
             bit_size: None,
@@ -152,6 +159,7 @@ impl Default for Constant {
 /// Note: Uses split_ini_line to properly handle expressions with commas inside braces,
 /// such as: { bitStringValue(algorithmUnits , algorithm) }
 /// The last_offset parameter supports the "lastOffset" keyword which means "use running offset counter"
+/// Supports per-field big-endian types (BU08, BS16, etc.) that override global endianness.
 pub fn parse_constant_line(
     name: &str,
     value: &str,
@@ -166,11 +174,11 @@ pub fn parse_constant_line(
     }
 
     // parts[0] = class (scalar, array, bits)
-    // parts[1] = type (U08, S16, etc)
+    // parts[1] = type (U08, S16, BU16, etc. - B* types force big-endian)
     // parts[2] = offset (can be numeric or "lastOffset" keyword)
 
     let class = parts[0].to_lowercase();
-    let data_type = DataType::from_ini_str(parts[1])?;
+    let (data_type, endianness_override) = DataType::from_ini_str_with_endianness(parts[1])?;
 
     // Handle "lastOffset" keyword - use the running offset counter
     let offset: u16 = if parts[2].trim().to_lowercase() == "lastoffset" {
@@ -180,6 +188,7 @@ pub fn parse_constant_line(
     };
 
     let mut constant = Constant::new(name, page, offset, data_type);
+    constant.endianness_override = endianness_override;
 
     // Parse shape based on class and remaining parts
     if class == "bits" {

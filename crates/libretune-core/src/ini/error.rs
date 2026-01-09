@@ -25,4 +25,13 @@ pub enum IniError {
 
     #[error("Expression parse error: {0}")]
     ExpressionError(String),
+
+    #[error("Include error: circular reference detected for '{0}'")]
+    CircularInclude(String),
+
+    #[error("Include error: file not found '{0}'")]
+    IncludeNotFound(String),
+
+    #[error("Include error: maximum depth ({0}) exceeded")]
+    IncludeDepthExceeded(usize),
 }

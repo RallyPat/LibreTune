@@ -71,7 +71,6 @@ fn test_rebin_table_smaller() {
 }
 
 #[test]
-#[ignore = "smooth_table has a bug with weight indexing"]
 fn test_smooth_table() {
     let z_values = vec![
         vec![10.0, 10.0, 10.0],
@@ -85,11 +84,107 @@ fn test_smooth_table() {
     // The center cell should be smoothed toward neighbors
     assert!(
         smoothed[1][1] < 50.0,
-        "Smoothed value should be less than original outlier"
+        "Smoothed value {} should be less than original outlier 50.0",
+        smoothed[1][1]
     );
     assert!(
         smoothed[1][1] > 10.0,
-        "Smoothed value should be greater than neighbors"
+        "Smoothed value {} should be greater than neighbors 10.0",
+        smoothed[1][1]
+    );
+}
+
+#[test]
+fn test_smooth_table_corner_cell() {
+    // Test smoothing a corner cell (only 4 neighbors + center = 4 cells in bounds)
+    let z_values = vec![
+        vec![50.0, 10.0, 10.0],
+        vec![10.0, 10.0, 10.0],
+        vec![10.0, 10.0, 10.0],
+    ];
+
+    let selected_cells = vec![(0, 0)]; // Top-left corner
+    let smoothed = smooth_table(&z_values, selected_cells, 1.0);
+
+    // Corner should be smoothed toward its available neighbors
+    assert!(
+        smoothed[0][0] < 50.0,
+        "Corner value {} should be smoothed down from 50.0",
+        smoothed[0][0]
+    );
+    assert!(
+        smoothed[0][0] > 10.0,
+        "Corner value {} should still be above neighbor values 10.0",
+        smoothed[0][0]
+    );
+}
+
+#[test]
+fn test_smooth_table_edge_cell() {
+    // Test smoothing an edge cell (6 neighbors + center = 6 cells in bounds)
+    let z_values = vec![
+        vec![10.0, 50.0, 10.0],
+        vec![10.0, 10.0, 10.0],
+        vec![10.0, 10.0, 10.0],
+    ];
+
+    let selected_cells = vec![(0, 1)]; // Top edge, middle column
+    let smoothed = smooth_table(&z_values, selected_cells, 1.0);
+
+    // Edge cell should be smoothed toward its available neighbors
+    assert!(
+        smoothed[0][1] < 50.0,
+        "Edge value {} should be smoothed down from 50.0",
+        smoothed[0][1]
+    );
+    assert!(
+        smoothed[0][1] > 10.0,
+        "Edge value {} should still be above neighbor values 10.0",
+        smoothed[0][1]
+    );
+}
+
+#[test]
+fn test_smooth_table_zero_factor() {
+    // factor=0 should return unchanged values
+    let z_values = vec![
+        vec![10.0, 10.0, 10.0],
+        vec![10.0, 50.0, 10.0],
+        vec![10.0, 10.0, 10.0],
+    ];
+
+    let selected_cells = vec![(1, 1)];
+    let smoothed = smooth_table(&z_values, selected_cells, 0.0);
+
+    assert!(
+        (smoothed[1][1] - 50.0).abs() < 0.001,
+        "With factor=0, value should be unchanged. Got {}",
+        smoothed[1][1]
+    );
+}
+
+#[test]
+fn test_smooth_table_high_factor() {
+    // Higher factor = more aggressive smoothing (neighbors weighted more equally)
+    let z_values = vec![
+        vec![10.0, 10.0, 10.0],
+        vec![10.0, 50.0, 10.0],
+        vec![10.0, 10.0, 10.0],
+    ];
+
+    let selected_cells = vec![(1, 1)];
+    let smoothed_low = smooth_table(&z_values, selected_cells.clone(), 0.5);
+    let smoothed_high = smooth_table(&z_values, selected_cells, 2.0);
+
+    // Higher factor should result in more smoothing (closer to neighbor average)
+    // With 8 neighbors at 10.0 and center at 50.0:
+    // - Low factor: center weighted heavily, result closer to 50
+    // - High factor: neighbors weighted more, result closer to 10
+    assert!(
+        smoothed_high[1][1] < smoothed_low[1][1],
+        "Higher factor {} should smooth more than lower factor {}",
+        smoothed_high[1][1],
+        smoothed_low[1][1]
     );
 }
 

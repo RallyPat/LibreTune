@@ -2004,6 +2004,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serialport",
+ "tempfile",
  "thiserror 2.0.17",
  "tokio",
  "tokio-serial",

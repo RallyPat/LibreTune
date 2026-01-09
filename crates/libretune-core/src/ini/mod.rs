@@ -129,6 +129,22 @@ pub struct EcuDefinition {
 
     /// Key actions (keyboard shortcuts)
     pub key_actions: Vec<KeyAction>,
+
+    /// VE Analysis configuration (from [VeAnalyze] section)
+    pub ve_analyze: Option<VeAnalyzeConfig>,
+
+    /// WUE Analysis configuration (from [WueAnalyze] section)
+    pub wue_analyze: Option<WueAnalyzeConfig>,
+
+    /// Gamma Enrichment configuration (from [GammaE] section)
+    pub gamma_e: Option<GammaEConfig>,
+
+    /// maintainConstantValue entries (from [ConstantsExtensions] section)
+    /// These define expressions that auto-update constants
+    pub maintain_constant_values: Vec<MaintainConstantValue>,
+
+    /// Constants that require ECU power cycle after change
+    pub requires_power_cycle: Vec<String>,
 }
 
 impl EcuDefinition {
@@ -136,33 +152,18 @@ impl EcuDefinition {
     ///
     /// Handles various encodings (UTF-8, Windows-1252, Latin-1) by using
     /// lossy conversion for non-UTF-8 files.
+    ///
+    /// This method supports the `#include` directive, allowing INI files
+    /// to include other INI files with relative path resolution.
     pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self, IniError> {
-        let content = Self::read_ini_file(path.as_ref())?;
-        Self::from_str(&content)
-    }
-
-    /// Read an INI file, handling encoding issues
-    fn read_ini_file(path: &Path) -> Result<String, IniError> {
-        // Try UTF-8 first
-        match std::fs::read_to_string(path) {
-            Ok(content) => Ok(content),
-            Err(e) => {
-                // If it's a UTF-8 error, try reading as bytes and use lossy conversion
-                if e.kind() == std::io::ErrorKind::InvalidData {
-                    let bytes =
-                        std::fs::read(path).map_err(|e| IniError::IoError(e.to_string()))?;
-
-                    // Use lossy conversion - replaces invalid UTF-8 sequences
-                    // This handles Windows-1252, Latin-1, and other single-byte encodings
-                    Ok(String::from_utf8_lossy(&bytes).into_owned())
-                } else {
-                    Err(IniError::IoError(e.to_string()))
-                }
-            }
-        }
+        parser::parse_ini_from_path(path.as_ref())
     }
 
     /// Parse an ECU definition from a string
+    /// 
+    /// Note: This method does not support `#include` directives since there
+    /// is no file path context for resolving relative includes. Use `from_file`
+    /// if you need `#include` support.
     pub fn from_str(content: &str) -> Result<Self, IniError> {
         parser::parse_ini(content)
     }
@@ -237,6 +238,11 @@ impl Default for EcuDefinition {
             ftp_browsers: HashMap::new(),
             datalog_views: HashMap::new(),
             key_actions: Vec::new(),
+            ve_analyze: None,
+            wue_analyze: None,
+            gamma_e: None,
+            maintain_constant_values: Vec::new(),
+            requires_power_cycle: Vec::new(),
         }
     }
 }
