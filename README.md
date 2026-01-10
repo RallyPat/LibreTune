@@ -64,7 +64,7 @@ Modern, open-source ECU tuning software for EpicEFI, Speeduino, rusEFI, and othe
 ### Prerequisites
 
 - **Rust 1.75+** - Install via [rustup](https://rustup.rs)
-- **Node.js 18+** - For the Tauri frontend
+- **Node.js 20+** - For the Tauri frontend
 
 ### Build & Run
 
