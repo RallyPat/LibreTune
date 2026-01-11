@@ -457,6 +457,60 @@ impl TuneFile {
             }
         }
 
+        // Parse pageData elements FIRST (raw binary page data as base)
+        // Constants parsed later will override individual values in the pages
+        // Format: <pageData page="N">hexcontent</pageData>
+        let mut page_data_pos = 0;
+        while page_data_pos < content.len() {
+            if let Some(pd_start) = content[page_data_pos..].find("<pageData") {
+                let abs_pd_start = page_data_pos + pd_start;
+                let pd_remaining = &content[abs_pd_start..];
+
+                // Extract page="N" attribute
+                if let Some(page_attr_start) = pd_remaining.find("page=\"") {
+                    let page_num_content = &pd_remaining[page_attr_start + 6..];
+                    if let Some(page_num_end) = page_num_content.find('"') {
+                        if let Ok(page_num) = page_num_content[..page_num_end].parse::<u8>() {
+                            // Find the > after attributes
+                            if let Some(tag_end) = pd_remaining.find('>') {
+                                let after_tag = &pd_remaining[tag_end + 1..];
+                                // Find closing </pageData>
+                                if let Some(close_tag) = after_tag.find("</pageData>") {
+                                    let hex_content = after_tag[..close_tag].trim();
+                                    // Decode hex to bytes (2 chars per byte, lowercase)
+                                    let mut bytes = Vec::with_capacity(hex_content.len() / 2);
+                                    let mut chars = hex_content.chars().filter(|c| !c.is_whitespace());
+                                    loop {
+                                        let high = match chars.next() {
+                                            Some(c) => c,
+                                            None => break,
+                                        };
+                                        let low = match chars.next() {
+                                            Some(c) => c,
+                                            None => break,
+                                        };
+                                        if let (Some(h), Some(l)) =
+                                            (high.to_digit(16), low.to_digit(16))
+                                        {
+                                            bytes.push(((h << 4) | l) as u8);
+                                        }
+                                    }
+                                    if !bytes.is_empty() {
+                                        tune.pages.insert(page_num, bytes);
+                                    }
+                                    page_data_pos = abs_pd_start + tag_end + 1 + close_tag + 11;
+                                    continue;
+                                }
+                            }
+                        }
+                    }
+                }
+                page_data_pos = abs_pd_start + 1;
+            } else {
+                break;
+            }
+        }
+
         // Parse page structure and extract constants/pcVariables with their page numbers
         // MSQ format: <page number="0"> ... <constant name="...">...</constant> ... </page>
         let mut current_page: u8 = 0; // Default to page 0 if no page tags found
@@ -1105,6 +1159,57 @@ mod tests {
         match some_value.unwrap() {
             TuneValue::Scalar(v) => assert_eq!(*v, 42.5),
             other => panic!("someValue should be Scalar, got: {:?}", other),
+        }
+
+        // Cleanup
+        let _ = std::fs::remove_file(&temp_path);
+    }
+
+    #[test]
+    fn test_parse_msq_page_data() {
+        // Test that <pageData page="N">hexcontent</pageData> is parsed correctly
+        // pageData provides raw binary page data which constants can override
+        let msq_content = r#"<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE msq PUBLIC "-//rusEfi//DTD msq//EN" "msq.dtd">
+<msq version="1.0">
+  <bibliography author="LibreTune Test" tuneComment="Test tune" writeDate="2026-01-11"/>
+  <versionInfo firmwareInfo="rusEFI test"/>
+  <pageData page="0">0102030405060708</pageData>
+  <pageData page="1">aabbccdd</pageData>
+  <page number="0">
+    <constant name="testValue">100</constant>
+  </page>
+</msq>"#;
+
+        // Write to temp file
+        let temp_dir = std::env::temp_dir();
+        let temp_path = temp_dir.join("test_page_data.msq");
+        std::fs::write(&temp_path, msq_content).expect("Failed to write temp file");
+
+        // Parse the MSQ
+        let result = TuneFile::load(&temp_path);
+        assert!(result.is_ok(), "Failed to parse MSQ: {:?}", result.err());
+
+        let tune = result.unwrap();
+
+        // Check page 0 data was parsed
+        assert!(tune.pages.contains_key(&0), "Page 0 should be present");
+        let page0 = tune.pages.get(&0).unwrap();
+        assert_eq!(page0.len(), 8, "Page 0 should have 8 bytes");
+        assert_eq!(page0, &[0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08]);
+
+        // Check page 1 data was parsed (lowercase hex)
+        assert!(tune.pages.contains_key(&1), "Page 1 should be present");
+        let page1 = tune.pages.get(&1).unwrap();
+        assert_eq!(page1.len(), 4, "Page 1 should have 4 bytes");
+        assert_eq!(page1, &[0xaa, 0xbb, 0xcc, 0xdd]);
+
+        // Constant should still be parsed
+        let test_value = tune.get_constant("testValue");
+        assert!(test_value.is_some(), "testValue constant not found");
+        match test_value.unwrap() {
+            TuneValue::Scalar(v) => assert_eq!(*v, 100.0),
+            other => panic!("testValue should be Scalar, got: {:?}", other),
         }
 
         // Cleanup
