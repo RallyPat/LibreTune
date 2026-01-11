@@ -28,6 +28,7 @@ interface TableEditor3DNewProps {
   onCellSelect?: (x: number, y: number) => void;
   selectedCell?: { x: number; y: number } | null;
   liveCell?: { x: number; y: number } | null;
+  historyTrail?: Array<{ row: number; col: number; time: number }>;
   heatmapScheme?: HeatmapScheme | string[];
 }
 
@@ -152,53 +153,77 @@ function SurfaceMesh({
       
       {/* Show selected cell marker */}
       {selectedCell && (
-        <CellMarker 
+        <SelectedCellMarker 
           x_bins={x_bins}
           y_bins={y_bins}
           z_values={z_values}
           cellX={selectedCell.x}
           cellY={selectedCell.y}
-          color="#ffff00"
         />
       )}
       
-      {/* Show live cell marker */}
+      {/* Show live cell indicator (triangle + outline) */}
       {liveCell && (
-        <CellMarker 
+        <LiveCellIndicator 
           x_bins={x_bins}
           y_bins={y_bins}
           z_values={z_values}
           cellX={liveCell.x}
           cellY={liveCell.y}
-          color="#00ff00"
-          animated
         />
       )}
     </>
   );
 }
 
-/** Marker sphere for highlighting a cell */
-function CellMarker({ 
+/** Helper to get normalized position for a cell */
+function getNormalizedPosition(
+  x_bins: number[],
+  y_bins: number[],
+  z_values: number[][],
+  cellX: number,
+  cellY: number
+): THREE.Vector3 {
+  const xMin = Math.min(...x_bins);
+  const xMax = Math.max(...x_bins);
+  const yMin = Math.min(...y_bins);
+  const yMax = Math.max(...y_bins);
+  const zFlat = z_values.flat();
+  const zMin = Math.min(...zFlat);
+  const zMax = Math.max(...zFlat);
+  
+  const normalizeX = (v: number) => ((v - xMin) / (xMax - xMin || 1)) * 10;
+  const normalizeY = (v: number) => ((v - yMin) / (yMax - yMin || 1)) * 10;
+  const normalizeZ = (v: number) => ((v - zMin) / (zMax - zMin || 1)) * 5;
+  
+  const x = normalizeX(x_bins[cellX] ?? 0);
+  const y = normalizeY(y_bins[cellY] ?? 0);
+  const z = normalizeZ(z_values[cellY]?.[cellX] ?? 0);
+  
+  return new THREE.Vector3(x, z, y);
+}
+
+/** Live cell indicator with inverted triangle and cell outline */
+function LiveCellIndicator({ 
   x_bins, 
   y_bins, 
   z_values, 
   cellX, 
-  cellY, 
-  color,
-  animated = false
+  cellY
 }: {
   x_bins: number[];
   y_bins: number[];
   z_values: number[][];
   cellX: number;
   cellY: number;
-  color: string;
-  animated?: boolean;
 }) {
-  const meshRef = useRef<THREE.Mesh>(null);
+  const coneRef = useRef<THREE.Mesh>(null);
+  const outlineRef = useRef<THREE.LineSegments>(null);
   
-  const position = useMemo(() => {
+  const { position, cellOutlineGeometry } = useMemo(() => {
+    const pos = getNormalizedPosition(x_bins, y_bins, z_values, cellX, cellY);
+    
+    // Calculate cell bounds for outline
     const xMin = Math.min(...x_bins);
     const xMax = Math.max(...x_bins);
     const yMin = Math.min(...y_bins);
@@ -211,25 +236,267 @@ function CellMarker({
     const normalizeY = (v: number) => ((v - yMin) / (yMax - yMin || 1)) * 10;
     const normalizeZ = (v: number) => ((v - zMin) / (zMax - zMin || 1)) * 5;
     
-    const x = normalizeX(x_bins[cellX] ?? 0);
-    const y = normalizeY(y_bins[cellY] ?? 0);
-    const z = normalizeZ(z_values[cellY]?.[cellX] ?? 0);
+    // Get half cell size
+    const xStep = x_bins.length > 1 ? normalizeX(x_bins[1]) - normalizeX(x_bins[0]) : 1;
+    const yStep = y_bins.length > 1 ? normalizeY(y_bins[1]) - normalizeY(y_bins[0]) : 1;
+    const halfX = xStep / 2;
+    const halfY = yStep / 2;
     
-    return new THREE.Vector3(x, z + 0.3, y);
+    // Get z values at cell corners (or use center value for all corners if at edge)
+    const getZ = (xi: number, yi: number) => {
+      const clampedX = Math.max(0, Math.min(xi, x_bins.length - 1));
+      const clampedY = Math.max(0, Math.min(yi, y_bins.length - 1));
+      return normalizeZ(z_values[clampedY]?.[clampedX] ?? 0);
+    };
+    
+    // Create outline box on surface
+    const z = getZ(cellX, cellY);
+    const vertices = new Float32Array([
+      // Bottom square (slightly above surface)
+      pos.x - halfX, z + 0.05, pos.z - halfY,
+      pos.x + halfX, z + 0.05, pos.z - halfY,
+      pos.x + halfX, z + 0.05, pos.z - halfY,
+      pos.x + halfX, z + 0.05, pos.z + halfY,
+      pos.x + halfX, z + 0.05, pos.z + halfY,
+      pos.x - halfX, z + 0.05, pos.z + halfY,
+      pos.x - halfX, z + 0.05, pos.z + halfY,
+      pos.x - halfX, z + 0.05, pos.z - halfY,
+    ]);
+    
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
+    
+    return { position: pos, cellOutlineGeometry: geo };
   }, [x_bins, y_bins, z_values, cellX, cellY]);
 
+  // Pulsing animation
   useFrame((state) => {
-    if (animated && meshRef.current) {
-      const scale = 1 + Math.sin(state.clock.elapsedTime * 4) * 0.2;
-      meshRef.current.scale.setScalar(scale);
+    if (coneRef.current) {
+      const scale = 1 + Math.sin(state.clock.elapsedTime * 4) * 0.15;
+      coneRef.current.scale.setScalar(scale);
+    }
+    if (outlineRef.current && outlineRef.current.material instanceof THREE.LineBasicMaterial) {
+      const intensity = 0.7 + Math.sin(state.clock.elapsedTime * 4) * 0.3;
+      outlineRef.current.material.opacity = intensity;
     }
   });
 
   return (
-    <mesh ref={meshRef} position={position}>
-      <sphereGeometry args={[0.15, 16, 16]} />
-      <meshStandardMaterial color={color} emissive={color} emissiveIntensity={0.5} />
-    </mesh>
+    <>
+      {/* Cell outline on surface */}
+      <lineSegments ref={outlineRef} geometry={cellOutlineGeometry}>
+        <lineBasicMaterial color="#00ff00" linewidth={2} transparent opacity={1} />
+      </lineSegments>
+      
+      {/* Inverted triangle (cone) floating above */}
+      <mesh 
+        ref={coneRef} 
+        position={[position.x, position.y + 1.2, position.z]}
+        rotation={[Math.PI, 0, 0]} // Inverted (pointing down)
+      >
+        <coneGeometry args={[0.25, 0.5, 4]} />
+        <meshStandardMaterial 
+          color="#00ff00" 
+          emissive="#00ff00" 
+          emissiveIntensity={0.6}
+          transparent
+          opacity={0.9}
+        />
+      </mesh>
+    </>
+  );
+}
+
+/** Selected cell marker (simple outline) */
+function SelectedCellMarker({ 
+  x_bins, 
+  y_bins, 
+  z_values, 
+  cellX, 
+  cellY
+}: {
+  x_bins: number[];
+  y_bins: number[];
+  z_values: number[][];
+  cellX: number;
+  cellY: number;
+}) {
+  const outlineGeometry = useMemo(() => {
+    const pos = getNormalizedPosition(x_bins, y_bins, z_values, cellX, cellY);
+    
+    const xMin = Math.min(...x_bins);
+    const xMax = Math.max(...x_bins);
+    const yMin = Math.min(...y_bins);
+    const yMax = Math.max(...y_bins);
+    const zFlat = z_values.flat();
+    const zMin = Math.min(...zFlat);
+    const zMax = Math.max(...zFlat);
+    
+    const normalizeX = (v: number) => ((v - xMin) / (xMax - xMin || 1)) * 10;
+    const normalizeY = (v: number) => ((v - yMin) / (yMax - yMin || 1)) * 10;
+    const normalizeZ = (v: number) => ((v - zMin) / (zMax - zMin || 1)) * 5;
+    
+    const xStep = x_bins.length > 1 ? normalizeX(x_bins[1]) - normalizeX(x_bins[0]) : 1;
+    const yStep = y_bins.length > 1 ? normalizeY(y_bins[1]) - normalizeY(y_bins[0]) : 1;
+    const halfX = xStep / 2;
+    const halfY = yStep / 2;
+    const z = normalizeZ(z_values[cellY]?.[cellX] ?? 0);
+    
+    const vertices = new Float32Array([
+      pos.x - halfX, z + 0.05, pos.z - halfY,
+      pos.x + halfX, z + 0.05, pos.z - halfY,
+      pos.x + halfX, z + 0.05, pos.z - halfY,
+      pos.x + halfX, z + 0.05, pos.z + halfY,
+      pos.x + halfX, z + 0.05, pos.z + halfY,
+      pos.x - halfX, z + 0.05, pos.z + halfY,
+      pos.x - halfX, z + 0.05, pos.z + halfY,
+      pos.x - halfX, z + 0.05, pos.z - halfY,
+    ]);
+    
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
+    return geo;
+  }, [x_bins, y_bins, z_values, cellX, cellY]);
+
+  return (
+    <lineSegments geometry={outlineGeometry}>
+      <lineBasicMaterial color="#ffff00" linewidth={2} />
+    </lineSegments>
+  );
+}
+
+/** Smooth trail line with fading opacity */
+function TrailLine({
+  x_bins,
+  y_bins,
+  z_values,
+  historyTrail
+}: {
+  x_bins: number[];
+  y_bins: number[];
+  z_values: number[][];
+  historyTrail: Array<{ row: number; col: number; time: number }>;
+}) {
+  const TRAIL_DURATION_MS = 3000;
+
+  const curveGeometry = useMemo(() => {
+    if (historyTrail.length < 2) return null;
+    
+    const now = Date.now();
+    const points: THREE.Vector3[] = [];
+    const colorArray: number[] = [];
+    
+    // Get positions for each trail point
+    for (const entry of historyTrail) {
+      const age = now - entry.time;
+      if (age > TRAIL_DURATION_MS) continue;
+      
+      const pos = getNormalizedPosition(x_bins, y_bins, z_values, entry.col, entry.row);
+      pos.y += 0.1; // Slightly above surface
+      points.push(pos);
+      
+      // Fade from green (newest) to transparent (oldest)
+      const alpha = 1 - (age / TRAIL_DURATION_MS);
+      colorArray.push(0, 1, 0, alpha); // RGBA
+    }
+    
+    if (points.length < 2) return null;
+    
+    // Create smooth curve through points
+    const splineCurve = new THREE.CatmullRomCurve3(points);
+    const curvePoints = splineCurve.getPoints(points.length * 10);
+    
+    // Interpolate colors for curve points
+    const interpolatedColors: number[] = [];
+    for (let i = 0; i < curvePoints.length; i++) {
+      const t = i / (curvePoints.length - 1);
+      const colorIndex = Math.min(Math.floor(t * (colorArray.length / 4 - 1)), colorArray.length / 4 - 2);
+      const localT = (t * (colorArray.length / 4 - 1)) - colorIndex;
+      
+      const r = colorArray[colorIndex * 4] * (1 - localT) + colorArray[(colorIndex + 1) * 4] * localT;
+      const g = colorArray[colorIndex * 4 + 1] * (1 - localT) + colorArray[(colorIndex + 1) * 4 + 1] * localT;
+      const b = colorArray[colorIndex * 4 + 2] * (1 - localT) + colorArray[(colorIndex + 1) * 4 + 2] * localT;
+      interpolatedColors.push(r, g, b);
+    }
+    
+    const geo = new THREE.BufferGeometry().setFromPoints(curvePoints);
+    geo.setAttribute('color', new THREE.Float32BufferAttribute(interpolatedColors, 3));
+    
+    return geo;
+  }, [x_bins, y_bins, z_values, historyTrail]);
+
+  if (!curveGeometry) return null;
+
+  // Use primitive to create THREE.Line directly
+  return (
+    <primitive object={new THREE.Line(curveGeometry, new THREE.LineBasicMaterial({ 
+      vertexColors: true, 
+      transparent: true, 
+      opacity: 0.8 
+    }))} />
+  );
+}
+
+/** Cell grid overlay (2D grid lines on surface) */
+function CellGridOverlay({
+  x_bins,
+  y_bins,
+  z_values
+}: {
+  x_bins: number[];
+  y_bins: number[];
+  z_values: number[][];
+}) {
+  const linesGeometry = useMemo(() => {
+    const xMin = Math.min(...x_bins);
+    const xMax = Math.max(...x_bins);
+    const yMin = Math.min(...y_bins);
+    const yMax = Math.max(...y_bins);
+    const zFlat = z_values.flat();
+    const zMin = Math.min(...zFlat);
+    const zMax = Math.max(...zFlat);
+    
+    const normalizeX = (v: number) => ((v - xMin) / (xMax - xMin || 1)) * 10;
+    const normalizeY = (v: number) => ((v - yMin) / (yMax - yMin || 1)) * 10;
+    const normalizeZ = (v: number) => ((v - zMin) / (zMax - zMin || 1)) * 5;
+    
+    const vertices: number[] = [];
+    
+    // Draw horizontal lines (along X axis for each Y)
+    for (let yi = 0; yi < y_bins.length; yi++) {
+      for (let xi = 0; xi < x_bins.length - 1; xi++) {
+        const x1 = normalizeX(x_bins[xi]);
+        const x2 = normalizeX(x_bins[xi + 1]);
+        const y = normalizeY(y_bins[yi]);
+        const z1 = normalizeZ(z_values[yi]?.[xi] ?? 0) + 0.02;
+        const z2 = normalizeZ(z_values[yi]?.[xi + 1] ?? 0) + 0.02;
+        
+        vertices.push(x1, z1, y, x2, z2, y);
+      }
+    }
+    
+    // Draw vertical lines (along Y axis for each X)
+    for (let xi = 0; xi < x_bins.length; xi++) {
+      for (let yi = 0; yi < y_bins.length - 1; yi++) {
+        const x = normalizeX(x_bins[xi]);
+        const y1 = normalizeY(y_bins[yi]);
+        const y2 = normalizeY(y_bins[yi + 1]);
+        const z1 = normalizeZ(z_values[yi]?.[xi] ?? 0) + 0.02;
+        const z2 = normalizeZ(z_values[yi + 1]?.[xi] ?? 0) + 0.02;
+        
+        vertices.push(x, z1, y1, x, z2, y2);
+      }
+    }
+    
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+    return geo;
+  }, [x_bins, y_bins, z_values]);
+
+  return (
+    <lineSegments geometry={linesGeometry}>
+      <lineBasicMaterial color="#ffffff" transparent opacity={0.3} />
+    </lineSegments>
   );
 }
 
@@ -342,7 +609,9 @@ function Scene({
   onCellClick,
   selectedCell,
   liveCell,
-  wireframe
+  historyTrail,
+  wireframe,
+  showCells
 }: {
   x_bins: number[];
   y_bins: number[];
@@ -354,7 +623,9 @@ function Scene({
   onCellClick?: (x: number, y: number) => void;
   selectedCell?: { x: number; y: number } | null;
   liveCell?: { x: number; y: number } | null;
+  historyTrail?: Array<{ row: number; col: number; time: number }>;
   wireframe: boolean;
+  showCells: boolean;
 }) {
   const [hoveredCell, _setHoveredCell] = useState<{ x: number; y: number } | null>(null);
 
@@ -385,6 +656,25 @@ function Scene({
         liveCell={liveCell}
         wireframe={wireframe}
       />
+      
+      {/* Cell grid overlay */}
+      {showCells && (
+        <CellGridOverlay
+          x_bins={x_bins}
+          y_bins={y_bins}
+          z_values={z_values}
+        />
+      )}
+      
+      {/* History trail line */}
+      {historyTrail && historyTrail.length > 1 && (
+        <TrailLine
+          x_bins={x_bins}
+          y_bins={y_bins}
+          z_values={z_values}
+          historyTrail={historyTrail}
+        />
+      )}
       
       {/* Axis labels and grid */}
       <AxisLabels 
@@ -421,9 +711,11 @@ export default function TableEditor3DNew({
   onCellSelect,
   selectedCell,
   liveCell,
+  historyTrail,
   heatmapScheme = 'tunerstudio'
 }: TableEditor3DNewProps) {
   const [wireframe, setWireframe] = useState(false);
+  const [showCells, setShowCells] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -468,6 +760,15 @@ export default function TableEditor3DNew({
             Wireframe
           </label>
           
+          <label className="table3d-checkbox">
+            <input
+              type="checkbox"
+              checked={showCells}
+              onChange={(e) => setShowCells(e.target.checked)}
+            />
+            Show Cells
+          </label>
+          
           <button className="table3d-btn" onClick={toggleFullscreen} title="Toggle fullscreen">
             {fullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
           </button>
@@ -488,7 +789,9 @@ export default function TableEditor3DNew({
             onCellClick={handleCellClick}
             selectedCell={selectedCell}
             liveCell={liveCell}
+            historyTrail={historyTrail}
             wireframe={wireframe}
+            showCells={showCells}
           />
         </Canvas>
       </div>

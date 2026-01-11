@@ -847,7 +847,8 @@ export function TableEditor({
           z_units={data.zUnits}
           onBack={() => setShow3D(false)}
           selectedCell={selection ? { x: selection.start.col, y: selection.start.row } : null}
-          liveCell={livePosition ? { x: livePosition.col, y: livePosition.row } : null}
+          liveCell={effectiveLivePosition ? { x: effectiveLivePosition.col, y: effectiveLivePosition.row } : null}
+          historyTrail={followMode ? historyTrail : undefined}
         />
       )}
 
