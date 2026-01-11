@@ -191,42 +191,25 @@ jobs:
         working-directory: crates/libretune-app
         run: npm ci
 
-      - name: Stamp nightly version
-        working-directory: crates/libretune-app/src-tauri
-        shell: pwsh
-        run: |
-          $dateStamp = "${{ needs.check-changes.outputs.date_stamp }}"
-          $content = Get-Content tauri.conf.json -Raw
-          $content = $content -replace '"version": "[^"]*"', "`"version`": `"0.1.0-nightly.$dateStamp`""
-          Set-Content tauri.conf.json $content
-          Write-Host "Version stamped as 0.1.0-nightly.$dateStamp"
-
-      - name: Build Tauri app (Windows)
+      - name: Build Tauri app (Windows - Portable)
         working-directory: crates/libretune-app
-        run: npx tauri build --target x86_64-pc-windows-msvc
+        run: npx tauri build --target x86_64-pc-windows-msvc --no-bundle
 
       - name: Prepare artifacts directory
         working-directory: crates/libretune-app
         run: |
           mkdir artifacts\windows
 
-      - name: Copy Windows artifacts
+      - name: Copy Windows portable exe
         working-directory: crates/libretune-app
         shell: cmd
         run: |
-          REM Copy NSIS installer if it exists (check workspace root first, then local)
-          if exist "..\..\target\x86_64-pc-windows-msvc\release\bundle\nsis" (
-            for %%f in ("..\..\target\x86_64-pc-windows-msvc\release\bundle\nsis\*.exe") do copy "%%f" "artifacts\windows\" >nul 2>&1
+          REM Copy portable exe (check workspace root first, then local)
+          if exist "..\..\target\x86_64-pc-windows-msvc\release\libretune-app.exe" (
+            copy "..\..\target\x86_64-pc-windows-msvc\release\libretune-app.exe" "artifacts\windows\LibreTune-nightly-portable.exe" >nul 2>&1
           )
-          if exist "src-tauri\target\x86_64-pc-windows-msvc\release\bundle\nsis" (
-            for %%f in ("src-tauri\target\x86_64-pc-windows-msvc\release\bundle\nsis\*.exe") do copy "%%f" "artifacts\windows\" >nul 2>&1
-          )
-          REM Copy MSI installer if it exists
-          if exist "..\..\target\x86_64-pc-windows-msvc\release\bundle\msi" (
-            for %%f in ("..\..\target\x86_64-pc-windows-msvc\release\bundle\msi\*.msi") do copy "%%f" "artifacts\windows\" >nul 2>&1
-          )
-          if exist "src-tauri\target\x86_64-pc-windows-msvc\release\bundle\msi" (
-            for %%f in ("src-tauri\target\x86_64-pc-windows-msvc\release\bundle\msi\*.msi") do copy "%%f" "artifacts\windows\" >nul 2>&1
+          if exist "src-tauri\target\x86_64-pc-windows-msvc\release\libretune-app.exe" (
+            copy "src-tauri\target\x86_64-pc-windows-msvc\release\libretune-app.exe" "artifacts\windows\LibreTune-nightly-portable.exe" >nul 2>&1
           )
           REM List what we found
           echo === Artifacts copied ===
