@@ -5,7 +5,9 @@
 mod cache;
 mod diff;
 mod file;
+pub mod migration;
 
 pub use cache::{PageState, TuneCache};
 pub use diff::TuneDiff;
-pub use file::{TuneFile, TuneValue};
+pub use file::{ConstantManifestEntry, IniMetadata, TuneFile, TuneValue};
+pub use migration::{ConstantChange, MigrationReport};

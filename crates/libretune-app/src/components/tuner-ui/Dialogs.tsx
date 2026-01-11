@@ -444,7 +444,7 @@ interface CurrentProject {
 interface SettingsDialogProps extends DialogProps {
   theme: string;
   onThemeChange: (theme: string) => void;
-  onSettingsChange?: (settings: { units?: string; autoBurnOnClose?: boolean; demoMode?: boolean; indicatorColumnCount?: string; indicatorFillEmpty?: boolean; indicatorTextFit?: string }) => void;
+  onSettingsChange?: (settings: { units?: string; autoBurnOnClose?: boolean; demoMode?: boolean; indicatorColumnCount?: string; indicatorFillEmpty?: boolean; indicatorTextFit?: string; statusBarChannels?: string[] }) => void;
   currentProject?: CurrentProject | null;
 }
 
@@ -459,6 +459,10 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
   const [indicatorTextFit, setIndicatorTextFit] = useState('scale');
   const [currentIniPath, setCurrentIniPath] = useState<string | null>(null);
   const [switchingIni, setSwitchingIni] = useState(false);
+  
+  // Status bar channel configuration
+  const [statusBarChannels, setStatusBarChannels] = useState<string[]>([]);
+  const [availableChannels, setAvailableChannels] = useState<string[]>([]);
   
   // Heatmap settings
   const [heatmapValueScheme, setHeatmapValueScheme] = useState<HeatmapScheme>('tunerstudio');
@@ -487,6 +491,8 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
         setIndicatorFillEmpty(settings.indicator_fill_empty || false);
         setIndicatorTextFit(settings.indicator_text_fit || 'scale');
         setCurrentIniPath(settings.last_ini_path || null);
+        // Status bar channels
+        setStatusBarChannels(settings.status_bar_channels || []);
         // Heatmap settings
         setHeatmapValueScheme(settings.heatmap_value_scheme || 'tunerstudio');
         setHeatmapChangeScheme(settings.heatmap_change_scheme || 'tunerstudio');
@@ -496,6 +502,11 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
         setGaugeFreeMove(settings.gauge_free_move ?? false);
         setGaugeLock(settings.gauge_lock ?? false);
       }).catch(console.error);
+
+      // Load available output channels from ECU definition
+      invoke<string[]>('get_available_channels').then((channels) => {
+        setAvailableChannels(channels || []);
+      }).catch(() => setAvailableChannels([]));
 
       // Load demo mode state (runtime flag)
       invoke<boolean>('get_demo_mode').then(setDemoMode).catch(console.error);
@@ -568,6 +579,8 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
     }
     // Update auto-burn setting
     await invoke('update_setting', { key: 'auto_burn_on_close', value: autoBurnOnClose.toString() });
+    // Update status bar channels
+    await invoke('update_setting', { key: 'status_bar_channels', value: JSON.stringify(statusBarChannels) });
     // Update indicator panel settings
     await invoke('update_setting', { key: 'indicator_column_count', value: indicatorColumnCount });
     await invoke('update_setting', { key: 'indicator_fill_empty', value: indicatorFillEmpty.toString() });
@@ -580,9 +593,9 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
     await invoke('update_setting', { key: 'gauge_snap_to_grid', value: gaugeSnapToGrid.toString() });
     await invoke('update_setting', { key: 'gauge_free_move', value: gaugeFreeMove.toString() });
     await invoke('update_setting', { key: 'gauge_lock', value: gaugeLock.toString() });
-    onSettingsChange?.({ units: localUnits, autoBurnOnClose, indicatorColumnCount, indicatorFillEmpty, indicatorTextFit });
+    onSettingsChange?.({ units: localUnits, autoBurnOnClose, indicatorColumnCount, indicatorFillEmpty, indicatorTextFit, statusBarChannels });
     onClose();
-  }, [localTheme, localUnits, autoBurnOnClose, indicatorColumnCount, indicatorFillEmpty, indicatorTextFit, heatmapValueScheme, heatmapChangeScheme, heatmapCoverageScheme, gaugeSnapToGrid, gaugeFreeMove, gaugeLock, onThemeChange, onSettingsChange, onClose]);
+  }, [localTheme, localUnits, autoBurnOnClose, statusBarChannels, indicatorColumnCount, indicatorFillEmpty, indicatorTextFit, heatmapValueScheme, heatmapChangeScheme, heatmapCoverageScheme, gaugeSnapToGrid, gaugeFreeMove, gaugeLock, onThemeChange, onSettingsChange, onClose]);
 
   if (!isOpen) return null;
 
@@ -725,6 +738,77 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
               Demo Mode (simulate ECU)
             </label>
             <span className="dialog-form-note">Simulate ECU data for testing (runtime-only)</span>
+          </div>
+
+          <h3 style={{ marginTop: '1.5rem', marginBottom: '0.5rem' }}>Status Bar</h3>
+          
+          <div className="dialog-form-group">
+            <label>Channels to Display (max 8)</label>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              {/* Selected channels with remove buttons */}
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem', minHeight: '2rem', padding: '0.5rem', backgroundColor: 'var(--bg-secondary)', borderRadius: '4px', border: '1px solid var(--border-color)' }}>
+                {statusBarChannels.length === 0 ? (
+                  <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Using default channels from ECU definition</span>
+                ) : (
+                  statusBarChannels.map((channel, idx) => (
+                    <span key={channel} style={{ 
+                      display: 'inline-flex', 
+                      alignItems: 'center', 
+                      gap: '0.25rem',
+                      padding: '0.25rem 0.5rem',
+                      backgroundColor: 'var(--accent-color)',
+                      color: '#fff',
+                      borderRadius: '3px',
+                      fontSize: '0.85rem'
+                    }}>
+                      {channel}
+                      <button 
+                        onClick={() => setStatusBarChannels(prev => prev.filter((_, i) => i !== idx))}
+                        style={{ 
+                          background: 'none', 
+                          border: 'none', 
+                          color: '#fff', 
+                          cursor: 'pointer',
+                          padding: '0 0.25rem',
+                          fontSize: '1rem',
+                          lineHeight: 1
+                        }}
+                      >×</button>
+                    </span>
+                  ))
+                )}
+              </div>
+              {/* Add channel dropdown */}
+              <select
+                value=""
+                onChange={(e) => {
+                  if (e.target.value && statusBarChannels.length < 8 && !statusBarChannels.includes(e.target.value)) {
+                    setStatusBarChannels(prev => [...prev, e.target.value]);
+                  } else if (statusBarChannels.length >= 8) {
+                    alert('Maximum 8 channels allowed in status bar');
+                  }
+                }}
+                style={{ padding: '0.5rem' }}
+              >
+                <option value="">+ Add channel...</option>
+                {availableChannels
+                  .filter(ch => !statusBarChannels.includes(ch))
+                  .sort()
+                  .map(ch => (
+                    <option key={ch} value={ch}>{ch}</option>
+                  ))
+                }
+              </select>
+              {statusBarChannels.length > 0 && (
+                <button 
+                  onClick={() => setStatusBarChannels([])}
+                  style={{ alignSelf: 'flex-start', padding: '0.25rem 0.5rem', fontSize: '0.85rem' }}
+                >
+                  Reset to Defaults
+                </button>
+              )}
+            </div>
+            <span className="dialog-form-note">Select which realtime channels appear in the status bar. Leave empty for auto-detection from ECU definition.</span>
           </div>
 
           {currentProject && (

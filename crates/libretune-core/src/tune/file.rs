@@ -45,6 +45,16 @@ pub struct TuneFile {
     /// These are stored on page "-1" in TunerStudio format
     #[serde(default)]
     pub pc_variables: HashMap<String, TuneValue>,
+    
+    /// INI metadata for version tracking (added in v1.1)
+    /// Contains hash and spec version of INI used when tune was saved
+    #[serde(default)]
+    pub ini_metadata: Option<IniMetadata>,
+    
+    /// Constant manifest for migration detection (added in v1.1)
+    /// Lists all constants with their types/offsets at save time
+    #[serde(default)]
+    pub constant_manifest: Option<Vec<ConstantManifestEntry>>,
 }
 
 /// A value in a tune file
@@ -56,12 +66,53 @@ pub enum TuneValue {
     Bool(bool),
 }
 
+/// INI metadata stored with tune files for version tracking
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct IniMetadata {
+    /// ECU signature from the INI file
+    pub signature: String,
+    
+    /// INI filename (e.g., "speeduino.ini")
+    pub name: String,
+    
+    /// SHA-256 hash of INI structural content (constants, pages, offsets)
+    pub hash: String,
+    
+    /// INI spec version (from [MegaTune] section)
+    pub spec_version: String,
+    
+    /// Timestamp when tune was saved with this INI
+    pub saved_at: String,
+}
+
+/// A single constant's metadata for the manifest
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConstantManifestEntry {
+    /// Constant name
+    pub name: String,
+    
+    /// Data type string (e.g., "U08", "S16", "array[16x16]")
+    pub data_type: String,
+    
+    /// ECU page number
+    pub page: u8,
+    
+    /// Byte offset within page
+    pub offset: u16,
+    
+    /// Scale factor
+    pub scale: f64,
+    
+    /// Translation offset
+    pub translate: f64,
+}
+
 impl TuneFile {
     /// Create a new empty tune file
     pub fn new(signature: impl Into<String>) -> Self {
         let now = Utc::now().to_rfc3339();
         Self {
-            version: "1.0".to_string(),
+            version: "1.1".to_string(),
             signature: signature.into(),
             author: None,
             description: None,
@@ -71,6 +122,8 @@ impl TuneFile {
             constants: HashMap::new(),
             constant_pages: HashMap::new(),
             pc_variables: HashMap::new(),
+            ini_metadata: None,
+            constant_manifest: None,
         }
     }
 
@@ -210,6 +263,118 @@ impl TuneFile {
             let ts_content = &content[ts_start + 11..];
             if let Some(ts_end) = ts_content.find('"') {
                 tune.modified = Some(ts_content[..ts_end].to_string());
+            }
+        }
+
+        // Parse iniMetadata section (LibreTune 1.1+ format for version tracking)
+        if let Some(ini_start) = content.find("<iniMetadata") {
+            let ini_remaining = &content[ini_start..];
+            let mut metadata = IniMetadata::default();
+            
+            // Extract each attribute
+            if let Some(attr_start) = ini_remaining.find("signature=\"") {
+                let attr_content = &ini_remaining[attr_start + 11..];
+                if let Some(attr_end) = attr_content.find('"') {
+                    metadata.signature = attr_content[..attr_end].to_string();
+                }
+            }
+            if let Some(attr_start) = ini_remaining.find("name=\"") {
+                let attr_content = &ini_remaining[attr_start + 6..];
+                if let Some(attr_end) = attr_content.find('"') {
+                    metadata.name = attr_content[..attr_end].to_string();
+                }
+            }
+            if let Some(attr_start) = ini_remaining.find("hash=\"") {
+                let attr_content = &ini_remaining[attr_start + 6..];
+                if let Some(attr_end) = attr_content.find('"') {
+                    metadata.hash = attr_content[..attr_end].to_string();
+                }
+            }
+            if let Some(attr_start) = ini_remaining.find("specVersion=\"") {
+                let attr_content = &ini_remaining[attr_start + 13..];
+                if let Some(attr_end) = attr_content.find('"') {
+                    metadata.spec_version = attr_content[..attr_end].to_string();
+                }
+            }
+            if let Some(attr_start) = ini_remaining.find("savedAt=\"") {
+                let attr_content = &ini_remaining[attr_start + 9..];
+                if let Some(attr_end) = attr_content.find('"') {
+                    metadata.saved_at = attr_content[..attr_end].to_string();
+                }
+            }
+            
+            tune.ini_metadata = Some(metadata);
+        }
+
+        // Parse constantManifest section (LibreTune 1.1+ format for migration detection)
+        if let Some(manifest_start) = content.find("<constantManifest>") {
+            if let Some(manifest_end) = content[manifest_start..].find("</constantManifest>") {
+                let manifest_content = &content[manifest_start..manifest_start + manifest_end];
+                let mut manifest = Vec::new();
+                
+                // Parse each <entry> element
+                let mut entry_pos = 0;
+                while let Some(entry_start) = manifest_content[entry_pos..].find("<entry ") {
+                    let abs_entry_start = entry_pos + entry_start;
+                    let entry_remaining = &manifest_content[abs_entry_start..];
+                    
+                    let mut entry = ConstantManifestEntry {
+                        name: String::new(),
+                        data_type: String::new(),
+                        page: 0,
+                        offset: 0,
+                        scale: 1.0,
+                        translate: 0.0,
+                    };
+                    
+                    // Extract attributes
+                    if let Some(attr_start) = entry_remaining.find("name=\"") {
+                        let attr_content = &entry_remaining[attr_start + 6..];
+                        if let Some(attr_end) = attr_content.find('"') {
+                            entry.name = attr_content[..attr_end].to_string();
+                        }
+                    }
+                    if let Some(attr_start) = entry_remaining.find("type=\"") {
+                        let attr_content = &entry_remaining[attr_start + 6..];
+                        if let Some(attr_end) = attr_content.find('"') {
+                            entry.data_type = attr_content[..attr_end].to_string();
+                        }
+                    }
+                    if let Some(attr_start) = entry_remaining.find("page=\"") {
+                        let attr_content = &entry_remaining[attr_start + 6..];
+                        if let Some(attr_end) = attr_content.find('"') {
+                            entry.page = attr_content[..attr_end].parse().unwrap_or(0);
+                        }
+                    }
+                    if let Some(attr_start) = entry_remaining.find("offset=\"") {
+                        let attr_content = &entry_remaining[attr_start + 8..];
+                        if let Some(attr_end) = attr_content.find('"') {
+                            entry.offset = attr_content[..attr_end].parse().unwrap_or(0);
+                        }
+                    }
+                    if let Some(attr_start) = entry_remaining.find("scale=\"") {
+                        let attr_content = &entry_remaining[attr_start + 7..];
+                        if let Some(attr_end) = attr_content.find('"') {
+                            entry.scale = attr_content[..attr_end].parse().unwrap_or(1.0);
+                        }
+                    }
+                    if let Some(attr_start) = entry_remaining.find("translate=\"") {
+                        let attr_content = &entry_remaining[attr_start + 11..];
+                        if let Some(attr_end) = attr_content.find('"') {
+                            entry.translate = attr_content[..attr_end].parse().unwrap_or(0.0);
+                        }
+                    }
+                    
+                    if !entry.name.is_empty() {
+                        manifest.push(entry);
+                    }
+                    
+                    entry_pos = abs_entry_start + 1;
+                }
+                
+                if !manifest.is_empty() {
+                    tune.constant_manifest = Some(manifest);
+                }
             }
         }
 
@@ -574,6 +739,35 @@ impl TuneFile {
             xml.push_str("/>\n");
         }
 
+        // Add INI metadata for version tracking (LibreTune 1.1+)
+        if let Some(ref metadata) = self.ini_metadata {
+            xml.push_str(&format!(
+                "  <iniMetadata signature=\"{}\" name=\"{}\" hash=\"{}\" specVersion=\"{}\" savedAt=\"{}\"/>\n",
+                metadata.signature,
+                metadata.name,
+                metadata.hash,
+                metadata.spec_version,
+                metadata.saved_at
+            ));
+        }
+
+        // Add constant manifest for migration detection (LibreTune 1.1+)
+        if let Some(ref manifest) = self.constant_manifest {
+            xml.push_str("  <constantManifest>\n");
+            for entry in manifest {
+                xml.push_str(&format!(
+                    "    <entry name=\"{}\" type=\"{}\" page=\"{}\" offset=\"{}\" scale=\"{}\" translate=\"{}\"/>\n",
+                    entry.name,
+                    entry.data_type,
+                    entry.page,
+                    entry.offset,
+                    entry.scale,
+                    entry.translate
+                ));
+            }
+            xml.push_str("  </constantManifest>\n");
+        }
+
         // Group constants by page number (preserve page structure)
         let mut constants_by_page: HashMap<u8, Vec<String>> = HashMap::new();
         for name in self.constants.keys() {
@@ -823,7 +1017,7 @@ fn format_tune_value(value: &TuneValue) -> String {
 impl Default for TuneFile {
     fn default() -> Self {
         Self {
-            version: "1.0".to_string(),
+            version: "1.1".to_string(),
             signature: String::new(),
             author: None,
             description: None,
@@ -833,6 +1027,8 @@ impl Default for TuneFile {
             constants: HashMap::new(),
             constant_pages: HashMap::new(),
             pc_variables: HashMap::new(),
+            ini_metadata: None,
+            constant_manifest: None,
         }
     }
 }

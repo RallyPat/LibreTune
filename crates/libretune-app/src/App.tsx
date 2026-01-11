@@ -36,6 +36,7 @@ import TableComparisonDialog from "./components/dialogs/TableComparisonDialog";
 import PerformanceFieldsDialog from "./components/dialogs/PerformanceFieldsDialog";
 import RestorePointsDialog from "./components/dialogs/RestorePointsDialog";
 import ImportProjectWizard from "./components/dialogs/ImportProjectWizard";
+import MigrationReportDialog from "./components/dialogs/MigrationReportDialog";
 import ErrorDetailsDialog, { useErrorDialog } from "./components/dialogs/ErrorDetailsDialog";
 import { PluginPanel } from "./plugin";
 import { useLoading } from "./components/LoadingContext";
@@ -296,6 +297,9 @@ function AppContent() {
   // Import project wizard state
   const [importProjectOpen, setImportProjectOpen] = useState(false);
   
+  // Migration report dialog state (shown when loading a tune from different INI version)
+  const [migrationReportOpen, setMigrationReportOpen] = useState(false);
+  
   // Plugin panel state
   const [pluginPanelOpen, setPluginPanelOpen] = useState(false);
   
@@ -408,6 +412,26 @@ function AppContent() {
         });
       } catch (e) {
         console.error("Failed to listen for signature:mismatch events:", e);
+      }
+    })();
+    
+    return () => {
+      if (unlisten) unlisten();
+    };
+  }, []);
+
+  // Listen for migration needed events from backend
+  useEffect(() => {
+    let unlisten: UnlistenFn | null = null;
+    
+    (async () => {
+      try {
+        unlisten = await listen("tune:migration_needed", () => {
+          console.log("Tune migration needed - opening dialog");
+          setMigrationReportOpen(true);
+        });
+      } catch (e) {
+        console.error("Failed to listen for tune:migration_needed events:", e);
       }
     })();
     
@@ -1095,7 +1119,7 @@ function AppContent() {
       if (name === "autotune") {
         const newTab: Tab = { id: "autotune", title: "AutoTune Live", icon: "autotune" };
         setTabs([...tabs, newTab]);
-        setTabContents({ ...tabContents, autotune: { type: "autotune", data: "veTable1" } });
+        setTabContents({ ...tabContents, autotune: { type: "autotune", data: "" } }); // Empty = auto-detect VE table
         setActiveTabId("autotune");
         return;
       }
@@ -1989,6 +2013,7 @@ function AppContent() {
           if (settings.units) setUnitsSystem(settings.units as 'metric' | 'imperial');
           if (settings.autoBurnOnClose !== undefined) setAutoBurnOnClose(settings.autoBurnOnClose);
           if (settings.demoMode !== undefined) setStatus(s => ({ ...s, demo_mode: settings.demoMode }));
+          if (settings.statusBarChannels !== undefined) setStatusBarChannels(settings.statusBarChannels);
           // Legacy dashboard settings (removed with TabbedDashboard)
           // if (settings.indicatorColumnCount !== undefined) { ... }
           // if (settings.indicatorFillEmpty !== undefined) { ... }
@@ -2161,6 +2186,15 @@ function AppContent() {
             console.error("Failed to open imported project:", e);
             showToast("Project imported but failed to open: " + e, "error");
           }
+        }}
+      />
+      
+      {/* Migration Report Dialog - shown when loading tune from different INI version */}
+      <MigrationReportDialog
+        isOpen={migrationReportOpen}
+        onClose={() => setMigrationReportOpen(false)}
+        onProceed={() => {
+          console.log("User proceeding with migration");
         }}
       />
       

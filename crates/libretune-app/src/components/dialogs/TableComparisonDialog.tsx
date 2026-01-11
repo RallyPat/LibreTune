@@ -59,7 +59,7 @@ export default function TableComparisonDialog({ isOpen, onClose }: Props) {
   const loadTables = async () => {
     setLoading(true);
     try {
-      const tableList = await invoke<TableInfo[]>("get_available_tables");
+      const tableList = await invoke<TableInfo[]>("get_tables");
       setTables(tableList);
       if (tableList.length >= 2) {
         setTableA(tableList[0].name);

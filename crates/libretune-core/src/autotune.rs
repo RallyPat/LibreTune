@@ -69,6 +69,9 @@ pub struct AutoTuneFilters {
     pub max_y_axis: Option<String>,
     pub min_clt: f64,
     pub custom_filter: Option<String>,
+    // Transient filtering
+    pub max_tps_rate: f64,           // Max TPS change rate (%/sec) before filtering
+    pub exclude_accel_enrich: bool,  // Exclude data when accel enrichment active
 }
 
 impl Default for AutoTuneFilters {
@@ -80,6 +83,8 @@ impl Default for AutoTuneFilters {
             max_y_axis: None,
             min_clt: 160.0,
             custom_filter: None,
+            max_tps_rate: 10.0,           // 10%/sec threshold
+            exclude_accel_enrich: true,   // Exclude accel enrichment by default
         }
     }
 }
@@ -92,11 +97,26 @@ pub struct AutoTuneReferenceTables {
 }
 
 /// VE Analyze runtime state
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct AutoTuneState {
     pub is_running: bool,
     pub locked_cells: Vec<(usize, usize)>,
     pub recommendations: HashMap<(usize, usize), AutoTuneRecommendation>,
+    // Lambda delay buffer - stores recent data points for delayed correlation
+    data_buffer: std::collections::VecDeque<VEDataPoint>,
+    buffer_max_age_ms: u64,  // How long to keep data points (default 500ms)
+}
+
+impl Default for AutoTuneState {
+    fn default() -> Self {
+        Self {
+            is_running: false,
+            locked_cells: Vec::new(),
+            recommendations: HashMap::new(),
+            data_buffer: std::collections::VecDeque::new(),
+            buffer_max_age_ms: 500,  // Keep 500ms of data for lambda delay correlation
+        }
+    }
 }
 
 /// Data point from ECU for VE analysis
@@ -107,6 +127,28 @@ pub struct VEDataPoint {
     pub afr: f64,
     pub ve: f64,
     pub clt: f64,
+    // Transient detection fields
+    pub tps: f64,                        // Current TPS value (%)
+    pub tps_rate: f64,                   // TPS change rate (%/sec)
+    pub accel_enrich_active: Option<bool>, // ECU accel enrichment flag (if available)
+    // Lambda delay correlation
+    pub timestamp_ms: u64,               // Timestamp for delay correlation
+}
+
+impl Default for VEDataPoint {
+    fn default() -> Self {
+        Self {
+            rpm: 0.0,
+            map: 0.0,
+            afr: 0.0,
+            ve: 0.0,
+            clt: 0.0,
+            tps: 0.0,
+            tps_rate: 0.0,
+            accel_enrich_active: None,
+            timestamp_ms: 0,
+        }
+    }
 }
 
 impl AutoTuneState {
@@ -117,6 +159,7 @@ impl AutoTuneState {
     pub fn start(&mut self) {
         self.is_running = true;
         self.recommendations.clear();
+        self.data_buffer.clear();
     }
 
     pub fn stop(&mut self) {
@@ -139,6 +182,67 @@ impl AutoTuneState {
         }
     }
 
+    /// Calculate lambda sensor delay based on RPM
+    /// Higher RPM = faster exhaust flow = less delay
+    /// Returns delay in milliseconds
+    fn get_lambda_delay_ms(&self, rpm: f64) -> u64 {
+        // Default delay curve:
+        // - At idle (800 RPM): ~200ms delay
+        // - At redline (6000 RPM): ~50ms delay
+        // Linear interpolation between these points
+        const IDLE_RPM: f64 = 800.0;
+        const REDLINE_RPM: f64 = 6000.0;
+        const IDLE_DELAY_MS: f64 = 200.0;
+        const REDLINE_DELAY_MS: f64 = 50.0;
+        
+        let clamped_rpm = rpm.clamp(IDLE_RPM, REDLINE_RPM);
+        let rpm_ratio = (clamped_rpm - IDLE_RPM) / (REDLINE_RPM - IDLE_RPM);
+        let delay = IDLE_DELAY_MS - (rpm_ratio * (IDLE_DELAY_MS - REDLINE_DELAY_MS));
+        
+        delay as u64
+    }
+
+    /// Prune old entries from the data buffer
+    fn prune_data_buffer(&mut self, current_timestamp_ms: u64) {
+        let cutoff = current_timestamp_ms.saturating_sub(self.buffer_max_age_ms);
+        while let Some(front) = self.data_buffer.front() {
+            if front.timestamp_ms < cutoff {
+                self.data_buffer.pop_front();
+            } else {
+                break;
+            }
+        }
+    }
+
+    /// Find the data point from the buffer that best matches the lambda delay
+    fn find_delayed_data_point(&self, current_timestamp_ms: u64, delay_ms: u64) -> Option<VEDataPoint> {
+        let target_time = current_timestamp_ms.saturating_sub(delay_ms);
+        
+        // Find the closest data point to the target time
+        let mut best_match: Option<&VEDataPoint> = None;
+        let mut best_diff = u64::MAX;
+        
+        for point in self.data_buffer.iter() {
+            let diff = if point.timestamp_ms > target_time {
+                point.timestamp_ms - target_time
+            } else {
+                target_time - point.timestamp_ms
+            };
+            
+            if diff < best_diff {
+                best_diff = diff;
+                best_match = Some(point);
+            }
+        }
+        
+        // Only use if within 50ms of target time
+        if best_diff < 50 {
+            best_match.cloned()
+        } else {
+            None
+        }
+    }
+
     pub fn add_data_point(
         &mut self,
         point: VEDataPoint,
@@ -146,18 +250,43 @@ impl AutoTuneState {
         table_y_bins: &[f64],
         _settings: &AutoTuneSettings,
         filters: &AutoTuneFilters,
-        _authority: &AutoTuneAuthorityLimits,
+        authority: &AutoTuneAuthorityLimits,
     ) {
         if !self.is_running {
             return;
         }
 
+        // Always add to buffer for lambda delay correlation
+        self.data_buffer.push_back(point.clone());
+        self.prune_data_buffer(point.timestamp_ms);
+
         if !self.passes_filters(&point, filters) {
             return;
         }
 
-        let x_idx = self.find_bin_index(point.rpm, table_x_bins);
-        let y_idx = self.find_bin_index(point.map, table_y_bins);
+        // Calculate lambda delay based on current RPM
+        let delay_ms = self.get_lambda_delay_ms(point.rpm);
+        
+        // Find the data point from when the current AFR reading was actually generated
+        // The current AFR corresponds to conditions from delay_ms ago
+        let historical_point = if delay_ms > 0 && point.timestamp_ms > delay_ms {
+            self.find_delayed_data_point(point.timestamp_ms, delay_ms)
+        } else {
+            None
+        };
+        
+        // Use historical cell location if available, otherwise use current
+        let (cell_rpm, cell_map, cell_ve) = if let Some(ref hist) = historical_point {
+            // Use the historical RPM/MAP to find the correct cell
+            // but use current AFR (which corresponds to that historical moment)
+            (hist.rpm, hist.map, hist.ve)
+        } else {
+            // No historical data available, use current (less accurate but better than nothing)
+            (point.rpm, point.map, point.ve)
+        };
+
+        let x_idx = self.find_bin_index(cell_rpm, table_x_bins);
+        let y_idx = self.find_bin_index(cell_map, table_y_bins);
 
         if x_idx.is_none() || y_idx.is_none() {
             return;
@@ -171,7 +300,8 @@ impl AutoTuneState {
         }
 
         // Calculate required VE before borrowing recommendations
-        let required_ve = self.calculate_required_ve(point.ve, point.afr);
+        // Use the historical VE value (from the delayed cell) for the calculation
+        let required_ve = self.calculate_required_ve(cell_ve, point.afr);
 
         let current_recs = self
             .recommendations
@@ -179,8 +309,8 @@ impl AutoTuneState {
             .or_insert_with(|| AutoTuneRecommendation {
                 cell_x: cell_x_idx,
                 cell_y: cell_y_idx,
-                beginning_value: point.ve,
-                recommended_value: point.ve,
+                beginning_value: cell_ve,
+                recommended_value: cell_ve,
                 hit_count: 0,
                 hit_weighting: 0.0,
                 target_afr: point.afr,
@@ -189,13 +319,39 @@ impl AutoTuneState {
 
         current_recs.hit_count += 1;
 
-        let _delta = required_ve - current_recs.beginning_value;
+        // Apply authority limits to clamp the recommended value
+        let clamped_ve = Self::apply_authority_limits(
+            current_recs.beginning_value,
+            required_ve,
+            authority,
+        );
 
-        current_recs.recommended_value = required_ve;
+        current_recs.recommended_value = clamped_ve;
 
         let hit_weight = 1.0;
         current_recs.hit_weighting += hit_weight;
         current_recs.hit_percentage = 100.0;
+    }
+
+    /// Apply authority limits to clamp the recommended VE change
+    fn apply_authority_limits(
+        beginning_value: f64,
+        recommended_value: f64,
+        authority: &AutoTuneAuthorityLimits,
+    ) -> f64 {
+        let delta = recommended_value - beginning_value;
+        
+        // Clamp by absolute value change
+        let clamped_delta = delta.clamp(
+            -authority.max_cell_value_change,
+            authority.max_cell_value_change,
+        );
+        
+        // Clamp by percentage change
+        let max_pct_delta = beginning_value * (authority.max_cell_percentage_change / 100.0);
+        let final_delta = clamped_delta.clamp(-max_pct_delta, max_pct_delta);
+        
+        beginning_value + final_delta
     }
 
     fn find_bin_index(&self, value: f64, bins: &[f64]) -> Option<usize> {
@@ -206,7 +362,27 @@ impl AutoTuneState {
     }
 
     fn passes_filters(&self, point: &VEDataPoint, filters: &AutoTuneFilters) -> bool {
-        point.rpm >= filters.min_rpm && point.rpm <= filters.max_rpm && point.clt >= filters.min_clt
+        // Basic RPM and CLT filters
+        if point.rpm < filters.min_rpm || point.rpm > filters.max_rpm {
+            return false;
+        }
+        if point.clt < filters.min_clt {
+            return false;
+        }
+        
+        // Transient filtering: reject if TPS is changing too fast
+        if point.tps_rate.abs() > filters.max_tps_rate {
+            return false;
+        }
+        
+        // Transient filtering: reject if accel enrichment is active (if flag available)
+        if filters.exclude_accel_enrich {
+            if let Some(true) = point.accel_enrich_active {
+                return false;
+            }
+        }
+        
+        true
     }
 
     fn calculate_required_ve(&self, current_ve: f64, actual_afr: f64) -> f64 {

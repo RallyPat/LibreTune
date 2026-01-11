@@ -130,12 +130,38 @@ export function AutoTuneLive({ tableName: initialTableName = 'veTable1', onClose
 
   const loadAvailableTables = useCallback(async () => {
     try {
-      const tables = await invoke<TableInfo[]>('get_available_tables');
-      setAvailableTables(tables);
+      const tables = await invoke<TableInfo[]>('get_tables');
+      
+      // Sort: VE/fuel tables first, then alphabetically
+      const veKeywords = ['ve', 'fuel', 'afr', 'lambda'];
+      const isVeTable = (t: TableInfo) => 
+        veKeywords.some(kw => t.name.toLowerCase().includes(kw) || t.title.toLowerCase().includes(kw));
+      
+      const sorted = [...tables].sort((a, b) => {
+        const aIsVe = isVeTable(a);
+        const bIsVe = isVeTable(b);
+        if (aIsVe && !bIsVe) return -1;
+        if (!aIsVe && bIsVe) return 1;
+        return a.title.localeCompare(b.title);
+      });
+      setAvailableTables(sorted);
+      
+      // Auto-select VE table if current selection not found
+      const currentExists = sorted.some(t => t.name === selectedTable);
+      if (!currentExists && sorted.length > 0) {
+        const veNames = ['veTableTbl', 'veTable1Tbl', 'veTable1', 'veTable', 'fuelTableTbl'];
+        const veTable = sorted.find(t => veNames.includes(t.name)) 
+          || sorted.find(t => t.title.toLowerCase().includes('ve table'))
+          || sorted[0]; // Fallback to first (VE-related due to sorting)
+        if (veTable) {
+          setSelectedTable(veTable.name);
+        }
+      }
     } catch (e) {
       console.error('Failed to load available tables:', e);
+      setError('Failed to load tables: ' + e);
     }
-  }, []);
+  }, [selectedTable]);
 
   const loadTableData = useCallback(async () => {
     try {

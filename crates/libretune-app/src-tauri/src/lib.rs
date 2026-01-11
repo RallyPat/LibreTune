@@ -1,6 +1,6 @@
 use libretune_core::autotune::{
     AutoTuneAuthorityLimits, AutoTuneFilters, AutoTuneRecommendation, AutoTuneSettings,
-    AutoTuneState,
+    AutoTuneState, VEDataPoint,
 };
 use libretune_core::dash::{
     self, Bibliography, DashComponent, DashFile, GaugePainter, TsColor, VersionInfo,
@@ -22,7 +22,10 @@ use libretune_core::project::{
 use libretune_core::protocol::serial::list_ports;
 use libretune_core::protocol::{Connection, ConnectionConfig, ConnectionState};
 use libretune_core::table_ops;
-use libretune_core::tune::{PageState, TuneCache, TuneFile, TuneValue};
+use libretune_core::tune::{
+    ConstantChange, ConstantManifestEntry, IniMetadata, MigrationReport, PageState, TuneCache,
+    TuneFile, TuneValue,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
@@ -77,6 +80,8 @@ struct AppState {
     connection: Mutex<Option<Connection>>,
     definition: Mutex<Option<EcuDefinition>>,
     autotune_state: Mutex<AutoTuneState>,
+    // AutoTune configuration (stored when start_autotune is called)
+    autotune_config: Mutex<Option<AutoTuneConfig>>,
     streaming_task: Mutex<Option<tokio::task::JoinHandle<()>>>,
     // Background task for AutoTune auto-send
     autotune_send_task: Mutex<Option<tokio::task::JoinHandle<()>>>,
@@ -96,6 +101,23 @@ struct AppState {
     plugin_manager: Mutex<Option<std::sync::Arc<PluginManager>>>,
     // Controller bridge for plugin ECU access (shared with plugin_manager)
     controller_bridge: Mutex<Option<std::sync::Arc<ControllerBridge>>>,
+    // Migration report when loading a tune from a different INI version
+    migration_report: Mutex<Option<MigrationReport>>,
+}
+
+/// AutoTune configuration stored when tuning session starts
+#[derive(Clone)]
+struct AutoTuneConfig {
+    table_name: String,
+    settings: AutoTuneSettings,
+    filters: AutoTuneFilters,
+    authority_limits: AutoTuneAuthorityLimits,
+    // Table bin values for cell lookup
+    x_bins: Vec<f64>,
+    y_bins: Vec<f64>,
+    // Previous TPS value for calculating rate
+    last_tps: Option<f64>,
+    last_timestamp_ms: Option<u64>,
 }
 
 #[derive(Serialize)]
@@ -197,6 +219,10 @@ struct Settings {
     indicator_column_count: String, // "auto" or number like "12"
     indicator_fill_empty: bool,     // Fill empty cells in last row
     indicator_text_fit: String,     // "scale" or "wrap"
+    
+    // Status bar channel configuration
+    #[serde(default)]
+    status_bar_channels: Vec<String>, // User-selected channels for status bar (max 8)
     
     // Heatmap color scheme settings
     #[serde(default = "default_heatmap_scheme")]
@@ -2102,6 +2128,123 @@ async fn get_realtime_data(
     Ok(data)
 }
 
+/// Feed realtime data to AutoTune if it's running
+async fn feed_autotune_data(
+    app_state: &AppState,
+    data: &HashMap<String, f64>,
+    current_time_ms: u64,
+) {
+    // Check if AutoTune is running
+    let autotune_guard = app_state.autotune_state.lock().await;
+    if !autotune_guard.is_running {
+        return;
+    }
+    drop(autotune_guard);
+    
+    // Get the config
+    let mut config_guard = app_state.autotune_config.lock().await;
+    let config = match config_guard.as_mut() {
+        Some(c) => c,
+        None => return,
+    };
+    
+    // Extract channel values (try common channel names)
+    let rpm = data.get("rpm")
+        .or_else(|| data.get("RPM"))
+        .or_else(|| data.get("rpmValue"))
+        .copied()
+        .unwrap_or(0.0);
+    
+    let map = data.get("map")
+        .or_else(|| data.get("MAP"))
+        .or_else(|| data.get("mapValue"))
+        .or_else(|| data.get("fuelingLoad"))
+        .copied()
+        .unwrap_or(0.0);
+    
+    let afr = data.get("afr")
+        .or_else(|| data.get("AFR"))
+        .or_else(|| data.get("afr1"))
+        .or_else(|| data.get("AFRValue"))
+        .or_else(|| data.get("lambda1"))
+        .map(|v| if *v < 2.0 { *v * 14.7 } else { *v })  // Convert lambda to AFR
+        .unwrap_or(14.7);
+    
+    let ve = data.get("ve")
+        .or_else(|| data.get("VE"))
+        .or_else(|| data.get("veValue"))
+        .or_else(|| data.get("VEtable"))
+        .copied()
+        .unwrap_or(0.0);
+    
+    let clt = data.get("clt")
+        .or_else(|| data.get("CLT"))
+        .or_else(|| data.get("coolant"))
+        .or_else(|| data.get("coolantTemperature"))
+        .copied()
+        .unwrap_or(0.0);
+    
+    let tps = data.get("tps")
+        .or_else(|| data.get("TPS"))
+        .or_else(|| data.get("tpsValue"))
+        .copied()
+        .unwrap_or(0.0);
+    
+    // Calculate TPS rate (%/sec) based on time delta
+    let tps_rate = if let (Some(last_tps), Some(last_ts)) = (config.last_tps, config.last_timestamp_ms) {
+        let dt_sec = (current_time_ms.saturating_sub(last_ts)) as f64 / 1000.0;
+        if dt_sec > 0.001 {
+            (tps - last_tps) / dt_sec
+        } else {
+            0.0
+        }
+    } else {
+        0.0
+    };
+    
+    // Update last values for next iteration
+    config.last_tps = Some(tps);
+    config.last_timestamp_ms = Some(current_time_ms);
+    
+    // Check for accel enrichment flag
+    let accel_enrich_active = data.get("accelEnrich")
+        .or_else(|| data.get("accelEnrichActive"))
+        .or_else(|| data.get("tpsAE"))
+        .map(|v| *v > 0.5);
+    
+    // Create the data point
+    let data_point = VEDataPoint {
+        rpm,
+        map,
+        afr,
+        ve,
+        clt,
+        tps,
+        tps_rate,
+        accel_enrich_active,
+        timestamp_ms: current_time_ms,
+    };
+    
+    // Clone the config values before we release the guard
+    let x_bins = config.x_bins.clone();
+    let y_bins = config.y_bins.clone();
+    let settings = config.settings.clone();
+    let filters = config.filters.clone();
+    let authority = config.authority_limits.clone();
+    drop(config_guard);
+    
+    // Feed to AutoTune
+    let mut autotune_guard = app_state.autotune_state.lock().await;
+    autotune_guard.add_data_point(
+        data_point,
+        &x_bins,
+        &y_bins,
+        &settings,
+        &filters,
+        &authority,
+    );
+}
+
 #[tauri::command]
 async fn start_realtime_stream(
     app: tauri::AppHandle,
@@ -2146,6 +2289,7 @@ async fn start_realtime_stream(
             ticker.tick().await;
 
             let is_demo = *app_state.demo_mode.lock().await;
+            let current_time_ms = start_time.elapsed().as_millis() as u64;
 
             if is_demo {
                 // Demo mode: generate simulated data
@@ -2157,6 +2301,9 @@ async fn start_realtime_stream(
                     let elapsed_ms = start_time.elapsed().as_millis() as u64;
                     let data = sim.update(elapsed_ms);
                     let _ = app_handle.emit("realtime:update", &data);
+                    
+                    // Feed data to AutoTune if running
+                    feed_autotune_data(&app_state, &data, current_time_ms).await;
                     
                     // Forward realtime data to plugin bridge for TS-compatible plugins
                     if let Some(ref bridge) = *app_state.controller_bridge.lock().await {
@@ -2194,6 +2341,12 @@ async fn start_realtime_stream(
                             }
 
                             let _ = app_handle.emit("realtime:update", &data);
+                            
+                            // Feed data to AutoTune if running
+                            // Note: We need to drop the guards first to avoid deadlock
+                            drop(conn_guard);
+                            drop(def_guard);
+                            feed_autotune_data(&app_state, &data, current_time_ms).await;
                             
                             // Forward realtime data to plugin bridge for TS-compatible plugins
                             if let Some(ref bridge) = *app_state.controller_bridge.lock().await {
@@ -2399,9 +2552,18 @@ async fn get_available_channels(
     Ok(channels)
 }
 
-/// Get suggested status bar channels based on FrontPage or common defaults
+/// Get suggested status bar channels based on user settings, FrontPage, or common defaults
 #[tauri::command]
-async fn get_status_bar_defaults(state: tauri::State<'_, AppState>) -> Result<Vec<String>, String> {
+async fn get_status_bar_defaults(
+    state: tauri::State<'_, AppState>,
+    app: tauri::AppHandle,
+) -> Result<Vec<String>, String> {
+    // First check if user has saved custom status bar channels
+    let settings = load_settings(&app);
+    if !settings.status_bar_channels.is_empty() {
+        return Ok(settings.status_bar_channels);
+    }
+
     let def_guard = state.definition.lock().await;
     let def = def_guard.as_ref().ok_or("Definition not loaded")?;
 
@@ -3461,20 +3623,114 @@ async fn get_all_constant_values(
 #[tauri::command]
 async fn start_autotune(
     state: tauri::State<'_, AppState>,
-    _table_name: String,
+    table_name: String,
     settings: AutoTuneSettings,
     filters: AutoTuneFilters,
     authority_limits: AutoTuneAuthorityLimits,
 ) -> Result<(), String> {
+    // Get the table definition to extract bin values
+    let def_guard = state.definition.lock().await;
+    let def = def_guard.as_ref().ok_or("No ECU definition loaded")?;
+    let cache_guard = state.tune_cache.lock().await;
+    let cache = cache_guard.as_ref();
+    
+    // Find the table and extract bins
+    let (x_bins, y_bins) = if let Some(table) = def.get_table_by_name_or_map(&table_name) {
+        // Read X bins from the constant
+        let x_bins = read_axis_bins(def, cache, &table.x_bins, table.x_size)?;
+        
+        // Read Y bins from the constant (if it's a 3D table)
+        let y_bins = if let Some(ref y_bins_name) = table.y_bins {
+            read_axis_bins(def, cache, y_bins_name, table.y_size)?
+        } else {
+            vec![0.0]  // 2D table has single Y bin
+        };
+        
+        (x_bins, y_bins)
+    } else {
+        // Use default bins if table not found
+        (vec![500.0, 1000.0, 1500.0, 2000.0, 2500.0, 3000.0, 3500.0, 4000.0, 4500.0, 5000.0, 5500.0, 6000.0],
+         vec![20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0, 100.0])
+    };
+    
+    drop(cache_guard);
+    drop(def_guard);
+    
+    // Store the config for realtime stream to use
+    let config = AutoTuneConfig {
+        table_name: table_name.clone(),
+        settings: settings.clone(),
+        filters: filters.clone(),
+        authority_limits: authority_limits.clone(),
+        x_bins,
+        y_bins,
+        last_tps: None,
+        last_timestamp_ms: None,
+    };
+    
+    *state.autotune_config.lock().await = Some(config);
+    
     let mut guard = state.autotune_state.lock().await;
     guard.start();
     Ok(())
+}
+
+/// Read axis bin values from a constant definition
+fn read_axis_bins(
+    def: &EcuDefinition,
+    cache: Option<&TuneCache>,
+    const_name: &str,
+    size: usize,
+) -> Result<Vec<f64>, String> {
+    // Try to get the constant
+    let constant = match def.constants.get(const_name) {
+        Some(c) => c,
+        None => {
+            // Constant not found, generate linear bins
+            return Ok((0..size).map(|i| i as f64 * 500.0 + 500.0).collect());
+        }
+    };
+    
+    // If we have cached tune data, read from it
+    if let Some(cache) = cache {
+        if let Some(page_data) = cache.get_page(constant.page) {
+            let elem_size = constant.data_type.size_bytes();
+            let mut bins = Vec::with_capacity(size);
+            let mut offset = constant.offset as usize;
+            
+            for _ in 0..size {
+                if offset + elem_size <= page_data.len() {
+                    if let Ok(raw) = read_raw_value(&page_data[offset..], &constant.data_type) {
+                        bins.push(constant.raw_to_display(raw));
+                    }
+                    offset += elem_size;
+                }
+            }
+            
+            if !bins.is_empty() {
+                return Ok(bins);
+            }
+        }
+    }
+    
+    // Last resort: generate linear bins based on typical RPM/MAP ranges
+    // For RPM bins (x-axis typically)
+    if size > 8 {
+        // Likely RPM axis - 500 to 6500 RPM
+        Ok((0..size).map(|i| 500.0 + (i as f64 * 6000.0 / (size - 1) as f64)).collect())
+    } else {
+        // Likely MAP/load axis - 20 to 100 kPa
+        Ok((0..size).map(|i| 20.0 + (i as f64 * 80.0 / (size - 1).max(1) as f64)).collect())
+    }
 }
 
 #[tauri::command]
 async fn stop_autotune(state: tauri::State<'_, AppState>) -> Result<(), String> {
     let mut guard = state.autotune_state.lock().await;
     guard.stop();
+    
+    // Clear the config
+    *state.autotune_config.lock().await = None;
     Ok(())
 }
 
@@ -6282,6 +6538,15 @@ async fn save_tune(
     // Update modified timestamp
     tune.touch();
 
+    // Populate INI metadata for version tracking (LibreTune 1.1+)
+    // This allows detecting when a tune was created with a different INI version
+    let ini_name = state.current_project.lock().await
+        .as_ref()
+        .map(|p| p.config.ecu_definition.clone())
+        .unwrap_or_else(|| "unknown.ini".to_string());
+    tune.ini_metadata = Some(def.generate_ini_metadata(&ini_name));
+    tune.constant_manifest = Some(def.generate_constant_manifest());
+
     // Use provided path, or current path, or generate default
     let save_path = if let Some(p) = path {
         PathBuf::from(p)
@@ -6397,6 +6662,59 @@ async fn load_tune(
         }
     } else {
         eprintln!("[WARN] load_tune: No INI definition loaded - will apply constants by name match if definition is loaded later");
+    }
+
+    // Check for INI version migration if tune has a saved manifest (LibreTune 1.1+ tunes)
+    // This helps users understand what changed between INI versions
+    {
+        use libretune_core::tune::migration::compare_manifests;
+
+        let def_guard = state.definition.lock().await;
+        if let (Some(saved_manifest), Some(def)) =
+            (&tune.constant_manifest, def_guard.as_ref())
+        {
+            let migration_report = compare_manifests(saved_manifest, def);
+
+            // Only report if there are actual changes
+            if migration_report.severity != "none" {
+                eprintln!(
+                    "[INFO] load_tune: INI version migration detected (severity: {})",
+                    migration_report.severity
+                );
+                eprintln!(
+                    "[INFO]   Missing in tune (new in INI): {}",
+                    migration_report.missing_in_tune.len()
+                );
+                eprintln!(
+                    "[INFO]   Missing in INI (removed): {}",
+                    migration_report.missing_in_ini.len()
+                );
+                eprintln!(
+                    "[INFO]   Type changed: {}",
+                    migration_report.type_changed.len()
+                );
+                eprintln!(
+                    "[INFO]   Scale/offset changed: {}",
+                    migration_report.scale_changed.len()
+                );
+
+                // Store in state for frontend access
+                *state.migration_report.lock().await = Some(migration_report.clone());
+
+                // Emit event to notify frontend
+                let _ = app.emit("tune:migration_needed", &migration_report);
+            } else {
+                // Clear any previous migration report
+                *state.migration_report.lock().await = None;
+            }
+        } else if tune.constant_manifest.is_some() {
+            eprintln!("[DEBUG] load_tune: Tune has manifest but no INI loaded - migration check deferred");
+        } else {
+            eprintln!("[DEBUG] load_tune: Tune has no manifest (pre-1.1 format) - migration check skipped");
+            // Clear any previous migration report
+            *state.migration_report.lock().await = None;
+        }
+        drop(def_guard);
     }
 
     let info = TuneInfo {
@@ -6871,6 +7189,40 @@ async fn load_tune(
     let _ = app.emit("tune:loaded", "file");
 
     Ok(info)
+}
+
+/// Get the current migration report (if any) from loading a tune
+#[tauri::command]
+async fn get_migration_report(
+    state: tauri::State<'_, AppState>,
+) -> Result<Option<MigrationReport>, String> {
+    let report = state.migration_report.lock().await;
+    Ok(report.clone())
+}
+
+/// Clear the current migration report
+#[tauri::command]
+async fn clear_migration_report(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    *state.migration_report.lock().await = None;
+    Ok(())
+}
+
+/// Get INI metadata for the currently loaded tune
+#[tauri::command]
+async fn get_tune_ini_metadata(
+    state: tauri::State<'_, AppState>,
+) -> Result<Option<IniMetadata>, String> {
+    let tune = state.current_tune.lock().await;
+    Ok(tune.as_ref().and_then(|t| t.ini_metadata.clone()))
+}
+
+/// Get constant manifest for the currently loaded tune
+#[tauri::command]
+async fn get_tune_constant_manifest(
+    state: tauri::State<'_, AppState>,
+) -> Result<Option<Vec<ConstantManifestEntry>>, String> {
+    let tune = state.current_tune.lock().await;
+    Ok(tune.as_ref().and_then(|t| t.constant_manifest.clone()))
 }
 
 #[tauri::command]
@@ -9734,6 +10086,7 @@ mod demo_mode_tests {
             connection: Mutex::new(None),
             definition: Mutex::new(None),
             autotune_state: Mutex::new(AutoTuneState::new()),
+            autotune_config: Mutex::new(None),
             streaming_task: Mutex::new(None),
             autotune_send_task: Mutex::new(None),
             current_tune: Mutex::new(None),
@@ -9747,6 +10100,7 @@ mod demo_mode_tests {
             demo_mode: Mutex::new(false),
             plugin_manager: Mutex::new(None),
             controller_bridge: Mutex::new(None),
+            migration_report: Mutex::new(None),
         };
 
         let dev_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -9802,6 +10156,11 @@ async fn update_setting(app: tauri::AppHandle, key: String, value: String) -> Re
             settings.indicator_fill_empty = value.parse().map_err(|_| "Invalid boolean value")?
         }
         "indicator_text_fit" => settings.indicator_text_fit = value,
+        // Status bar channels (JSON array)
+        "status_bar_channels" => {
+            settings.status_bar_channels = serde_json::from_str(&value)
+                .map_err(|e| format!("Invalid JSON for status_bar_channels: {}", e))?
+        }
         // Heatmap scheme settings
         "heatmap_value_scheme" => settings.heatmap_value_scheme = value,
         "heatmap_change_scheme" => settings.heatmap_change_scheme = value,
@@ -10151,6 +10510,7 @@ pub fn run() {
             connection: Mutex::new(None),
             definition: Mutex::new(None),
             autotune_state: Mutex::new(AutoTuneState::new()),
+            autotune_config: Mutex::new(None),
             streaming_task: Mutex::new(None),
             autotune_send_task: Mutex::new(None),
             current_tune: Mutex::new(None),
@@ -10164,6 +10524,7 @@ pub fn run() {
             demo_mode: Mutex::new(false),
             plugin_manager: Mutex::new(None),
             controller_bridge: Mutex::new(None),
+            migration_report: Mutex::new(None),
         })
         .invoke_handler(tauri::generate_handler![
             get_serial_ports,
@@ -10233,6 +10594,10 @@ pub fn run() {
             save_tune,
             save_tune_as,
             load_tune,
+            get_migration_report,
+            clear_migration_report,
+            get_tune_ini_metadata,
+            get_tune_constant_manifest,
             list_tune_files,
             burn_to_ecu,
             execute_controller_command,

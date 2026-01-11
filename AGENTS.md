@@ -185,7 +185,7 @@ Based on analysis of common ECU tuning software patterns:
 
 ## Remaining Tasks for Future Agents
 [x] Fix smooth_table bug (weight array indexing issue in table_ops.rs) - FIXED, all 10 tests pass
-[ ] Add more AutoTune algorithms (lambda compensation, transient filtering)
+[x] Add more AutoTune algorithms (lambda compensation, transient filtering) - COMPLETED Jan 11, 2026
 [x] Implement 3D table with react-three-fiber for better visualization - Enhanced with live cursor, trail line, cell grid overlay
 [x] Add data logging/playback features - Implemented DataLogView with CSV import, playback controls
 [x] All gauge types implemented (13/13) - RoundGauge, RoundDashedGauge, FuelMeter, Tachometer added
@@ -196,7 +196,7 @@ Based on analysis of common ECU tuning software patterns:
 [x] Add tune comparison/diff view - Implemented compare_tables command
 [ ] Implement Git integration for tune versioning
 [x] Add unit conversion layer (°C↔°F, kPa↔PSI, AFR↔Lambda) with user preferences - UnitPreferencesProvider implemented
-[ ] Add user-configurable status bar channel selection
+[x] Add user-configurable status bar channel selection - COMPLETED Jan 11, 2026
 [x] Create comprehensive test suite (CI + 46 unit tests added)
 [x] Fix table map_name lookup (veTable1Map → veTable1Tbl)
 [x] Remove hardcoded ECU channel names from status bar
@@ -211,8 +211,8 @@ Based on analysis of common ECU tuning software patterns:
 [x] Java properties file parser for TunerStudio compatibility
 [x] PC variables persistence (pcVariableValues.msq)
 [x] Restore points system (create, list, load, delete, prune)
-[ ] INI version tracking in tune files
-[ ] User-driven tune migration between INI versions
+[x] INI version tracking in tune files - COMPLETED Jan 11, 2026
+[x] User-driven tune migration between INI versions - COMPLETED Jan 11, 2026
 [x] Fix table operations integration (scale, smooth, interpolate, set equal, rebin) - All Tauri commands now wired to core library
 [x] Frontend dialogs for restore points and project import
 [x] Pop-out windows for multi-monitor support (dock-back, bidirectional sync)
@@ -222,6 +222,115 @@ Based on analysis of common ECU tuning software patterns:
 [x] Composite logger (Speeduino/rusEFI/MS2) - Backend + CompositeLoggerView.tsx
 
 ## Recent Changes (Session History)
+
+### AutoTune Live Table Lookup Fix - Completed Jan 11, 2026
+- **Problem**: AutoTune Live failed with "Table veTable1 not found" for rusEFI/epicEFI INIs
+- **Root Cause**: Frontend called non-existent `get_available_tables` command and hardcoded `veTable1`
+- **Fix** (`tuner-ui/AutoTuneLive.tsx`):
+  - Changed `get_available_tables` → `get_tables` (correct backend command)
+  - Added VE table auto-detection: tries `veTableTbl`, `veTable1Tbl`, `veTable1`, etc.
+  - Sorted table list: VE/fuel tables first, then alphabetically
+  - Fallback to first VE-related table or first table overall
+- **Fix** (`TableComparisonDialog.tsx`): Changed `get_available_tables` → `get_tables`
+- **Fix** (`App.tsx`): Changed hardcoded `"veTable1"` to `""` for auto-detection
+- **Cleanup**: Deleted unused `realtime/AutoTuneLive.tsx` (tuner-ui version is active)
+
+### INI Version Tracking & Tune Migration - Completed Jan 11, 2026
+- **TuneFile format update** (`file.rs`):
+  - Added `IniMetadata` struct: `signature`, `name`, `hash`, `spec_version`, `saved_at`
+  - Added `ConstantManifestEntry` struct: `name`, `data_type`, `page`, `offset`, `scale`, `translate`
+  - Added `ini_metadata: Option<IniMetadata>` and `constant_manifest: Option<Vec<ConstantManifestEntry>>` to TuneFile
+  - Bumped TuneFile version from "1.0" to "1.1"
+
+- **MSQ parser/writer** (`file.rs`):
+  - Parses new `<iniMetadata>` XML section with signature, name, hash, specVersion, savedAt attributes
+  - Parses new `<constantManifest>` section containing `<entry>` elements
+  - `save_msq()` writes both new sections after bibliography
+
+- **INI fingerprinting** (`ini/mod.rs`):
+  - `compute_structural_hash()` - SHA-256 hash of all non-PC constants (name, type, page, offset, scale)
+  - `generate_constant_manifest()` - Creates manifest entries from current EcuDefinition
+  - `generate_ini_metadata()` - Combines hash + manifest + timestamp into IniMetadata
+
+- **Migration detection** (`tune/migration.rs` - NEW):
+  - `MigrationReport` struct with: `missing_in_tune`, `missing_in_ini`, `type_changed`, `scale_changed`, `can_auto_migrate`, `requires_user_review`, `severity`
+  - `ConstantChange` struct for detailed change info (old/new type, scale, offset, translate)
+  - `compare_manifests()` function compares saved manifest against current INI definition
+  - Severity levels: "none", "low" (new constants), "medium" (scale changes), "high" (type changes/removals)
+  - Unit tests for empty manifest and summary generation
+
+- **Backend integration** (`lib.rs`):
+  - `save_tune()` now populates `ini_metadata` and `constant_manifest` before saving
+  - `load_tune()` generates migration report when tune has manifest and INI is loaded
+  - Emits `tune:migration_needed` event when severity != "none"
+  - Added `migration_report: Mutex<Option<MigrationReport>>` to AppState
+  - New Tauri commands: `get_migration_report`, `clear_migration_report`, `get_tune_ini_metadata`, `get_tune_constant_manifest`
+
+- **MigrationReportDialog** (`dialogs/MigrationReportDialog.tsx` - NEW):
+  - Shows severity badge (color-coded: red=high, orange=medium, blue=low)
+  - Collapsible sections for: type changes (critical), scale changes (warning), removed constants, new constants
+  - Lists first 20 items in each section with "...and N more" for larger lists
+  - "Dismiss" and "Continue with Tune" buttons
+  - Auto-opens when `tune:migration_needed` event is received
+
+### User-Configurable Status Bar - Completed Jan 11, 2026
+- **Settings persistence** (`lib.rs`):
+  - Added `status_bar_channels: Vec<String>` to Settings struct with `#[serde(default)]`
+  - Updated `get_status_bar_defaults` to check user settings first before INI FrontPage/common defaults
+  - Added JSON array parsing in `update_setting` for status_bar_channels
+
+- **Status Bar Channel Selector UI** (`SettingsDialog.tsx`):
+  - Tag-style chip display showing currently selected channels
+  - Remove button (×) on each channel tag
+  - Dropdown to add available channels (filtered to exclude already-selected)
+  - Maximum 8 channels enforced
+  - "Reset to Defaults" button to clear custom selection
+  - Live updates reflected immediately in status bar
+
+- **App.tsx integration**:
+  - `handleSettingsChange` callback now handles `statusBarChannels` updates
+  - Refreshes status bar display when settings are changed
+
+### AutoTune Enhancements - Completed Jan 11, 2026
+- **Transient Filtering** (`autotune.rs`):
+  - Added `tps: f64` field to `VEDataPoint` for current TPS value
+  - Added `tps_rate: f64` field for TPS change rate (%/sec)
+  - Added `accel_enrich_active: Option<bool>` for ECU accel enrichment flag
+  - Added `timestamp_ms: u64` for lambda delay correlation
+  - Added `max_tps_rate: f64` to `AutoTuneFilters` (default 10.0 %/sec)
+  - Added `exclude_accel_enrich: bool` to `AutoTuneFilters` (default true)
+  - Updated `passes_filters()` to reject data during fast TPS changes or accel enrichment
+
+- **Lambda Delay Compensation** (`autotune.rs`):
+  - Added `data_buffer: VecDeque<VEDataPoint>` to `AutoTuneState` for buffering
+  - Added `buffer_max_age_ms: u64` (default 500ms) for buffer pruning
+  - Implemented `get_lambda_delay_ms(rpm)` with default curve:
+    - 200ms at idle (800 RPM)
+    - 50ms at redline (6000 RPM)
+    - Linear interpolation between
+  - `find_delayed_data_point()` finds historical data point matching delay
+  - `add_data_point()` now correlates current AFR with historical VE cell
+
+- **Authority Limits Enforcement** (`autotune.rs`):
+  - Added `apply_authority_limits()` static function
+  - Clamps recommendations by absolute value change AND percentage change
+  - Applied in `add_data_point()` before storing recommendation
+
+- **Realtime Stream Integration** (`lib.rs`):
+  - Added `AutoTuneConfig` struct to store table name, settings, filters, authority limits, and table bins
+  - Added `autotune_config: Mutex<Option<AutoTuneConfig>>` to AppState
+  - `start_autotune()` now extracts table bin values from INI and stores config
+  - `stop_autotune()` clears the config
+  - Added `feed_autotune_data()` helper function
+  - Realtime stream loop now feeds data to AutoTune when running
+  - Automatically calculates TPS rate from consecutive samples
+  - Looks up common channel names (rpm, RPM, map, MAP, afr, AFR, etc.)
+  - Converts lambda readings to AFR if needed
+
+- **Axis Bin Reading** (`lib.rs`):
+  - Added `read_axis_bins()` helper to read table axis values from tune cache
+  - Falls back to generated linear bins if data not available
+  - Handles both RPM-like (wide range) and MAP-like (narrow range) axes
 
 ### Table Operations Integration - Completed Jan 11, 2026
 - **Fixed table editing toolbar operations** (`lib.rs`):

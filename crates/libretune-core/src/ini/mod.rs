@@ -202,6 +202,83 @@ impl EcuDefinition {
     pub fn total_memory_size(&self) -> usize {
         self.page_sizes.iter().map(|s| *s as usize).sum()
     }
+
+    /// Compute a structural hash of the INI definition
+    /// 
+    /// This hash is based on constant names, types, pages, offsets, and scales.
+    /// It changes when the INI structure changes, but not for cosmetic changes
+    /// like label updates or help text.
+    pub fn compute_structural_hash(&self) -> String {
+        use std::collections::BTreeMap;
+        use std::hash::{Hash, Hasher};
+        use std::collections::hash_map::DefaultHasher;
+        
+        let mut hasher = DefaultHasher::new();
+        
+        // Hash signature
+        self.signature.hash(&mut hasher);
+        
+        // Hash page configuration
+        self.n_pages.hash(&mut hasher);
+        for size in &self.page_sizes {
+            size.hash(&mut hasher);
+        }
+        
+        // Sort constants by name for deterministic ordering
+        let sorted_constants: BTreeMap<_, _> = self.constants.iter()
+            .filter(|(_, c)| !c.is_pc_variable)
+            .collect();
+        
+        for (name, constant) in sorted_constants {
+            // Hash structural properties only
+            name.hash(&mut hasher);
+            format!("{:?}", constant.data_type).hash(&mut hasher);
+            constant.page.hash(&mut hasher);
+            constant.offset.hash(&mut hasher);
+            // Convert floats to bits for hashing
+            constant.scale.to_bits().hash(&mut hasher);
+            constant.translate.to_bits().hash(&mut hasher);
+        }
+        
+        format!("{:016x}", hasher.finish())
+    }
+    
+    /// Generate a constant manifest for saving with tune files
+    pub fn generate_constant_manifest(&self) -> Vec<crate::tune::ConstantManifestEntry> {
+        let mut manifest = Vec::new();
+        
+        for (name, constant) in &self.constants {
+            // Skip PC variables
+            if constant.is_pc_variable {
+                continue;
+            }
+            
+            manifest.push(crate::tune::ConstantManifestEntry {
+                name: name.clone(),
+                data_type: format!("{:?}", constant.data_type),
+                page: constant.page,
+                offset: constant.offset,
+                scale: constant.scale,
+                translate: constant.translate,
+            });
+        }
+        
+        // Sort by name for consistent ordering
+        manifest.sort_by(|a, b| a.name.cmp(&b.name));
+        
+        manifest
+    }
+    
+    /// Generate INI metadata for saving with tune files
+    pub fn generate_ini_metadata(&self, ini_filename: &str) -> crate::tune::IniMetadata {
+        crate::tune::IniMetadata {
+            signature: self.signature.clone(),
+            name: ini_filename.to_string(),
+            hash: self.compute_structural_hash(),
+            spec_version: self.ini_spec_version.clone(),
+            saved_at: chrono::Utc::now().to_rfc3339(),
+        }
+    }
 }
 
 impl Default for EcuDefinition {
