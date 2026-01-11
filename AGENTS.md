@@ -175,6 +175,7 @@ async fn command_name(param: Type) -> Result<ReturnType, String> {
 4. **Performance**: Use useMemo for expensive computations, debounce user input
 5. **Keyboard Navigation**: Follow standard ECU tuning hotkey patterns
 6. **Legal Distinction**: All code must be original, never copied from proprietary software
+7. **Git Workflow**: Commit changes but **NEVER push to remote** unless explicitly instructed by the user
 
 ## ECU Tuning Software Reference Analysis
 Based on analysis of common ECU tuning software patterns:
