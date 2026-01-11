@@ -457,15 +457,22 @@ fn merge_definitions(target: &mut EcuDefinition, source: EcuDefinition) {
 
 /// Strip comments from a line (everything after ';')
 /// Note: '#' is handled at the line level for preprocessor directives
+/// Special case: Don't strip semicolons in field names before '=' (for help text syntax)
 fn strip_comment(line: &str) -> String {
     let mut result = String::new();
     let mut in_quotes = false;
+    let mut found_equals = false;
 
     for ch in line.chars() {
         if ch == '"' {
             in_quotes = !in_quotes;
             result.push(ch);
-        } else if ch == ';' && !in_quotes {
+        } else if ch == '=' && !in_quotes {
+            found_equals = true;
+            result.push(ch);
+        } else if ch == ';' && !in_quotes && found_equals {
+            // Only strip semicolons as comments AFTER we've seen the '=' sign
+            // This preserves help text syntax: fieldname;+help = value
             break;
         } else {
             result.push(ch);
@@ -2547,14 +2554,30 @@ mod tests {
 
     #[test]
     fn test_strip_comment() {
-        assert_eq!(strip_comment("value ; comment"), "value ");
+        // Comments after equals sign
+        assert_eq!(strip_comment("key = value ; comment"), "key = value ");
+        
+        // Semicolons in quotes are preserved
         assert_eq!(
-            strip_comment("\"value ; with semi\""),
-            "\"value ; with semi\""
+            strip_comment("key = \"value ; with semi\""),
+            "key = \"value ; with semi\""
         );
+        
         // Note: # is now handled at the line level for preprocessor directives,
         // so strip_comment doesn't remove # comment lines anymore
         assert_eq!(strip_comment("# comment line"), "# comment line");
+        
+        // NEW: Semicolons in field names (before =) are preserved for help text
+        assert_eq!(
+            strip_comment("fieldname;+help text = value"),
+            "fieldname;+help text = value"
+        );
+        
+        // But comments after = are still stripped
+        assert_eq!(
+            strip_comment("fieldname;+help = value ; comment"),
+            "fieldname;+help = value "
+        );
     }
 
     #[test]
@@ -2971,3 +2994,59 @@ indicator = { (tps > tpsflood) && (rpm < crankRPM) }, "FLOOD OFF", "FLOOD CLEAR"
         assert_eq!(help, Some("Help text with spaces".to_string()));
     }
 }
+
+    #[test]
+    fn test_parse_ini_with_help_text() {
+        let content = r#"
+[MegaTune]
+signature = "test 1.0"
+queryCommand = "Q"
+
+[TunerStudio]
+iniSpecVersion = 3.0
+nPages = 1
+pageSize = 256
+
+[Constants]
+page = 0
+
+crankingRpm;+Maximum RPM below which engine is considered to be cranking = scalar, U16, 0, "RPM", 1, 0, 0, 1000, 0
+baseFuelMass;+"Base mass of the per-cylinder fuel injected during cranking. This is then modified by the multipliers for CLT, IAT, TPS etc, to give the final cranking pulse width." = scalar, F32, 2, "mg", 1, 0, 0, 100, 2
+fieldWithoutPlus;This should not appear as tooltip = scalar, U08, 6, "", 1, 0, 0, 255, 0
+normalField = scalar, U16, 7, "ms", 0.1, 0, 0, 100, 1
+injectionMode;+"Select whether fuel is injected simultaneously for all cylinders or sequentially per cylinder" = bits, U08, 9, [0:1], "Simultaneous", "Sequential", "Semi-Sequential"
+bias_resistor;+Pull-up resistor value on your board;"Ohm" = scalar, F32, 10, "Ohm", 1, 0, 0, 200000, 1
+
+[OutputChannels]
+rpm = U16, 0, "RPM", 1.0, 0.0
+"#;
+
+        let def = parse_ini(content).expect("Should parse successfully");
+        
+        // Check that constants with help text have it extracted
+        let c = def.constants.get("crankingRpm").expect("crankingRpm should exist");
+        assert!(c.help.is_some());
+        assert_eq!(c.help.as_ref().unwrap(), "Maximum RPM below which engine is considered to be cranking");
+        
+        let c = def.constants.get("baseFuelMass").expect("baseFuelMass should exist");
+        assert!(c.help.is_some());
+        assert!(c.help.as_ref().unwrap().contains("Base mass of the per-cylinder fuel injected"));
+        
+        // Check that field without + prefix has no help
+        let c = def.constants.get("fieldWithoutPlus").expect("fieldWithoutPlus should exist");
+        assert!(c.help.is_none());
+        
+        // Check that field without help text has none
+        let c = def.constants.get("normalField").expect("normalField should exist");
+        assert!(c.help.is_none());
+        
+        // Check bits field with help text
+        let c = def.constants.get("injectionMode").expect("injectionMode should exist");
+        assert!(c.help.is_some());
+        assert!(c.help.as_ref().unwrap().contains("Select whether fuel is injected"));
+        
+        // Check field with units suffix
+        let c = def.constants.get("bias_resistor").expect("bias_resistor should exist");
+        assert!(c.help.is_some());
+        assert_eq!(c.help.as_ref().unwrap(), "Pull-up resistor value on your board");
+    }

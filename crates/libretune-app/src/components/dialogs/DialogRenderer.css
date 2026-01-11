@@ -65,6 +65,22 @@
   color: var(--text-secondary);
   font-weight: 500;
   text-align: left;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.help-icon {
+  display: inline-flex;
+  align-items: center;
+  color: var(--accent);
+  cursor: help;
+  opacity: 0.8;
+  transition: opacity 0.2s;
+}
+
+.help-icon:hover {
+  opacity: 1;
 }
 
 .dialog-view .field-input-wrap {
