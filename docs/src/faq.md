@@ -152,3 +152,36 @@ Try these settings:
 1. Check ECU connection is stable
 2. Reduce polling rate in Settings
 3. Close other applications using serial ports
+
+## Trigger Patterns
+
+### My trigger pattern isn't in the list
+
+Trigger patterns (like "60-2", "36-1", "Nissan QG18") are defined in the **ECU firmware**, not in LibreTune. LibreTune only displays what's available in your INI file.
+
+If your trigger pattern is missing:
+1. Check if your ECU firmware supports it
+2. Request support from your ECU manufacturer (Speeduino, rusEFI, etc.)
+3. Update to newer firmware if support was added recently
+4. Import the matching INI file to LibreTune
+
+See [NISSAN_QG18_TRIGGER_SETUP.md](../../NISSAN_QG18_TRIGGER_SETUP.md) for a detailed example.
+
+### Can LibreTune add support for my trigger pattern?
+
+No. Trigger pattern decoding happens in the **ECU firmware** in real-time (microsecond precision). LibreTune is a tuning interface that runs on your computer - it cannot process trigger patterns.
+
+To add a new trigger pattern:
+1. Request it from your ECU firmware project (Speeduino, rusEFI)
+2. Wait for firmware implementation
+3. Update your ECU firmware
+4. Import the new INI file
+5. The pattern will automatically appear in LibreTune
+
+### What if I need a trigger pattern now?
+
+Temporary options:
+- Use "custom toothed wheel" with manual configuration
+- Use a similar existing pattern if timing is close
+- Use a trigger converter/adapter board
+- Consider switching to an ECU with your pattern supported

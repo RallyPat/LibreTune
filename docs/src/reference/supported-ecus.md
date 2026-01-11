@@ -107,3 +107,32 @@ Some ECU-specific features may require:
 - Updated INI file
 - LibreTune updates
 - Feature requests on GitHub
+
+## Trigger Patterns
+
+### Understanding Trigger Pattern Support
+
+**Important**: Trigger patterns (like "60-2", "36-1", "Nissan QG18") are implemented in the **ECU firmware**, not in LibreTune.
+
+LibreTune reads available patterns from the INI file and presents them in a dropdown. The actual trigger decoding happens in real-time on the ECU's microcontroller.
+
+### If Your Trigger Pattern Is Missing
+
+If you need a trigger pattern that's not in the list:
+
+1. **Check ECU Firmware**: Verify your firmware version supports the pattern
+2. **Update Firmware**: If support was added recently, flash new firmware
+3. **Request Feature**: Contact your ECU manufacturer:
+   - Speeduino: https://speeduino.com/forum/
+   - rusEFI: https://github.com/rusefi/rusefi
+   - EpicEFI: Contact through their channels
+4. **Import New INI**: Once firmware is updated, import matching INI to LibreTune
+
+**Example**: For detailed information on requesting trigger pattern support, see [NISSAN_QG18_TRIGGER_SETUP.md](../../NISSAN_QG18_TRIGGER_SETUP.md).
+
+### Temporary Solutions
+
+While waiting for firmware support:
+- Use "custom toothed wheel" with manual configuration
+- Use a similar pattern if timing characteristics match
+- Use a trigger converter/adapter board
