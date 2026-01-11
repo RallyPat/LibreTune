@@ -16,8 +16,9 @@ use libretune_core::ini::{
 };
 use libretune_core::plugin::{ControllerBridge, PluginEvent, PluginInfo, PluginManager, SwingComponent};
 use libretune_core::project::{
-    ConnectionSettings, IniEntry, IniRepository, IniSource, OnlineIniEntry, OnlineIniRepository,
-    Project, ProjectConfig, ProjectInfo, ProjectSettings,
+    BranchInfo, CommitDiff, CommitInfo, ConnectionSettings, IniEntry, IniRepository, IniSource,
+    OnlineIniEntry, OnlineIniRepository, Project, ProjectConfig, ProjectInfo, ProjectSettings,
+    ProjectTemplate, TemplateManager, VersionControl,
 };
 use libretune_core::protocol::serial::list_ports;
 use libretune_core::protocol::{Connection, ConnectionConfig, ConnectionState};
@@ -237,10 +238,24 @@ struct Settings {
     heatmap_change_custom: Vec<String>,  // Custom color stops for change context
     #[serde(default)]
     heatmap_coverage_custom: Vec<String>, // Custom color stops for coverage context
+    
+    // Git version control settings
+    #[serde(default = "default_auto_commit")]
+    auto_commit_on_save: String,    // "always", "never", "ask"
+    #[serde(default = "default_commit_message_format")]
+    commit_message_format: String,  // Format string with {date}, {time} placeholders
 }
 
 fn default_heatmap_scheme() -> String {
     "tunerstudio".to_string()
+}
+
+fn default_auto_commit() -> String {
+    "ask".to_string()
+}
+
+fn default_commit_message_format() -> String {
+    "Tune saved on {date} at {time}".to_string()
 }
 
 fn save_settings(app: &tauri::AppHandle, settings: &Settings) {
@@ -517,11 +532,19 @@ async fn find_matching_inis_internal(
     matches
 }
 
+/// Lists all available serial ports on the system.
+///
+/// Returns: Vector of serial port names (e.g., "COM3" on Windows, "/dev/ttyUSB0" on Linux)
 #[tauri::command]
 async fn get_serial_ports() -> Result<Vec<String>, String> {
     Ok(list_ports().into_iter().map(|p| p.name).collect())
 }
 
+/// Lists all available ECU INI definition files in the definitions directory.
+///
+/// Scans the app's definitions directory for .ini files that describe ECU protocols.
+///
+/// Returns: Sorted vector of INI filenames
 #[tauri::command]
 async fn get_available_inis(app: tauri::AppHandle) -> Result<Vec<String>, String> {
     let mut inis = Vec::new();
@@ -557,6 +580,16 @@ async fn get_available_inis(app: tauri::AppHandle) -> Result<Vec<String>, String
     Ok(inis)
 }
 
+/// Loads an ECU INI definition file and initializes the tune cache.
+///
+/// This parses the INI file to understand the ECU's memory layout, communication
+/// protocol, tables, curves, and output channels. Must be called before connecting
+/// to an ECU or opening a tune file.
+///
+/// # Arguments
+/// * `path` - Absolute path or filename relative to definitions directory
+///
+/// Returns: Nothing on success, error message on failure
 #[tauri::command]
 async fn load_ini(
     app: tauri::AppHandle,
@@ -837,6 +870,18 @@ async fn load_ini(
     }
 }
 
+/// Establishes a serial connection to an ECU.
+///
+/// Opens a serial port and attempts to communicate with the ECU using the
+/// protocol defined in the loaded INI file. Returns connection status and
+/// any signature mismatch information.
+///
+/// # Arguments
+/// * `port_name` - Serial port name (e.g., "COM3", "/dev/ttyUSB0")
+/// * `baud_rate` - Baud rate for serial communication (e.g., 115200)
+/// * `timeout_ms` - Optional connection timeout in milliseconds
+///
+/// Returns: ConnectResult with ECU signature and optional mismatch info
 #[tauri::command]
 async fn connect_to_ecu(
     app: tauri::AppHandle,
@@ -1199,6 +1244,11 @@ async fn sync_ecu_data(
     })
 }
 
+/// Disconnects from the currently connected ECU.
+///
+/// Closes the serial connection and clears the connection state.
+///
+/// Returns: Nothing on success
 #[tauri::command]
 async fn disconnect_ecu(state: tauri::State<'_, AppState>) -> Result<(), String> {
     let mut guard = state.connection.lock().await;
@@ -1275,6 +1325,12 @@ async fn get_adaptive_timing_stats(
     })
 }
 
+/// Gets the current ECU connection status.
+///
+/// Returns comprehensive connection information including state, ECU signature,
+/// loaded INI info, and demo mode status.
+///
+/// Returns: ConnectionStatus with connection state and metadata
 #[tauri::command]
 async fn get_connection_status(
     state: tauri::State<'_, AppState>,
@@ -1304,6 +1360,11 @@ async fn get_connection_status(
     })
 }
 
+/// Retrieves the path to the last-used INI file from settings.
+///
+/// Used on startup to auto-load the previously used ECU definition.
+///
+/// Returns: Optional path to last INI file, or None if not set or file missing
 #[tauri::command]
 async fn auto_load_last_ini(app: tauri::AppHandle) -> Result<Option<String>, String> {
     let settings = load_settings(&app);
@@ -1380,6 +1441,15 @@ fn clean_axis_label(label: &str) -> String {
     trimmed.to_string()
 }
 
+/// Retrieves complete table data including axis bins and Z values.
+///
+/// Fetches a 2D or 3D table from the tune cache or ECU memory, converting
+/// raw bytes to display values using the INI-defined scale and translate.
+///
+/// # Arguments
+/// * `table_name` - Table name or map name from INI definition
+///
+/// Returns: TableData with x/y bins, z values, and axis metadata
 #[tauri::command]
 async fn get_table_data(
     state: tauri::State<'_, AppState>,
@@ -1605,6 +1675,12 @@ struct ProtocolDefaults {
     timeout_ms: u32,
 }
 
+/// Get protocol timing defaults from the loaded INI definition.
+///
+/// Returns timing values like baud rate, delays, and timeouts that the
+/// frontend can use to configure connection settings.
+///
+/// Returns: ProtocolDefaults with timing and format settings
 #[tauri::command]
 async fn get_protocol_defaults(
     state: tauri::State<'_, AppState>,
@@ -1643,6 +1719,12 @@ struct TuneCacheStatus {
     dirty_pages: Vec<u8>,
 }
 
+/// Get the current status of the tune data cache.
+///
+/// Returns information about loaded pages, dirty data that needs saving,
+/// and pending burns. Used to show sync/save status in the UI.
+///
+/// Returns: TuneCacheStatus with page loading and modification info
 #[tauri::command]
 async fn get_tune_cache_status(
     state: tauri::State<'_, AppState>,
@@ -1779,6 +1861,15 @@ async fn load_all_pages(
     Ok(())
 }
 
+/// Retrieves curve data (1D table) including X and Y values.
+///
+/// Fetches a curve from the tune cache or ECU memory for display
+/// in the curve editor.
+///
+/// # Arguments
+/// * `curve_name` - Curve name from INI definition
+///
+/// Returns: CurveData with x/y values and metadata
 #[tauri::command]
 async fn get_curve_data(
     state: tauri::State<'_, AppState>,
@@ -1902,6 +1993,16 @@ async fn get_curve_data(
     })
 }
 
+/// Updates table Z values in the tune cache and optionally writes to ECU.
+///
+/// Converts display values to raw bytes and writes to the tune cache.
+/// If connected to ECU, also writes to ECU memory. Works in offline mode.
+///
+/// # Arguments
+/// * `table_name` - Table name or map name from INI definition
+/// * `z_values` - 2D array of new Z values in display units
+///
+/// Returns: Nothing on success
 #[tauri::command]
 async fn update_table_data(
     state: tauri::State<'_, AppState>,
@@ -1995,6 +2096,13 @@ async fn update_table_data(
     Ok(())
 }
 
+/// Updates curve Y values in the tune cache and optionally writes to ECU.
+///
+/// # Arguments
+/// * `curve_name` - Curve name from INI definition
+/// * `y_values` - Vector of new Y values in display units
+///
+/// Returns: Nothing on success
 #[tauri::command]
 async fn update_curve_data(
     state: tauri::State<'_, AppState>,
@@ -2090,6 +2198,12 @@ async fn update_curve_data(
     Ok(())
 }
 
+/// Retrieves current realtime data from the ECU.
+///
+/// Polls the ECU for current sensor values and computed channels.
+/// Used for gauges, status bar, and table highlighting.
+///
+/// Returns: HashMap of channel names to current values
 #[tauri::command]
 async fn get_realtime_data(
     state: tauri::State<'_, AppState>,
@@ -2245,6 +2359,16 @@ async fn feed_autotune_data(
     );
 }
 
+/// Starts continuous realtime data streaming from the ECU.
+///
+/// Spawns a background task that polls the ECU at the specified interval
+/// and emits `realtime:update` events to the frontend. Also feeds data
+/// to AutoTune if running.
+///
+/// # Arguments
+/// * `interval_ms` - Polling interval in milliseconds (default: 100ms)
+///
+/// Returns: Nothing on success
 #[tauri::command]
 async fn start_realtime_stream(
     app: tauri::AppHandle,
@@ -2366,6 +2490,11 @@ async fn start_realtime_stream(
     Ok(())
 }
 
+/// Stops the realtime data streaming task.
+///
+/// Aborts the background task started by `start_realtime_stream`.
+///
+/// Returns: Nothing on success
 #[tauri::command]
 async fn stop_realtime_stream(state: tauri::State<'_, AppState>) -> Result<(), String> {
     let mut task_guard = state.streaming_task.lock().await;
@@ -2381,6 +2510,12 @@ struct TableInfo {
     title: String,
 }
 
+/// Lists all available tables from the loaded INI definition.
+///
+/// Returns basic info (name and title) for all tables defined in the INI.
+/// Used to populate menus and table selection UI.
+///
+/// Returns: Sorted vector of TableInfo with name and title
 #[tauri::command]
 async fn get_tables(state: tauri::State<'_, AppState>) -> Result<Vec<TableInfo>, String> {
     let def_guard = state.definition.lock().await;
@@ -2435,6 +2570,12 @@ struct FrontPageInfo {
     indicators: Vec<FrontPageIndicatorInfo>,
 }
 
+/// Get the FrontPage definition from the INI file.
+///
+/// FrontPage defines the default dashboard layout including which gauges
+/// and status indicators to show when the app first loads.
+///
+/// Returns: Optional FrontPageInfo with gauge references and indicators
 #[tauri::command]
 async fn get_frontpage(state: tauri::State<'_, AppState>) -> Result<Option<FrontPageInfo>, String> {
     let def_guard = state.definition.lock().await;
@@ -2458,6 +2599,13 @@ async fn get_frontpage(state: tauri::State<'_, AppState>) -> Result<Option<Front
     }))
 }
 
+/// Get all gauge configurations from the INI file.
+///
+/// Returns complete gauge definitions including channel bindings,
+/// min/max ranges, warning thresholds, and display settings.
+/// Used to configure dashboard gauges.
+///
+/// Returns: Vector of GaugeInfo for all defined gauges
 #[tauri::command]
 async fn get_gauge_configs(state: tauri::State<'_, AppState>) -> Result<Vec<GaugeInfo>, String> {
     let def_guard = state.definition.lock().await;
@@ -2729,6 +2877,16 @@ fn should_show_item(item: &MenuItem, context: &HashMap<String, f64>) -> bool {
     }
 }
 
+/// Evaluates an INI expression (visibility condition) with given context values.
+///
+/// Used to determine if menu items, dialogs, or fields should be shown
+/// based on current constant values.
+///
+/// # Arguments
+/// * `expression` - INI expression string (e.g., "{ nCylinders > 4 }")
+/// * `context` - HashMap of variable names to current values
+///
+/// Returns: Boolean result of expression evaluation
 #[tauri::command]
 async fn evaluate_expression(
     state: tauri::State<'_, AppState>,
@@ -2741,6 +2899,15 @@ async fn evaluate_expression(
     Ok(val.as_bool())
 }
 
+/// Retrieves a dialog definition from the INI file.
+///
+/// Gets the complete dialog structure including panels, fields, and layout
+/// for rendering settings dialogs.
+///
+/// # Arguments
+/// * `name` - Dialog name from INI definition
+///
+/// Returns: Complete DialogDefinition structure
 #[tauri::command]
 async fn get_dialog_definition(
     state: tauri::State<'_, AppState>,
@@ -2754,6 +2921,12 @@ async fn get_dialog_definition(
         .ok_or_else(|| format!("Dialog {} not found", name))
 }
 
+/// Retrieves an indicator panel definition from the INI file.
+///
+/// # Arguments
+/// * `name` - Indicator panel name from INI definition
+///
+/// Returns: IndicatorPanel structure with LED/indicator configurations
 #[tauri::command]
 async fn get_indicator_panel(
     state: tauri::State<'_, AppState>,
@@ -2767,6 +2940,12 @@ async fn get_indicator_panel(
         .ok_or_else(|| format!("IndicatorPanel {} not found", name))
 }
 
+/// Retrieves a port editor configuration from the INI file.
+///
+/// # Arguments
+/// * `name` - Port editor name from INI definition
+///
+/// Returns: PortEditorConfig for I/O pin assignment UI
 #[tauri::command]
 async fn get_port_editor(
     state: tauri::State<'_, AppState>,
@@ -2780,6 +2959,12 @@ async fn get_port_editor(
         .ok_or_else(|| format!("PortEditor {} not found", name))
 }
 
+/// Retrieves a help topic from the INI file.
+///
+/// # Arguments
+/// * `name` - Help topic name from INI definition
+///
+/// Returns: HelpTopic with title and content
 #[tauri::command]
 async fn get_help_topic(
     state: tauri::State<'_, AppState>,
@@ -2793,6 +2978,15 @@ async fn get_help_topic(
         .ok_or_else(|| format!("Help topic {} not found", name))
 }
 
+/// Retrieves constant metadata from the INI definition.
+///
+/// Gets information about a constant including its type, units, min/max,
+/// bit options (for dropdown fields), and visibility conditions.
+///
+/// # Arguments
+/// * `name` - Constant name from INI definition
+///
+/// Returns: ConstantInfo with metadata for UI rendering
 #[tauri::command]
 async fn get_constant(
     state: tauri::State<'_, AppState>,
@@ -2845,6 +3039,12 @@ async fn get_constant(
     })
 }
 
+/// Retrieves a string constant's current value.
+///
+/// # Arguments
+/// * `name` - String constant name from INI definition
+///
+/// Returns: The string value
 #[tauri::command]
 async fn get_constant_string_value(
     state: tauri::State<'_, AppState>,
@@ -2906,6 +3106,15 @@ async fn get_constant_string_value(
     Ok(String::new())
 }
 
+/// Retrieves a numeric constant's current value.
+///
+/// Reads from tune file (offline) or ECU memory (online). For PC variables,
+/// reads from local cache. Handles bit-field extraction automatically.
+///
+/// # Arguments
+/// * `name` - Constant name from INI definition
+///
+/// Returns: Current value in display units (scaled/translated)
 #[tauri::command]
 async fn get_constant_value(
     state: tauri::State<'_, AppState>,
@@ -3135,6 +3344,16 @@ async fn get_constant_value(
     Ok(0.0)
 }
 
+/// Updates a constant's value in the tune and optionally writes to ECU.
+///
+/// Handles PC variables (local only), scalar constants, and bit-field
+/// constants. Writes to tune cache and ECU if connected.
+///
+/// # Arguments
+/// * `name` - Constant name from INI definition
+/// * `value` - New value in display units
+///
+/// Returns: Nothing on success
 #[tauri::command]
 async fn update_constant(
     state: tauri::State<'_, AppState>,
@@ -3349,6 +3568,12 @@ async fn update_constant(
     Ok(())
 }
 
+/// Retrieves all scalar constant values at once.
+///
+/// Used to get visibility condition context for menu items and dialogs.
+/// Only returns scalar constants, not arrays.
+///
+/// Returns: HashMap of constant names to their current values
 #[tauri::command]
 async fn get_all_constant_values(
     state: tauri::State<'_, AppState>,
@@ -3620,6 +3845,18 @@ async fn get_all_constant_values(
     Ok(values)
 }
 
+/// Starts AutoTune data collection and recommendation engine.
+///
+/// Initializes the AutoTune state machine to collect AFR data and generate
+/// VE table correction recommendations. Reads table axis bins for cell lookup.
+///
+/// # Arguments
+/// * `table_name` - Target VE table name
+/// * `settings` - AutoTune configuration (target AFR, etc.)
+/// * `filters` - Data filtering criteria (RPM range, CLT range, etc.)
+/// * `authority_limits` - Maximum allowed cell changes
+///
+/// Returns: Nothing on success
 #[tauri::command]
 async fn start_autotune(
     state: tauri::State<'_, AppState>,
@@ -3724,6 +3961,12 @@ fn read_axis_bins(
     }
 }
 
+/// Stops AutoTune data collection.
+///
+/// Clears the AutoTune config and stops processing realtime data.
+/// Recommendations remain available until explicitly cleared.
+///
+/// Returns: Nothing on success
 #[tauri::command]
 async fn stop_autotune(state: tauri::State<'_, AppState>) -> Result<(), String> {
     let mut guard = state.autotune_state.lock().await;
@@ -3745,6 +3988,12 @@ struct AutoTuneHeatEntry {
     hit_count: u32,
 }
 
+/// Retrieves current AutoTune recommendations.
+///
+/// Returns all accumulated VE correction recommendations with their
+/// confidence weights (hit counts).
+///
+/// Returns: Vector of recommendations per cell
 #[tauri::command]
 async fn get_autotune_recommendations(
     state: tauri::State<'_, AppState>,
@@ -3753,6 +4002,11 @@ async fn get_autotune_recommendations(
     Ok(guard.get_recommendations())
 }
 
+/// Retrieves AutoTune heatmap data for visualization.
+///
+/// Returns per-cell data for rendering coverage and change heatmaps.
+///
+/// Returns: Vector of heatmap entries with weighting and change magnitude
 #[tauri::command]
 async fn get_autotune_heatmap(
     state: tauri::State<'_, AppState>,
@@ -3777,6 +4031,15 @@ async fn get_autotune_heatmap(
     Ok(entries)
 }
 
+/// Applies AutoTune recommendations to the VE table.
+///
+/// Writes the recommended VE corrections to the target table,
+/// updating both tune cache and ECU memory.
+///
+/// # Arguments
+/// * `table_name` - Target VE table name
+///
+/// Returns: Nothing on success
 #[tauri::command]
 async fn send_autotune_recommendations(
     state: tauri::State<'_, AppState>,
@@ -3877,6 +4140,15 @@ async fn send_autotune_recommendations(
     Ok(())
 }
 
+/// Burns the AutoTune recommendations to ECU flash memory.
+///
+/// Permanently saves the current table values (including any AutoTune
+/// changes) to non-volatile ECU memory.
+///
+/// # Arguments
+/// * `table_name` - Target table to burn
+///
+/// Returns: Nothing on success
 #[tauri::command]
 async fn burn_autotune_recommendations(
     state: tauri::State<'_, AppState>,
@@ -3908,6 +4180,15 @@ async fn burn_autotune_recommendations(
     Ok(())
 }
 
+/// Locks specific cells from AutoTune updates.
+///
+/// Prevents AutoTune from modifying the specified cells during
+/// data collection and recommendation generation.
+///
+/// # Arguments
+/// * `cells` - Vector of (x, y) cell coordinates to lock
+///
+/// Returns: Nothing on success
 #[tauri::command]
 async fn lock_autotune_cells(
     state: tauri::State<'_, AppState>,
@@ -3918,6 +4199,16 @@ async fn lock_autotune_cells(
     Ok(())
 }
 
+/// Starts automatic periodic sending of AutoTune recommendations.
+///
+/// Spawns a background task that applies AutoTune recommendations
+/// at the specified interval.
+///
+/// # Arguments
+/// * `table_name` - Target VE table name
+/// * `interval_ms` - Send interval in milliseconds (default: 15000)
+///
+/// Returns: Nothing on success
 #[tauri::command]
 async fn start_autotune_autosend(
     app: tauri::AppHandle,
@@ -4048,6 +4339,11 @@ async fn start_autotune_autosend(
     Ok(())
 }
 
+/// Stops the AutoTune autosend background task.
+///
+/// Aborts the periodic recommendation sending task.
+///
+/// Returns: Nothing on success
 #[tauri::command]
 async fn stop_autotune_autosend(state: tauri::State<'_, AppState>) -> Result<(), String> {
     let mut task_guard = state.autotune_send_task.lock().await;
@@ -4057,6 +4353,12 @@ async fn stop_autotune_autosend(state: tauri::State<'_, AppState>) -> Result<(),
     Ok(())
 }
 
+/// Unlocks previously locked AutoTune cells.
+///
+/// # Arguments
+/// * `cells` - Vector of (x, y) cell coordinates to unlock
+///
+/// Returns: Nothing on success
 #[tauri::command]
 async fn unlock_autotune_cells(
     state: tauri::State<'_, AppState>,
@@ -4227,6 +4529,17 @@ async fn update_table_z_values_internal(
     Ok(())
 }
 
+/// Re-bins a table with new X and Y axis values.
+///
+/// Optionally interpolates Z values to fit the new axis bins.
+///
+/// # Arguments
+/// * `table_name` - Table name from INI definition
+/// * `new_x_bins` - New X axis bin values
+/// * `new_y_bins` - New Y axis bin values
+/// * `interpolate_z` - If true, interpolates Z values to fit new bins
+///
+/// Returns: Updated TableData with new bins and Z values
 #[tauri::command]
 async fn rebin_table(
     state: tauri::State<'_, AppState>,
@@ -4263,6 +4576,16 @@ async fn rebin_table(
     })
 }
 
+/// Applies Gaussian smoothing to selected table cells.
+///
+/// Uses weighted averaging from neighboring cells to smooth transitions.
+///
+/// # Arguments
+/// * `table_name` - Table name from INI definition
+/// * `factor` - Smoothing factor (higher = more smoothing)
+/// * `selected_cells` - Vector of (row, col) coordinates to smooth
+///
+/// Returns: Updated TableData with smoothed values
 #[tauri::command]
 async fn smooth_table(
     state: tauri::State<'_, AppState>,
@@ -4285,6 +4608,16 @@ async fn smooth_table(
     })
 }
 
+/// Interpolates values between corner cells of selected region.
+///
+/// Uses bilinear interpolation to fill in values between the
+/// corner cells of the selection rectangle.
+///
+/// # Arguments
+/// * `table_name` - Table name from INI definition
+/// * `selected_cells` - Vector of (row, col) coordinates to interpolate
+///
+/// Returns: Updated TableData with interpolated values
 #[tauri::command]
 async fn interpolate_cells(
     state: tauri::State<'_, AppState>,
@@ -4306,6 +4639,14 @@ async fn interpolate_cells(
     })
 }
 
+/// Scales selected cells by a multiplication factor.
+///
+/// # Arguments
+/// * `table_name` - Table name from INI definition
+/// * `selected_cells` - Vector of (row, col) coordinates to scale
+/// * `scale_factor` - Multiplication factor (e.g., 1.1 for +10%)
+///
+/// Returns: Updated TableData with scaled values
 #[tauri::command]
 async fn scale_cells(
     state: tauri::State<'_, AppState>,
@@ -4328,6 +4669,14 @@ async fn scale_cells(
     })
 }
 
+/// Sets all selected cells to the same value.
+///
+/// # Arguments
+/// * `table_name` - Table name from INI definition
+/// * `selected_cells` - Vector of (row, col) coordinates to set
+/// * `value` - Value to assign to all selected cells
+///
+/// Returns: Updated TableData with modified values
 #[tauri::command]
 async fn set_cells_equal(
     state: tauri::State<'_, AppState>,
@@ -4351,6 +4700,15 @@ async fn set_cells_equal(
     })
 }
 
+/// Saves a dashboard layout to the project's dashboard file.
+///
+/// Converts the layout to XML format for storage.
+///
+/// # Arguments
+/// * `project_name` - Name of the project
+/// * `layout` - Dashboard layout configuration
+///
+/// Returns: Nothing on success
 #[tauri::command]
 async fn save_dashboard_layout(
     state: tauri::State<'_, AppState>,
@@ -4369,6 +4727,14 @@ async fn save_dashboard_layout(
     Ok(())
 }
 
+/// Loads a dashboard layout from a project's dashboard file.
+///
+/// Supports both XML and legacy JSON formats.
+///
+/// # Arguments
+/// * `project_name` - Name of the project
+///
+/// Returns: DashboardLayout configuration
 #[tauri::command]
 async fn load_dashboard_layout(
     state: tauri::State<'_, AppState>,
@@ -4393,6 +4759,9 @@ async fn load_dashboard_layout(
     Ok(layout)
 }
 
+/// Lists all available dashboard layouts in the projects directory.
+///
+/// Returns: Vector of dashboard names (without extension)
 #[tauri::command]
 async fn list_dashboard_layouts(
     state: tauri::State<'_, AppState>,
@@ -6340,6 +6709,9 @@ struct TuneInfo {
     has_tune: bool,
 }
 
+/// Gets information about the currently loaded tune.
+///
+/// Returns: TuneInfo with path, signature, and modification status
 #[tauri::command]
 async fn get_tune_info(state: tauri::State<'_, AppState>) -> Result<TuneInfo, String> {
     let tune_guard = state.current_tune.lock().await;
@@ -6379,6 +6751,15 @@ async fn new_tune(state: tauri::State<'_, AppState>) -> Result<(), String> {
     Ok(())
 }
 
+/// Saves the current tune to disk.
+///
+/// Writes all tune data to an MSQ file. If no path is provided,
+/// uses the existing path or prompts for save location.
+///
+/// # Arguments
+/// * `path` - Optional file path. If None, uses current path or generates one
+///
+/// Returns: The path where the tune was saved
 #[tauri::command]
 async fn save_tune(
     state: tauri::State<'_, AppState>,
@@ -6580,11 +6961,28 @@ async fn save_tune(
     Ok(save_path.to_string_lossy().to_string())
 }
 
+/// Saves the current tune to a specified path.
+///
+/// Wrapper around save_tune with a required path argument.
+///
+/// # Arguments
+/// * `path` - File path for saving the tune
+///
+/// Returns: The path where the tune was saved
 #[tauri::command]
 async fn save_tune_as(state: tauri::State<'_, AppState>, path: String) -> Result<String, String> {
     save_tune(state, Some(path)).await
 }
 
+/// Loads a tune file from disk.
+///
+/// Parses an MSQ file and populates the tune cache. Handles signature
+/// comparison and generates migration reports if the INI has changed.
+///
+/// # Arguments
+/// * `path` - Path to the MSQ file to load
+///
+/// Returns: TuneInfo with loaded tune metadata
 #[tauri::command]
 async fn load_tune(
     state: tauri::State<'_, AppState>,
@@ -7225,6 +7623,11 @@ async fn get_tune_constant_manifest(
     Ok(tune.as_ref().and_then(|t| t.constant_manifest.clone()))
 }
 
+/// Lists all tune files in the projects directory.
+///
+/// Scans for MSQ and JSON tune files.
+///
+/// Returns: Sorted vector of tune file paths
 #[tauri::command]
 async fn list_tune_files() -> Result<Vec<String>, String> {
     let projects_dir = libretune_core::project::Project::projects_dir()
@@ -7251,6 +7654,12 @@ async fn list_tune_files() -> Result<Vec<String>, String> {
     Ok(tunes)
 }
 
+/// Burns (writes) tune data from ECU RAM to non-volatile flash memory.
+///
+/// This is the critical "save to ECU" operation that persists changes.
+/// Saves window state first in case of issues.
+///
+/// Returns: Nothing on success
 #[tauri::command]
 async fn burn_to_ecu(
     app: tauri::AppHandle,
@@ -7860,6 +8269,11 @@ async fn start_tooth_logger(
     })
 }
 
+/// Stops the tooth logger capture.
+///
+/// Sends the appropriate stop command based on ECU type.
+///
+/// Returns: Nothing on success
 #[tauri::command]
 async fn stop_tooth_logger(
     state: tauri::State<'_, AppState>,
@@ -7971,6 +8385,11 @@ async fn start_composite_logger(
     })
 }
 
+/// Stops the composite logger capture.
+///
+/// Sends the appropriate stop command based on ECU type.
+///
+/// Returns: Nothing on success
 #[tauri::command]
 async fn stop_composite_logger(
     state: tauri::State<'_, AppState>,
@@ -8020,6 +8439,16 @@ struct TableCellDiff {
     percent_diff: f64,
 }
 
+/// Compares two tables cell-by-cell to show differences.
+///
+/// Useful for comparing before/after tuning changes or comparing tables
+/// between different tune files.
+///
+/// # Arguments
+/// * `table_a` - First table name
+/// * `table_b` - Second table name
+///
+/// Returns: TableComparisonResult with all differences
 #[tauri::command]
 async fn compare_tables(
     state: tauri::State<'_, AppState>,
@@ -8599,6 +9028,15 @@ async fn list_projects() -> Result<Vec<ProjectInfoResponse>, String> {
 }
 
 /// Create a new project
+///
+/// Creates a new project directory with INI definition and optional tune import.
+///
+/// # Arguments
+/// * `name` - Project name (used for directory)
+/// * `ini_id` - INI repository ID to use
+/// * `tune_path` - Optional path to an existing tune file to import
+///
+/// Returns: CurrentProjectInfo with project details
 #[tauri::command]
 async fn create_project(
     state: tauri::State<'_, AppState>,
@@ -8748,6 +9186,14 @@ async fn create_project(
 }
 
 /// Open an existing project
+///
+/// Loads a project from disk, including its INI definition and tune file.
+/// Disconnects any existing ECU connection to avoid state conflicts.
+///
+/// # Arguments
+/// * `path` - Path to the project directory
+///
+/// Returns: CurrentProjectInfo with project details
 #[tauri::command]
 async fn open_project(
     app: tauri::AppHandle,
@@ -9186,7 +9632,12 @@ async fn open_project(
     Ok(response)
 }
 
-/// Close the current project
+/// Close the current project and clear state.
+///
+/// Closes the project, clears the INI definition and tune from memory.
+/// Should be called before opening a different project.
+///
+/// Returns: Nothing on success
 #[tauri::command]
 async fn close_project(state: tauri::State<'_, AppState>) -> Result<(), String> {
     // Get and close the project
@@ -9208,7 +9659,12 @@ async fn close_project(state: tauri::State<'_, AppState>) -> Result<(), String> 
     Ok(())
 }
 
-/// Get current project info (or null if no project open)
+/// Get information about the currently open project.
+///
+/// Returns project metadata including name, path, signature, tune status,
+/// and connection settings. Returns None if no project is open.
+///
+/// Returns: Optional CurrentProjectInfo with project details
 #[tauri::command]
 async fn get_current_project(
     state: tauri::State<'_, AppState>,
@@ -9229,7 +9685,15 @@ async fn get_current_project(
     }))
 }
 
-/// Update project connection settings
+/// Update the serial connection settings for the current project.
+///
+/// Saves the port name and baud rate to the project configuration file.
+///
+/// # Arguments
+/// * `port` - Serial port name (e.g., "COM3", "/dev/ttyUSB0")
+/// * `baud_rate` - Baud rate for communication
+///
+/// Returns: Nothing on success
 #[tauri::command]
 async fn update_project_connection(
     state: tauri::State<'_, AppState>,
@@ -9587,7 +10051,14 @@ async fn load_restore_point(
     Ok(())
 }
 
-/// Delete a restore point
+/// Delete a restore point by filename.
+///
+/// Permanently removes the specified restore point file from the project.
+///
+/// # Arguments
+/// * `filename` - The filename of the restore point to delete
+///
+/// Returns: Nothing on success
 #[tauri::command]
 async fn delete_restore_point(
     state: tauri::State<'_, AppState>,
@@ -9712,10 +10183,485 @@ async fn import_tunerstudio_project(
 }
 
 // =====================================================
+// Git Version Control Commands
+// =====================================================
+
+/// Response type for commit info
+#[derive(Debug, Clone, Serialize)]
+struct CommitInfoResponse {
+    sha_short: String,
+    sha: String,
+    message: String,
+    author: String,
+    timestamp: String,
+    is_head: bool,
+}
+
+impl From<CommitInfo> for CommitInfoResponse {
+    fn from(info: CommitInfo) -> Self {
+        Self {
+            sha_short: info.sha_short,
+            sha: info.sha,
+            message: info.message,
+            author: info.author,
+            timestamp: info.timestamp,
+            is_head: info.is_head,
+        }
+    }
+}
+
+/// Response type for branch info
+#[derive(Debug, Clone, Serialize)]
+struct BranchInfoResponse {
+    name: String,
+    is_current: bool,
+    tip_sha: String,
+}
+
+impl From<BranchInfo> for BranchInfoResponse {
+    fn from(info: BranchInfo) -> Self {
+        Self {
+            name: info.name,
+            is_current: info.is_current,
+            tip_sha: info.tip_sha,
+        }
+    }
+}
+
+/// Initialize git repository for current project
+#[tauri::command]
+async fn git_init_project(
+    state: tauri::State<'_, AppState>,
+) -> Result<bool, String> {
+    let proj_guard = state.current_project.lock().await;
+    let project = proj_guard
+        .as_ref()
+        .ok_or_else(|| "No project open".to_string())?;
+
+    let vc = VersionControl::init(&project.path)
+        .map_err(|e| format!("Failed to initialize git: {}", e))?;
+
+    // Create initial commit
+    vc.commit("Initial project commit")
+        .map_err(|e| format!("Failed to create initial commit: {}", e))?;
+
+    Ok(true)
+}
+
+/// Check if current project has git repository
+#[tauri::command]
+async fn git_has_repo(
+    state: tauri::State<'_, AppState>,
+) -> Result<bool, String> {
+    let proj_guard = state.current_project.lock().await;
+    let project = proj_guard
+        .as_ref()
+        .ok_or_else(|| "No project open".to_string())?;
+
+    Ok(VersionControl::is_git_repo(&project.path))
+}
+
+/// Commit current tune with message
+#[tauri::command]
+async fn git_commit(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    message: Option<String>,
+) -> Result<String, String> {
+    let proj_guard = state.current_project.lock().await;
+    let project = proj_guard
+        .as_ref()
+        .ok_or_else(|| "No project open".to_string())?;
+
+    let vc = VersionControl::open(&project.path)
+        .map_err(|e| format!("Git repository not initialized: {}", e))?;
+
+    // Generate message from settings if not provided
+    let commit_message = message.unwrap_or_else(|| {
+        let settings = load_settings(&app);
+        let now = chrono::Local::now();
+        settings
+            .commit_message_format
+            .replace("{date}", &now.format("%Y-%m-%d").to_string())
+            .replace("{time}", &now.format("%H:%M:%S").to_string())
+    });
+
+    let sha = vc
+        .commit(&commit_message)
+        .map_err(|e| format!("Failed to commit: {}", e))?;
+
+    Ok(sha)
+}
+
+/// Get commit history for current project
+#[tauri::command]
+async fn git_history(
+    state: tauri::State<'_, AppState>,
+    max_count: Option<usize>,
+) -> Result<Vec<CommitInfoResponse>, String> {
+    let proj_guard = state.current_project.lock().await;
+    let project = proj_guard
+        .as_ref()
+        .ok_or_else(|| "No project open".to_string())?;
+
+    let vc = VersionControl::open(&project.path)
+        .map_err(|e| format!("Git repository not initialized: {}", e))?;
+
+    let history = vc
+        .get_history(max_count.unwrap_or(50))
+        .map_err(|e| format!("Failed to get history: {}", e))?;
+
+    Ok(history.into_iter().map(CommitInfoResponse::from).collect())
+}
+
+/// Get diff between two commits
+#[tauri::command]
+async fn git_diff(
+    state: tauri::State<'_, AppState>,
+    from_sha: String,
+    to_sha: String,
+) -> Result<CommitDiff, String> {
+    let proj_guard = state.current_project.lock().await;
+    let project = proj_guard
+        .as_ref()
+        .ok_or_else(|| "No project open".to_string())?;
+
+    let vc = VersionControl::open(&project.path)
+        .map_err(|e| format!("Git repository not initialized: {}", e))?;
+
+    vc.diff_commits(&from_sha, &to_sha)
+        .map_err(|e| format!("Failed to diff commits: {}", e))
+}
+
+/// Checkout a specific commit
+#[tauri::command]
+async fn git_checkout(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    sha: String,
+) -> Result<(), String> {
+    let proj_guard = state.current_project.lock().await;
+    let project = proj_guard
+        .as_ref()
+        .ok_or_else(|| "No project open".to_string())?;
+
+    let vc = VersionControl::open(&project.path)
+        .map_err(|e| format!("Git repository not initialized: {}", e))?;
+
+    vc.checkout_commit(&sha)
+        .map_err(|e| format!("Failed to checkout: {}", e))?;
+
+    // Notify UI to reload tune
+    let _ = app.emit("tune:loaded", "git_checkout");
+
+    Ok(())
+}
+
+/// List all branches in the project's git repository.
+///
+/// Returns information about each branch including name, whether it's
+/// the current branch, and its tip commit SHA.
+///
+/// Returns: Vector of BranchInfoResponse with branch details
+#[tauri::command]
+async fn git_list_branches(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<BranchInfoResponse>, String> {
+    let proj_guard = state.current_project.lock().await;
+    let project = proj_guard
+        .as_ref()
+        .ok_or_else(|| "No project open".to_string())?;
+
+    let vc = VersionControl::open(&project.path)
+        .map_err(|e| format!("Git repository not initialized: {}", e))?;
+
+    let branches = vc
+        .list_branches()
+        .map_err(|e| format!("Failed to list branches: {}", e))?;
+
+    Ok(branches.into_iter().map(BranchInfoResponse::from).collect())
+}
+
+/// Create a new git branch in the project repository.
+///
+/// Creates a new branch pointing at the current HEAD commit.
+/// Does not switch to the new branch automatically.
+///
+/// # Arguments
+/// * `name` - Name for the new branch
+///
+/// Returns: Nothing on success
+#[tauri::command]
+async fn git_create_branch(
+    state: tauri::State<'_, AppState>,
+    name: String,
+) -> Result<(), String> {
+    let proj_guard = state.current_project.lock().await;
+    let project = proj_guard
+        .as_ref()
+        .ok_or_else(|| "No project open".to_string())?;
+
+    let vc = VersionControl::open(&project.path)
+        .map_err(|e| format!("Git repository not initialized: {}", e))?;
+
+    vc.create_branch(&name)
+        .map_err(|e| format!("Failed to create branch: {}", e))
+}
+
+/// Switch to a different git branch.
+///
+/// Checks out the specified branch and emits an event to reload
+/// the tune data in the UI.
+///
+/// # Arguments
+/// * `name` - Name of the branch to switch to
+///
+/// Returns: Nothing on success
+#[tauri::command]
+async fn git_switch_branch(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    name: String,
+) -> Result<(), String> {
+    let proj_guard = state.current_project.lock().await;
+    let project = proj_guard
+        .as_ref()
+        .ok_or_else(|| "No project open".to_string())?;
+
+    let vc = VersionControl::open(&project.path)
+        .map_err(|e| format!("Git repository not initialized: {}", e))?;
+
+    vc.switch_branch(&name)
+        .map_err(|e| format!("Failed to switch branch: {}", e))?;
+
+    // Notify UI to reload tune
+    let _ = app.emit("tune:loaded", "git_switch_branch");
+
+    Ok(())
+}
+
+/// Get the name of the current git branch.
+///
+/// Returns None if the project doesn't have a git repository initialized.
+///
+/// Returns: Optional branch name string
+#[tauri::command]
+async fn git_current_branch(
+    state: tauri::State<'_, AppState>,
+) -> Result<Option<String>, String> {
+    let proj_guard = state.current_project.lock().await;
+    let project = proj_guard
+        .as_ref()
+        .ok_or_else(|| "No project open".to_string())?;
+
+    if !VersionControl::is_git_repo(&project.path) {
+        return Ok(None);
+    }
+
+    let vc = VersionControl::open(&project.path)
+        .map_err(|e| format!("Git repository not initialized: {}", e))?;
+
+    Ok(vc.get_current_branch_name())
+}
+
+/// Check if the project has uncommitted git changes.
+///
+/// Returns false if the project doesn't have a git repository.
+///
+/// Returns: True if there are uncommitted changes
+#[tauri::command]
+async fn git_has_changes(
+    state: tauri::State<'_, AppState>,
+) -> Result<bool, String> {
+    let proj_guard = state.current_project.lock().await;
+    let project = proj_guard
+        .as_ref()
+        .ok_or_else(|| "No project open".to_string())?;
+
+    if !VersionControl::is_git_repo(&project.path) {
+        return Ok(false);
+    }
+
+    let vc = VersionControl::open(&project.path)
+        .map_err(|e| format!("Git repository not initialized: {}", e))?;
+
+    vc.has_changes()
+        .map_err(|e| format!("Failed to check changes: {}", e))
+}
+
+// =====================================================
+// Project Template Commands
+// =====================================================
+
+/// Response type for project template
+#[derive(Debug, Clone, Serialize)]
+struct ProjectTemplateResponse {
+    id: String,
+    name: String,
+    description: String,
+    ecu_type: String,
+    ini_signature: String,
+    ini_pattern: String,
+    dashboard_preset: String,
+    icon: String,
+    connection_baud_rate: u32,
+    connection_protocol: String,
+}
+
+impl From<ProjectTemplate> for ProjectTemplateResponse {
+    fn from(t: ProjectTemplate) -> Self {
+        Self {
+            id: t.id,
+            name: t.name,
+            description: t.description,
+            ecu_type: t.ecu_type,
+            ini_signature: t.ini_signature,
+            ini_pattern: t.ini_pattern,
+            dashboard_preset: t.dashboard_preset,
+            icon: t.icon,
+            connection_baud_rate: t.connection.baud_rate,
+            connection_protocol: t.connection.protocol,
+        }
+    }
+}
+
+/// List available project templates
+#[tauri::command]
+async fn list_project_templates() -> Result<Vec<ProjectTemplateResponse>, String> {
+    let templates = TemplateManager::list_templates();
+    Ok(templates.into_iter().map(ProjectTemplateResponse::from).collect())
+}
+
+/// Create a new project from a template
+#[tauri::command]
+async fn create_project_from_template(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    template_id: String,
+    project_name: String,
+) -> Result<CurrentProjectInfo, String> {
+    let template = TemplateManager::get_template(&template_id)
+        .ok_or_else(|| format!("Template not found: {}", template_id))?;
+
+    // Find matching INI in repository
+    let ini_entry = {
+        let repo_guard = state.ini_repository.lock().await;
+        let repo = repo_guard
+            .as_ref()
+            .ok_or_else(|| "INI repository not initialized".to_string())?;
+
+        // Try to find INI matching template signature
+        repo.list()
+            .iter()
+            .find(|e| e.signature.contains(&template.ini_signature) || 
+                      e.name.to_lowercase().contains(&template.ecu_type.to_lowercase()))
+            .cloned()
+            .ok_or_else(|| format!(
+                "No matching INI found for {}. Please import an INI file for {} first.",
+                template.ini_signature, template.ecu_type
+            ))?
+    };
+
+    // Create project directory
+    let projects_dir = get_projects_dir(&app);
+    let project_path = projects_dir.join(&project_name);
+
+    if project_path.exists() {
+        return Err(format!("Project '{}' already exists", project_name));
+    }
+
+    std::fs::create_dir_all(&project_path)
+        .map_err(|e| format!("Failed to create project directory: {}", e))?;
+
+    // Create project config with template settings
+    let config = ProjectConfig {
+        version: "1.0".to_string(),
+        name: project_name.clone(),
+        created: chrono::Utc::now().to_rfc3339(),
+        modified: chrono::Utc::now().to_rfc3339(),
+        ecu_definition: ini_entry.path.clone(),
+        signature: ini_entry.signature.clone(),
+        connection: ConnectionSettings {
+            port: None,
+            baud_rate: template.connection.baud_rate,
+            timeout_ms: template.connection.timeout_ms as u32,
+        },
+        settings: ProjectSettings::default(),
+        dashboard: None,
+    };
+
+    // Save project config
+    let config_path = project_path.join("project.json");
+    let config_json = serde_json::to_string_pretty(&config)
+        .map_err(|e| format!("Failed to serialize config: {}", e))?;
+    std::fs::write(&config_path, config_json)
+        .map_err(|e| format!("Failed to write config: {}", e))?;
+
+    // Create subdirectories
+    std::fs::create_dir_all(project_path.join("datalogs")).ok();
+    std::fs::create_dir_all(project_path.join("dashboards")).ok();
+    std::fs::create_dir_all(project_path.join("restorePoints")).ok();
+    std::fs::create_dir_all(project_path.join("projectCfg")).ok();
+
+    // Copy INI to projectCfg
+    let definitions_dir = get_definitions_dir(&app);
+    let source_ini = definitions_dir.join(&ini_entry.path);
+    let dest_ini = project_path.join("projectCfg").join("definition.ini");
+    if source_ini.exists() {
+        std::fs::copy(&source_ini, &dest_ini).ok();
+    }
+
+    // Create initial tune with template baseline constants
+    let mut tune = TuneFile::new(&ini_entry.signature);
+    for (name, value_str) in &template.baseline_constants {
+        if let Ok(val) = value_str.parse::<f64>() {
+            tune.set_constant(name, TuneValue::Scalar(val));
+        }
+    }
+
+    let tune_path = project_path.join("CurrentTune.msq");
+    tune.save(&tune_path)
+        .map_err(|e| format!("Failed to save initial tune: {}", e))?;
+
+    // Initialize git repository
+    let vc = VersionControl::init(&project_path)
+        .map_err(|e| format!("Failed to initialize git: {}", e))?;
+    vc.commit("Project created from template")
+        .map_err(|e| format!("Failed to create initial commit: {}", e))?;
+
+    // Open the project
+    let project = Project::open(&project_path)
+        .map_err(|e| format!("Failed to open project: {}", e))?;
+
+    let response = CurrentProjectInfo {
+        name: project.config.name.clone(),
+        path: project.path.to_string_lossy().to_string(),
+        signature: project.config.signature.clone(),
+        has_tune: project.current_tune.is_some(),
+        tune_modified: project.dirty,
+        connection: ConnectionSettingsResponse {
+            port: project.config.connection.port.clone(),
+            baud_rate: project.config.connection.baud_rate,
+        },
+    };
+
+    // Store as current project
+    let mut proj_guard = state.current_project.lock().await;
+    *proj_guard = Some(project);
+
+    Ok(response)
+}
+
+// =====================================================
 // INI Repository Commands
 // =====================================================
 
-/// Initialize the INI repository
+/// Initialize the INI repository for managing ECU definition files.
+///
+/// Opens or creates the local INI repository where ECU definitions
+/// are stored and indexed.
+///
+/// Returns: Path to the repository directory
 #[tauri::command]
 async fn init_ini_repository(state: tauri::State<'_, AppState>) -> Result<String, String> {
     let repo =
@@ -9751,7 +10697,14 @@ async fn list_repository_inis(
         .collect())
 }
 
-/// Import an INI file into the repository
+/// Import an INI file into the local repository.
+///
+/// Copies the INI file and indexes it for future use.
+///
+/// # Arguments
+/// * `source_path` - Path to the INI file to import
+///
+/// Returns: IniEntryResponse with the imported file's metadata
 #[tauri::command]
 async fn import_ini(
     state: tauri::State<'_, AppState>,
@@ -9778,7 +10731,14 @@ async fn import_ini(
     })
 }
 
-/// Scan a directory for INI files and import them
+/// Scan a directory for INI files and import them all.
+///
+/// Recursively searches for .ini files and adds them to the repository.
+///
+/// # Arguments
+/// * `directory` - Path to directory to scan
+///
+/// Returns: Vector of imported INI IDs
 #[tauri::command]
 async fn scan_for_inis(
     state: tauri::State<'_, AppState>,
@@ -9793,7 +10753,14 @@ async fn scan_for_inis(
         .map_err(|e| format!("Failed to scan directory: {}", e))
 }
 
-/// Remove an INI from the repository
+/// Remove an INI file from the repository.
+///
+/// Deletes the INI file and removes it from the index.
+///
+/// # Arguments
+/// * `id` - The unique identifier of the INI to remove
+///
+/// Returns: Nothing on success
 #[tauri::command]
 async fn remove_ini(state: tauri::State<'_, AppState>, id: String) -> Result<(), String> {
     let mut guard = state.ini_repository.lock().await;
@@ -10068,7 +11035,11 @@ async fn apply_demo_disable(state: &AppState) -> Result<(), String> {
     Ok(())
 }
 
-/// Check if demo mode is currently enabled
+/// Check if demo mode is currently enabled.
+///
+/// Demo mode simulates ECU data for testing without a real connection.
+///
+/// Returns: True if demo mode is active
 #[tauri::command]
 async fn get_demo_mode(state: tauri::State<'_, AppState>) -> Result<bool, String> {
     let demo_guard = state.demo_mode.lock().await;
@@ -10353,7 +11324,12 @@ async fn ensure_plugin_manager_initialized(
     Ok(pm)
 }
 
-/// Check if JRE is available and return version string
+/// Check if Java Runtime Environment is available.
+///
+/// Searches for java in JAVA_HOME, PATH, and common installation locations.
+/// Required for loading TunerStudio-compatible plugins.
+///
+/// Returns: Java version string on success
 #[tauri::command]
 fn check_jre() -> Result<String, String> {
     find_java_binary()?;
@@ -10373,7 +11349,15 @@ fn check_jre() -> Result<String, String> {
     }
 }
 
-/// Load a TS-compatible plugin from a JAR file
+/// Load a TunerStudio-compatible plugin from a JAR file.
+///
+/// Starts the JVM if not already running, then loads the plugin.
+/// The plugin must implement the standard TS plugin interface.
+///
+/// # Arguments
+/// * `jar_path` - Path to the plugin JAR file
+///
+/// Returns: PluginInfo with plugin metadata
 #[tauri::command]
 async fn load_plugin(
     jar_path: String,
@@ -10399,7 +11383,12 @@ async fn load_plugin(
     Ok(info)
 }
 
-/// Unload a plugin
+/// Unload a plugin and release its resources.
+///
+/// # Arguments
+/// * `plugin_id` - The unique identifier of the plugin to unload
+///
+/// Returns: Nothing on success
 #[tauri::command]
 async fn unload_plugin(
     plugin_id: String,
@@ -10413,7 +11402,9 @@ async fn unload_plugin(
     Ok(())
 }
 
-/// List loaded plugins
+/// List all currently loaded plugins.
+///
+/// Returns: Vector of PluginInfo for each loaded plugin
 #[tauri::command]
 async fn list_plugins(
     state: tauri::State<'_, AppState>,
@@ -10426,7 +11417,15 @@ async fn list_plugins(
     }
 }
 
-/// Get plugin UI component tree
+/// Get the UI component tree for a plugin.
+///
+/// Returns the Swing component hierarchy that represents the plugin's
+/// user interface, converted to a serializable format.
+///
+/// # Arguments
+/// * `plugin_id` - The unique identifier of the plugin
+///
+/// Returns: Optional SwingComponent tree
 #[tauri::command]
 async fn get_plugin_ui(
     plugin_id: String,
@@ -10438,7 +11437,15 @@ async fn get_plugin_ui(
     Ok(pm.get_plugin_ui(&plugin_id))
 }
 
-/// Send an event to a plugin
+/// Send an event to a loaded plugin.
+///
+/// Forwards UI events (clicks, key presses, etc.) to the plugin.
+///
+/// # Arguments
+/// * `plugin_id` - The unique identifier of the plugin
+/// * `event` - The event to send
+///
+/// Returns: Nothing on success
 #[tauri::command]
 async fn send_plugin_event(
     plugin_id: String,
@@ -10453,7 +11460,12 @@ async fn send_plugin_event(
     Ok(())
 }
 
-/// Use the project tune (discard ECU tune)
+/// Use the project's saved tune file, discarding any ECU data.
+///
+/// Loads the tune from the project's CurrentTune.msq file and populates
+/// the tune cache. Used when there's a conflict between project and ECU data.
+///
+/// Returns: Nothing on success
 #[tauri::command]
 async fn use_project_tune(
     state: tauri::State<'_, AppState>,
@@ -10492,7 +11504,12 @@ async fn use_project_tune(
     Ok(())
 }
 
-/// Use the ECU tune (discard project tune changes)
+/// Use the ECU's tune data, discarding project file changes.
+///
+/// Keeps the currently synced ECU data and marks the tune as unmodified.
+/// Used when there's a conflict between project and ECU data.
+///
+/// Returns: Nothing on success
 #[tauri::command]
 async fn use_ecu_tune(state: tauri::State<'_, AppState>) -> Result<(), String> {
     // ECU tune is already loaded from sync, just mark as not modified
@@ -10643,6 +11660,21 @@ pub fn run() {
             // TunerStudio import
             preview_tunerstudio_import,
             import_tunerstudio_project,
+            // Git version control commands
+            git_init_project,
+            git_has_repo,
+            git_commit,
+            git_history,
+            git_diff,
+            git_checkout,
+            git_list_branches,
+            git_create_branch,
+            git_switch_branch,
+            git_current_branch,
+            git_has_changes,
+            // Project template commands
+            list_project_templates,
+            create_project_from_template,
             // INI signature management commands
             find_matching_inis,
             update_project_ini,

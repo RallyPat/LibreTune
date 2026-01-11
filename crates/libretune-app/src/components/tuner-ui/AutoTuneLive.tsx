@@ -1,3 +1,33 @@
+/**
+ * AutoTuneLive - Real-time VE table auto-tuning component.
+ * 
+ * Provides automatic VE table correction recommendations based on wideband O2
+ * sensor feedback. Monitors engine operation and suggests cell adjustments
+ * to achieve target AFR values.
+ * 
+ * Features:
+ * - Real-time AFR monitoring and correction calculation
+ * - Heat map visualization (data coverage, change magnitude)
+ * - Cell locking to exclude specific cells from tuning
+ * - Configurable filters (RPM, TPS, CLT, steady-state)
+ * - Authority limits to prevent over-correction
+ * - Lambda delay compensation for accurate cell attribution
+ * - Transient filtering to ignore acceleration enrichment
+ * - Import/export recommendations as CSV
+ * 
+ * @example
+ * ```tsx
+ * <AutoTuneLive
+ *   tableName="veTable1Tbl"
+ *   onClose={() => closeTab()}
+ * />
+ * ```
+ * 
+ * @see {@link AutoTuneSettings} for tuning configuration
+ * @see {@link AutoTuneFilters} for data filtering options
+ * @see {@link AutoTuneAuthorityLimits} for correction limits
+ */
+
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { open, save } from '@tauri-apps/plugin-dialog';
@@ -8,40 +38,78 @@ import './AutoTuneLive.css';
 // Types
 // =============================================================================
 
+/**
+ * AutoTune session settings.
+ */
 interface AutoTuneSettings {
+  /** Target AFR for corrections (e.g., 14.7 for stoich) */
   target_afr: number;
+  /** Algorithm name (e.g., 'proportional', 'integral') */
   algorithm: string;
+  /** How often to process data in milliseconds */
   update_rate_ms: number;
 }
 
+/**
+ * Data filtering configuration for AutoTune.
+ * Samples outside these ranges are ignored.
+ */
 interface AutoTuneFilters {
+  /** Minimum RPM to accept data */
   min_rpm: number;
+  /** Maximum RPM to accept data */
   max_rpm: number;
+  /** Minimum throttle position percentage */
   min_tps: number;
+  /** Maximum throttle position percentage */
   max_tps: number;
+  /** Minimum coolant temperature (reject cold engine data) */
   min_clt: number;
+  /** Require steady-state operation for valid data */
   require_steady_state: boolean;
+  /** Maximum RPM change for steady-state detection */
   steady_state_rpm_delta: number;
+  /** Minimum time at steady-state in milliseconds */
   steady_state_time_ms: number;
 }
 
+/**
+ * Limits on how much AutoTune can modify cell values.
+ */
 interface AutoTuneAuthorityLimits {
+  /** Maximum change per update per cell (percentage) */
   max_change_per_cell: number;
+  /** Maximum total change from original value (percentage) */
   max_total_change: number;
+  /** Absolute minimum allowed cell value */
   min_value: number;
+  /** Absolute maximum allowed cell value */
   max_value: number;
 }
 
+/**
+ * Heat map data for a single table cell.
+ */
 interface HeatmapEntry {
+  /** X-axis cell index */
   cell_x: number;
+  /** Y-axis cell index */
   cell_y: number;
+  /** Data coverage weighting (0-1, higher = more data) */
   hit_weighting: number;
+  /** Magnitude of recommended change */
   change_magnitude: number;
+  /** Original cell value before tuning */
   beginning_value: number;
+  /** Recommended new value */
   recommended_value: number;
+  /** Number of data samples for this cell */
   hit_count: number;
 }
 
+/**
+ * Table data structure from backend.
+ */
 interface TableData {
   name: string;
   title: string;
@@ -50,13 +118,21 @@ interface TableData {
   z_values: number[][];
 }
 
+/**
+ * Minimal table info for selection dropdown.
+ */
 interface TableInfo {
   name: string;
   title: string;
 }
 
+/**
+ * Props for AutoTuneLive component.
+ */
 interface AutoTuneLiveProps {
+  /** Initial table to tune (defaults to VE table detection) */
   tableName?: string;
+  /** Callback when component is closed */
   onClose?: () => void;
 }
 

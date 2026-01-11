@@ -1,0 +1,38 @@
+[book]
+title = "LibreTune User Manual"
+authors = ["LibreTune Contributors"]
+description = "User guide for LibreTune ECU tuning software"
+language = "en"
+multilingual = false
+src = "src"
+
+[build]
+build-dir = "book"
+create-missing = true
+
+[output.html]
+default-theme = "navy"
+preferred-dark-theme = "navy"
+git-repository-url = "https://github.com/RallyPat/LibreTune"
+edit-url-template = "https://github.com/RallyPat/LibreTune/edit/main/docs/{path}"
+site-url = "/LibreTune/"
+cname = ""
+input-404 = "404.md"
+
+[output.html.fold]
+enable = true
+level = 1
+
+[output.html.search]
+enable = true
+limit-results = 30
+teaser-word-count = 30
+use-hierarchical-structure = true
+
+[output.html.playground]
+editable = false
+
+# Future: Multi-language support
+# [language.es]
+# name = "Español"
+# title = "Manual de Usuario de LibreTune"

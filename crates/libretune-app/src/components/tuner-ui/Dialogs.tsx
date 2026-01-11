@@ -474,6 +474,10 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
   const [gaugeFreeMove, setGaugeFreeMove] = useState(false);
   const [gaugeLock, setGaugeLock] = useState(false);
   
+  // Version control settings
+  const [autoCommitOnSave, setAutoCommitOnSave] = useState('never');
+  const [commitMessageFormat, setCommitMessageFormat] = useState('Tune saved on {date} at {time}');
+  
   // Unit preferences from context
   const unitPrefs = useUnitPreferences();
   
@@ -501,6 +505,9 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
         setGaugeSnapToGrid(settings.gauge_snap_to_grid ?? true);
         setGaugeFreeMove(settings.gauge_free_move ?? false);
         setGaugeLock(settings.gauge_lock ?? false);
+        // Version control settings
+        setAutoCommitOnSave(settings.auto_commit_on_save ?? 'never');
+        setCommitMessageFormat(settings.commit_message_format ?? 'Tune saved on {date} at {time}');
       }).catch(console.error);
 
       // Load available output channels from ECU definition
@@ -593,9 +600,12 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
     await invoke('update_setting', { key: 'gauge_snap_to_grid', value: gaugeSnapToGrid.toString() });
     await invoke('update_setting', { key: 'gauge_free_move', value: gaugeFreeMove.toString() });
     await invoke('update_setting', { key: 'gauge_lock', value: gaugeLock.toString() });
+    // Update version control settings
+    await invoke('update_setting', { key: 'auto_commit_on_save', value: autoCommitOnSave });
+    await invoke('update_setting', { key: 'commit_message_format', value: commitMessageFormat });
     onSettingsChange?.({ units: localUnits, autoBurnOnClose, indicatorColumnCount, indicatorFillEmpty, indicatorTextFit, statusBarChannels });
     onClose();
-  }, [localTheme, localUnits, autoBurnOnClose, statusBarChannels, indicatorColumnCount, indicatorFillEmpty, indicatorTextFit, heatmapValueScheme, heatmapChangeScheme, heatmapCoverageScheme, gaugeSnapToGrid, gaugeFreeMove, gaugeLock, onThemeChange, onSettingsChange, onClose]);
+  }, [localTheme, localUnits, autoBurnOnClose, statusBarChannels, indicatorColumnCount, indicatorFillEmpty, indicatorTextFit, heatmapValueScheme, heatmapChangeScheme, heatmapCoverageScheme, gaugeSnapToGrid, gaugeFreeMove, gaugeLock, autoCommitOnSave, commitMessageFormat, onThemeChange, onSettingsChange, onClose]);
 
   if (!isOpen) return null;
 
@@ -919,6 +929,32 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
               Lock gauge positions
             </label>
             <span className="dialog-form-note">Prevent accidental gauge movement</span>
+          </div>
+
+          <h3 style={{ marginTop: '1.5rem', marginBottom: '0.5rem' }}>Version Control</h3>
+          
+          <div className="dialog-form-group">
+            <label>Auto-Commit on Save</label>
+            <select
+              value={autoCommitOnSave}
+              onChange={(e) => setAutoCommitOnSave(e.target.value)}
+            >
+              <option value="never">Never</option>
+              <option value="always">Always</option>
+              <option value="ask">Ask each time</option>
+            </select>
+            <span className="dialog-form-note">Automatically create a Git commit when saving the tune</span>
+          </div>
+
+          <div className="dialog-form-group">
+            <label>Commit Message Format</label>
+            <input
+              type="text"
+              value={commitMessageFormat}
+              onChange={(e) => setCommitMessageFormat(e.target.value)}
+              style={{ width: '100%', padding: '0.5rem', fontFamily: 'monospace' }}
+            />
+            <span className="dialog-form-note">Available placeholders: {'{date}'}, {'{time}'}, {'{table}'}</span>
           </div>
 
           <h3 style={{ marginTop: '1.5rem', marginBottom: '0.5rem' }}>Indicator Panel</h3>

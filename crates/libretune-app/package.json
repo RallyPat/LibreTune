@@ -16,7 +16,11 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "release": "bash ../../scripts/build-release.sh",
-    "release:clean": "bash ../../scripts/build-release.sh --clean"
+    "release:clean": "bash ../../scripts/build-release.sh --clean",
+    "docs:frontend": "typedoc",
+    "docs:rust": "cd ../libretune-core && cargo doc --no-deps --open",
+    "docs:user": "mdbook build ../../docs && mdbook serve ../../docs --open",
+    "docs:all": "bash ../../scripts/build-docs.sh"
   },
   "dependencies": {
     "@react-three/drei": "^10.7.7",
@@ -36,6 +40,8 @@
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
     "@vitejs/plugin-react": "^4.6.0",
+    "typedoc": "^0.27.0",
+    "typedoc-plugin-missing-exports": "^3.0.0",
     "typescript": "~5.8.3",
     "vite": "^7.0.4"
   }

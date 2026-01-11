@@ -25,6 +25,8 @@ mod online_repository;
 mod project;
 mod properties;
 mod repository;
+mod templates;
+mod version_control;
 
 pub use online_repository::{IniSource, OnlineIniEntry, OnlineIniRepository};
 pub use project::{
@@ -32,3 +34,5 @@ pub use project::{
 };
 pub use properties::Properties;
 pub use repository::{IniEntry, IniRepository};
+pub use templates::{ProjectTemplate, TemplateManager};
+pub use version_control::{BranchInfo, CommitDiff, CommitInfo, TuneChange, VersionControl};

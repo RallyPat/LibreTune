@@ -52,8 +52,16 @@ libc = "0.2.178"
 # HTTP client for online INI repository (using rustls to avoid OpenSSL dependency)
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 
+# Git integration for tune versioning (using vendored libgit2 + bundled SSL)
+git2 = { version = "0.19", default-features = false, features = ["vendored-libgit2"] }
+
 [dev-dependencies]
 pretty_assertions = { workspace = true }
 tempfile = "3.24.0"
 tokio = { workspace = true, features = ["test-util", "macros"] }
 tracing-subscriber = { workspace = true }
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+targets = ["x86_64-unknown-linux-gnu", "x86_64-pc-windows-msvc", "x86_64-apple-darwin"]

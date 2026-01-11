@@ -1,6 +1,10 @@
 //! # LibreTune Core Library
 //!
 //! Core functionality for the LibreTune ECU tuning software.
+
+#![warn(missing_docs)]
+#![cfg_attr(docsrs, feature(doc_cfg))]
+
 //!
 //! This library provides:
 //! - INI definition file parsing (standard ECU INI format)

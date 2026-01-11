@@ -104,6 +104,28 @@ The project aims to provide professional ECU tuning workflow and functionality w
   - Tauri events for sync: `tab:dock`, `table:updated`, `realtime:update`
   - WebviewWindow API for creating new windows
 
+### 10. Git-Based Tune Versioning
+- Location: `crates/libretune-core/src/project/version_control.rs`
+- Features:
+  - Initialize Git repo for project (`git_init_project`)
+  - Manual and auto-commit on save (user preference: "always"/"never"/"ask")
+  - View commit history with timeline (`git_history`)
+  - Diff between commits showing changed files (`git_diff`)
+  - Checkout specific commits to restore tune state (`git_checkout`)
+  - Branch management (create, switch, list branches)
+  - Commit message format with placeholders: `{date}`, `{time}`, `{table}`
+- Frontend: `TuneHistoryPanel.tsx` - Timeline view with diff modal, branch selector
+- Settings: Version Control section in SettingsDialog
+
+### 11. Project Templates
+- Location: `crates/libretune-core/src/project/templates.rs`
+- Built-in templates:
+  - **Speeduino 4-cyl NA**: Basic naturally aspirated 4-cylinder gasoline engine
+  - **rusEFI Proteus F4**: Advanced tuning for Proteus F4 board
+  - **epicEFI Standard**: Standard configuration for epicEFI boards
+- Template structure: name, description, ECU type, INI pattern, default connection settings
+- Frontend: Template picker in NewProjectDialog with 3-mode flow (select template → configure or scratch)
+
 ## Development Commands
 
 ### Backend (Rust)
@@ -191,10 +213,10 @@ Based on analysis of common ECU tuning software patterns:
 [x] All gauge types implemented (13/13) - RoundGauge, RoundDashedGauge, FuelMeter, Tachometer added
 [ ] Implement action scripting engine
 [ ] Add plugin system for extensibility
-[ ] Add user manual/help system
-[ ] Implement project templates
+[x] Add user manual/help system - COMPLETED: mdBook user manual, UserManualViewer component
+[x] Implement project templates - COMPLETED Jan 12, 2026 (3 built-in templates: Speeduino, rusEFI, epicEFI)
 [x] Add tune comparison/diff view - Implemented compare_tables command
-[ ] Implement Git integration for tune versioning
+[x] Implement Git integration for tune versioning - COMPLETED Jan 12, 2026 (local git, auto-commit settings, history panel)
 [x] Add unit conversion layer (°C↔°F, kPa↔PSI, AFR↔Lambda) with user preferences - UnitPreferencesProvider implemented
 [x] Add user-configurable status bar channel selection - COMPLETED Jan 11, 2026
 [x] Create comprehensive test suite (CI + 46 unit tests added)

@@ -10,27 +10,48 @@ import { useHeatmapSettings } from '../../utils/useHeatmapSettings';
 import './TableComponents.css';
 import './TableEditor2D.css';
 
+/**
+ * Props for the TableEditor2D component.
+ */
 interface TableEditor2DProps {
+  /** Display title for the table */
   title: string;
+  /** Internal name used for backend operations */
   table_name: string;
+  /** Label for the X axis (columns) */
   x_axis_name: string;
+  /** Label for the Y axis (rows) */
   y_axis_name: string;
+  /** X axis bin values (column headers) */
   x_bins: number[];
+  /** Y axis bin values (row headers) */
   y_bins: number[];
+  /** 2D array of Z values [row][col] */
   z_values: number[][];
-  onBack?: () => void;  // Optional for embedded mode
-  realtimeData?: Record<string, number>; // For live cursor position
-  embedded?: boolean;  // Compact mode for embedding in dialogs
-  onOpenInTab?: () => void;  // Callback to open in separate tab
-  onValuesChange?: (values: number[][]) => void;  // Callback when values change
+  /** Callback when back button is clicked (optional for embedded mode) */
+  onBack?: () => void;
+  /** Real-time ECU data for live cursor position */
+  realtimeData?: Record<string, number>;
+  /** Compact mode for embedding in dialogs */
+  embedded?: boolean;
+  /** Callback to open this table in a separate tab */
+  onOpenInTab?: () => void;
+  /** Callback when cell values are modified */
+  onValuesChange?: (values: number[][]) => void;
 }
 
+/**
+ * State for the re-bin dialog.
+ */
 interface RebinDialogState {
   show: boolean;
   newXBins: number[];
   newYBins: number[];
 }
 
+/**
+ * State for the cell edit dialog.
+ */
 interface CellEditDialogState {
   show: boolean;
   row: number;
@@ -38,6 +59,36 @@ interface CellEditDialogState {
   value: number;
 }
 
+/**
+ * TableEditor2D - A comprehensive 2D table editor for ECU calibration data.
+ * 
+ * Features:
+ * - Cell selection (click, shift-click, ctrl-click, drag)
+ * - Value editing (direct input, increment/decrement)
+ * - Bulk operations (set equal, scale, smooth, interpolate)
+ * - Copy/paste with smart selection
+ * - Undo/redo support
+ * - Color-coded cell values with heatmap visualization
+ * - Live cursor showing current ECU operating point
+ * - History trail showing recent operating positions
+ * - Re-binning with automatic Z-value interpolation
+ * - Context menu for additional operations
+ * 
+ * @example
+ * ```tsx
+ * <TableEditor2D
+ *   title="VE Table 1"
+ *   table_name="veTable1Tbl"
+ *   x_axis_name="RPM"
+ *   y_axis_name="MAP"
+ *   x_bins={[500, 1000, 1500, ...]}
+ *   y_bins={[20, 40, 60, ...]}
+ *   z_values={[[50, 52, ...], ...]}
+ *   realtimeData={realtimeData}
+ *   onBack={() => closeTab()}
+ * />
+ * ```
+ */
 export default function TableEditor2D({
   title,
   table_name,

@@ -29,6 +29,7 @@ import TsDashboard from "./components/dashboards/TsDashboard";
 import { ToothLoggerView, CompositeLoggerView } from "./components/diagnostics";
 import DialogRenderer, { DialogDefinition as RendererDialogDef } from "./components/dialogs/DialogRenderer";
 import HelpViewer, { HelpTopicData } from "./components/dialogs/HelpViewer";
+import UserManualViewer from "./components/dialogs/UserManualViewer";
 import SignatureMismatchDialog, { SignatureMismatchInfo } from "./components/dialogs/SignatureMismatchDialog";
 import TuneMismatchDialog, { TuneMismatchInfo } from "./components/dialogs/TuneMismatchDialog";
 import TuneComparisonDialog from "./components/dialogs/TuneComparisonDialog";
@@ -37,6 +38,7 @@ import PerformanceFieldsDialog from "./components/dialogs/PerformanceFieldsDialo
 import RestorePointsDialog from "./components/dialogs/RestorePointsDialog";
 import ImportProjectWizard from "./components/dialogs/ImportProjectWizard";
 import MigrationReportDialog from "./components/dialogs/MigrationReportDialog";
+import TuneHistoryPanel from "./components/TuneHistoryPanel";
 import ErrorDetailsDialog, { useErrorDialog } from "./components/dialogs/ErrorDetailsDialog";
 import { PluginPanel } from "./plugin";
 import { useLoading } from "./components/LoadingContext";
@@ -273,6 +275,8 @@ function AppContent() {
   const [syncing, setSyncing] = useState(false);
   const [syncProgress, setSyncProgress] = useState<{ current: number; total: number; percent: number } | null>(null);
   const [helpTopic, setHelpTopic] = useState<HelpTopicData | null>(null);
+  const [userManualOpen, setUserManualOpen] = useState(false);
+  const [userManualSection, setUserManualSection] = useState<string | undefined>(undefined);
   
   // Signature mismatch dialog state
   const [signatureMismatchOpen, setSignatureMismatchOpen] = useState(false);
@@ -293,6 +297,9 @@ function AppContent() {
   
   // Restore points dialog state
   const [restorePointsOpen, setRestorePointsOpen] = useState(false);
+  
+  // Tune history panel state (git versioning)
+  const [tuneHistoryOpen, setTuneHistoryOpen] = useState(false);
   
   // Import project wizard state
   const [importProjectOpen, setImportProjectOpen] = useState(false);
@@ -1513,6 +1520,7 @@ function AppContent() {
           { id: "sep2", label: "", separator: true },
           { id: "create-restore", label: "Create &Restore Point", onClick: handleCreateRestorePoint },
           { id: "restore-points", label: "Restore &Points...", onClick: () => setRestorePointsOpen(true) },
+          { id: "tune-history", label: "Tune &History...", onClick: () => setTuneHistoryOpen(true) },
           { id: "sep3", label: "", separator: true },
           { id: "burn", label: "&Burn to ECU\tCtrl+B", onClick: () => setBurnDialogOpen(true), disabled: status.state !== "Connected" },
           { id: "sep4", label: "", separator: true },
@@ -1680,8 +1688,11 @@ function AppContent() {
       id: "help",
       label: "&Help",
       items: [
-        { id: "docs", label: "&Documentation", onClick: () => window.open("https://libretune.org/docs", "_blank") },
-        { id: "shortcuts", label: "&Keyboard Shortcuts", onClick: () => showToast("Keyboard shortcuts: Ctrl+S (Save), Ctrl+B (Burn), Ctrl+Z (Undo), etc.", "info") },
+        { id: "docs", label: "&User Manual", onClick: () => setUserManualOpen(true) },
+        { id: "shortcuts", label: "&Keyboard Shortcuts", onClick: () => {
+          setUserManualSection('reference/shortcuts');
+          setUserManualOpen(true);
+        }},
         { id: "sep1", label: "", separator: true },
         { id: "about", label: "&About LibreTune", onClick: () => setAboutDialogOpen(true) },
       ],
@@ -2117,6 +2128,21 @@ function AppContent() {
         <HelpViewer
           topic={helpTopic}
           onClose={() => setHelpTopic(null)}
+          onOpenManual={() => {
+            setHelpTopic(null);
+            setUserManualOpen(true);
+          }}
+        />
+      )}
+      
+      {/* User Manual */}
+      {userManualOpen && (
+        <UserManualViewer
+          section={userManualSection}
+          onClose={() => {
+            setUserManualOpen(false);
+            setUserManualSection(undefined);
+          }}
         />
       )}
       
@@ -2160,6 +2186,12 @@ function AppContent() {
           await fetchMenuTree(values);
           showToast("Restore point loaded successfully", "success");
         }}
+      />
+      
+      {/* Tune History Panel (Git versioning) */}
+      <TuneHistoryPanel
+        isOpen={tuneHistoryOpen}
+        onClose={() => setTuneHistoryOpen(false)}
       />
       
       {/* Import Project Wizard */}
@@ -2403,6 +2435,20 @@ function NoProjectView({
   );
 }
 
+// Project template type
+interface ProjectTemplate {
+  id: string;
+  name: string;
+  description: string;
+  ecu_type: string;
+  ini_signature: string;
+  ini_pattern: string;
+  dashboard_preset: string;
+  icon: string;
+  connection_baud_rate: number;
+  connection_protocol: string;
+}
+
 // New Project Dialog
 function NewProjectDialog({
   isOpen,
@@ -2417,10 +2463,30 @@ function NewProjectDialog({
   onImportIni: () => void;
   onCreate: (name: string, iniId: string, tunePath?: string) => void;
 }) {
+  const [mode, setMode] = useState<"select" | "template" | "scratch">("select");
+  const [templates, setTemplates] = useState<ProjectTemplate[]>([]);
+  const [selectedTemplate, setSelectedTemplate] = useState<ProjectTemplate | null>(null);
   const [projectName, setProjectName] = useState("");
   const [selectedIni, setSelectedIni] = useState<string>("");
   const [tunePath, setTunePath] = useState<string>("");
   const [tuneFileName, setTuneFileName] = useState<string>("");
+  const [creating, setCreating] = useState(false);
+  
+  // Load templates on mount
+  useEffect(() => {
+    if (isOpen) {
+      invoke<ProjectTemplate[]>("list_project_templates")
+        .then(setTemplates)
+        .catch(console.error);
+      // Reset state when dialog opens
+      setMode("select");
+      setSelectedTemplate(null);
+      setProjectName("");
+      setSelectedIni("");
+      setTunePath("");
+      setTuneFileName("");
+    }
+  }, [isOpen]);
   
   async function browseTune() {
     try {
@@ -2444,8 +2510,245 @@ function NewProjectDialog({
     }
   }
   
+  async function createFromTemplate() {
+    if (!selectedTemplate || !projectName.trim()) return;
+    setCreating(true);
+    try {
+      await invoke("create_project_from_template", {
+        templateId: selectedTemplate.id,
+        projectName: projectName.trim(),
+      });
+      onClose();
+      // Trigger refresh - the App will handle this through the project state
+      window.location.reload();
+    } catch (e) {
+      console.error("Failed to create project from template:", e);
+      alert(`Failed to create project: ${e}`);
+    } finally {
+      setCreating(false);
+    }
+  }
+  
   if (!isOpen) return null;
   
+  // Template Selection Mode
+  if (mode === "select") {
+    return (
+      <div style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(0,0,0,0.6)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        zIndex: 1000,
+      }}>
+        <div style={{
+          background: "var(--bg-surface)",
+          borderRadius: 12,
+          padding: 24,
+          minWidth: 600,
+          maxWidth: 800,
+          maxHeight: "80vh",
+          overflow: "auto",
+        }}>
+          <h2 style={{ marginBottom: 8 }}>New Project</h2>
+          <p style={{ color: "var(--text-muted)", marginBottom: 24 }}>
+            Choose a template to get started quickly, or start from scratch.
+          </p>
+          
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 16, marginBottom: 24 }}>
+            {templates.map((template) => (
+              <div
+                key={template.id}
+                onClick={() => { setSelectedTemplate(template); setMode("template"); }}
+                style={{
+                  padding: 20,
+                  borderRadius: 8,
+                  border: "1px solid var(--border-default)",
+                  background: "var(--bg-elevated)",
+                  cursor: "pointer",
+                  transition: "all 0.2s",
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--primary)"; }}
+                onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--border-default)"; }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12 }}>
+                  <div style={{
+                    width: 40,
+                    height: 40,
+                    borderRadius: 8,
+                    background: template.icon === "speeduino" ? "#4CAF50" : 
+                               template.icon === "rusefi" ? "#2196F3" : "#FF9800",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    color: "white",
+                    fontWeight: "bold",
+                    fontSize: 14,
+                  }}>
+                    {template.ecu_type.substring(0, 2).toUpperCase()}
+                  </div>
+                  <div>
+                    <div style={{ fontWeight: 600 }}>{template.name}</div>
+                    <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{template.ecu_type}</div>
+                  </div>
+                </div>
+                <p style={{ fontSize: 13, color: "var(--text-secondary)", margin: 0 }}>
+                  {template.description}
+                </p>
+              </div>
+            ))}
+            
+            {/* Start from Scratch card */}
+            <div
+              onClick={() => setMode("scratch")}
+              style={{
+                padding: 20,
+                borderRadius: 8,
+                border: "1px dashed var(--border-default)",
+                background: "transparent",
+                cursor: "pointer",
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                justifyContent: "center",
+                minHeight: 120,
+                transition: "all 0.2s",
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--primary)"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--border-default)"; }}
+            >
+              <div style={{ fontSize: 24, marginBottom: 8 }}>➕</div>
+              <div style={{ fontWeight: 600 }}>Start from Scratch</div>
+              <div style={{ fontSize: 12, color: "var(--text-muted)" }}>Manual INI selection</div>
+            </div>
+          </div>
+          
+          <div style={{ display: "flex", gap: 12, justifyContent: "flex-end" }}>
+            <button onClick={onClose} style={{ padding: "10px 20px" }}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+  
+  // Template Configuration Mode
+  if (mode === "template" && selectedTemplate) {
+    return (
+      <div style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(0,0,0,0.6)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        zIndex: 1000,
+      }}>
+        <div style={{
+          background: "var(--bg-surface)",
+          borderRadius: 12,
+          padding: 24,
+          minWidth: 500,
+          maxHeight: "80vh",
+          overflow: "auto",
+        }}>
+          <button 
+            onClick={() => setMode("select")}
+            style={{ padding: "4px 12px", marginBottom: 16, fontSize: 13 }}
+          >
+            ← Back
+          </button>
+          
+          <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 24 }}>
+            <div style={{
+              width: 48,
+              height: 48,
+              borderRadius: 8,
+              background: selectedTemplate.icon === "speeduino" ? "#4CAF50" : 
+                         selectedTemplate.icon === "rusefi" ? "#2196F3" : "#FF9800",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              color: "white",
+              fontWeight: "bold",
+              fontSize: 16,
+            }}>
+              {selectedTemplate.ecu_type.substring(0, 2).toUpperCase()}
+            </div>
+            <div>
+              <h2 style={{ margin: 0 }}>{selectedTemplate.name}</h2>
+              <p style={{ margin: "4px 0 0 0", color: "var(--text-muted)", fontSize: 13 }}>
+                {selectedTemplate.description}
+              </p>
+            </div>
+          </div>
+          
+          <div style={{ marginBottom: 20 }}>
+            <label style={{ display: "block", marginBottom: 8, fontWeight: 500 }}>
+              Project Name
+            </label>
+            <input
+              type="text"
+              value={projectName}
+              onChange={(e) => setProjectName(e.target.value)}
+              placeholder={`My ${selectedTemplate.ecu_type} Tune`}
+              style={{
+                width: "100%",
+                padding: 12,
+                borderRadius: 6,
+                border: "1px solid var(--border-default)",
+                background: "var(--bg-input)",
+                color: "var(--text-primary)",
+              }}
+            />
+          </div>
+          
+          <div style={{ 
+            background: "var(--bg-elevated)", 
+            borderRadius: 8, 
+            padding: 16, 
+            marginBottom: 20,
+            fontSize: 13,
+          }}>
+            <div style={{ fontWeight: 500, marginBottom: 12 }}>Template Settings</div>
+            <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "8px 16px" }}>
+              <span style={{ color: "var(--text-muted)" }}>ECU Signature:</span>
+              <span>{selectedTemplate.ini_signature}</span>
+              <span style={{ color: "var(--text-muted)" }}>Baud Rate:</span>
+              <span>{selectedTemplate.connection_baud_rate}</span>
+              <span style={{ color: "var(--text-muted)" }}>Dashboard:</span>
+              <span>{selectedTemplate.dashboard_preset}</span>
+            </div>
+          </div>
+          
+          <div style={{ display: "flex", gap: 12, justifyContent: "flex-end" }}>
+            <button onClick={onClose} style={{ padding: "10px 20px" }}>
+              Cancel
+            </button>
+            <button
+              onClick={createFromTemplate}
+              disabled={!projectName.trim() || creating}
+              style={{
+                padding: "10px 20px",
+                background: (!projectName.trim() || creating) ? "var(--bg-disabled)" : "var(--primary)",
+                color: "white",
+                border: "none",
+                borderRadius: 6,
+                cursor: (!projectName.trim() || creating) ? "not-allowed" : "pointer",
+              }}
+            >
+              {creating ? "Creating..." : "Create Project"}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+  
+  // Manual "Start from Scratch" mode (original behavior)
   return (
     <div style={{
       position: "fixed",
@@ -2464,6 +2767,13 @@ function NewProjectDialog({
         maxHeight: "80vh",
         overflow: "auto",
       }}>
+        <button 
+          onClick={() => setMode("select")}
+          style={{ padding: "4px 12px", marginBottom: 16, fontSize: 13 }}
+        >
+          ← Back
+        </button>
+        
         <h2 style={{ marginBottom: 24 }}>New Project</h2>
         
         <div style={{ marginBottom: 20 }}>

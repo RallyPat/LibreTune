@@ -92,6 +92,27 @@
   border-top: 1px solid var(--border-color);
   display: flex;
   justify-content: flex-end;
+  gap: 12px;
+}
+
+.help-manual-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.help-manual-btn:hover {
+  background: var(--bg-hover);
+  border-color: var(--accent);
 }
 
 .help-web-btn {

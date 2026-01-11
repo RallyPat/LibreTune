@@ -1,8 +1,26 @@
 /**
- * TS Dashboard Component
+ * TsDashboard - TunerStudio-compatible dashboard renderer.
  * 
- * Renders a complete TS-compatible dashboard from a DashFile structure.
- * Supports all gauge types, indicators, embedded images, and proper positioning.
+ * Renders a complete dashboard from a DashFile structure, supporting all
+ * TunerStudio gauge types, indicators, embedded images, and proper positioning.
+ * 
+ * Features:
+ * - 13 gauge types (Analog, Digital, Bar, Sweep, Line Graph, etc.)
+ * - Boolean indicators (LED, image-based)
+ * - Gauge sweep animation on load (sportscar-style)
+ * - Designer mode for layout editing
+ * - Context menu for gauge configuration
+ * - Dashboard selector with categories
+ * - Import from TunerStudio .dash files
+ * - Responsive scaling for different screen sizes
+ * 
+ * @example
+ * ```tsx
+ * <TsDashboard
+ *   realtimeData={realtimeData}
+ *   isConnected={connectionStatus.state === 'Connected'}
+ * />
+ * ```
  */
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
@@ -23,9 +41,15 @@ import ImportDashboardDialog from '../dialogs/ImportDashboardDialog';
 import DashboardDesigner from './DashboardDesigner';
 import './TsDashboard.css';
 
+/**
+ * Props for the TsDashboard component.
+ */
 interface TsDashboardProps {
+  /** Real-time ECU data keyed by channel name */
   realtimeData?: Record<string, number>;
+  /** Path to initially load (optional, uses last dashboard or default) */
   initialDashPath?: string;
+  /** Whether ECU is connected (enables data display) */
   isConnected?: boolean;
 }
 

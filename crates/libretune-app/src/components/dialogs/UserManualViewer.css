@@ -1,0 +1,333 @@
+/* UserManualViewer.css - Styles for the user manual viewer */
+
+.manual-viewer-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  backdrop-filter: blur(4px);
+}
+
+.manual-viewer-modal {
+  background: var(--bg-primary, #1a1a2e);
+  border-radius: 12px;
+  width: 90vw;
+  height: 85vh;
+  max-width: 1200px;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+}
+
+/* Header */
+.manual-viewer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background: var(--bg-secondary, #252540);
+  border-bottom: 1px solid var(--border-color, #333);
+}
+
+.manual-header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  font-size: 1rem;
+  color: var(--text-primary, #fff);
+}
+
+.manual-header-right {
+  display: flex;
+  gap: 4px;
+}
+
+.manual-icon-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary, #888);
+  padding: 6px;
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s, color 0.2s;
+}
+
+.manual-icon-btn:hover {
+  background: var(--bg-hover, #333);
+  color: var(--text-primary, #fff);
+}
+
+/* Body layout */
+.manual-viewer-body {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+/* Sidebar */
+.manual-sidebar {
+  width: 260px;
+  background: var(--bg-secondary, #252540);
+  border-right: 1px solid var(--border-color, #333);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.manual-sidebar-header {
+  padding: 12px;
+  border-bottom: 1px solid var(--border-color, #333);
+}
+
+.toc-home-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: 1px solid var(--border-color, #444);
+  color: var(--text-primary, #fff);
+  padding: 8px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  width: 100%;
+  font-size: 0.9rem;
+  transition: background 0.2s;
+}
+
+.toc-home-btn:hover {
+  background: var(--bg-hover, #333);
+}
+
+.manual-toc {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 0;
+}
+
+.toc-entry {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary, #aaa);
+  padding: 8px 12px;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: background 0.2s, color 0.2s;
+}
+
+.toc-entry:hover {
+  background: var(--bg-hover, #333);
+  color: var(--text-primary, #fff);
+}
+
+.toc-entry.active {
+  color: var(--accent-color, #4a9eff);
+  background: rgba(74, 158, 255, 0.1);
+  font-weight: 500;
+}
+
+.toc-children {
+  background: rgba(0, 0, 0, 0.1);
+}
+
+/* Content area */
+.manual-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  overflow: hidden;
+}
+
+.sidebar-toggle {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  background: var(--bg-secondary, #252540);
+  border: 1px solid var(--border-color, #333);
+  border-left: none;
+  border-radius: 0 6px 6px 0;
+  padding: 12px 4px;
+  cursor: pointer;
+  color: var(--text-secondary, #888);
+  z-index: 10;
+  transition: color 0.2s;
+}
+
+.sidebar-toggle:hover {
+  color: var(--text-primary, #fff);
+}
+
+.manual-content-inner {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px 32px;
+}
+
+.manual-text {
+  max-width: 800px;
+  margin: 0 auto;
+  line-height: 1.7;
+  color: var(--text-primary, #fff);
+}
+
+.manual-text h1 {
+  font-size: 2rem;
+  margin-bottom: 1rem;
+  color: var(--text-primary, #fff);
+}
+
+.manual-text h2 {
+  font-size: 1.5rem;
+  margin-top: 2rem;
+  margin-bottom: 0.75rem;
+  color: var(--text-primary, #fff);
+}
+
+.manual-text h3 {
+  font-size: 1.2rem;
+  margin-top: 1.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.manual-text p {
+  margin-bottom: 1rem;
+}
+
+.manual-text code {
+  background: var(--bg-secondary, #252540);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: 'Fira Code', 'JetBrains Mono', monospace;
+  font-size: 0.9em;
+}
+
+.manual-text pre {
+  background: var(--bg-secondary, #252540);
+  padding: 16px;
+  border-radius: 8px;
+  overflow-x: auto;
+  margin: 1rem 0;
+}
+
+.manual-text pre code {
+  background: transparent;
+  padding: 0;
+}
+
+.manual-text a {
+  color: var(--accent-color, #4a9eff);
+  text-decoration: none;
+}
+
+.manual-text a:hover {
+  text-decoration: underline;
+}
+
+.manual-text table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1rem 0;
+}
+
+.manual-text th,
+.manual-text td {
+  border: 1px solid var(--border-color, #333);
+  padding: 8px 12px;
+  text-align: left;
+}
+
+.manual-text th {
+  background: var(--bg-secondary, #252540);
+  font-weight: 600;
+}
+
+.manual-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--text-secondary, #888);
+}
+
+.manual-placeholder {
+  text-align: center;
+  padding: 40px 20px;
+}
+
+.manual-placeholder h1 {
+  margin-bottom: 1.5rem;
+}
+
+.manual-placeholder pre {
+  display: inline-block;
+  text-align: left;
+  background: var(--bg-secondary, #252540);
+  padding: 16px 24px;
+  border-radius: 8px;
+  margin: 1rem 0;
+}
+
+/* Navigation footer */
+.manual-nav-footer {
+  display: flex;
+  justify-content: space-between;
+  padding: 12px 24px;
+  border-top: 1px solid var(--border-color, #333);
+  background: var(--bg-secondary, #252540);
+}
+
+.manual-nav-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: 1px solid var(--border-color, #444);
+  color: var(--text-primary, #fff);
+  padding: 8px 16px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.manual-nav-btn:hover {
+  background: var(--bg-hover, #333);
+  border-color: var(--accent-color, #4a9eff);
+}
+
+.manual-nav-btn.prev {
+  flex-direction: row;
+}
+
+.manual-nav-btn.next {
+  flex-direction: row;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .manual-sidebar {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    z-index: 20;
+    box-shadow: 4px 0 20px rgba(0, 0, 0, 0.3);
+  }
+
+  .manual-viewer-modal {
+    width: 95vw;
+    height: 90vh;
+  }
+}

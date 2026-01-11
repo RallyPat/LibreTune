@@ -1,20 +1,46 @@
-import { X, ExternalLink } from 'lucide-react';
+/**
+ * HelpViewer - Displays context-sensitive help from INI files.
+ *
+ * Shows help content defined in the ECU's INI file with options
+ * to open web help or the full user manual.
+ *
+ * @example
+ * ```tsx
+ * <HelpViewer
+ *   topic={{ name: 'fuel_table', title: 'Fuel Table', text_lines: ['...'] }}
+ *   onClose={() => setHelpOpen(false)}
+ *   onOpenManual={() => setManualOpen(true)}
+ * />
+ * ```
+ */
+
+import { X, ExternalLink, Book } from 'lucide-react';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import './HelpViewer.css';
 
+/** Help topic data from INI files */
 export interface HelpTopicData {
+  /** Internal name/identifier */
   name: string;
+  /** Display title */
   title: string;
+  /** Optional URL for external web help */
   web_url?: string;
+  /** HTML content lines */
   text_lines: string[];
 }
 
+/** Props for HelpViewer component */
 interface HelpViewerProps {
+  /** Help topic to display */
   topic: HelpTopicData;
+  /** Callback when viewer is closed */
   onClose: () => void;
+  /** Callback to open the full user manual */
+  onOpenManual?: () => void;
 }
 
-export default function HelpViewer({ topic, onClose }: HelpViewerProps) {
+export default function HelpViewer({ topic, onClose, onOpenManual }: HelpViewerProps) {
   const handleWebHelp = async () => {
     if (topic.web_url) {
       try {
@@ -37,10 +63,10 @@ export default function HelpViewer({ topic, onClose }: HelpViewerProps) {
             <X size={20} />
           </button>
         </div>
-        
+
         <div className="help-viewer-content">
           {topic.text_lines.length > 0 ? (
-            <div 
+            <div
               className="help-text"
               dangerouslySetInnerHTML={{ __html: htmlContent }}
             />
@@ -49,14 +75,20 @@ export default function HelpViewer({ topic, onClose }: HelpViewerProps) {
           )}
         </div>
 
-        {topic.web_url && (
-          <div className="help-viewer-footer">
+        <div className="help-viewer-footer">
+          {onOpenManual && (
+            <button className="help-manual-btn" onClick={onOpenManual}>
+              <Book size={16} />
+              User Manual
+            </button>
+          )}
+          {topic.web_url && (
             <button className="help-web-btn" onClick={handleWebHelp}>
               <ExternalLink size={16} />
               Open Web Help
             </button>
-          </div>
-        )}
+          )}
+        </div>
       </div>
     </div>
   );
