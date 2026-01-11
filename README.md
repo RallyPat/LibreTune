@@ -96,6 +96,8 @@ Modern, open-source ECU tuning software for EpicEFI, Speeduino, rusEFI, and othe
 - Any ECU using the standard INI definition format (MegaTune/TunerStudio compatible)
 - Megasquirt MS2/MS3 (partial support - serial protocol in progress)
 
+**Note**: Trigger pattern support (e.g., "60-2", "36-1", "Nissan QG18") depends on ECU firmware, not LibreTune. See [docs/NISSAN_QG18_TRIGGER_SETUP.md](docs/NISSAN_QG18_TRIGGER_SETUP.md) for details on how trigger patterns work and how to request support for new patterns.
+
 ## Quick Start
 
 ### Prerequisites
