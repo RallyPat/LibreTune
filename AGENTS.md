@@ -4,6 +4,19 @@
 LibreTune is a modern, open-source ECU tuning software for Speeduino, EpicEFI, and compatible aftermarket ECUs.
 It's built with Rust core + Tauri desktop app + React frontend.
 
+## Supported ECU Platforms
+LibreTune supports multiple ECU platforms, each treated as a distinct project:
+
+| Platform | Description | INI Pattern | Test Coverage |
+|----------|-------------|-------------|---------------|
+| **Speeduino** | Open-source Arduino-based ECU | `speeduino*.ini` | Full platform test |
+| **rusEFI** | Open-source STM32-based ECU | `rusEFI*.ini` (not FOME/epicEFI) | Full platform test |
+| **FOME** | Fork of rusEFI with enhanced features | `*FOME*.ini` | All files tested |
+| **epicEFI** | rusEFI variant for epicECU boards | `*epicECU*.ini` | Sampled testing (10 files) |
+| **MegaSquirt** | MS2/MS3 ECU systems | `MS2*.ini`, `MS3*.ini` | Basic parsing |
+
+**Note**: FOME, epicEFI, and rusEFI are separate projects and should not be conflated in code or documentation.
+
 ## Architecture
 ```
 crates/
@@ -784,7 +797,15 @@ Based on analysis of common ECU tuning software patterns:
   - Tests for: rebin_table, scale_cells, set_cells_equal, interpolate_cells
   - 5 passing tests, 1 ignored (smooth_table bug discovered)
 
-- **Test results**: 46 passed, 2 ignored across all test files
+- **Added platform-specific corpus tests** (Jan 2026):
+  - File: `crates/libretune-core/tests/corpus.rs`
+  - `test_parse_all_corpus_inis()` - All 687 INI files in reference/ecuDef must parse (100% pass)
+  - `test_speeduino_ini_fields()` - Speeduino-specific validation
+  - `test_rusefi_ini_fields()` - rusEFI validation (excludes FOME/epicEFI)
+  - `test_fome_ini_fields()` - Tests ALL FOME files (currently 2)
+  - `test_epicefi_ini_fields()` - Samples 10 epicEFI files for efficiency
+
+- **Test results**: 84+ passed, 2 ignored across all test files
 
 ### Known Issues
 - **smooth_table bug**: Weight array indexing issue at line 115 in table_ops.rs
