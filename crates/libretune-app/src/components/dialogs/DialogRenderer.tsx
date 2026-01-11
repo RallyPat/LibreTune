@@ -74,13 +74,20 @@ interface CurveData {
   gauge?: string | null;
 }
 
+interface FieldInfo {
+  label: string;
+  name: string;
+  help?: string;
+}
+
 function DialogField({ 
   label, 
   name, 
   onUpdate, 
   context,
   fieldEnabledCondition,
-  onOptimisticUpdate 
+  onOptimisticUpdate,
+  onFieldFocus
 }: { 
   label: string; 
   name: string; 
@@ -88,6 +95,7 @@ function DialogField({
   context: Record<string, number>;
   fieldEnabledCondition?: boolean; // Enable condition from DialogComponent::Field
   onOptimisticUpdate?: (name: string, value: number) => void;
+  onFieldFocus?: (info: FieldInfo) => void;
 }) {
   const [constant, setConstant] = useState<Constant | null>(null);
   const [numValue, setNumValue] = useState<number | null>(null);
@@ -167,6 +175,15 @@ function DialogField({
 
   const displayLabel = label || constant.label || constant.name;
   
+  // Handle field focus to show help in description panel
+  const handleFocus = () => {
+    onFieldFocus?.({
+      label: displayLabel,
+      name: constant.name,
+      help: constant.help
+    });
+  };
+  
   // Filter out "INVALID" from bit_options and build index mapping
   const validBitOptions: string[] = [];
   const originalToFilteredMap = new Map<number, number>();
@@ -237,6 +254,7 @@ function DialogField({
             value={strValue}
             disabled={!isEnabled}
             onChange={(e) => setStrValue(e.target.value)}
+            onFocus={handleFocus}
             onBlur={async () => {
               try {
                 await invoke('update_constant_string', { name: constant.name, value: strValue });
@@ -313,6 +331,7 @@ function DialogField({
               type="checkbox"
               checked={selectedBit === checkedIndex}
               disabled={!isEnabled}
+              onFocus={handleFocus}
               onChange={(e) => {
                 const newVal = e.target.checked ? checkedIndex : uncheckedIndex;
                 setSelectedBit(newVal);
@@ -358,6 +377,7 @@ function DialogField({
           <select
             value={safeSelectedBit}
             disabled={!isEnabled}
+            onFocus={handleFocus}
             onChange={(e) => {
               const filteredVal = parseInt(e.target.value, 10);
               // Convert filtered index back to original index using the map
@@ -429,6 +449,7 @@ function DialogField({
           step={1 / Math.pow(10, constant.digits)}
           value={numValue ?? 0}
           disabled={!isEnabled}
+          onFocus={handleFocus}
           onChange={(e) => setNumValue(parseFloat(e.target.value))}
           onBlur={() => {
             if (numValue !== null) {
@@ -866,12 +887,14 @@ function DialogFieldWrapper({
   comp, 
   context, 
   onUpdate,
-  onOptimisticUpdate 
+  onOptimisticUpdate,
+  onFieldFocus
 }: { 
   comp: DialogComponent; 
   context: Record<string, number>; 
   onUpdate?: () => void;
   onOptimisticUpdate?: (name: string, value: number) => void;
+  onFieldFocus?: (info: FieldInfo) => void;
 }) {
   const [fieldVisible, setFieldVisible] = useState<boolean>(true);
   const [fieldEnabled, setFieldEnabled] = useState<boolean>(true);
@@ -929,6 +952,7 @@ function DialogFieldWrapper({
     context={context}
     fieldEnabledCondition={fieldEnabled}
     onOptimisticUpdate={onOptimisticUpdate}
+    onFieldFocus={onFieldFocus}
   />;
 }
 
@@ -972,15 +996,17 @@ function DialogComponentRenderer({
   context,
   onUpdate,
   onOptimisticUpdate,
+  onFieldFocus,
 }: {
   comp: DialogComponent;
   openTable: (name: string) => void;
   context: Record<string, number>;
   onUpdate?: () => void;
   onOptimisticUpdate?: (name: string, value: number) => void;
+  onFieldFocus?: (info: FieldInfo) => void;
 }) {
   if (comp.type === 'Field' && comp.name) {
-    return <DialogFieldWrapper comp={comp} context={context} onUpdate={onUpdate} onOptimisticUpdate={onOptimisticUpdate} />;
+    return <DialogFieldWrapper comp={comp} context={context} onUpdate={onUpdate} onOptimisticUpdate={onOptimisticUpdate} onFieldFocus={onFieldFocus} />;
   }
   if (comp.type === 'Label' && comp.text) {
     return <div className="dialog-label">{comp.text}</div>;
@@ -1025,6 +1051,13 @@ export default function DialogRenderer({ definition, onBack, openTable, context,
   // Conditions like {cylindersCount > 5} will automatically evaluate based on the current cylindersCount value
   // This works for any cylinder count: 1, 2, 3, 4, 5, 6, 7, 8, 10, 12, etc.
   
+  // State for showing field description in bottom panel
+  const [selectedField, setSelectedField] = useState<FieldInfo | null>(null);
+  
+  const handleFieldFocus = (info: FieldInfo) => {
+    setSelectedField(info);
+  };
+  
   return (
     <div className="dialog-view view-transition">
       <div className="editor-header">
@@ -1038,8 +1071,19 @@ export default function DialogRenderer({ definition, onBack, openTable, context,
 
       <div className="glass-card dialog-container">
         {definition.components.map((comp, i) => (
-          <DialogComponentRenderer key={i} comp={comp} openTable={openTable} context={context} onUpdate={onUpdate} onOptimisticUpdate={onOptimisticUpdate} />
+          <DialogComponentRenderer key={i} comp={comp} openTable={openTable} context={context} onUpdate={onUpdate} onOptimisticUpdate={onOptimisticUpdate} onFieldFocus={handleFieldFocus} />
         ))}
+      </div>
+      
+      <div className="dialog-description-panel">
+        {selectedField ? (
+          <>
+            <strong>{selectedField.label}</strong>
+            <p>{selectedField.help || 'No description available for this setting.'}</p>
+          </>
+        ) : (
+          <p className="description-placeholder">Select a field to see its description</p>
+        )}
       </div>
     </div>
   );

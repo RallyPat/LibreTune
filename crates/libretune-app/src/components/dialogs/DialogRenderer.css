@@ -401,3 +401,32 @@
 .command-warning-buttons button.danger:hover {
   background: #ff6666;
 }
+
+/* Description panel at bottom of dialog */
+.dialog-description-panel {
+  padding: 12px 20px;
+  background: var(--bg-secondary);
+  border-top: 1px solid var(--border-color);
+  min-height: 60px;
+  max-height: 100px;
+  overflow-y: auto;
+}
+
+.dialog-description-panel strong {
+  color: var(--accent);
+  font-size: 14px;
+  display: block;
+  margin-bottom: 4px;
+}
+
+.dialog-description-panel p {
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.4;
+  margin: 0;
+}
+
+.dialog-description-panel .description-placeholder {
+  color: var(--text-muted);
+  font-style: italic;
+}
