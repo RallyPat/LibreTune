@@ -2,8 +2,20 @@
 
 [![License: GPL v2](https://img.shields.io/badge/License-GPL_v2-blue.svg)](https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html)
 [![CI](https://github.com/RallyPat/LibreTune/actions/workflows/ci.yml/badge.svg)](https://github.com/RallyPat/LibreTune/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/RallyPat/LibreTune?label=stable)](https://github.com/RallyPat/LibreTune/releases/latest)
+[![Nightly](https://img.shields.io/github/v/release/RallyPat/LibreTune?include_prereleases&label=nightly)](https://github.com/RallyPat/LibreTune/releases/tag/nightly)
 
 Modern, open-source ECU tuning software for EpicEFI, Speeduino, rusEFI, and other TS format INI compatible aftermarket engine control units.
+
+## Downloads
+
+| Platform | Stable Release | Nightly Build | Notes |
+|----------|----------------|---------------|-------|
+| **Linux** | [AppImage / DEB / RPM](https://github.com/RallyPat/LibreTune/releases/latest) | [Nightly](https://github.com/RallyPat/LibreTune/releases/tag/nightly) | AppImage is portable, no install needed |
+| **Windows** | [Installer (MSI/EXE)](https://github.com/RallyPat/LibreTune/releases/latest) | [Portable EXE](https://github.com/RallyPat/LibreTune/releases/tag/nightly) | Nightly is portable, no install needed |
+| **macOS** | [DMG (ARM64 & Intel)](https://github.com/RallyPat/LibreTune/releases/latest) | [Nightly](https://github.com/RallyPat/LibreTune/releases/tag/nightly) | Separate builds for Apple Silicon and Intel |
+
+> ⚠️ **Nightly builds** are automatically generated from the latest code and may be unstable. For production use, download stable releases.
 
 ![LibreTune Table Editor](docs/screenshots/table-editor.png)
 
