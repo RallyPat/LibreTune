@@ -47,7 +47,7 @@ The project aims to provide professional ECU tuning workflow and functionality w
 ### 4. Gauge Rendering (TunerStudio-Compatible)
 - Location: `crates/libretune-app/src/components/gauges/TsGauge.tsx`
 - **Enhanced in Jan 2026**: All gauge types now feature metallic bezels, shadows, gradients, and 3D effects
-- Gauge Types Implemented (9 of 13):
+- Gauge Types Implemented (13 of 13 - ALL COMPLETE):
   - BasicReadout - LCD-style digital numeric display with metallic frame and inset shadows
   - HorizontalBarGauge - Horizontal progress bar with rounded corners and gradient fills
   - VerticalBarGauge - Vertical progress bar with tick marks and 3D gradient effects
@@ -57,7 +57,10 @@ The project aims to provide professional ECU tuning workflow and functionality w
   - VerticalDashedBar - Segmented vertical bar with per-segment zone coloring
   - Histogram - Bar chart distribution visualization centered on current value
   - LineGraph - Time-series line chart with filled gradient area and current value dot
-- Pending Types: RoundGauge, RoundDashedGauge, FuelMeter, Tachometer
+  - RoundGauge - Circular gauge with 270° arc and tick marks
+  - RoundDashedGauge - Circular gauge with segmented arc
+  - FuelMeter - Specialized fuel level gauge
+  - Tachometer - RPM-specific gauge with redline zone
 
 ### 5. Professional Default Dashboards
 - Location: `crates/libretune-app/src-tauri/src/lib.rs` (create_*_dashboard functions)
@@ -183,16 +186,16 @@ Based on analysis of common ECU tuning software patterns:
 ## Remaining Tasks for Future Agents
 [x] Fix smooth_table bug (weight array indexing issue in table_ops.rs) - FIXED, all 10 tests pass
 [ ] Add more AutoTune algorithms (lambda compensation, transient filtering)
-[ ] Implement 3D table with react-three-fiber for better visualization
-[ ] Add data logging/playback features
-[ ] Add more gauge types (strip gauges, custom gauges)
+[x] Implement 3D table with react-three-fiber for better visualization - Enhanced with live cursor, trail line, cell grid overlay
+[x] Add data logging/playback features - Implemented DataLogView with CSV import, playback controls
+[x] All gauge types implemented (13/13) - RoundGauge, RoundDashedGauge, FuelMeter, Tachometer added
 [ ] Implement action scripting engine
 [ ] Add plugin system for extensibility
 [ ] Add user manual/help system
 [ ] Implement project templates
 [x] Add tune comparison/diff view - Implemented compare_tables command
 [ ] Implement Git integration for tune versioning
-[ ] Add unit conversion layer (°C↔°F, kPa↔PSI, AFR↔Lambda) with user preferences
+[x] Add unit conversion layer (°C↔°F, kPa↔PSI, AFR↔Lambda) with user preferences - UnitPreferencesProvider implemented
 [ ] Add user-configurable status bar channel selection
 [x] Create comprehensive test suite (CI + 46 unit tests added)
 [x] Fix table map_name lookup (veTable1Map → veTable1Tbl)
@@ -210,6 +213,7 @@ Based on analysis of common ECU tuning software patterns:
 [x] Restore points system (create, list, load, delete, prune)
 [ ] INI version tracking in tune files
 [ ] User-driven tune migration between INI versions
+[x] Fix table operations integration (scale, smooth, interpolate, set equal, rebin) - All Tauri commands now wired to core library
 [x] Frontend dialogs for restore points and project import
 [x] Pop-out windows for multi-monitor support (dock-back, bidirectional sync)
 [x] CSV export/import for tune data - Implemented with file dialogs
@@ -218,6 +222,29 @@ Based on analysis of common ECU tuning software patterns:
 [x] Composite logger (Speeduino/rusEFI/MS2) - Backend + CompositeLoggerView.tsx
 
 ## Recent Changes (Session History)
+
+### Table Operations Integration - Completed Jan 11, 2026
+- **Fixed table editing toolbar operations** (`lib.rs`):
+  - All 5 Tauri commands were stubs returning "requires ECU connection" error
+  - Now properly wired to `libretune_core::table_ops` functions
+  - Added `get_table_data_internal()` helper for code reuse
+  - Added `update_table_z_values_internal()` helper for saving changes
+  - Operations work in offline mode (edit tune file) and write to ECU if connected
+
+- **Implemented commands**:
+  - `smooth_table` - 2D Gaussian weighted averaging of selected cells
+  - `interpolate_cells` - Bilinear interpolation between corner cells
+  - `scale_cells` - Multiply selected cells by factor
+  - `set_cells_equal` - Set selected cells to average value
+  - `rebin_table` - Change axis bins with Z-value interpolation
+
+- **Frontend performance improvements** (`TableEditor2D.tsx`):
+  - `handleScale` now calls single backend command instead of N individual `update_table_data` calls
+  - `handleSetEqual` now calls single backend command for atomic operation
+  - All handlers use async/await with try/catch error handling
+  - Fixed coordinate order: frontend sends `(row, col)` not `(x, y)` to match backend
+
+- **Test verification**: All 10 table_ops unit tests pass
 
 ### Data Tools & Diagnostic Loggers - Completed Jan 11, 2026
 - **CSV Export/Import** (`lib.rs`):

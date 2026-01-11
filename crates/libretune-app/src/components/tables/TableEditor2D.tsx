@@ -273,7 +273,7 @@ export default function TableEditor2D({
     }
   };
 
-  const handleSetEqual = () => {
+  const handleSetEqual = async () => {
     const values = Array.from(selectedCells).map(key => {
       const [x, y] = key.split(',').map(Number);
       return { x, y, value: localZValues[y][x] };
@@ -283,9 +283,23 @@ export default function TableEditor2D({
 
     const avgValue = values.reduce((sum, v) => sum + v.value, 0) / values.length;
 
-    values.forEach(({ x, y }) => {
-      handleCellChange(x, y, avgValue);
-    });
+    try {
+      const result: any = await invoke('set_cells_equal', {
+        table_name,
+        selected_cells: Array.from(selectedCells).map(key => {
+          const [x, y] = key.split(',').map(Number);
+          return [y, x] as [number, number];  // Backend expects (row, col)
+        }),
+        value: avgValue
+      });
+      if (result && result.z_values) {
+        setLocalZValues(result.z_values);
+        onValuesChange?.(result.z_values);
+        setCanUndo(true);
+      }
+    } catch (err) {
+      console.error('Set equal failed:', err);
+    }
   };
 
   const handleSetEqualWrapper = () => {
@@ -333,63 +347,85 @@ export default function TableEditor2D({
     });
   };
 
-  const handleScale = (factor: number) => {
-    const values = Array.from(selectedCells).map(key => {
-      const [x, y] = key.split(',').map(Number);
-      return { x, y, value: localZValues[y][x] };
-    });
-    
-    values.forEach(({ x, y, value }) => {
-      handleCellChange(x, y, value * factor);
-    });
-  };
-
-  const handleSmooth = () => {
-    invoke('smooth_table', {
-      table_name,
-      selected_cells: Array.from(selectedCells).map(key => {
-        const [x, y] = key.split(',').map(Number);
-        return [x, y] as [number, number];
-      }),
-      factor: 1.0
-    }).then((result: any) => {
+  const handleScale = async (factor: number) => {
+    try {
+      const result: any = await invoke('scale_cells', {
+        table_name,
+        selected_cells: Array.from(selectedCells).map(key => {
+          const [x, y] = key.split(',').map(Number);
+          return [y, x] as [number, number];  // Backend expects (row, col)
+        }),
+        scale_factor: factor
+      });
       if (result && result.z_values) {
         setLocalZValues(result.z_values);
-        setSelectedCells(new Set());
+        onValuesChange?.(result.z_values);
+        setCanUndo(true);
       }
-    });
+    } catch (err) {
+      console.error('Scale failed:', err);
+    }
   };
 
-  const handleInterpolate = () => {
-    invoke('interpolate_cells', {
-      table_name,
-      selected_cells: Array.from(selectedCells).map(key => {
-        const [x, y] = key.split(',').map(Number);
-        return [x, y] as [number, number];
-      })
-    }).then((result: any) => {
+  const handleSmooth = async () => {
+    try {
+      const result: any = await invoke('smooth_table', {
+        table_name,
+        selected_cells: Array.from(selectedCells).map(key => {
+          const [x, y] = key.split(',').map(Number);
+          return [y, x] as [number, number];  // Backend expects (row, col)
+        }),
+        factor: 1.0
+      });
       if (result && result.z_values) {
         setLocalZValues(result.z_values);
-        setSelectedCells(new Set());
+        onValuesChange?.(result.z_values);
+        setCanUndo(true);
       }
-    });
+    } catch (err) {
+      console.error('Smooth failed:', err);
+      // TODO: Show toast notification when toast system is available as prop
+    }
   };
 
-  const handleRebin = (newXBins: number[], newYBins: number[], interpolateZ: boolean) => {
+  const handleInterpolate = async () => {
+    try {
+      const result: any = await invoke('interpolate_cells', {
+        table_name,
+        selected_cells: Array.from(selectedCells).map(key => {
+          const [x, y] = key.split(',').map(Number);
+          return [y, x] as [number, number];  // Backend expects (row, col)
+        })
+      });
+      if (result && result.z_values) {
+        setLocalZValues(result.z_values);
+        onValuesChange?.(result.z_values);
+        setCanUndo(true);
+      }
+    } catch (err) {
+      console.error('Interpolate failed:', err);
+    }
+  };
+
+  const handleRebin = async (newXBins: number[], newYBins: number[], interpolateZ: boolean) => {
     setRebinDialog({ show: false, newXBins, newYBins });
     
-    invoke('rebin_table', {
-      table_name,
-      new_x_bins: newXBins,
-      new_y_bins: newYBins,
-      interpolate_z: interpolateZ
-    }).then((result: any) => {
+    try {
+      const result: any = await invoke('rebin_table', {
+        table_name,
+        new_x_bins: newXBins,
+        new_y_bins: newYBins,
+        interpolate_z: interpolateZ
+      });
       if (result && result.z_values) {
         setLocalZValues(result.z_values);
-        // Note: x_bins and y_bins from props won't update, but newXBins/newYBins are stored in rebinDialog
+        onValuesChange?.(result.z_values);
+        setCanUndo(true);
         setSelectedCells(new Set());
       }
-    });
+    } catch (err) {
+      console.error('Rebin failed:', err);
+    }
   };
 
   const handleCellEditApply = (value: number) => {
