@@ -2252,10 +2252,18 @@ function SettingsView() {
   const { showToast } = useToast();
   const [demoMode, setDemoMode] = useState(false);
   const [demoLoading, setDemoLoading] = useState(false);
+  const [showAllHelpIcons, setShowAllHelpIcons] = useState(true);
 
-  // Check demo mode status on mount
+  // Check demo mode status and load settings on mount
   useEffect(() => {
     invoke<boolean>("get_demo_mode").then(setDemoMode).catch(console.error);
+    invoke<{ show_all_help_icons?: boolean }>("get_settings")
+      .then((settings) => {
+        if (settings.show_all_help_icons !== undefined) {
+          setShowAllHelpIcons(settings.show_all_help_icons);
+        }
+      })
+      .catch(console.error);
   }, []);
 
   const handleDemoToggle = async () => {
@@ -2337,6 +2345,46 @@ function SettingsView() {
           <option value="midnight">Midnight</option>
           <option value="carbon">Carbon</option>
         </select>
+      </div>
+
+      {/* Help Icons Section */}
+      <div style={{ 
+        marginBottom: 16, 
+        padding: 16, 
+        background: 'var(--bg-surface)', 
+        border: '1px solid var(--border)',
+        borderRadius: 8 
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
+          <input
+            type="checkbox"
+            id="showAllHelpIcons"
+            checked={showAllHelpIcons}
+            onChange={async (e) => {
+              const newValue = e.target.checked;
+              setShowAllHelpIcons(newValue);
+              try {
+                await invoke("update_setting", { key: "show_all_help_icons", value: newValue.toString() });
+              } catch (err) {
+                console.error("Failed to save help icons setting:", err);
+                showToast(`Failed to save setting: ${err}`, "error");
+              }
+            }}
+            style={{ width: 18, height: 18 }}
+          />
+          <label htmlFor="showAllHelpIcons" style={{ fontWeight: 600, fontSize: 14, cursor: 'pointer' }}>
+            Show help icons on all fields
+          </label>
+        </div>
+        <p style={{ 
+          color: 'var(--text-muted)', 
+          fontSize: 12, 
+          margin: 0,
+          marginLeft: 30,
+          lineHeight: 1.5
+        }}>
+          When disabled, help icons only appear for fields that have descriptions defined in the INI file.
+        </p>
       </div>
     </div>
   );

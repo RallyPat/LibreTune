@@ -1792,9 +1792,9 @@ fn parse_menu_entry(def: &mut EcuDefinition, key: &str, value: &str) {
 /// Parse [SettingContextHelp] section entries
 /// Format: constantName = "Help text for this constant"
 fn parse_setting_context_help(def: &mut EcuDefinition, key: &str, value: &str) {
-    // The key is the constant name, value is the help/label text
+    // The key is the constant name, value is the help text
     if let Some(constant) = def.constants.get_mut(key) {
-        constant.label = Some(value.trim_matches('"').to_string());
+        constant.help = Some(value.trim_matches('"').to_string());
     }
 }
 

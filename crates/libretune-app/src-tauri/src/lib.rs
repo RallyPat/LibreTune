@@ -227,6 +227,10 @@ struct Settings {
     #[serde(default)]
     status_bar_channels: Vec<String>, // User-selected channels for status bar (max 8)
 
+    // Help icon visibility setting
+    #[serde(default = "default_true")]
+    show_all_help_icons: bool, // Show help icons on all fields (true) or only fields with descriptions (false)
+
     // Heatmap color scheme settings
     #[serde(default = "default_heatmap_scheme")]
     heatmap_value_scheme: String, // Scheme for VE/timing tables
@@ -250,6 +254,10 @@ struct Settings {
 
 fn default_heatmap_scheme() -> String {
     "tunerstudio".to_string()
+}
+
+fn default_true() -> bool {
+    true
 }
 
 fn default_auto_commit() -> String {
@@ -11236,6 +11244,10 @@ async fn update_setting(app: tauri::AppHandle, key: String, value: String) -> Re
         "heatmap_value_scheme" => settings.heatmap_value_scheme = value,
         "heatmap_change_scheme" => settings.heatmap_change_scheme = value,
         "heatmap_coverage_scheme" => settings.heatmap_coverage_scheme = value,
+        // Help icon visibility
+        "show_all_help_icons" => {
+            settings.show_all_help_icons = value.parse().map_err(|_| "Invalid boolean value")?
+        }
         _ => return Err(format!("Unknown setting: {}", key)),
     }
 

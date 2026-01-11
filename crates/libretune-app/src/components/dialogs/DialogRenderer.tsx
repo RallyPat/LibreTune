@@ -87,7 +87,8 @@ function DialogField({
   context,
   fieldEnabledCondition,
   onOptimisticUpdate,
-  onFieldFocus
+  onFieldFocus,
+  showAllHelpIcons = true
 }: { 
   label: string; 
   name: string; 
@@ -96,6 +97,7 @@ function DialogField({
   fieldEnabledCondition?: boolean; // Enable condition from DialogComponent::Field
   onOptimisticUpdate?: (name: string, value: number) => void;
   onFieldFocus?: (info: FieldInfo) => void;
+  showAllHelpIcons?: boolean; // Show help icons on all fields (true) or only fields with help (false)
 }) {
   const [constant, setConstant] = useState<Constant | null>(null);
   const [numValue, setNumValue] = useState<number | null>(null);
@@ -242,9 +244,9 @@ function DialogField({
       <div className="settings-field">
         <label>
           {displayLabel}
-          {constant.help && (
-            <span className="help-icon" title={constant.help}>
-              <HelpCircle size={14} />
+          {(showAllHelpIcons || constant.help) && (
+            <span className="help-icon" title={constant.help || 'Click for info'} onClick={handleFocus} tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && handleFocus()}>
+              <HelpCircle size={16} />
             </span>
           )}
         </label>
@@ -266,7 +268,6 @@ function DialogField({
             placeholder={constant.help || ''}
           />
         </div>
-        {constant.help && <div className="field-help">{constant.help}</div>}
       </div>
     );
   }
@@ -345,13 +346,12 @@ function DialogField({
               }}
             />
             {displayLabel}: {uncheckedLabel} / {checkedLabel}
-            {constant.help && (
-              <span className="help-icon" title={constant.help}>
-                <HelpCircle size={14} />
+            {(showAllHelpIcons || constant.help) && (
+              <span className="help-icon" title={constant.help || 'Click for info'} onClick={handleFocus} tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && handleFocus()}>
+                <HelpCircle size={16} />
               </span>
             )}
           </label>
-          {constant.help && <div className="field-help">{constant.help}</div>}
         </div>
       );
     }
@@ -367,9 +367,9 @@ function DialogField({
       <div className="settings-field">
         <label>
           {displayLabel}
-          {constant.help && (
-            <span className="help-icon" title={constant.help}>
-              <HelpCircle size={14} />
+          {(showAllHelpIcons || constant.help) && (
+            <span className="help-icon" title={constant.help || 'Click for info'} onClick={handleFocus} tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && handleFocus()}>
+              <HelpCircle size={16} />
             </span>
           )}
         </label>
@@ -422,7 +422,6 @@ function DialogField({
             )}
           </select>
         </div>
-        {constant.help && <div className="field-help">{constant.help}</div>}
         {validBitOptions.length === 0 && bitOptions.length > 0 && (
           <div style={{ color: 'orange', padding: '4px', fontSize: '0.85em' }}>
             Warning: All options filtered out as INVALID
@@ -437,9 +436,9 @@ function DialogField({
     <div className="settings-field">
       <label>
         {displayLabel}
-        {constant.help && (
-          <span className="help-icon" title={constant.help}>
-            <HelpCircle size={14} />
+        {(showAllHelpIcons || constant.help) && (
+          <span className="help-icon" title={constant.help || 'Click for info'} onClick={handleFocus} tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && handleFocus()}>
+            <HelpCircle size={16} />
           </span>
         )}
       </label>
@@ -464,7 +463,6 @@ function DialogField({
         />
         <span className="field-unit">{constant.units}</span>
       </div>
-      {constant.help && <div className="field-help">{constant.help}</div>}
     </div>
   );
 }
@@ -888,13 +886,15 @@ function DialogFieldWrapper({
   context, 
   onUpdate,
   onOptimisticUpdate,
-  onFieldFocus
+  onFieldFocus,
+  showAllHelpIcons
 }: { 
   comp: DialogComponent; 
   context: Record<string, number>; 
   onUpdate?: () => void;
   onOptimisticUpdate?: (name: string, value: number) => void;
   onFieldFocus?: (info: FieldInfo) => void;
+  showAllHelpIcons?: boolean;
 }) {
   const [fieldVisible, setFieldVisible] = useState<boolean>(true);
   const [fieldEnabled, setFieldEnabled] = useState<boolean>(true);
@@ -953,6 +953,7 @@ function DialogFieldWrapper({
     fieldEnabledCondition={fieldEnabled}
     onOptimisticUpdate={onOptimisticUpdate}
     onFieldFocus={onFieldFocus}
+    showAllHelpIcons={showAllHelpIcons}
   />;
 }
 
@@ -997,6 +998,7 @@ function DialogComponentRenderer({
   onUpdate,
   onOptimisticUpdate,
   onFieldFocus,
+  showAllHelpIcons,
 }: {
   comp: DialogComponent;
   openTable: (name: string) => void;
@@ -1004,9 +1006,10 @@ function DialogComponentRenderer({
   onUpdate?: () => void;
   onOptimisticUpdate?: (name: string, value: number) => void;
   onFieldFocus?: (info: FieldInfo) => void;
+  showAllHelpIcons?: boolean;
 }) {
   if (comp.type === 'Field' && comp.name) {
-    return <DialogFieldWrapper comp={comp} context={context} onUpdate={onUpdate} onOptimisticUpdate={onOptimisticUpdate} onFieldFocus={onFieldFocus} />;
+    return <DialogFieldWrapper comp={comp} context={context} onUpdate={onUpdate} onOptimisticUpdate={onOptimisticUpdate} onFieldFocus={onFieldFocus} showAllHelpIcons={showAllHelpIcons} />;
   }
   if (comp.type === 'Label' && comp.text) {
     return <div className="dialog-label">{comp.text}</div>;
@@ -1054,6 +1057,20 @@ export default function DialogRenderer({ definition, onBack, openTable, context,
   // State for showing field description in bottom panel
   const [selectedField, setSelectedField] = useState<FieldInfo | null>(null);
   
+  // State for help icon visibility setting (default true = show on all fields)
+  const [showAllHelpIcons, setShowAllHelpIcons] = useState(true);
+  
+  // Fetch the help icon visibility setting on mount
+  useEffect(() => {
+    invoke<{ show_all_help_icons?: boolean }>("get_settings")
+      .then((settings) => {
+        if (settings.show_all_help_icons !== undefined) {
+          setShowAllHelpIcons(settings.show_all_help_icons);
+        }
+      })
+      .catch(console.error);
+  }, []);
+  
   const handleFieldFocus = (info: FieldInfo) => {
     setSelectedField(info);
   };
@@ -1071,7 +1088,7 @@ export default function DialogRenderer({ definition, onBack, openTable, context,
 
       <div className="glass-card dialog-container">
         {definition.components.map((comp, i) => (
-          <DialogComponentRenderer key={i} comp={comp} openTable={openTable} context={context} onUpdate={onUpdate} onOptimisticUpdate={onOptimisticUpdate} onFieldFocus={handleFieldFocus} />
+          <DialogComponentRenderer key={i} comp={comp} openTable={openTable} context={context} onUpdate={onUpdate} onOptimisticUpdate={onOptimisticUpdate} onFieldFocus={handleFieldFocus} showAllHelpIcons={showAllHelpIcons} />
         ))}
       </div>
       
@@ -1082,7 +1099,7 @@ export default function DialogRenderer({ definition, onBack, openTable, context,
             <p>{selectedField.help || 'No description available for this setting.'}</p>
           </>
         ) : (
-          <p className="description-placeholder">Select a field to see its description</p>
+          <p className="description-placeholder">Click the ℹ️ icon next to any setting to see its description</p>
         )}
       </div>
     </div>
