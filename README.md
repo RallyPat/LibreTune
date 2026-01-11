@@ -16,25 +16,62 @@ Modern, open-source ECU tuning software for EpicEFI, Speeduino, rusEFI, and othe
 - **Modern Architecture**: Rust core with native desktop UI via Tauri
 - **INI Definition Compatible**: Works with standard ECU INI definition files
 - **Real-time Data**: Live sensor display with configurable dashboard gauges
+- **Multi-Monitor Support**: Pop-out any tab to its own window with bidirectional sync
 
 ### Table Editing
 - **2D/3D Table Editors**: Full-featured grid editor with keyboard navigation
+- **3D Visualization**: React Three Fiber surface mesh with orbit controls
+- **Live Cursor**: Follow mode with inverted triangle indicator and history trail
 - **Editing Tools**: Set Equal, Increase/Decrease, Scale, Interpolate, Smooth
 - **Re-binning**: Change axis bins with automatic Z-value interpolation
 - **Copy/Paste**: Standard clipboard operations for table data
+- **Table Comparison**: Side-by-side diff view between tune versions
 - **Burn to ECU**: Write changes directly to ECU memory
 
 ### Dashboard & Gauges
 - **TS-Compatible Dashboards**: Import existing .dash files
-- **Multiple Gauge Types**: Analog dials, bar gauges, digital readouts, sweep gauges
+- **9 Gauge Types**: Analog dials, bar gauges (horizontal/vertical), digital readouts, sweep gauges, line graphs, histograms, dashed bars
 - **Customizable Layout**: Drag-and-drop gauge positioning
 - **Designer Mode**: Edit dashboard layouts visually
+- **Dashboard Management**: Create, duplicate, rename, delete, export dashboards
+- **3 Default Dashboards**: Basic, Racing, and Tuning layouts included
 
 ### AutoTune
 - **Live Auto-tuning**: Real-time fuel table recommendations based on AFR targets
+- **Table Selector**: Choose which table to auto-tune
 - **Heat Maps**: Visualize cell weighting and change magnitude
 - **Cell Locking**: Lock cells to prevent AutoTune modifications
 - **Authority Limits**: Configure maximum adjustment percentages
+- **Reference Tables**: Load/save reference CSV files
+
+### Data Logging
+- **Configurable Sample Rates**: 1Hz to 100Hz logging
+- **Log Playback**: Play/pause, seek slider, variable speed (0.25x-4x)
+- **CSV Support**: Load logs from LibreTune or TunerStudio format
+- **Channel Selection**: Choose which channels to display
+
+### Diagnostic Tools
+- **Tooth Logger**: Crank/cam trigger pattern analysis with RPM detection
+- **Composite Logger**: Multi-channel waveform display with sync status
+- **CSV Export**: Export diagnostic captures for analysis
+
+### Data Management
+- **CSV Export/Import**: Export and import tune data as CSV
+- **Reset to Defaults**: Restore all values to INI defaults
+- **Restore Points**: Create, load, and manage tune backups
+- **TunerStudio Import**: Import existing TunerStudio projects
+
+### Unit Preferences
+- **Temperature**: °C, °F, or Kelvin
+- **Pressure**: kPa, PSI, bar, or inHg
+- **AFR Display**: AFR or Lambda (with fuel type selection)
+- **Speed**: km/h or mph
+
+### Performance Calculator
+- **Physics-based HP**: Calculate wheel horsepower from acceleration data
+- **Torque Curves**: View estimated torque at different RPMs
+- **Acceleration Times**: Estimated 0-60 and quarter mile times
+- **Vehicle Specs**: Configure weight, drag coefficient, tire diameter, gear ratios
 
 ### Project Management
 - **Project-based Workflow**: Organize tunes by vehicle/ECU
@@ -51,13 +88,13 @@ Modern, open-source ECU tuning software for EpicEFI, Speeduino, rusEFI, and othe
 ## Supported ECUs
 
 ### Currently Supported
-- **Speeduino** - Full support for INI definition files
-- **rusEFI** - Full support for INI definition files
+- **Speeduino** - Full support for INI definition files and serial protocol
+- **rusEFI** - Full support for INI definition files and serial protocol
+- **EpicEFI** - Full support via standard INI format
 
-### Planned
-- Megasquirt MS1/MS2
-- Megasquirt MS3
-- Other INI-compatible ECUs
+### Compatible
+- Any ECU using the standard INI definition format (MegaTune/TunerStudio compatible)
+- Megasquirt MS2/MS3 (partial support - serial protocol in progress)
 
 ## Quick Start
 
@@ -135,12 +172,22 @@ libretune/
 │   │   │   ├── ecu/       # ECU memory model
 │   │   │   ├── datalog/   # Data logging
 │   │   │   ├── autotune/  # AutoTune algorithms
-│   │   │   └── tune/      # Tune file management
+│   │   │   ├── tune/      # Tune file management
+│   │   │   ├── dash/      # Dashboard format parsing
+│   │   │   └── project/   # Project & restore points
 │   │   └── Cargo.toml
 │   └── libretune-app/     # Tauri desktop application
 │       ├── src/           # React frontend (TypeScript)
+│       │   ├── components/
+│       │   │   ├── dashboards/   # Dashboard & gauge rendering
+│       │   │   ├── tables/       # 2D/3D table editors
+│       │   │   ├── dialogs/      # Modal dialogs
+│       │   │   ├── diagnostics/  # Tooth/composite loggers
+│       │   │   └── tuner-ui/     # Main UI components
+│       │   └── utils/     # Unit conversion, preferences
 │       └── src-tauri/     # Tauri backend (Rust)
 ├── docs/                  # Documentation and screenshots
+├── scripts/               # Build and development scripts
 └── Cargo.toml             # Workspace root
 ```
 
