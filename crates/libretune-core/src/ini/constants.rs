@@ -160,11 +160,13 @@ impl Default for Constant {
 /// such as: { bitStringValue(algorithmUnits , algorithm) }
 /// The last_offset parameter supports the "lastOffset" keyword which means "use running offset counter"
 /// Supports per-field big-endian types (BU08, BS16, etc.) that override global endianness.
+/// The help parameter is the extracted help text from the field name (if any).
 pub fn parse_constant_line(
     name: &str,
     value: &str,
     page: u8,
     last_offset: u16,
+    help: Option<String>,
 ) -> Option<Constant> {
     let parts_vec = split_ini_line(value);
     let parts: Vec<&str> = parts_vec.iter().map(|s| s.as_str()).collect();
@@ -189,6 +191,7 @@ pub fn parse_constant_line(
 
     let mut constant = Constant::new(name, page, offset, data_type);
     constant.endianness_override = endianness_override;
+    constant.help = help;
 
     // Parse shape based on class and remaining parts
     if class == "bits" {
@@ -272,7 +275,8 @@ pub fn parse_constant_line(
 /// Format: name = class, type, units, scale, translate, min, max, digits
 /// or: name = bits, U08, [bit_spec], "Option1", "Option2", ...
 /// PcVariables are stored locally (not on ECU), so they use page 255 and offset 0
-pub fn parse_pc_variable_line(name: &str, value: &str) -> Option<Constant> {
+/// The help parameter is the extracted help text from the field name (if any).
+pub fn parse_pc_variable_line(name: &str, value: &str, help: Option<String>) -> Option<Constant> {
     let parts_vec = split_ini_line(value);
     let parts: Vec<&str> = parts_vec.iter().map(|s| s.as_str()).collect();
 
@@ -290,6 +294,7 @@ pub fn parse_pc_variable_line(name: &str, value: &str) -> Option<Constant> {
     // Use page 255 to indicate PC variable (not stored on ECU)
     let mut constant = Constant::new(name, 255, 0, data_type);
     constant.is_pc_variable = true;
+    constant.help = help;
 
     // Parse based on class
     if class == "bits" {
@@ -406,6 +411,7 @@ mod tests {
             "scalar, U16, 0, \"ms\", 0.1, 0.0, 0, 25.5, 1",
             0,
             0,
+            None,
         );
         assert!(c.is_some());
         let c = c.unwrap();
@@ -423,6 +429,7 @@ mod tests {
             "array, U08, lastOffset, [16x16], \"AFR\", 0.1, 0.0, 7, 25.5, 1",
             0,
             1234,
+            None,
         );
         assert!(c.is_some());
         let c = c.unwrap();
@@ -435,7 +442,7 @@ mod tests {
     #[test]
     fn test_parse_pc_variable_line_scalar() {
         // Test PC variable scalar parsing (no offset)
-        let c = parse_pc_variable_line("rpmwarn", "scalar, U16, \"rpm\", 1, 0, 0, 30000, 0");
+        let c = parse_pc_variable_line("rpmwarn", "scalar, U16, \"rpm\", 1, 0, 0, 30000, 0", None);
         assert!(c.is_some());
         let c = c.unwrap();
         assert_eq!(c.name, "rpmwarn");
@@ -453,6 +460,7 @@ mod tests {
         let c = parse_pc_variable_line(
             "tsCanId",
             "bits, U08, [0:3], \"CAN ID 0\", \"CAN ID 1\", \"CAN ID 2\"",
+            None,
         );
         assert!(c.is_some());
         let c = c.unwrap();
@@ -469,7 +477,7 @@ mod tests {
     #[test]
     fn test_parse_bits_with_display_offset_positive() {
         // Test [4:7+1] notation - display offset of +1
-        let c = parse_constant_line("nCylinders", "bits, U08, 182, [4:7+1]", 0, 0);
+        let c = parse_constant_line("nCylinders", "bits, U08, 182, [4:7+1]", 0, 0, None);
         assert!(c.is_some());
         let c = c.unwrap();
         assert_eq!(c.name, "nCylinders");
@@ -487,6 +495,7 @@ mod tests {
             "bits, U08, 100, [0:3-1], \"Val 0\", \"Val 1\"",
             0,
             0,
+            None,
         );
         assert!(c.is_some());
         let c = c.unwrap();
@@ -500,7 +509,7 @@ mod tests {
     #[test]
     fn test_parse_bits_without_display_offset() {
         // Test [0:7] notation - no display offset
-        let c = parse_constant_line("normalBits", "bits, U08, 50, [0:7], \"Off\", \"On\"", 0, 0);
+        let c = parse_constant_line("normalBits", "bits, U08, 50, [0:7], \"Off\", \"On\"", 0, 0, None);
         assert!(c.is_some());
         let c = c.unwrap();
         assert_eq!(c.bit_position, Some(0));
@@ -516,6 +525,7 @@ mod tests {
             "bits, U08, 10, [2:3], \"Basic\", \"INVALID\", \"INVALID\", \"Advanced\"",
             0,
             0,
+            None,
         );
         assert!(c.is_some());
         let c = c.unwrap();

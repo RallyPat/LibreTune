@@ -475,6 +475,42 @@ fn strip_comment(line: &str) -> String {
     result
 }
 
+/// Extract help text from constant name according to TunerStudio format
+/// Format: fieldname;+help text;"units"
+/// Returns (clean_name, Option<help_text>)
+fn extract_help_text(name_with_help: &str) -> (&str, Option<String>) {
+    // Look for semicolon in the name part (before '=' sign)
+    if let Some(semicolon_pos) = name_with_help.find(';') {
+        let name = name_with_help[..semicolon_pos].trim();
+        let help_part = name_with_help[semicolon_pos + 1..].trim();
+        
+        // TunerStudio requires '+' after semicolon for tooltip to appear
+        if help_part.starts_with('+') {
+            // Extract help text (everything after '+' up to optional quoted units)
+            let help_text = help_part[1..].trim();
+            
+            // Remove quoted units suffix if present (e.g., ;"Ohm" at the end)
+            let help_clean = if let Some(quote_pos) = help_text.find(';') {
+                help_text[..quote_pos].trim()
+            } else {
+                help_text
+            };
+            
+            // Remove surrounding quotes if present
+            let help_final = help_clean.trim_matches('"').to_string();
+            
+            if !help_final.is_empty() {
+                return (name, Some(help_final));
+            }
+        }
+        
+        // If semicolon exists but no '+' prefix, return just the name (no help text)
+        return (name, None);
+    }
+    
+    (name_with_help.trim(), None)
+}
+
 /// Parse a key = value line
 fn parse_key_value(line: &str) -> Option<(&str, &str)> {
     let parts: Vec<&str> = line.splitn(2, '=').collect();
@@ -773,7 +809,10 @@ fn parse_constants_entry(
     }
 
     // Parse constant definition, passing defines for bits options resolution
-    if let Some(mut constant) = parse_constant_line(key, value, *current_page, *last_offset) {
+    // Extract help text from the key (fieldname;+help text)
+    let (clean_key, help_text) = extract_help_text(key);
+    
+    if let Some(mut constant) = parse_constant_line(clean_key, value, *current_page, *last_offset, help_text) {
         // Update last_offset for next constant (offset + size in bytes)
         let size = constant.data_type.size_bytes() as u16 * constant.shape.element_count() as u16;
         *last_offset = constant.offset + size;
@@ -782,7 +821,7 @@ fn parse_constants_entry(
         if !constant.bit_options.is_empty() {
             constant.bit_options = resolve_bits_options(&def.defines, constant.bit_options);
         }
-        def.constants.insert(key.to_string(), constant);
+        def.constants.insert(clean_key.to_string(), constant);
     }
 }
 
@@ -937,10 +976,13 @@ fn parse_setting_group_entry(def: &mut EcuDefinition, key: &str, value: &str) {
 /// These are PC-side variables like tsCanId, rpmwarn, etc.
 /// They are stored locally, not on the ECU.
 fn parse_pc_variable_entry(def: &mut EcuDefinition, key: &str, value: &str) {
+    // Extract help text from the key (fieldname;+help text)
+    let (clean_key, help_text) = extract_help_text(key);
+    
     // Parse as a full constant for UI display
-    if let Some(constant) = parse_pc_variable_line(key, value) {
+    if let Some(constant) = parse_pc_variable_line(clean_key, value, help_text) {
         // Store as a constant so dialogs can look it up
-        def.constants.insert(key.to_string(), constant);
+        def.constants.insert(clean_key.to_string(), constant);
     }
 
     // Also store byte value for command substitution (backward compatibility)
@@ -2894,5 +2936,38 @@ indicator = { (tps > tpsflood) && (rpm < crankRPM) }, "FLOOD OFF", "FLOOD CLEAR"
         assert_eq!(ind3.label_off, "FLOOD OFF");
         assert_eq!(ind3.label_on, "FLOOD CLEAR");
         assert_eq!(ind3.bg_on, "red");
+    }
+
+    #[test]
+    fn test_extract_help_text() {
+        // Test with help text (TunerStudio format with + prefix)
+        let (name, help) = extract_help_text("bias_resistor;+Pull-up resistor value on your board");
+        assert_eq!(name, "bias_resistor");
+        assert_eq!(help, Some("Pull-up resistor value on your board".to_string()));
+        
+        // Test with help text and quoted units suffix
+        let (name, help) = extract_help_text("bias_resistor;+Pull-up resistor value on your board;\"Ohm\"");
+        assert_eq!(name, "bias_resistor");
+        assert_eq!(help, Some("Pull-up resistor value on your board".to_string()));
+        
+        // Test with help text in quotes
+        let (name, help) = extract_help_text("baseFuelMass;+\"Base mass of the per-cylinder fuel injected\"");
+        assert_eq!(name, "baseFuelMass");
+        assert_eq!(help, Some("Base mass of the per-cylinder fuel injected".to_string()));
+        
+        // Test without + prefix (no tooltip should be shown per TunerStudio spec)
+        let (name, help) = extract_help_text("field_name;This text should not appear");
+        assert_eq!(name, "field_name");
+        assert_eq!(help, None);
+        
+        // Test with no semicolon (no help text)
+        let (name, help) = extract_help_text("simple_field");
+        assert_eq!(name, "simple_field");
+        assert_eq!(help, None);
+        
+        // Test with whitespace
+        let (name, help) = extract_help_text("  field_name  ;  +  Help text with spaces  ");
+        assert_eq!(name, "field_name");
+        assert_eq!(help, Some("Help text with spaces".to_string()));
     }
 }
