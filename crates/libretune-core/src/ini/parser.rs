@@ -727,8 +727,11 @@ fn parse_constants_entry(
     let key_lower = key.to_lowercase();
 
     // Check for page directive
+    // INI files use 1-based page numbers (page = 1), but MSQ files and internal cache use 0-based
+    // Normalize to 0-based for consistent internal representation
     if key_lower == "page" {
-        *current_page = value.parse().unwrap_or(0);
+        let ini_page: u8 = value.parse().unwrap_or(1);
+        *current_page = ini_page.saturating_sub(1); // Convert 1-based to 0-based
         *last_offset = 0; // Reset offset counter for new page
         return;
     }
@@ -2615,6 +2618,13 @@ rpm = U16, 0, "RPM", 1.0, 0.0
         assert_eq!(def.n_pages, 2);
         assert_eq!(def.page_sizes, vec![288, 128]);
 
+        // Verify page normalization: INI page = 1 should be stored as page 0 internally
+        let req_fuel = def.constants.get("reqFuel").expect("reqFuel should exist");
+        assert_eq!(
+            req_fuel.page, 0,
+            "INI 'page = 1' should be normalized to internal page 0"
+        );
+
         assert!(def.constants.contains_key("reqFuel"));
         assert!(def.output_channels.contains_key("rpm"));
     }
@@ -3049,4 +3059,72 @@ rpm = U16, 0, "RPM", 1.0, 0.0
         let c = def.constants.get("bias_resistor").expect("bias_resistor should exist");
         assert!(c.help.is_some());
         assert_eq!(c.help.as_ref().unwrap(), "Pull-up resistor value on your board");
+    }
+
+    #[test]
+    fn test_page_number_normalization() {
+        // Test that INI 1-based page numbers are normalized to 0-based internally
+        let content = r#"
+[MegaTune]
+signature = "test 1.0"
+queryCommand = "Q"
+
+[TunerStudio]
+iniSpecVersion = 3.0
+nPages = 2
+pageSize = 256, 128
+
+[Constants]
+page = 1
+constOnPage1 = scalar, U16, 0, "ms", 1, 0, 0, 100, 1
+
+page = 2
+constOnPage2 = scalar, U16, 0, "ms", 1, 0, 0, 100, 1
+
+[OutputChannels]
+rpm = U16, 0, "RPM", 1.0, 0.0
+"#;
+
+        let def = parse_ini(content).expect("Should parse successfully");
+
+        // INI page = 1 should be normalized to internal page 0
+        let c1 = def.constants.get("constOnPage1").expect("constOnPage1 should exist");
+        assert_eq!(
+            c1.page, 0,
+            "INI 'page = 1' should be normalized to internal page 0"
+        );
+
+        // INI page = 2 should be normalized to internal page 1
+        let c2 = def.constants.get("constOnPage2").expect("constOnPage2 should exist");
+        assert_eq!(
+            c2.page, 1,
+            "INI 'page = 2' should be normalized to internal page 1"
+        );
+    }
+
+    #[test]
+    fn test_page_zero_in_ini() {
+        // Test edge case: some INIs might use page = 0 (should stay as 0, with saturating_sub)
+        let content = r#"
+[MegaTune]
+signature = "test 1.0"
+queryCommand = "Q"
+
+[TunerStudio]
+nPages = 1
+pageSize = 256
+
+[Constants]
+page = 0
+constOnPage0 = scalar, U16, 0, "ms", 1, 0, 0, 100, 1
+"#;
+
+        let def = parse_ini(content).expect("Should parse successfully");
+
+        // page = 0 with saturating_sub(1) should stay as 0 (not underflow)
+        let c = def.constants.get("constOnPage0").expect("constOnPage0 should exist");
+        assert_eq!(
+            c.page, 0,
+            "INI 'page = 0' should remain as internal page 0 (saturating_sub prevents underflow)"
+        );
     }

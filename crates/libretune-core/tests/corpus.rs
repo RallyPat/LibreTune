@@ -334,3 +334,67 @@ fn test_epicefi_ini_fields() {
         epic_files.len()
     );
 }
+
+/// Test MegaSquirt INI files (MS2/MS3) with multi-page support
+#[test]
+fn test_megasquirt_ini_fields() {
+    let corpus_path = corpus_dir();
+    if !corpus_path.exists() {
+        println!("Corpus directory not found, skipping test");
+        return;
+    }
+
+    // Find MS2 and MS3 INI files
+    let ms_files: Vec<_> = fs::read_dir(&corpus_path)
+        .expect("Failed to read corpus directory")
+        .filter_map(|e| e.ok())
+        .filter(|e| {
+            let name = e.file_name().to_string_lossy().to_string();
+            name.starts_with("MS2") || name.starts_with("MS3")
+        })
+        .map(|e| e.path())
+        .collect();
+
+    if ms_files.is_empty() {
+        println!("No MegaSquirt INI files found in corpus, skipping test");
+        return;
+    }
+
+    println!("Testing {} MegaSquirt INI files...", ms_files.len());
+
+    for path in &ms_files {
+        let filename = path.file_name().unwrap().to_string_lossy();
+        let def = EcuDefinition::from_file(path)
+            .expect(&format!("Should parse MegaSquirt INI: {}", filename));
+
+        // MegaSquirt typically has multiple pages
+        println!("MegaSquirt INI successfully parsed: {}", filename);
+        println!("  Signature: {}", def.signature);
+        println!("  nPages: {}", def.n_pages);
+        println!("  pageSizes: {:?}", def.page_sizes);
+        println!("  Constants: {}", def.constants.len());
+        println!("  Output channels: {}", def.output_channels.len());
+
+        // Verify page numbers are 0-based after normalization
+        // Find a constant and check its page number
+        if let Some((name, constant)) = def.constants.iter().next() {
+            println!(
+                "  Sample constant '{}' on page {} (0-based)",
+                name, constant.page
+            );
+            // Page should be 0-based (0, 1, etc.) not 1-based
+            assert!(
+                constant.page < def.n_pages || def.n_pages == 0,
+                "Constant '{}' page {} should be less than nPages {}",
+                name,
+                constant.page,
+                def.n_pages
+            );
+        }
+    }
+
+    println!(
+        "\nAll {} MegaSquirt INI files passed validation",
+        ms_files.len()
+    );
+}
