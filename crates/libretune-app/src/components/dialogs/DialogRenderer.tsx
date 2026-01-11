@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { ArrowLeft, Activity, Grid3X3 } from 'lucide-react';
+import { ArrowLeft, Activity, Grid3X3, HelpCircle } from 'lucide-react';
 import CurveEditor, { SimpleGaugeInfo } from '../curves/CurveEditor';
 import TableEditor2D from '../tables/TableEditor2D';
 import './DialogRenderer.css';
@@ -223,7 +223,14 @@ function DialogField({
   if (constant.value_type === 'string') {
     return (
       <div className="settings-field">
-        <label>{displayLabel}</label>
+        <label>
+          {displayLabel}
+          {constant.help && (
+            <span className="help-icon" title={constant.help}>
+              <HelpCircle size={14} />
+            </span>
+          )}
+        </label>
         <div className="field-input-wrap">
           <input
             type="text"
@@ -319,7 +326,13 @@ function DialogField({
               }}
             />
             {displayLabel}: {uncheckedLabel} / {checkedLabel}
+            {constant.help && (
+              <span className="help-icon" title={constant.help}>
+                <HelpCircle size={14} />
+              </span>
+            )}
           </label>
+          {constant.help && <div className="field-help">{constant.help}</div>}
         </div>
       );
     }
@@ -333,7 +346,14 @@ function DialogField({
     
     return (
       <div className="settings-field">
-        <label>{displayLabel}</label>
+        <label>
+          {displayLabel}
+          {constant.help && (
+            <span className="help-icon" title={constant.help}>
+              <HelpCircle size={14} />
+            </span>
+          )}
+        </label>
         <div className="field-input-wrap">
           <select
             value={safeSelectedBit}
@@ -382,6 +402,7 @@ function DialogField({
             )}
           </select>
         </div>
+        {constant.help && <div className="field-help">{constant.help}</div>}
         {validBitOptions.length === 0 && bitOptions.length > 0 && (
           <div style={{ color: 'orange', padding: '4px', fontSize: '0.85em' }}>
             Warning: All options filtered out as INVALID
@@ -394,7 +415,14 @@ function DialogField({
   // Default: numeric scalar field
   return (
     <div className="settings-field">
-      <label>{displayLabel}</label>
+      <label>
+        {displayLabel}
+        {constant.help && (
+          <span className="help-icon" title={constant.help}>
+            <HelpCircle size={14} />
+          </span>
+        )}
+      </label>
       <div className="field-input-wrap">
         <input
           type="number"
