@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { open, save } from '@tauri-apps/plugin-dialog';
+import { openUrl } from '@tauri-apps/plugin-opener';
 import { HeatmapScheme, getAvailableSchemes } from '../../utils/heatmapColors';
 import { useUnitPreferences } from '../../utils/useUnitPreferences';
 import { TemperatureUnit, PressureUnit, AfrUnit, SpeedUnit, FuelType, STOICH_AFR } from '../../utils/unitConversions';
@@ -1030,10 +1031,16 @@ export function AboutDialog({ isOpen, onClose }: DialogProps) {
           <p>Open-source ECU tuning software compatible with standard INI definition files.</p>
           
           <div className="dialog-about-links">
-            <a href="https://github.com/libretune/libretune" target="_blank" rel="noopener noreferrer">
+            <a 
+              href="#" 
+              onClick={(e) => { e.preventDefault(); openUrl('https://github.com/RallyPat/LibreTune'); }}
+            >
               GitHub
             </a>
-            <a href="https://libretune.org/docs" target="_blank" rel="noopener noreferrer">
+            <a 
+              href="#" 
+              onClick={(e) => { e.preventDefault(); openUrl('https://github.com/RallyPat/LibreTune/tree/main/docs'); }}
+            >
               Documentation
             </a>
           </div>
