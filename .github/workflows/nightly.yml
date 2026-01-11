@@ -5,6 +5,9 @@ on:
     - cron: '0 3 * * *'  # Run at 3 AM UTC daily
   workflow_dispatch:  # Allow manual triggering
 
+permissions:
+  contents: write  # Required for creating/updating releases
+
 env:
   CARGO_TERM_COLOR: always
   NIGHTLY_DATE: ${{ github.run_id }}
@@ -321,3 +324,74 @@ jobs:
           path: crates/libretune-app/artifacts/macos/*
           if-no-files-found: warn
           retention-days: 7
+
+  upload-nightly:
+    name: Upload Nightly Release
+    needs: [check-changes, build-linux, build-windows, build-macos]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v6
+        with:
+          path: artifacts
+          pattern: '*'
+          merge-multiple: false
+
+      - name: Prepare release files
+        run: |
+          mkdir -p release
+          DATE_STAMP="${{ needs.check-changes.outputs.date_stamp }}"
+          
+          # Rename Linux artifacts
+          for f in artifacts/linux-x86_64-*/*.AppImage; do
+            [ -f "$f" ] && cp "$f" "release/LibreTune-nightly-${DATE_STAMP}-linux-x86_64.AppImage"
+          done
+          for f in artifacts/linux-x86_64-*/*.deb; do
+            [ -f "$f" ] && cp "$f" "release/LibreTune-nightly-${DATE_STAMP}-linux-x86_64.deb"
+          done
+          for f in artifacts/linux-x86_64-*/*.rpm; do
+            [ -f "$f" ] && cp "$f" "release/LibreTune-nightly-${DATE_STAMP}-linux-x86_64.rpm"
+          done
+          
+          # Rename Windows artifacts
+          for f in artifacts/windows-x86_64-*/*.exe; do
+            [ -f "$f" ] && cp "$f" "release/LibreTune-nightly-${DATE_STAMP}-windows-x86_64-portable.exe"
+          done
+          
+          # Rename macOS artifacts
+          for f in artifacts/macos-universal-*/*.dmg; do
+            [ -f "$f" ] && cp "$f" "release/$(basename "$f" .dmg)-nightly-${DATE_STAMP}.dmg"
+          done
+          for f in artifacts/macos-universal-*/*.zip; do
+            [ -f "$f" ] && cp "$f" "release/$(basename "$f" .zip)-nightly-${DATE_STAMP}.zip"
+          done
+          
+          echo "=== Release files ==="
+          ls -lh release/
+
+      - name: Create/Update Nightly Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: nightly
+          name: Nightly Build
+          prerelease: true
+          body: |
+            ## Nightly Build - ${{ needs.check-changes.outputs.date_stamp }}
+            
+            ⚠️ **This is an automated nightly build. Use at your own risk.**
+            
+            Built from commit: ${{ github.sha }}
+            Build date: ${{ needs.check-changes.outputs.date_stamp }}
+            
+            ### Downloads
+            - **Linux**: AppImage (portable), DEB, RPM
+            - **Windows**: Portable EXE (no installation required)
+            - **macOS**: DMG (ARM64 and Intel)
+            
+            ### Notes
+            - This release is automatically updated each night when there are new commits
+            - For stable releases, see the [Releases](https://github.com/RallyPat/LibreTune/releases) page
+          files: release/*
+          fail_on_unmatched_files: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
