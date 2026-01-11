@@ -294,9 +294,9 @@ impl Project {
         let signature = extract_signature(&ini_content).unwrap_or_default();
 
         // Create the new LibreTune project
-        let parent = target_dir.map(|p| p.to_path_buf()).unwrap_or_else(|| {
-            Self::projects_dir().unwrap_or_else(|_| PathBuf::from("."))
-        });
+        let parent = target_dir
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| Self::projects_dir().unwrap_or_else(|_| PathBuf::from(".")));
 
         let mut project = Self::create(&project_name, &ini_path, &signature, Some(&parent))?;
 

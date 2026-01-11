@@ -150,7 +150,11 @@ fn test_integer_value_formatting() {
     let trimmed = formatted.trim_end_matches('0').trim_end_matches('.');
 
     // Should trim to clean integer representation
-    assert_eq!(trimmed, "100", "Integer value should format cleanly: got {}", trimmed);
+    assert_eq!(
+        trimmed, "100",
+        "Integer value should format cleanly: got {}",
+        trimmed
+    );
 }
 
 /// Test array formatting with high precision
@@ -257,11 +261,7 @@ fn test_computed_channel_complex_expression() {
     // 2.0 * 3000 / 1200 = 5.0
     assert!(result.is_some(), "Should return Some value");
     let value = result.unwrap();
-    assert!(
-        (value - 5.0).abs() < 0.001,
-        "Expected 5.0, got {}",
-        value
-    );
+    assert!((value - 5.0).abs() < 0.001, "Expected 5.0, got {}", value);
 }
 
 /// Test computed channel evaluates with default 0 for undefined variables
@@ -290,9 +290,16 @@ fn test_computed_channel_undefined_variable_defaults_to_zero() {
 
     // Should return Some(0.0) since undefined variables default to 0 in INI expressions
     let result = channel.parse_with_context(&data, endian, &context);
-    assert!(result.is_some(), "Should return Some value for computed channel");
+    assert!(
+        result.is_some(),
+        "Should return Some value for computed channel"
+    );
     let value = result.unwrap();
-    assert_eq!(value, 0.0, "Undefined variable should default to 0, got {}", value);
+    assert_eq!(
+        value, 0.0,
+        "Undefined variable should default to 0, got {}",
+        value
+    );
 }
 
 /// Test non-computed channel ignores context and uses raw data

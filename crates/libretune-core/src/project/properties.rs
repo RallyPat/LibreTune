@@ -102,7 +102,7 @@ impl Properties {
     }
 
     /// Load properties from a file
-    /// 
+    ///
     /// Handles both UTF-8 and ISO-8859-1 (Latin-1) encoded files.
     pub fn load<P: AsRef<Path>>(path: P) -> io::Result<Self> {
         let bytes = fs::read(path)?;
@@ -126,7 +126,10 @@ impl Properties {
 
     /// Get a value or default
     pub fn get_or(&self, key: &str, default: &str) -> String {
-        self.map.get(key).cloned().unwrap_or_else(|| default.to_string())
+        self.map
+            .get(key)
+            .cloned()
+            .unwrap_or_else(|| default.to_string())
     }
 
     /// Get as i32
@@ -370,7 +373,10 @@ key2=value2
     fn test_escaped_spaces() {
         let content = r"key\ with\ spaces=value with spaces";
         let props = Properties::parse(content);
-        assert_eq!(props.get("key with spaces"), Some(&"value with spaces".to_string()));
+        assert_eq!(
+            props.get("key with spaces"),
+            Some(&"value with spaces".to_string())
+        );
     }
 
     #[test]
@@ -412,8 +418,14 @@ recordsPerSec=100
         let props = Properties::parse(content);
         assert_eq!(props.get("commPort"), Some(&"COM8".to_string()));
         assert_eq!(props.get_i32("baudRate"), Some(115200));
-        assert_eq!(props.get("projectName"), Some(&"MS3-Example_Project".to_string()));
-        assert_eq!(props.get("ecuConfigFile"), Some(&"mainController.ini".to_string()));
+        assert_eq!(
+            props.get("projectName"),
+            Some(&"MS3-Example_Project".to_string())
+        );
+        assert_eq!(
+            props.get("ecuConfigFile"),
+            Some(&"mainController.ini".to_string())
+        );
         assert_eq!(props.get_bool("useCommonDashboardDir"), Some(false));
         assert_eq!(props.get_i32("recordsPerSec"), Some(100));
     }

@@ -13,22 +13,22 @@ use crate::ini::EcuDefinition;
 pub struct MigrationReport {
     /// Constants in the new INI that weren't in the tune
     pub missing_in_tune: Vec<String>,
-    
+
     /// Constants in the tune that aren't in the new INI
     pub missing_in_ini: Vec<String>,
-    
+
     /// Constants whose type or shape changed
     pub type_changed: Vec<ConstantChange>,
-    
+
     /// Constants whose scale/translate changed (may affect values)
     pub scale_changed: Vec<ConstantChange>,
-    
+
     /// True if all changes can be auto-migrated safely
     pub can_auto_migrate: bool,
-    
+
     /// True if user should review changes before applying
     pub requires_user_review: bool,
-    
+
     /// Overall severity: "none", "low", "medium", "high"
     pub severity: String,
 }
@@ -38,21 +38,21 @@ pub struct MigrationReport {
 pub struct ConstantChange {
     /// Constant name
     pub name: String,
-    
+
     /// Old value (from tune manifest)
     pub old_type: String,
     pub old_page: u8,
     pub old_offset: u16,
     pub old_scale: f64,
     pub old_translate: f64,
-    
+
     /// New value (from current INI)
     pub new_type: String,
     pub new_page: u8,
     pub new_offset: u16,
     pub new_scale: f64,
     pub new_translate: f64,
-    
+
     /// Description of what changed
     pub change_description: String,
 }
@@ -70,7 +70,7 @@ impl MigrationReport {
             severity: "none".to_string(),
         }
     }
-    
+
     /// Check if there are any differences
     pub fn has_changes(&self) -> bool {
         !self.missing_in_tune.is_empty()
@@ -78,11 +78,11 @@ impl MigrationReport {
             || !self.type_changed.is_empty()
             || !self.scale_changed.is_empty()
     }
-    
+
     /// Get a summary of the changes
     pub fn summary(&self) -> String {
         let mut parts = Vec::new();
-        
+
         if !self.missing_in_tune.is_empty() {
             parts.push(format!("{} new constants", self.missing_in_tune.len()));
         }
@@ -95,7 +95,7 @@ impl MigrationReport {
         if !self.scale_changed.is_empty() {
             parts.push(format!("{} scale changes", self.scale_changed.len()));
         }
-        
+
         if parts.is_empty() {
             "No changes detected".to_string()
         } else {
@@ -110,11 +110,13 @@ pub fn compare_manifests(
     current_ini: &EcuDefinition,
 ) -> MigrationReport {
     let mut report = MigrationReport::empty();
-    
+
     // Build lookup from manifest entries
-    let saved_map: std::collections::HashMap<&str, &ConstantManifestEntry> = 
-        saved_manifest.iter().map(|e| (e.name.as_str(), e)).collect();
-    
+    let saved_map: std::collections::HashMap<&str, &ConstantManifestEntry> = saved_manifest
+        .iter()
+        .map(|e| (e.name.as_str(), e))
+        .collect();
+
     // Check for constants in INI but not in tune (new constants)
     for (name, constant) in &current_ini.constants {
         if !saved_map.contains_key(name.as_str()) {
@@ -125,13 +127,13 @@ pub fn compare_manifests(
             report.missing_in_tune.push(name.clone());
         }
     }
-    
+
     // Check each saved constant against current INI
     for entry in saved_manifest {
         if let Some(current) = current_ini.constants.get(&entry.name) {
             // Constant exists in both - check for changes
             let current_type = format!("{:?}", current.data_type);
-            
+
             // Check if type changed
             if entry.data_type != current_type {
                 report.type_changed.push(ConstantChange {
@@ -153,8 +155,8 @@ pub fn compare_manifests(
                 });
             }
             // Check if scale/translate changed (affects display values)
-            else if (entry.scale - current.scale).abs() > 1e-9 
-                || (entry.translate - current.translate).abs() > 1e-9 
+            else if (entry.scale - current.scale).abs() > 1e-9
+                || (entry.translate - current.translate).abs() > 1e-9
             {
                 report.scale_changed.push(ConstantChange {
                     name: entry.name.clone(),
@@ -170,8 +172,7 @@ pub fn compare_manifests(
                     new_translate: current.translate,
                     change_description: format!(
                         "Scale changed from {}*x+{} to {}*x+{}",
-                        entry.scale, entry.translate,
-                        current.scale, current.translate
+                        entry.scale, entry.translate, current.scale, current.translate
                     ),
                 });
             }
@@ -180,7 +181,7 @@ pub fn compare_manifests(
             report.missing_in_ini.push(entry.name.clone());
         }
     }
-    
+
     // Determine severity and migration flags
     if !report.type_changed.is_empty() || !report.missing_in_ini.is_empty() {
         report.requires_user_review = true;
@@ -196,31 +197,31 @@ pub fn compare_manifests(
         report.requires_user_review = false;
         report.severity = "low".to_string();
     }
-    
+
     report
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_empty_manifest_comparison() {
         // Empty manifest should report all INI constants as missing
         let manifest = vec![];
         let def = EcuDefinition::default();
-        
+
         let report = compare_manifests(&manifest, &def);
         assert!(!report.has_changes());
         assert_eq!(report.severity, "none");
     }
-    
+
     #[test]
     fn test_migration_report_summary() {
         let mut report = MigrationReport::empty();
         report.missing_in_tune = vec!["const1".to_string(), "const2".to_string()];
         report.missing_in_ini = vec!["old_const".to_string()];
-        
+
         let summary = report.summary();
         assert!(summary.contains("2 new constants"));
         assert!(summary.contains("1 removed constants"));

@@ -70,8 +70,8 @@ pub struct AutoTuneFilters {
     pub min_clt: f64,
     pub custom_filter: Option<String>,
     // Transient filtering
-    pub max_tps_rate: f64,           // Max TPS change rate (%/sec) before filtering
-    pub exclude_accel_enrich: bool,  // Exclude data when accel enrichment active
+    pub max_tps_rate: f64, // Max TPS change rate (%/sec) before filtering
+    pub exclude_accel_enrich: bool, // Exclude data when accel enrichment active
 }
 
 impl Default for AutoTuneFilters {
@@ -83,8 +83,8 @@ impl Default for AutoTuneFilters {
             max_y_axis: None,
             min_clt: 160.0,
             custom_filter: None,
-            max_tps_rate: 10.0,           // 10%/sec threshold
-            exclude_accel_enrich: true,   // Exclude accel enrichment by default
+            max_tps_rate: 10.0,         // 10%/sec threshold
+            exclude_accel_enrich: true, // Exclude accel enrichment by default
         }
     }
 }
@@ -104,7 +104,7 @@ pub struct AutoTuneState {
     pub recommendations: HashMap<(usize, usize), AutoTuneRecommendation>,
     // Lambda delay buffer - stores recent data points for delayed correlation
     data_buffer: std::collections::VecDeque<VEDataPoint>,
-    buffer_max_age_ms: u64,  // How long to keep data points (default 500ms)
+    buffer_max_age_ms: u64, // How long to keep data points (default 500ms)
 }
 
 impl Default for AutoTuneState {
@@ -114,7 +114,7 @@ impl Default for AutoTuneState {
             locked_cells: Vec::new(),
             recommendations: HashMap::new(),
             data_buffer: std::collections::VecDeque::new(),
-            buffer_max_age_ms: 500,  // Keep 500ms of data for lambda delay correlation
+            buffer_max_age_ms: 500, // Keep 500ms of data for lambda delay correlation
         }
     }
 }
@@ -128,11 +128,11 @@ pub struct VEDataPoint {
     pub ve: f64,
     pub clt: f64,
     // Transient detection fields
-    pub tps: f64,                        // Current TPS value (%)
-    pub tps_rate: f64,                   // TPS change rate (%/sec)
+    pub tps: f64,                          // Current TPS value (%)
+    pub tps_rate: f64,                     // TPS change rate (%/sec)
     pub accel_enrich_active: Option<bool>, // ECU accel enrichment flag (if available)
     // Lambda delay correlation
-    pub timestamp_ms: u64,               // Timestamp for delay correlation
+    pub timestamp_ms: u64, // Timestamp for delay correlation
 }
 
 impl Default for VEDataPoint {
@@ -194,11 +194,11 @@ impl AutoTuneState {
         const REDLINE_RPM: f64 = 6000.0;
         const IDLE_DELAY_MS: f64 = 200.0;
         const REDLINE_DELAY_MS: f64 = 50.0;
-        
+
         let clamped_rpm = rpm.clamp(IDLE_RPM, REDLINE_RPM);
         let rpm_ratio = (clamped_rpm - IDLE_RPM) / (REDLINE_RPM - IDLE_RPM);
         let delay = IDLE_DELAY_MS - (rpm_ratio * (IDLE_DELAY_MS - REDLINE_DELAY_MS));
-        
+
         delay as u64
     }
 
@@ -215,26 +215,30 @@ impl AutoTuneState {
     }
 
     /// Find the data point from the buffer that best matches the lambda delay
-    fn find_delayed_data_point(&self, current_timestamp_ms: u64, delay_ms: u64) -> Option<VEDataPoint> {
+    fn find_delayed_data_point(
+        &self,
+        current_timestamp_ms: u64,
+        delay_ms: u64,
+    ) -> Option<VEDataPoint> {
         let target_time = current_timestamp_ms.saturating_sub(delay_ms);
-        
+
         // Find the closest data point to the target time
         let mut best_match: Option<&VEDataPoint> = None;
         let mut best_diff = u64::MAX;
-        
+
         for point in self.data_buffer.iter() {
             let diff = if point.timestamp_ms > target_time {
                 point.timestamp_ms - target_time
             } else {
                 target_time - point.timestamp_ms
             };
-            
+
             if diff < best_diff {
                 best_diff = diff;
                 best_match = Some(point);
             }
         }
-        
+
         // Only use if within 50ms of target time
         if best_diff < 50 {
             best_match.cloned()
@@ -266,7 +270,7 @@ impl AutoTuneState {
 
         // Calculate lambda delay based on current RPM
         let delay_ms = self.get_lambda_delay_ms(point.rpm);
-        
+
         // Find the data point from when the current AFR reading was actually generated
         // The current AFR corresponds to conditions from delay_ms ago
         let historical_point = if delay_ms > 0 && point.timestamp_ms > delay_ms {
@@ -274,7 +278,7 @@ impl AutoTuneState {
         } else {
             None
         };
-        
+
         // Use historical cell location if available, otherwise use current
         let (cell_rpm, cell_map, cell_ve) = if let Some(ref hist) = historical_point {
             // Use the historical RPM/MAP to find the correct cell
@@ -320,11 +324,8 @@ impl AutoTuneState {
         current_recs.hit_count += 1;
 
         // Apply authority limits to clamp the recommended value
-        let clamped_ve = Self::apply_authority_limits(
-            current_recs.beginning_value,
-            required_ve,
-            authority,
-        );
+        let clamped_ve =
+            Self::apply_authority_limits(current_recs.beginning_value, required_ve, authority);
 
         current_recs.recommended_value = clamped_ve;
 
@@ -340,17 +341,17 @@ impl AutoTuneState {
         authority: &AutoTuneAuthorityLimits,
     ) -> f64 {
         let delta = recommended_value - beginning_value;
-        
+
         // Clamp by absolute value change
         let clamped_delta = delta.clamp(
             -authority.max_cell_value_change,
             authority.max_cell_value_change,
         );
-        
+
         // Clamp by percentage change
         let max_pct_delta = beginning_value * (authority.max_cell_percentage_change / 100.0);
         let final_delta = clamped_delta.clamp(-max_pct_delta, max_pct_delta);
-        
+
         beginning_value + final_delta
     }
 
@@ -369,19 +370,19 @@ impl AutoTuneState {
         if point.clt < filters.min_clt {
             return false;
         }
-        
+
         // Transient filtering: reject if TPS is changing too fast
         if point.tps_rate.abs() > filters.max_tps_rate {
             return false;
         }
-        
+
         // Transient filtering: reject if accel enrichment is active (if flag available)
         if filters.exclude_accel_enrich {
             if let Some(true) = point.accel_enrich_active {
                 return false;
             }
         }
-        
+
         true
     }
 

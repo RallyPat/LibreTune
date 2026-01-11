@@ -45,12 +45,12 @@ pub struct TuneFile {
     /// These are stored on page "-1" in TunerStudio format
     #[serde(default)]
     pub pc_variables: HashMap<String, TuneValue>,
-    
+
     /// INI metadata for version tracking (added in v1.1)
     /// Contains hash and spec version of INI used when tune was saved
     #[serde(default)]
     pub ini_metadata: Option<IniMetadata>,
-    
+
     /// Constant manifest for migration detection (added in v1.1)
     /// Lists all constants with their types/offsets at save time
     #[serde(default)]
@@ -71,16 +71,16 @@ pub enum TuneValue {
 pub struct IniMetadata {
     /// ECU signature from the INI file
     pub signature: String,
-    
+
     /// INI filename (e.g., "speeduino.ini")
     pub name: String,
-    
+
     /// SHA-256 hash of INI structural content (constants, pages, offsets)
     pub hash: String,
-    
+
     /// INI spec version (from [MegaTune] section)
     pub spec_version: String,
-    
+
     /// Timestamp when tune was saved with this INI
     pub saved_at: String,
 }
@@ -90,19 +90,19 @@ pub struct IniMetadata {
 pub struct ConstantManifestEntry {
     /// Constant name
     pub name: String,
-    
+
     /// Data type string (e.g., "U08", "S16", "array[16x16]")
     pub data_type: String,
-    
+
     /// ECU page number
     pub page: u8,
-    
+
     /// Byte offset within page
     pub offset: u16,
-    
+
     /// Scale factor
     pub scale: f64,
-    
+
     /// Translation offset
     pub translate: f64,
 }
@@ -132,45 +132,54 @@ impl TuneFile {
     /// that didn't properly detect self-closing XML tags
     fn sanitize_corrupted_strings(&mut self) {
         let mut fixed_count = 0;
-        
+
         // Check constants
         for (name, value) in self.constants.iter_mut() {
             if let TuneValue::String(s) = value {
                 // Detect XML fragments that shouldn't be in string values
                 if s.starts_with('<') && (s.contains("constant") || s.contains("pcVariable")) {
-                    eprintln!("[MIGRATION] Fixing corrupted string value for '{}': was '{}'", name, s);
+                    eprintln!(
+                        "[MIGRATION] Fixing corrupted string value for '{}': was '{}'",
+                        name, s
+                    );
                     *value = TuneValue::String(String::new());
                     fixed_count += 1;
                 }
             }
         }
-        
+
         // Check pcVariables too
         for (name, value) in self.pc_variables.iter_mut() {
             if let TuneValue::String(s) = value {
                 if s.starts_with('<') && (s.contains("constant") || s.contains("pcVariable")) {
-                    eprintln!("[MIGRATION] Fixing corrupted pcVariable value for '{}': was '{}'", name, s);
+                    eprintln!(
+                        "[MIGRATION] Fixing corrupted pcVariable value for '{}': was '{}'",
+                        name, s
+                    );
                     *value = TuneValue::String(String::new());
                     fixed_count += 1;
                 }
             }
         }
-        
+
         if fixed_count > 0 {
-            eprintln!("[MIGRATION] Fixed {} corrupted string values from old parser bug", fixed_count);
+            eprintln!(
+                "[MIGRATION] Fixed {} corrupted string values from old parser bug",
+                fixed_count
+            );
         }
     }
 
     /// Load a tune file from disk
-    /// 
+    ///
     /// MSQ files may use ISO-8859-1 (Latin-1) encoding, so we read as bytes
     /// and convert to UTF-8 to handle non-ASCII characters.
     pub fn load<P: AsRef<Path>>(path: P) -> io::Result<Self> {
         let path = path.as_ref();
-        
+
         // Read as bytes first to handle different encodings
         let bytes = fs::read(path)?;
-        
+
         // Try UTF-8 first, fall back to ISO-8859-1 (Latin-1) conversion
         let content = match String::from_utf8(bytes.clone()) {
             Ok(s) => s,
@@ -197,10 +206,10 @@ impl TuneFile {
                     .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
             }
         }?;
-        
+
         // Sanitize any corrupted string values (migration fix for older saved tunes)
         tune.sanitize_corrupted_strings();
-        
+
         Ok(tune)
     }
 
@@ -270,7 +279,7 @@ impl TuneFile {
         if let Some(ini_start) = content.find("<iniMetadata") {
             let ini_remaining = &content[ini_start..];
             let mut metadata = IniMetadata::default();
-            
+
             // Extract each attribute
             if let Some(attr_start) = ini_remaining.find("signature=\"") {
                 let attr_content = &ini_remaining[attr_start + 11..];
@@ -302,7 +311,7 @@ impl TuneFile {
                     metadata.saved_at = attr_content[..attr_end].to_string();
                 }
             }
-            
+
             tune.ini_metadata = Some(metadata);
         }
 
@@ -311,13 +320,13 @@ impl TuneFile {
             if let Some(manifest_end) = content[manifest_start..].find("</constantManifest>") {
                 let manifest_content = &content[manifest_start..manifest_start + manifest_end];
                 let mut manifest = Vec::new();
-                
+
                 // Parse each <entry> element
                 let mut entry_pos = 0;
                 while let Some(entry_start) = manifest_content[entry_pos..].find("<entry ") {
                     let abs_entry_start = entry_pos + entry_start;
                     let entry_remaining = &manifest_content[abs_entry_start..];
-                    
+
                     let mut entry = ConstantManifestEntry {
                         name: String::new(),
                         data_type: String::new(),
@@ -326,7 +335,7 @@ impl TuneFile {
                         scale: 1.0,
                         translate: 0.0,
                     };
-                    
+
                     // Extract attributes
                     if let Some(attr_start) = entry_remaining.find("name=\"") {
                         let attr_content = &entry_remaining[attr_start + 6..];
@@ -364,14 +373,14 @@ impl TuneFile {
                             entry.translate = attr_content[..attr_end].parse().unwrap_or(0.0);
                         }
                     }
-                    
+
                     if !entry.name.is_empty() {
                         manifest.push(entry);
                     }
-                    
+
                     entry_pos = abs_entry_start + 1;
                 }
-                
+
                 if !manifest.is_empty() {
                     tune.constant_manifest = Some(manifest);
                 }
@@ -479,7 +488,8 @@ impl TuneFile {
                                     let hex_content = after_tag[..close_tag].trim();
                                     // Decode hex to bytes (2 chars per byte, lowercase)
                                     let mut bytes = Vec::with_capacity(hex_content.len() / 2);
-                                    let mut chars = hex_content.chars().filter(|c| !c.is_whitespace());
+                                    let mut chars =
+                                        hex_content.chars().filter(|c| !c.is_whitespace());
                                     loop {
                                         let high = match chars.next() {
                                             Some(c) => c,
@@ -851,15 +861,24 @@ impl TuneFile {
                             let formatted = format!("{:.17}", v);
                             // Trim unnecessary trailing zeros for cleaner output
                             let trimmed = formatted.trim_end_matches('0').trim_end_matches('.');
-                            if trimmed.is_empty() { "0".to_string() } else { trimmed.to_string() }
-                        },
+                            if trimmed.is_empty() {
+                                "0".to_string()
+                            } else {
+                                trimmed.to_string()
+                            }
+                        }
                         TuneValue::Array(arr) => {
                             // Format as space-separated for arrays with high precision
                             arr.iter()
                                 .map(|v| {
                                     let formatted = format!("{:.17}", v);
-                                    let trimmed = formatted.trim_end_matches('0').trim_end_matches('.');
-                                    if trimmed.is_empty() { "0".to_string() } else { trimmed.to_string() }
+                                    let trimmed =
+                                        formatted.trim_end_matches('0').trim_end_matches('.');
+                                    if trimmed.is_empty() {
+                                        "0".to_string()
+                                    } else {
+                                        trimmed.to_string()
+                                    }
                                 })
                                 .collect::<Vec<_>>()
                                 .join(" ")
@@ -900,14 +919,22 @@ impl TuneFile {
                         TuneValue::Scalar(v) => {
                             let formatted = format!("{:.17}", v);
                             let trimmed = formatted.trim_end_matches('0').trim_end_matches('.');
-                            if trimmed.is_empty() { "0".to_string() } else { trimmed.to_string() }
+                            if trimmed.is_empty() {
+                                "0".to_string()
+                            } else {
+                                trimmed.to_string()
+                            }
                         }
                         TuneValue::Array(arr) => arr
                             .iter()
                             .map(|v| {
                                 let formatted = format!("{:.17}", v);
                                 let trimmed = formatted.trim_end_matches('0').trim_end_matches('.');
-                                if trimmed.is_empty() { "0".to_string() } else { trimmed.to_string() }
+                                if trimmed.is_empty() {
+                                    "0".to_string()
+                                } else {
+                                    trimmed.to_string()
+                                }
                             })
                             .collect::<Vec<_>>()
                             .join(" "),
@@ -1057,14 +1084,7 @@ fn format_tune_value(value: &TuneValue) -> String {
             .collect::<Vec<_>>()
             .join(" "),
         TuneValue::String(s) => format!("\"{}\"", s),
-        TuneValue::Bool(b) => {
-            if *b {
-                "true"
-            } else {
-                "false"
-            }
-            .to_string()
-        }
+        TuneValue::Bool(b) => if *b { "true" } else { "false" }.to_string(),
     }
 }
 

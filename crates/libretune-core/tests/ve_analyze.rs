@@ -24,23 +24,26 @@ fn test_ve_analyze_parsing() {
 "#;
 
     let def = EcuDefinition::from_str(ini_content).expect("Should parse successfully");
-    
-    assert!(def.ve_analyze.is_some(), "VeAnalyze config should be present");
+
+    assert!(
+        def.ve_analyze.is_some(),
+        "VeAnalyze config should be present"
+    );
     let config = def.ve_analyze.unwrap();
-    
+
     assert_eq!(config.ve_table_name, "veTableTbl");
     assert_eq!(config.target_table_name, "lambdaTableTbl");
     assert_eq!(config.lambda_channel, "lambdaValue");
     assert_eq!(config.ego_correction_channel, "egoCorrectionForVeAnalyze");
     assert_eq!(config.active_condition, "{ 1 }");
-    
+
     assert_eq!(config.lambda_target_tables.len(), 2);
     assert_eq!(config.lambda_target_tables[0], "lambdaTableTbl");
     assert_eq!(config.lambda_target_tables[1], "afrTSCustom");
-    
+
     // Check filters
     assert_eq!(config.filters.len(), 4);
-    
+
     let rpm_filter = &config.filters[0];
     assert_eq!(rpm_filter.name, "minRPMFilter");
     assert_eq!(rpm_filter.display_name, "Minimum RPM");
@@ -48,15 +51,15 @@ fn test_ve_analyze_parsing() {
     assert_eq!(rpm_filter.operator, FilterOperator::LessThan);
     assert_eq!(rpm_filter.default_value, 500.0);
     assert!(rpm_filter.user_adjustable);
-    
+
     let delta_tps = &config.filters[2];
     assert_eq!(delta_tps.operator, FilterOperator::GreaterThan);
     assert_eq!(delta_tps.default_value, 50.0);
-    
+
     // std_Custom filter
     let std_custom = &config.filters[3];
     assert_eq!(std_custom.name, "std_Custom");
-    
+
     // Options
     assert_eq!(config.options.len(), 2);
     assert!(config.options.contains(&"disableLiveUpdates".to_string()));
@@ -82,10 +85,13 @@ fn test_wue_analyze_parsing() {
 "#;
 
     let def = EcuDefinition::from_str(ini_content).expect("Should parse successfully");
-    
-    assert!(def.wue_analyze.is_some(), "WueAnalyze config should be present");
+
+    assert!(
+        def.wue_analyze.is_some(),
+        "WueAnalyze config should be present"
+    );
     let config = def.wue_analyze.unwrap();
-    
+
     assert_eq!(config.wue_curve_name, "wueCurve");
     assert_eq!(config.afr_temp_comp_curve, "wueAfrOffsetCurve");
     assert_eq!(config.target_table_name, "lambdaTableTbl");
@@ -93,9 +99,9 @@ fn test_wue_analyze_parsing() {
     assert_eq!(config.coolant_channel, "coolant");
     assert_eq!(config.wue_channel, "wueEnrich");
     assert_eq!(config.ego_correction_channel, "egoCorrection");
-    
+
     assert_eq!(config.wue_percent_offset, 100.0);
-    
+
     assert_eq!(config.filters.len(), 2);
     assert_eq!(config.options.len(), 1);
 }
@@ -120,7 +126,7 @@ fn test_filter_operators() {
 
     let def = EcuDefinition::from_str(ini_content).expect("Should parse successfully");
     let config = def.ve_analyze.unwrap();
-    
+
     assert_eq!(config.filters[0].operator, FilterOperator::LessThan);
     assert_eq!(config.filters[1].operator, FilterOperator::GreaterThan);
     assert_eq!(config.filters[2].operator, FilterOperator::Equal);
@@ -151,7 +157,7 @@ fn test_real_corpus_ve_analyze() {
 "#;
 
     let def = EcuDefinition::from_str(ini_content).expect("Should parse real corpus VeAnalyze");
-    
+
     let config = def.ve_analyze.expect("VeAnalyze should be parsed");
     assert_eq!(config.ve_table_name, "veTableTbl");
     assert_eq!(config.filters.len(), 7);

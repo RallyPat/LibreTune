@@ -4,8 +4,8 @@
 //! allowing users to view history, compare versions, and restore previous tunes.
 
 use git2::{
-    BranchType, Commit, DiffOptions, Error as GitError, IndexAddOption, Repository,
-    Signature, StatusOptions,
+    BranchType, Commit, DiffOptions, Error as GitError, IndexAddOption, Repository, Signature,
+    StatusOptions,
 };
 use std::path::Path;
 
@@ -163,9 +163,9 @@ datalogs/
             Err(_) => return Ok(vec![]), // No commits yet
         };
 
-        let head_oid = head.target().ok_or_else(|| {
-            GitError::from_str("HEAD has no target")
-        })?;
+        let head_oid = head
+            .target()
+            .ok_or_else(|| GitError::from_str("HEAD has no target"))?;
 
         let mut revwalk = self.repo.revwalk()?;
         revwalk.push(head_oid)?;
@@ -199,9 +199,9 @@ datalogs/
         let to_tree = to_commit.tree()?;
 
         let mut diff_opts = DiffOptions::new();
-        let diff = self
-            .repo
-            .diff_tree_to_tree(Some(&from_tree), Some(&to_tree), Some(&mut diff_opts))?;
+        let diff =
+            self.repo
+                .diff_tree_to_tree(Some(&from_tree), Some(&to_tree), Some(&mut diff_opts))?;
 
         let mut files_changed = Vec::new();
         let mut changes = Vec::new();
@@ -276,10 +276,7 @@ datalogs/
 
         for branch_result in self.repo.branches(Some(BranchType::Local))? {
             let (branch, _) = branch_result?;
-            let name = branch
-                .name()?
-                .unwrap_or("(unnamed)")
-                .to_string();
+            let name = branch.name()?.unwrap_or("(unnamed)").to_string();
 
             let tip_sha = branch
                 .get()
@@ -332,9 +329,9 @@ datalogs/
 
     fn get_head_commit(&self) -> Result<Commit<'_>, GitError> {
         let head = self.repo.head()?;
-        let oid = head.target().ok_or_else(|| {
-            GitError::from_str("HEAD has no target")
-        })?;
+        let oid = head
+            .target()
+            .ok_or_else(|| GitError::from_str("HEAD has no target"))?;
         self.repo.find_commit(oid)
     }
 
@@ -407,7 +404,8 @@ mod tests {
         vc.commit("Initial tune").expect("Failed to commit");
 
         // Create a branch
-        vc.create_branch("experiment").expect("Failed to create branch");
+        vc.create_branch("experiment")
+            .expect("Failed to create branch");
 
         // List branches
         let branches = vc.list_branches().expect("Failed to list branches");

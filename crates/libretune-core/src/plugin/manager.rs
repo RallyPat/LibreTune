@@ -200,12 +200,7 @@ impl PluginManager {
 
     /// Get plugin UI tree
     pub fn get_plugin_ui(&self, plugin_id: &str) -> Option<SwingComponent> {
-        self.plugins
-            .read()
-            .ok()?
-            .get(plugin_id)?
-            .ui_tree
-            .clone()
+        self.plugins.read().ok()?.get(plugin_id)?.ui_tree.clone()
     }
 
     /// Send an event to a plugin (user interaction)
@@ -276,8 +271,11 @@ impl PluginManager {
         let mut stdin_guard = self.stdin.lock().map_err(|e| e.to_string())?;
         let stdin = stdin_guard.as_mut().ok_or("Plugin host not running")?;
 
-        writeln!(stdin, "{}", message).map_err(|e| format!("Failed to write to plugin host: {}", e))?;
-        stdin.flush().map_err(|e| format!("Failed to flush stdin: {}", e))?;
+        writeln!(stdin, "{}", message)
+            .map_err(|e| format!("Failed to write to plugin host: {}", e))?;
+        stdin
+            .flush()
+            .map_err(|e| format!("Failed to flush stdin: {}", e))?;
 
         Ok(())
     }
@@ -285,7 +283,7 @@ impl PluginManager {
     /// Spawn thread to read JVM stdout
     fn spawn_reader_thread(&self, stdout: ChildStdout) {
         let pending = self.pending_requests.clone();
-        
+
         thread::spawn(move || {
             let reader = BufReader::new(stdout);
             for line in reader.lines() {
@@ -300,7 +298,8 @@ impl PluginManager {
                                     let _ = tx.send(response);
                                 }
                             }
-                        } else if let Ok(notification) = serde_json::from_str::<RpcNotification>(&msg)
+                        } else if let Ok(notification) =
+                            serde_json::from_str::<RpcNotification>(&msg)
                         {
                             // Handle notification (UI updates, etc.)
                             eprintln!("[Plugin] Notification: {:?}", notification);
@@ -362,7 +361,11 @@ mod tests {
         // This test may fail if Java is not installed
         match PluginManager::check_jre() {
             Ok(version) => {
-                assert!(version.contains("version") || version.contains("openjdk") || version.contains("java"));
+                assert!(
+                    version.contains("version")
+                        || version.contains("openjdk")
+                        || version.contains("java")
+                );
             }
             Err(e) => {
                 assert!(e.contains("not found") || e.contains("Java"));

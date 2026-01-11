@@ -105,10 +105,7 @@ pub struct ComponentBounds {
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum LayoutInfo {
     #[serde(rename = "BorderLayout")]
-    Border {
-        hgap: i32,
-        vgap: i32,
-    },
+    Border { hgap: i32, vgap: i32 },
     #[serde(rename = "GridBagLayout")]
     GridBag,
     #[serde(rename = "FlowLayout")]
@@ -129,10 +126,7 @@ pub enum LayoutInfo {
         vgap: i32,
     },
     #[serde(rename = "CardLayout")]
-    Card {
-        hgap: i32,
-        vgap: i32,
-    },
+    Card { hgap: i32, vgap: i32 },
     #[serde(rename = "null")]
     None,
 }
@@ -183,9 +177,7 @@ pub enum UiDiff {
         component: SwingComponent,
     },
     /// Component removed from tree
-    Remove {
-        component_id: String,
-    },
+    Remove { component_id: String },
     /// Component property changed
     Update {
         component_id: String,
@@ -193,9 +185,7 @@ pub enum UiDiff {
         value: serde_json::Value,
     },
     /// Full tree replacement (initial load or major change)
-    Replace {
-        root: SwingComponent,
-    },
+    Replace { root: SwingComponent },
 }
 
 // ============================================================================
@@ -207,14 +197,9 @@ pub enum UiDiff {
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum PluginEvent {
     /// Button click or action
-    Action {
-        component_id: String,
-    },
+    Action { component_id: String },
     /// Text field value changed
-    TextChange {
-        component_id: String,
-        text: String,
-    },
+    TextChange { component_id: String, text: String },
     /// Checkbox/radio state changed
     StateChange {
         component_id: String,
@@ -227,10 +212,7 @@ pub enum PluginEvent {
         selected_item: String,
     },
     /// Slider value changed
-    SliderChange {
-        component_id: String,
-        value: i32,
-    },
+    SliderChange { component_id: String, value: i32 },
     /// Table cell edited
     TableEdit {
         component_id: String,
@@ -301,7 +283,11 @@ mod tests {
 
     #[test]
     fn test_rpc_request_serialization() {
-        let req = RpcRequest::new(1, "loadPlugin", Some(serde_json::json!({"path": "/test.jar"})));
+        let req = RpcRequest::new(
+            1,
+            "loadPlugin",
+            Some(serde_json::json!({"path": "/test.jar"})),
+        );
         let json = serde_json::to_string(&req).unwrap();
         assert!(json.contains("\"jsonrpc\":\"2.0\""));
         assert!(json.contains("\"method\":\"loadPlugin\""));
@@ -312,10 +298,17 @@ mod tests {
         let comp = SwingComponent {
             id: "btn1".to_string(),
             component_type: "JButton".to_string(),
-            bounds: ComponentBounds { x: 10, y: 20, width: 100, height: 30 },
+            bounds: ComponentBounds {
+                x: 10,
+                y: 20,
+                width: 100,
+                height: 30,
+            },
             layout: None,
             layout_constraint: Some(serde_json::json!("CENTER")),
-            properties: [("text".to_string(), serde_json::json!("Click Me"))].into_iter().collect(),
+            properties: [("text".to_string(), serde_json::json!("Click Me"))]
+                .into_iter()
+                .collect(),
             children: vec![],
         };
         let json = serde_json::to_string_pretty(&comp).unwrap();

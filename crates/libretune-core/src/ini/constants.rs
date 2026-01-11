@@ -213,7 +213,8 @@ pub fn parse_constant_line(
                     // Use rfind to avoid negative bit indices like [-1:3]
                     if minus_pos > 0 {
                         constant.bit_size = size_part[..minus_pos].parse().ok();
-                        constant.display_offset = -(size_part[minus_pos + 1..].parse::<i8>().unwrap_or(0));
+                        constant.display_offset =
+                            -(size_part[minus_pos + 1..].parse::<i8>().unwrap_or(0));
                     } else {
                         constant.bit_size = size_part.parse().ok();
                     }
@@ -310,7 +311,8 @@ pub fn parse_pc_variable_line(name: &str, value: &str) -> Option<Constant> {
                 } else if let Some(minus_pos) = size_part.rfind('-') {
                     if minus_pos > 0 {
                         constant.bit_size = size_part[..minus_pos].parse().ok();
-                        constant.display_offset = -(size_part[minus_pos + 1..].parse::<i8>().unwrap_or(0));
+                        constant.display_offset =
+                            -(size_part[minus_pos + 1..].parse::<i8>().unwrap_or(0));
                     } else {
                         constant.bit_size = size_part.parse().ok();
                     }
@@ -467,12 +469,7 @@ mod tests {
     #[test]
     fn test_parse_bits_with_display_offset_positive() {
         // Test [4:7+1] notation - display offset of +1
-        let c = parse_constant_line(
-            "nCylinders",
-            "bits, U08, 182, [4:7+1]",
-            0,
-            0,
-        );
+        let c = parse_constant_line("nCylinders", "bits, U08, 182, [4:7+1]", 0, 0);
         assert!(c.is_some());
         let c = c.unwrap();
         assert_eq!(c.name, "nCylinders");
@@ -503,12 +500,7 @@ mod tests {
     #[test]
     fn test_parse_bits_without_display_offset() {
         // Test [0:7] notation - no display offset
-        let c = parse_constant_line(
-            "normalBits",
-            "bits, U08, 50, [0:7], \"Off\", \"On\"",
-            0,
-            0,
-        );
+        let c = parse_constant_line("normalBits", "bits, U08, 50, [0:7], \"Off\", \"On\"", 0, 0);
         assert!(c.is_some());
         let c = c.unwrap();
         assert_eq!(c.bit_position, Some(0));

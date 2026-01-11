@@ -537,10 +537,10 @@ impl ExpressionState {
     /// Update a channel's value (call this each time a new value is received)
     pub fn update_channel(&mut self, name: &str, value: f64, current_time: f64) {
         let state = self.channels.entry(name.to_string()).or_default();
-        
+
         // Store last value
         state.last_value = Some(value);
-        
+
         // Update max (reset if timer expired)
         if let Some(reset_time) = state.max_reset_time {
             if current_time >= reset_time {
@@ -552,7 +552,7 @@ impl ExpressionState {
         } else {
             state.max_value = Some(state.max_value.map(|m| m.max(value)).unwrap_or(value));
         }
-        
+
         // Update min (reset if timer expired)
         if let Some(reset_time) = state.min_reset_time {
             if current_time >= reset_time {
@@ -564,7 +564,7 @@ impl ExpressionState {
         } else {
             state.min_value = Some(state.min_value.map(|m| m.min(value)).unwrap_or(value));
         }
-        
+
         state.last_update_time = Some(current_time);
     }
 
@@ -595,12 +595,12 @@ impl ExpressionState {
     pub fn smooth_basic(&mut self, name: &str, value: f64, factor: f64) -> f64 {
         let state = self.channels.entry(name.to_string()).or_default();
         let factor = factor.clamp(0.0, 1.0);
-        
+
         let smoothed = match state.smoothed_value {
             Some(prev) => prev * factor + value * (1.0 - factor),
             None => value,
         };
-        
+
         state.smoothed_value = Some(smoothed);
         smoothed
     }

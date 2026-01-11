@@ -14,7 +14,9 @@ use libretune_core::ini::{
     AdaptiveTimingConfig, CommandPart, Constant, DataType, DialogDefinition, EcuDefinition,
     HelpTopic, Menu, MenuItem,
 };
-use libretune_core::plugin::{ControllerBridge, PluginEvent, PluginInfo, PluginManager, SwingComponent};
+use libretune_core::plugin::{
+    ControllerBridge, PluginEvent, PluginInfo, PluginManager, SwingComponent,
+};
 use libretune_core::project::{
     BranchInfo, CommitDiff, CommitInfo, ConnectionSettings, IniEntry, IniRepository, IniSource,
     OnlineIniEntry, OnlineIniRepository, Project, ProjectConfig, ProjectInfo, ProjectSettings,
@@ -220,30 +222,30 @@ struct Settings {
     indicator_column_count: String, // "auto" or number like "12"
     indicator_fill_empty: bool,     // Fill empty cells in last row
     indicator_text_fit: String,     // "scale" or "wrap"
-    
+
     // Status bar channel configuration
     #[serde(default)]
     status_bar_channels: Vec<String>, // User-selected channels for status bar (max 8)
-    
+
     // Heatmap color scheme settings
     #[serde(default = "default_heatmap_scheme")]
-    heatmap_value_scheme: String,   // Scheme for VE/timing tables
+    heatmap_value_scheme: String, // Scheme for VE/timing tables
     #[serde(default = "default_heatmap_scheme")]
-    heatmap_change_scheme: String,  // Scheme for AFR correction magnitude
+    heatmap_change_scheme: String, // Scheme for AFR correction magnitude
     #[serde(default = "default_heatmap_scheme")]
     heatmap_coverage_scheme: String, // Scheme for hit weighting visualization
     #[serde(default)]
-    heatmap_value_custom: Vec<String>,   // Custom color stops for value context
+    heatmap_value_custom: Vec<String>, // Custom color stops for value context
     #[serde(default)]
-    heatmap_change_custom: Vec<String>,  // Custom color stops for change context
+    heatmap_change_custom: Vec<String>, // Custom color stops for change context
     #[serde(default)]
     heatmap_coverage_custom: Vec<String>, // Custom color stops for coverage context
-    
+
     // Git version control settings
     #[serde(default = "default_auto_commit")]
-    auto_commit_on_save: String,    // "always", "never", "ask"
+    auto_commit_on_save: String, // "always", "never", "ask"
     #[serde(default = "default_commit_message_format")]
-    commit_message_format: String,  // Format string with {date}, {time} placeholders
+    commit_message_format: String, // Format string with {date}, {time} placeholders
 }
 
 fn default_heatmap_scheme() -> String {
@@ -2121,10 +2123,12 @@ async fn update_curve_data(
         .ok_or_else(|| format!("Curve {} not found", curve_name))?;
 
     // Get the Y-bins constant (the values we're updating)
-    let constant = def
-        .constants
-        .get(&curve.y_bins)
-        .ok_or_else(|| format!("Constant {} not found for curve {}", curve.y_bins, curve_name))?;
+    let constant = def.constants.get(&curve.y_bins).ok_or_else(|| {
+        format!(
+            "Constant {} not found for curve {}",
+            curve.y_bins, curve_name
+        )
+    })?;
 
     if y_values.len() != constant.shape.element_count() {
         return Err(format!(
@@ -2254,78 +2258,86 @@ async fn feed_autotune_data(
         return;
     }
     drop(autotune_guard);
-    
+
     // Get the config
     let mut config_guard = app_state.autotune_config.lock().await;
     let config = match config_guard.as_mut() {
         Some(c) => c,
         None => return,
     };
-    
+
     // Extract channel values (try common channel names)
-    let rpm = data.get("rpm")
+    let rpm = data
+        .get("rpm")
         .or_else(|| data.get("RPM"))
         .or_else(|| data.get("rpmValue"))
         .copied()
         .unwrap_or(0.0);
-    
-    let map = data.get("map")
+
+    let map = data
+        .get("map")
         .or_else(|| data.get("MAP"))
         .or_else(|| data.get("mapValue"))
         .or_else(|| data.get("fuelingLoad"))
         .copied()
         .unwrap_or(0.0);
-    
-    let afr = data.get("afr")
+
+    let afr = data
+        .get("afr")
         .or_else(|| data.get("AFR"))
         .or_else(|| data.get("afr1"))
         .or_else(|| data.get("AFRValue"))
         .or_else(|| data.get("lambda1"))
-        .map(|v| if *v < 2.0 { *v * 14.7 } else { *v })  // Convert lambda to AFR
+        .map(|v| if *v < 2.0 { *v * 14.7 } else { *v }) // Convert lambda to AFR
         .unwrap_or(14.7);
-    
-    let ve = data.get("ve")
+
+    let ve = data
+        .get("ve")
         .or_else(|| data.get("VE"))
         .or_else(|| data.get("veValue"))
         .or_else(|| data.get("VEtable"))
         .copied()
         .unwrap_or(0.0);
-    
-    let clt = data.get("clt")
+
+    let clt = data
+        .get("clt")
         .or_else(|| data.get("CLT"))
         .or_else(|| data.get("coolant"))
         .or_else(|| data.get("coolantTemperature"))
         .copied()
         .unwrap_or(0.0);
-    
-    let tps = data.get("tps")
+
+    let tps = data
+        .get("tps")
         .or_else(|| data.get("TPS"))
         .or_else(|| data.get("tpsValue"))
         .copied()
         .unwrap_or(0.0);
-    
+
     // Calculate TPS rate (%/sec) based on time delta
-    let tps_rate = if let (Some(last_tps), Some(last_ts)) = (config.last_tps, config.last_timestamp_ms) {
-        let dt_sec = (current_time_ms.saturating_sub(last_ts)) as f64 / 1000.0;
-        if dt_sec > 0.001 {
-            (tps - last_tps) / dt_sec
+    let tps_rate =
+        if let (Some(last_tps), Some(last_ts)) = (config.last_tps, config.last_timestamp_ms) {
+            let dt_sec = (current_time_ms.saturating_sub(last_ts)) as f64 / 1000.0;
+            if dt_sec > 0.001 {
+                (tps - last_tps) / dt_sec
+            } else {
+                0.0
+            }
         } else {
             0.0
-        }
-    } else {
-        0.0
-    };
-    
+        };
+
     // Update last values for next iteration
     config.last_tps = Some(tps);
     config.last_timestamp_ms = Some(current_time_ms);
-    
+
     // Check for accel enrichment flag
-    let accel_enrich_active = data.get("accelEnrich")
+    let accel_enrich_active = data
+        .get("accelEnrich")
         .or_else(|| data.get("accelEnrichActive"))
         .or_else(|| data.get("tpsAE"))
         .map(|v| *v > 0.5);
-    
+
     // Create the data point
     let data_point = VEDataPoint {
         rpm,
@@ -2338,7 +2350,7 @@ async fn feed_autotune_data(
         accel_enrich_active,
         timestamp_ms: current_time_ms,
     };
-    
+
     // Clone the config values before we release the guard
     let x_bins = config.x_bins.clone();
     let y_bins = config.y_bins.clone();
@@ -2346,16 +2358,11 @@ async fn feed_autotune_data(
     let filters = config.filters.clone();
     let authority = config.authority_limits.clone();
     drop(config_guard);
-    
+
     // Feed to AutoTune
     let mut autotune_guard = app_state.autotune_state.lock().await;
     autotune_guard.add_data_point(
-        data_point,
-        &x_bins,
-        &y_bins,
-        &settings,
-        &filters,
-        &authority,
+        data_point, &x_bins, &y_bins, &settings, &filters, &authority,
     );
 }
 
@@ -2425,10 +2432,10 @@ async fn start_realtime_stream(
                     let elapsed_ms = start_time.elapsed().as_millis() as u64;
                     let data = sim.update(elapsed_ms);
                     let _ = app_handle.emit("realtime:update", &data);
-                    
+
                     // Feed data to AutoTune if running
                     feed_autotune_data(&app_state, &data, current_time_ms).await;
-                    
+
                     // Forward realtime data to plugin bridge for TS-compatible plugins
                     if let Some(ref bridge) = *app_state.controller_bridge.lock().await {
                         bridge.update_realtime(data);
@@ -2459,19 +2466,21 @@ async fn start_realtime_stream(
 
                             // Pass 2: Evaluate computed channels using parsed values as context
                             for (name, channel) in computed_channels {
-                                if let Some(val) = channel.parse_with_context(&raw, def.endianness, &data) {
+                                if let Some(val) =
+                                    channel.parse_with_context(&raw, def.endianness, &data)
+                                {
                                     data.insert(name, val);
                                 }
                             }
 
                             let _ = app_handle.emit("realtime:update", &data);
-                            
+
                             // Feed data to AutoTune if running
                             // Note: We need to drop the guards first to avoid deadlock
                             drop(conn_guard);
                             drop(def_guard);
                             feed_autotune_data(&app_state, &data, current_time_ms).await;
-                            
+
                             // Forward realtime data to plugin bridge for TS-compatible plugins
                             if let Some(ref bridge) = *app_state.controller_bridge.lock().await {
                                 bridge.update_realtime(data);
@@ -3379,7 +3388,8 @@ async fn update_constant(
         // Also update tune.constants for consistency
         let mut tune_guard = state.current_tune.lock().await;
         if let Some(tune) = tune_guard.as_mut() {
-            tune.constants.insert(name, libretune_core::tune::TuneValue::Scalar(value));
+            tune.constants
+                .insert(name, libretune_core::tune::TuneValue::Scalar(value));
         }
         return Ok(());
     }
@@ -3431,7 +3441,8 @@ async fn update_constant(
             } else {
                 ((1u8 << bit_size) - 1) << bit_in_byte
             };
-            existing_bytes[0] = (existing_bytes[0] & !mask) | (((new_bit_val as u8) << bit_in_byte) & mask);
+            existing_bytes[0] =
+                (existing_bytes[0] & !mask) | (((new_bit_val as u8) << bit_in_byte) & mask);
         } else {
             // Multi-byte case: apply bits across multiple bytes
             let bits_in_first_byte = (8 - bit_in_byte).min(bit_size);
@@ -3486,7 +3497,8 @@ async fn update_constant(
             }
 
             // Update constants HashMap for offline reads
-            tune.constants.insert(name.clone(), libretune_core::tune::TuneValue::Scalar(value));
+            tune.constants
+                .insert(name.clone(), libretune_core::tune::TuneValue::Scalar(value));
         }
 
         // Mark tune as modified
@@ -3505,7 +3517,10 @@ async fn update_constant(
             }
         }
 
-        eprintln!("[DEBUG] update_constant: Updated bits constant '{}' to value {}", name, value);
+        eprintln!(
+            "[DEBUG] update_constant: Updated bits constant '{}' to value {}",
+            name, value
+        );
         return Ok(());
     }
 
@@ -3542,7 +3557,8 @@ async fn update_constant(
                 }
 
                 // Update constants HashMap for offline reads
-                tune.constants.insert(name.clone(), libretune_core::tune::TuneValue::Scalar(value));
+                tune.constants
+                    .insert(name.clone(), libretune_core::tune::TuneValue::Scalar(value));
             }
 
             // Mark tune as modified
@@ -3636,8 +3652,9 @@ async fn get_all_constant_values(
                         } else {
                             8
                         };
-                        let bits =
-                            ((byte >> bit_start) & bit_mask_u8(bit_end.saturating_sub(bit_start))) as u64;
+                        let bits = ((byte >> bit_start)
+                            & bit_mask_u8(bit_end.saturating_sub(bit_start)))
+                            as u64;
                         bit_value |= bits << (i * 8);
                     }
                     bit_value as f64
@@ -3823,8 +3840,9 @@ async fn get_all_constant_values(
                             } else {
                                 8
                             };
-                            let bits =
-                                ((byte >> bit_start) & bit_mask_u8(bit_end.saturating_sub(bit_start))) as u64;
+                            let bits = ((byte >> bit_start)
+                                & bit_mask_u8(bit_end.saturating_sub(bit_start)))
+                                as u64;
                             bit_value |= bits << (i * 8);
                         }
                         bit_value as f64
@@ -3870,29 +3888,34 @@ async fn start_autotune(
     let def = def_guard.as_ref().ok_or("No ECU definition loaded")?;
     let cache_guard = state.tune_cache.lock().await;
     let cache = cache_guard.as_ref();
-    
+
     // Find the table and extract bins
     let (x_bins, y_bins) = if let Some(table) = def.get_table_by_name_or_map(&table_name) {
         // Read X bins from the constant
         let x_bins = read_axis_bins(def, cache, &table.x_bins, table.x_size)?;
-        
+
         // Read Y bins from the constant (if it's a 3D table)
         let y_bins = if let Some(ref y_bins_name) = table.y_bins {
             read_axis_bins(def, cache, y_bins_name, table.y_size)?
         } else {
-            vec![0.0]  // 2D table has single Y bin
+            vec![0.0] // 2D table has single Y bin
         };
-        
+
         (x_bins, y_bins)
     } else {
         // Use default bins if table not found
-        (vec![500.0, 1000.0, 1500.0, 2000.0, 2500.0, 3000.0, 3500.0, 4000.0, 4500.0, 5000.0, 5500.0, 6000.0],
-         vec![20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0, 100.0])
+        (
+            vec![
+                500.0, 1000.0, 1500.0, 2000.0, 2500.0, 3000.0, 3500.0, 4000.0, 4500.0, 5000.0,
+                5500.0, 6000.0,
+            ],
+            vec![20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0, 100.0],
+        )
     };
-    
+
     drop(cache_guard);
     drop(def_guard);
-    
+
     // Store the config for realtime stream to use
     let config = AutoTuneConfig {
         table_name: table_name.clone(),
@@ -3904,9 +3927,9 @@ async fn start_autotune(
         last_tps: None,
         last_timestamp_ms: None,
     };
-    
+
     *state.autotune_config.lock().await = Some(config);
-    
+
     let mut guard = state.autotune_state.lock().await;
     guard.start();
     Ok(())
@@ -3927,14 +3950,14 @@ fn read_axis_bins(
             return Ok((0..size).map(|i| i as f64 * 500.0 + 500.0).collect());
         }
     };
-    
+
     // If we have cached tune data, read from it
     if let Some(cache) = cache {
         if let Some(page_data) = cache.get_page(constant.page) {
             let elem_size = constant.data_type.size_bytes();
             let mut bins = Vec::with_capacity(size);
             let mut offset = constant.offset as usize;
-            
+
             for _ in 0..size {
                 if offset + elem_size <= page_data.len() {
                     if let Ok(raw) = read_raw_value(&page_data[offset..], &constant.data_type) {
@@ -3943,21 +3966,25 @@ fn read_axis_bins(
                     offset += elem_size;
                 }
             }
-            
+
             if !bins.is_empty() {
                 return Ok(bins);
             }
         }
     }
-    
+
     // Last resort: generate linear bins based on typical RPM/MAP ranges
     // For RPM bins (x-axis typically)
     if size > 8 {
         // Likely RPM axis - 500 to 6500 RPM
-        Ok((0..size).map(|i| 500.0 + (i as f64 * 6000.0 / (size - 1) as f64)).collect())
+        Ok((0..size)
+            .map(|i| 500.0 + (i as f64 * 6000.0 / (size - 1) as f64))
+            .collect())
     } else {
         // Likely MAP/load axis - 20 to 100 kPa
-        Ok((0..size).map(|i| 20.0 + (i as f64 * 80.0 / (size - 1).max(1) as f64)).collect())
+        Ok((0..size)
+            .map(|i| 20.0 + (i as f64 * 80.0 / (size - 1).max(1) as f64))
+            .collect())
     }
 }
 
@@ -3971,7 +3998,7 @@ fn read_axis_bins(
 async fn stop_autotune(state: tauri::State<'_, AppState>) -> Result<(), String> {
     let mut guard = state.autotune_state.lock().await;
     guard.stop();
-    
+
     // Clear the config
     *state.autotune_config.lock().await = None;
     Ok(())
@@ -4388,22 +4415,36 @@ async fn get_table_data_internal(
     let is_3d = table.is_3d();
     let table_name_out = table.name.clone();
     let table_title = table.title.clone();
-    let x_label = table.x_label.clone().unwrap_or_else(|| table.x_bins.clone());
-    let y_label = table.y_label.clone().unwrap_or_else(|| table.y_bins.clone().unwrap_or_default());
+    let x_label = table
+        .x_label
+        .clone()
+        .unwrap_or_else(|| table.x_bins.clone());
+    let y_label = table
+        .y_label
+        .clone()
+        .unwrap_or_else(|| table.y_bins.clone().unwrap_or_default());
     let x_output_channel = table.x_output_channel.clone();
     let y_output_channel = table.y_output_channel.clone();
 
-    let x_const = def.constants.get(&x_bins_name)
-        .ok_or_else(|| format!("Constant {} not found", x_bins_name))?.clone();
-    let y_const = y_bins_name.as_ref().and_then(|name| def.constants.get(name).cloned());
-    let z_const = def.constants.get(&map_name)
-        .ok_or_else(|| format!("Constant {} not found", map_name))?.clone();
+    let x_const = def
+        .constants
+        .get(&x_bins_name)
+        .ok_or_else(|| format!("Constant {} not found", x_bins_name))?
+        .clone();
+    let y_const = y_bins_name
+        .as_ref()
+        .and_then(|name| def.constants.get(name).cloned());
+    let z_const = def
+        .constants
+        .get(&map_name)
+        .ok_or_else(|| format!("Constant {} not found", map_name))?
+        .clone();
 
     drop(def_guard);
 
     // Read from tune file (offline mode)
     let tune_guard = state.current_tune.lock().await;
-    
+
     fn read_const_values(constant: &Constant, tune: Option<&TuneFile>) -> Vec<f64> {
         let element_count = constant.shape.element_count();
         if let Some(tune_file) = tune {
@@ -4467,10 +4508,13 @@ async fn update_table_z_values_internal(
 
     let def = def_guard.as_ref().ok_or("Definition not loaded")?;
 
-    let table = def.get_table_by_name_or_map(table_name)
+    let table = def
+        .get_table_by_name_or_map(table_name)
         .ok_or_else(|| format!("Table {} not found", table_name))?;
 
-    let constant = def.constants.get(&table.map)
+    let constant = def
+        .constants
+        .get(&table.map)
         .ok_or_else(|| format!("Constant {} not found for table {}", table.map, table_name))?;
 
     // Flatten z_values
@@ -4491,7 +4535,9 @@ async fn update_table_z_values_internal(
     for (i, val) in flat_values.iter().enumerate() {
         let raw_val = constant.display_to_raw(*val);
         let offset = i * element_size;
-        constant.data_type.write_to_bytes(&mut raw_data, offset, raw_val, def.endianness);
+        constant
+            .data_type
+            .write_to_bytes(&mut raw_data, offset, raw_val, def.endianness);
     }
 
     // Write to TuneCache if available
@@ -4501,7 +4547,13 @@ async fn update_table_z_values_internal(
             let mut tune_guard = state.current_tune.lock().await;
             if let Some(tune) = tune_guard.as_mut() {
                 let page_data = tune.pages.entry(constant.page).or_insert_with(|| {
-                    vec![0u8; def.page_sizes.get(constant.page as usize).copied().unwrap_or(256) as usize]
+                    vec![
+                        0u8;
+                        def.page_sizes
+                            .get(constant.page as usize)
+                            .copied()
+                            .unwrap_or(256) as usize
+                    ]
                 });
                 let start = constant.offset as usize;
                 let end = start + raw_data.len();
@@ -4847,10 +4899,7 @@ async fn load_tunerstudio_dash(path: String) -> Result<DashboardLayout, String> 
         .map_err(|e| format!("Failed to parse dashboard XML: {}", e))?;
 
     let layout = convert_dashfile_to_layout(&dash_file, "TS Dashboard");
-    println!(
-        "[load_ts_dash] Loaded {} gauges",
-        layout.gauges.len()
-    );
+    println!("[load_ts_dash] Loaded {} gauges", layout.gauges.len());
     Ok(layout)
 }
 
@@ -4949,21 +4998,22 @@ async fn list_available_dashes(app: tauri::AppHandle) -> Result<Vec<DashFileInfo
     if let Ok(resource_path) = app.path().resource_dir() {
         let bundled_dash = resource_path.join("dashboards");
         if bundled_dash.exists() {
-            println!("[list_available_dashes] Scanning bundled dashboards: {:?}", bundled_dash);
+            println!(
+                "[list_available_dashes] Scanning bundled dashboards: {:?}",
+                bundled_dash
+            );
             scan_dash_directory(&bundled_dash, "Bundled", &mut dashes);
         }
     }
 
     // Sort: User first, then by name
-    dashes.sort_by(|a, b| {
-        match (a.category.as_str(), b.category.as_str()) {
-            ("User", "User") => a.name.cmp(&b.name),
-            ("User", _) => std::cmp::Ordering::Less,
-            (_, "User") => std::cmp::Ordering::Greater,
-            _ => a.name.cmp(&b.name),
-        }
+    dashes.sort_by(|a, b| match (a.category.as_str(), b.category.as_str()) {
+        ("User", "User") => a.name.cmp(&b.name),
+        ("User", _) => std::cmp::Ordering::Less,
+        (_, "User") => std::cmp::Ordering::Greater,
+        _ => a.name.cmp(&b.name),
     });
-    
+
     println!("[list_available_dashes] Found {} dashboards", dashes.len());
     Ok(dashes)
 }
@@ -4987,7 +5037,7 @@ async fn check_dash_conflict(
 ) -> Result<DashConflictInfo, String> {
     let dash_dir = get_dashboards_dir(&app);
     let target_path = dash_dir.join(&file_name);
-    
+
     if target_path.exists() {
         // Generate a suggested alternative name
         let suggested = generate_unique_filename(&dash_dir, &file_name);
@@ -5013,11 +5063,14 @@ fn generate_unique_filename(dir: &Path, original_name: &str) -> String {
         let base = original_name.trim_end_matches(".ltdash.xml");
         (base.to_string(), ".ltdash.xml".to_string())
     } else if let Some(dot_pos) = original_name.rfind('.') {
-        (original_name[..dot_pos].to_string(), original_name[dot_pos..].to_string())
+        (
+            original_name[..dot_pos].to_string(),
+            original_name[dot_pos..].to_string(),
+        )
     } else {
         (original_name.to_string(), String::new())
     };
-    
+
     let mut counter = 2;
     loop {
         let candidate = format!("{}_{}{}", base, counter, ext);
@@ -5055,13 +5108,13 @@ async fn import_dash_file(
     overwrite: bool,
 ) -> Result<DashImportResult, String> {
     let dash_dir = get_dashboards_dir(&app);
-    
+
     // Ensure dashboards directory exists
     std::fs::create_dir_all(&dash_dir)
         .map_err(|e| format!("Failed to create dashboards directory: {}", e))?;
-    
+
     let source = Path::new(&source_path);
-    
+
     // Check source file exists
     if !source.exists() {
         return Ok(DashImportResult {
@@ -5071,11 +5124,11 @@ async fn import_dash_file(
             file_info: None,
         });
     }
-    
+
     // Validate it's a parseable dash file
-    let content = std::fs::read_to_string(source)
-        .map_err(|e| format!("Failed to read file: {}", e))?;
-    
+    let content =
+        std::fs::read_to_string(source).map_err(|e| format!("Failed to read file: {}", e))?;
+
     if let Err(e) = dash::parse_dash_file(&content) {
         return Ok(DashImportResult {
             source_path: source_path.clone(),
@@ -5084,19 +5137,20 @@ async fn import_dash_file(
             file_info: None,
         });
     }
-    
+
     // Determine target filename
     let file_name = if let Some(ref new_name) = rename_to {
         new_name.clone()
     } else {
-        source.file_name()
+        source
+            .file_name()
             .ok_or_else(|| "Invalid file path".to_string())?
             .to_string_lossy()
             .to_string()
     };
-    
+
     let dest_path = dash_dir.join(&file_name);
-    
+
     // Check for conflict
     if dest_path.exists() && !overwrite {
         return Ok(DashImportResult {
@@ -5106,13 +5160,15 @@ async fn import_dash_file(
             file_info: None,
         });
     }
-    
+
     // Copy file to dashboards directory
-    std::fs::copy(source, &dest_path)
-        .map_err(|e| format!("Failed to copy file: {}", e))?;
-    
-    println!("[import_dash_file] Imported {} -> {:?}", source_path, dest_path);
-    
+    std::fs::copy(source, &dest_path).map_err(|e| format!("Failed to copy file: {}", e))?;
+
+    println!(
+        "[import_dash_file] Imported {} -> {:?}",
+        source_path, dest_path
+    );
+
     Ok(DashImportResult {
         source_path,
         success: true,
@@ -5921,7 +5977,7 @@ fn create_tuning_dashboard() -> DashFile {
     };
 
     // Top row: RPM sweep gauge + AFR analog + Coolant bar
-    
+
     // RPM - large sweep gauge
     dash.gauge_cluster
         .components
@@ -6154,7 +6210,7 @@ fn create_tuning_dashboard() -> DashFile {
         })));
 
     // Middle row: MAP bar + VE digital + Advance digital + TPS bar + Duty bar
-    
+
     // MAP - horizontal bar
     dash.gauge_cluster
         .components
@@ -6316,7 +6372,7 @@ fn create_tuning_dashboard() -> DashFile {
         })));
 
     // Bottom row: PW bar + Lambda histogram + EGT dashed bar + Duty dashed bar
-    
+
     // Pulse Width - horizontal bar
     dash.gauge_cluster
         .components
@@ -6791,7 +6847,11 @@ async fn save_tune(
             if constant.is_pc_variable {
                 // Get PC variable from local_values
                 if let Some(value) = cache.local_values.get(name) {
-                    tune.set_constant_with_page(name.clone(), TuneValue::Scalar(*value), constant.page);
+                    tune.set_constant_with_page(
+                        name.clone(),
+                        TuneValue::Scalar(*value),
+                        constant.page,
+                    );
                     constants_saved += 1;
                 }
                 continue;
@@ -6840,11 +6900,19 @@ async fn save_tune(
                     let bit_index = bit_val as usize;
                     if bit_index < constant.bit_options.len() {
                         let option_string = constant.bit_options[bit_index].clone();
-                        tune.set_constant_with_page(name.clone(), TuneValue::String(option_string), constant.page);
+                        tune.set_constant_with_page(
+                            name.clone(),
+                            TuneValue::String(option_string),
+                            constant.page,
+                        );
                         constants_saved += 1;
                     } else {
                         // Out of range - save as numeric index (fallback)
-                        tune.set_constant_with_page(name.clone(), TuneValue::Scalar(bit_val as f64), constant.page);
+                        tune.set_constant_with_page(
+                            name.clone(),
+                            TuneValue::Scalar(bit_val as f64),
+                            constant.page,
+                        );
                         constants_saved += 1;
                     }
                 }
@@ -6921,7 +6989,10 @@ async fn save_tune(
 
     // Populate INI metadata for version tracking (LibreTune 1.1+)
     // This allows detecting when a tune was created with a different INI version
-    let ini_name = state.current_project.lock().await
+    let ini_name = state
+        .current_project
+        .lock()
+        .await
         .as_ref()
         .map(|p| p.config.ecu_definition.clone())
         .unwrap_or_else(|| "unknown.ini".to_string());
@@ -7068,9 +7139,7 @@ async fn load_tune(
         use libretune_core::tune::migration::compare_manifests;
 
         let def_guard = state.definition.lock().await;
-        if let (Some(saved_manifest), Some(def)) =
-            (&tune.constant_manifest, def_guard.as_ref())
-        {
+        if let (Some(saved_manifest), Some(def)) = (&tune.constant_manifest, def_guard.as_ref()) {
             let migration_report = compare_manifests(saved_manifest, def);
 
             // Only report if there are actual changes
@@ -7106,7 +7175,9 @@ async fn load_tune(
                 *state.migration_report.lock().await = None;
             }
         } else if tune.constant_manifest.is_some() {
-            eprintln!("[DEBUG] load_tune: Tune has manifest but no INI loaded - migration check deferred");
+            eprintln!(
+                "[DEBUG] load_tune: Tune has manifest but no INI loaded - migration check deferred"
+            );
         } else {
             eprintln!("[DEBUG] load_tune: Tune has no manifest (pre-1.1 format) - migration check skipped");
             // Clear any previous migration report
@@ -8151,7 +8222,7 @@ struct CompositeLogResult {
 }
 
 /// Start the tooth logger and capture data
-/// 
+///
 /// ECU Protocol Commands:
 /// - Speeduino: 'H' to get tooth log (blocking), 'T' for timing pattern, 'h' for tooth times
 /// - rusEFI: 'l\x01' start tooth logger, 'l\x02' get data, 'l\x03' stop
@@ -8163,80 +8234,83 @@ async fn start_tooth_logger(
 ) -> Result<ToothLogResult, String> {
     let mut conn_guard = state.connection.lock().await;
     let def_guard = state.definition.lock().await;
-    
+
     let conn = conn_guard.as_mut().ok_or("Not connected to ECU")?;
     let def = def_guard.as_ref().ok_or("Definition not loaded")?;
-    
+
     // Detect ECU type from signature
     let signature = conn.signature().unwrap_or_default().to_lowercase();
-    
+
     let teeth: Vec<ToothLogEntry>;
-    
+
     if signature.contains("speeduino") || signature.contains("202") {
         // Speeduino protocol: Send 'H' command for tooth log
         // Response: 2-byte count + (count * 4-byte entries)
         // Each entry: 2 bytes tooth number + 2 bytes time (in 0.5us units)
         eprintln!("[Tooth Logger] Starting Speeduino tooth capture...");
-        
+
         // Send the tooth log request command
         conn.send_raw_bytes(b"H")
             .map_err(|e| format!("Failed to send tooth log command: {}", e))?;
-        
+
         // Wait for ECU to capture data
         std::thread::sleep(std::time::Duration::from_millis(500));
-        
+
         // Read response (ECU captures ~512 teeth then returns)
         // For now, return simulated data as placeholder until full protocol implementation
-        teeth = (0..36).map(|i| ToothLogEntry {
-            tooth_number: i,
-            tooth_time_us: 3000 + (i as u32 * 10), // ~3ms per tooth at idle
-            crank_angle: Some(i as f32 * 10.0),
-        }).collect();
-        
+        teeth = (0..36)
+            .map(|i| ToothLogEntry {
+                tooth_number: i,
+                tooth_time_us: 3000 + (i as u32 * 10), // ~3ms per tooth at idle
+                crank_angle: Some(i as f32 * 10.0),
+            })
+            .collect();
+
         eprintln!("[Tooth Logger] Captured {} teeth", teeth.len());
-        
     } else if signature.contains("rusefi") || signature.contains("fome") {
         // rusEFI protocol: Binary commands
         // 'l\x01' = start tooth logger
-        // 'l\x02' = get tooth data  
+        // 'l\x02' = get tooth data
         // 'l\x03' = stop tooth logger
         eprintln!("[Tooth Logger] Starting rusEFI tooth capture...");
-        
+
         // Start logger
         conn.send_raw_bytes(&[b'l', 0x01])
             .map_err(|e| format!("Failed to start tooth logger: {}", e))?;
-        
+
         // Wait for capture
         std::thread::sleep(std::time::Duration::from_millis(500));
-        
+
         // Get data
         conn.send_raw_bytes(&[b'l', 0x02])
             .map_err(|e| format!("Failed to get tooth data: {}", e))?;
-        
+
         // Stop logger
         conn.send_raw_bytes(&[b'l', 0x03])
             .map_err(|e| format!("Failed to stop tooth logger: {}", e))?;
-        
+
         // For now, return simulated data
-        teeth = (0..60).map(|i| ToothLogEntry {
-            tooth_number: i,
-            tooth_time_us: 1600 + (i as u32 * 5),
-            crank_angle: Some(i as f32 * 6.0),
-        }).collect();
-        
+        teeth = (0..60)
+            .map(|i| ToothLogEntry {
+                tooth_number: i,
+                tooth_time_us: 1600 + (i as u32 * 5),
+                crank_angle: Some(i as f32 * 6.0),
+            })
+            .collect();
     } else if signature.contains("ms2") || signature.contains("ms3") || signature.contains("mega") {
         // Megasquirt protocol: Page fetch
         eprintln!("[Tooth Logger] Starting Megasquirt tooth capture...");
-        
+
         // MS2/MS3 uses page 0xf0 for tooth logger data
         // Would need to fetch page and parse tooth timing data
-        
-        teeth = (0..36).map(|i| ToothLogEntry {
-            tooth_number: i,
-            tooth_time_us: 2800 + (i as u32 * 8),
-            crank_angle: Some(i as f32 * 10.0),
-        }).collect();
-        
+
+        teeth = (0..36)
+            .map(|i| ToothLogEntry {
+                tooth_number: i,
+                tooth_time_us: 2800 + (i as u32 * 8),
+                crank_angle: Some(i as f32 * 10.0),
+            })
+            .collect();
     } else {
         // Unknown ECU - return placeholder indicating feature not available
         return Err(format!(
@@ -8244,23 +8318,27 @@ async fn start_tooth_logger(
             signature
         ));
     }
-    
+
     // Calculate RPM from tooth times (if we have enough data)
     let detected_rpm = if teeth.len() >= 2 {
         let total_time: u32 = teeth.iter().map(|t| t.tooth_time_us).sum();
         let avg_tooth_time_us = total_time as f32 / teeth.len() as f32;
         // Assuming standard trigger wheel (36-1 teeth = 35 actual teeth per rev)
-        let teeth_per_rev = if teeth.len() > 30 { 36 } else { teeth.len() as u16 };
+        let teeth_per_rev = if teeth.len() > 30 {
+            36
+        } else {
+            teeth.len() as u16
+        };
         let rev_time_us = avg_tooth_time_us * teeth_per_rev as f32;
         let rpm = 60_000_000.0 / rev_time_us;
         Some(rpm)
     } else {
         None
     };
-    
+
     // Emit event to frontend
     let _ = app.emit("tooth_logger:data", &teeth);
-    
+
     Ok(ToothLogResult {
         teeth,
         capture_time_ms: 500,
@@ -8275,14 +8353,12 @@ async fn start_tooth_logger(
 ///
 /// Returns: Nothing on success
 #[tauri::command]
-async fn stop_tooth_logger(
-    state: tauri::State<'_, AppState>,
-) -> Result<(), String> {
+async fn stop_tooth_logger(state: tauri::State<'_, AppState>) -> Result<(), String> {
     let mut conn_guard = state.connection.lock().await;
-    
+
     if let Some(conn) = conn_guard.as_mut() {
         let signature = conn.signature().unwrap_or_default().to_lowercase();
-        
+
         if signature.contains("rusefi") || signature.contains("fome") {
             // rusEFI: Send stop command
             conn.send_raw_bytes(&[b'l', 0x03])
@@ -8290,7 +8366,7 @@ async fn stop_tooth_logger(
         }
         // Speeduino and MS don't need explicit stop
     }
-    
+
     Ok(())
 }
 
@@ -8302,82 +8378,85 @@ async fn start_composite_logger(
 ) -> Result<CompositeLogResult, String> {
     let mut conn_guard = state.connection.lock().await;
     let def_guard = state.definition.lock().await;
-    
+
     let conn = conn_guard.as_mut().ok_or("Not connected to ECU")?;
     let def = def_guard.as_ref().ok_or("Definition not loaded")?;
-    
+
     let signature = conn.signature().unwrap_or_default().to_lowercase();
-    
+
     let entries: Vec<CompositeLogEntry>;
-    
+
     if signature.contains("speeduino") || signature.contains("202") {
         // Speeduino composite logger commands:
         // 'J' = Start composite logger
         // 'O' = Get composite data
         // 'X' = Stop composite logger (or just timeout)
         eprintln!("[Composite Logger] Starting Speeduino composite capture...");
-        
+
         conn.send_raw_bytes(b"J")
             .map_err(|e| format!("Failed to start composite logger: {}", e))?;
-        
+
         std::thread::sleep(std::time::Duration::from_millis(500));
-        
+
         conn.send_raw_bytes(b"O")
             .map_err(|e| format!("Failed to get composite data: {}", e))?;
-        
+
         // Simulated data for now
-        entries = (0..1000).map(|i| CompositeLogEntry {
-            time_us: i * 100, // 100us sample rate = 10kHz
-            primary: (i / 10) % 2 == 0,
-            secondary: (i / 100) % 2 == 0,
-            sync: i >= 100, // Sync after first cam pulse
-            voltage: None,
-        }).collect();
-        
+        entries = (0..1000)
+            .map(|i| CompositeLogEntry {
+                time_us: i * 100, // 100us sample rate = 10kHz
+                primary: (i / 10) % 2 == 0,
+                secondary: (i / 100) % 2 == 0,
+                sync: i >= 100, // Sync after first cam pulse
+                voltage: None,
+            })
+            .collect();
     } else if signature.contains("rusefi") || signature.contains("fome") {
         // rusEFI: 'l\x04' start, 'l\x05' get, 'l\x06' stop
         eprintln!("[Composite Logger] Starting rusEFI composite capture...");
-        
+
         conn.send_raw_bytes(&[b'l', 0x04])
             .map_err(|e| format!("Failed to start composite logger: {}", e))?;
-        
+
         std::thread::sleep(std::time::Duration::from_millis(500));
-        
+
         conn.send_raw_bytes(&[b'l', 0x05])
             .map_err(|e| format!("Failed to get composite data: {}", e))?;
-        
+
         conn.send_raw_bytes(&[b'l', 0x06])
             .map_err(|e| format!("Failed to stop composite logger: {}", e))?;
-        
-        entries = (0..2000).map(|i| CompositeLogEntry {
-            time_us: i * 50, // 50us sample rate = 20kHz
-            primary: (i / 8) % 2 == 0,
-            secondary: (i / 80) % 2 == 0,
-            sync: i >= 80,
-            voltage: Some(2.5 + if (i / 8) % 2 == 0 { 2.0 } else { 0.0 }),
-        }).collect();
-        
+
+        entries = (0..2000)
+            .map(|i| CompositeLogEntry {
+                time_us: i * 50, // 50us sample rate = 20kHz
+                primary: (i / 8) % 2 == 0,
+                secondary: (i / 80) % 2 == 0,
+                sync: i >= 80,
+                voltage: Some(2.5 + if (i / 8) % 2 == 0 { 2.0 } else { 0.0 }),
+            })
+            .collect();
     } else if signature.contains("ms2") || signature.contains("ms3") || signature.contains("mega") {
         // Megasquirt: Page 0xf2-0xf3 for composite
         eprintln!("[Composite Logger] Starting Megasquirt composite capture...");
-        
-        entries = (0..500).map(|i| CompositeLogEntry {
-            time_us: i * 200,
-            primary: (i / 15) % 2 == 0,
-            secondary: (i / 150) % 2 == 0,
-            sync: i >= 30,
-            voltage: None,
-        }).collect();
-        
+
+        entries = (0..500)
+            .map(|i| CompositeLogEntry {
+                time_us: i * 200,
+                primary: (i / 15) % 2 == 0,
+                secondary: (i / 150) % 2 == 0,
+                sync: i >= 30,
+                voltage: None,
+            })
+            .collect();
     } else {
         return Err(format!(
             "Composite logger not supported for this ECU type (signature: {})",
             signature
         ));
     }
-    
+
     let _ = app.emit("composite_logger:data", &entries);
-    
+
     Ok(CompositeLogResult {
         entries,
         capture_time_ms: 500,
@@ -8391,20 +8470,18 @@ async fn start_composite_logger(
 ///
 /// Returns: Nothing on success
 #[tauri::command]
-async fn stop_composite_logger(
-    state: tauri::State<'_, AppState>,
-) -> Result<(), String> {
+async fn stop_composite_logger(state: tauri::State<'_, AppState>) -> Result<(), String> {
     let mut conn_guard = state.connection.lock().await;
-    
+
     if let Some(conn) = conn_guard.as_mut() {
         let signature = conn.signature().unwrap_or_default().to_lowercase();
-        
+
         if signature.contains("rusefi") || signature.contains("fome") {
             conn.send_raw_bytes(&[b'l', 0x06])
                 .map_err(|e| format!("Failed to stop composite logger: {}", e))?;
         }
     }
-    
+
     Ok(())
 }
 
@@ -8505,7 +8582,11 @@ async fn compare_tables(
                 let percent_diff = if val_a.abs() > 0.0001 {
                     (diff / val_a) * 100.0
                 } else {
-                    if diff.abs() > 0.0001 { 100.0 } else { 0.0 }
+                    if diff.abs() > 0.0001 {
+                        100.0
+                    } else {
+                        0.0
+                    }
                 };
 
                 differences.push(TableCellDiff {
@@ -8638,9 +8719,7 @@ fn read_raw_value(bytes: &[u8], data_type: &DataType) -> Result<f64, String> {
 
 /// Reset all tune values to their INI-defined defaults
 #[tauri::command]
-async fn reset_tune_to_defaults(
-    state: tauri::State<'_, AppState>,
-) -> Result<u32, String> {
+async fn reset_tune_to_defaults(state: tauri::State<'_, AppState>) -> Result<u32, String> {
     let def_guard = state.definition.lock().await;
     let mut cache_guard = state.tune_cache.lock().await;
     let mut tune_guard = state.current_tune.lock().await;
@@ -8669,7 +8748,8 @@ async fn reset_tune_to_defaults(
         // Update PC variable locally
         if constant.is_pc_variable {
             cache.local_values.insert(name.clone(), default_value);
-            tune.constants.insert(name.clone(), TuneValue::Scalar(default_value));
+            tune.constants
+                .insert(name.clone(), TuneValue::Scalar(default_value));
             reset_count += 1;
             continue;
         }
@@ -8677,9 +8757,10 @@ async fn reset_tune_to_defaults(
         // Update ECU constant in cache and tune file
         // Convert display value to raw value for storage
         let raw_value = constant.display_to_raw(default_value);
-        
+
         // Update tune file
-        tune.constants.insert(name.clone(), TuneValue::Scalar(default_value));
+        tune.constants
+            .insert(name.clone(), TuneValue::Scalar(default_value));
 
         // Encode value to bytes and write to cache
         let bytes = encode_constant_value(raw_value, &constant.data_type);
@@ -8701,9 +8782,11 @@ async fn export_tune_as_csv(
     let tune_guard = state.current_tune.lock().await;
 
     let def = def_guard.as_ref().ok_or("Definition not loaded")?;
-    
+
     let mut csv_lines = Vec::new();
-    csv_lines.push("Name,Page,Offset,Value,Units,Min,Max,Scale,Translate,DataType,IsPcVariable".to_string());
+    csv_lines.push(
+        "Name,Page,Offset,Value,Units,Min,Max,Scale,Translate,DataType,IsPcVariable".to_string(),
+    );
 
     let mut export_count = 0u32;
 
@@ -8735,11 +8818,19 @@ async fn export_tune_as_csv(
             if let Some(tune_val) = tune.constants.get(name) {
                 match tune_val {
                     TuneValue::Scalar(v) => *v,
-                    TuneValue::Bool(b) => if *b { 1.0 } else { 0.0 },
+                    TuneValue::Bool(b) => {
+                        if *b {
+                            1.0
+                        } else {
+                            0.0
+                        }
+                    }
                     TuneValue::String(s) => {
                         // Try to parse as number or look up in bit_options
                         s.parse::<f64>().unwrap_or_else(|_| {
-                            constant.bit_options.iter()
+                            constant
+                                .bit_options
+                                .iter()
                                 .position(|opt| opt == s)
                                 .map(|i| i as f64)
                                 .unwrap_or(0.0)
@@ -8749,11 +8840,17 @@ async fn export_tune_as_csv(
                 }
             } else {
                 // Not in tune file - use default
-                def.default_values.get(name).copied().unwrap_or(constant.min)
+                def.default_values
+                    .get(name)
+                    .copied()
+                    .unwrap_or(constant.min)
             }
         } else {
             // No tune loaded - use default
-            def.default_values.get(name).copied().unwrap_or(constant.min)
+            def.default_values
+                .get(name)
+                .copied()
+                .unwrap_or(constant.min)
         };
 
         // Escape name and units for CSV (in case they contain commas)
@@ -8789,8 +8886,7 @@ async fn export_tune_as_csv(
 
     // Write to file
     let csv_content = csv_lines.join("\n");
-    std::fs::write(&path, csv_content)
-        .map_err(|e| format!("Failed to write CSV file: {}", e))?;
+    std::fs::write(&path, csv_content).map_err(|e| format!("Failed to write CSV file: {}", e))?;
 
     Ok(export_count)
 }
@@ -8810,8 +8906,8 @@ async fn import_tune_from_csv(
     let tune = tune_guard.as_mut().ok_or("No tune loaded")?;
 
     // Read CSV file
-    let csv_content = std::fs::read_to_string(&path)
-        .map_err(|e| format!("Failed to read CSV file: {}", e))?;
+    let csv_content =
+        std::fs::read_to_string(&path).map_err(|e| format!("Failed to read CSV file: {}", e))?;
 
     let mut import_count = 0u32;
     let mut errors = Vec::new();
@@ -8821,7 +8917,7 @@ async fn import_tune_from_csv(
         if line_num == 0 && line.starts_with("Name,") {
             continue;
         }
-        
+
         // Skip empty lines
         if line.trim().is_empty() {
             continue;
@@ -8838,7 +8934,11 @@ async fn import_tune_from_csv(
         let value: f64 = match fields[3].trim().parse() {
             Ok(v) => v,
             Err(_) => {
-                errors.push(format!("Line {}: invalid value '{}'", line_num + 1, fields[3]));
+                errors.push(format!(
+                    "Line {}: invalid value '{}'",
+                    line_num + 1,
+                    fields[3]
+                ));
                 continue;
             }
         };
@@ -8856,22 +8956,28 @@ async fn import_tune_from_csv(
         let clamped_value = value.clamp(constant.min, constant.max);
         if (clamped_value - value).abs() > 0.0001 {
             errors.push(format!(
-                "Line {}: value {} clamped to {} (range {}-{})", 
-                line_num + 1, value, clamped_value, constant.min, constant.max
+                "Line {}: value {} clamped to {} (range {}-{})",
+                line_num + 1,
+                value,
+                clamped_value,
+                constant.min,
+                constant.max
             ));
         }
 
         // Update PC variable locally
         if constant.is_pc_variable {
             cache.local_values.insert(name.to_string(), clamped_value);
-            tune.constants.insert(name.to_string(), TuneValue::Scalar(clamped_value));
+            tune.constants
+                .insert(name.to_string(), TuneValue::Scalar(clamped_value));
             import_count += 1;
             continue;
         }
 
         // Update ECU constant
         let raw_value = constant.display_to_raw(clamped_value);
-        tune.constants.insert(name.to_string(), TuneValue::Scalar(clamped_value));
+        tune.constants
+            .insert(name.to_string(), TuneValue::Scalar(clamped_value));
 
         // Encode value to bytes and write to cache
         let bytes = encode_constant_value(raw_value, &constant.data_type);
@@ -8899,7 +9005,7 @@ fn parse_csv_line(line: &str) -> Vec<&str> {
     let mut start = 0;
     let mut in_quotes = false;
     let chars: Vec<char> = line.chars().collect();
-    
+
     for (i, &ch) in chars.iter().enumerate() {
         if ch == '"' {
             in_quotes = !in_quotes;
@@ -8908,23 +9014,23 @@ fn parse_csv_line(line: &str) -> Vec<&str> {
             // Strip surrounding quotes if present
             let trimmed = field.trim();
             if trimmed.starts_with('"') && trimmed.ends_with('"') && trimmed.len() >= 2 {
-                fields.push(&trimmed[1..trimmed.len()-1]);
+                fields.push(&trimmed[1..trimmed.len() - 1]);
             } else {
                 fields.push(trimmed);
             }
             start = i + 1;
         }
     }
-    
+
     // Add last field
     let field = &line[start..];
     let trimmed = field.trim();
     if trimmed.starts_with('"') && trimmed.ends_with('"') && trimmed.len() >= 2 {
-        fields.push(&trimmed[1..trimmed.len()-1]);
+        fields.push(&trimmed[1..trimmed.len() - 1]);
     } else {
         fields.push(trimmed);
     }
-    
+
     fields
 }
 
@@ -8949,12 +9055,8 @@ fn encode_constant_value(raw_value: f64, data_type: &DataType) -> Vec<u8> {
             let val = raw_value.clamp(-2147483648.0, 2147483647.0) as i32;
             val.to_be_bytes().to_vec()
         }
-        DataType::F32 => {
-            (raw_value as f32).to_be_bytes().to_vec()
-        }
-        DataType::F64 => {
-            raw_value.to_be_bytes().to_vec()
-        }
+        DataType::F32 => (raw_value as f32).to_be_bytes().to_vec(),
+        DataType::F64 => raw_value.to_be_bytes().to_vec(),
         DataType::Bits | DataType::String => {
             vec![raw_value.clamp(0.0, 255.0) as u8]
         }
@@ -10099,8 +10201,8 @@ async fn preview_tunerstudio_import(path: String) -> Result<TsImportPreview, Str
         return Err("Not a valid TS project: project.properties not found".to_string());
     }
 
-    let project_props =
-        Properties::load(&project_props_path).map_err(|e| format!("Failed to read project: {}", e))?;
+    let project_props = Properties::load(&project_props_path)
+        .map_err(|e| format!("Failed to read project: {}", e))?;
 
     // Extract project name
     let project_name = project_props
@@ -10230,9 +10332,7 @@ impl From<BranchInfo> for BranchInfoResponse {
 
 /// Initialize git repository for current project
 #[tauri::command]
-async fn git_init_project(
-    state: tauri::State<'_, AppState>,
-) -> Result<bool, String> {
+async fn git_init_project(state: tauri::State<'_, AppState>) -> Result<bool, String> {
     let proj_guard = state.current_project.lock().await;
     let project = proj_guard
         .as_ref()
@@ -10250,9 +10350,7 @@ async fn git_init_project(
 
 /// Check if current project has git repository
 #[tauri::command]
-async fn git_has_repo(
-    state: tauri::State<'_, AppState>,
-) -> Result<bool, String> {
+async fn git_has_repo(state: tauri::State<'_, AppState>) -> Result<bool, String> {
     let proj_guard = state.current_project.lock().await;
     let project = proj_guard
         .as_ref()
@@ -10392,10 +10490,7 @@ async fn git_list_branches(
 ///
 /// Returns: Nothing on success
 #[tauri::command]
-async fn git_create_branch(
-    state: tauri::State<'_, AppState>,
-    name: String,
-) -> Result<(), String> {
+async fn git_create_branch(state: tauri::State<'_, AppState>, name: String) -> Result<(), String> {
     let proj_guard = state.current_project.lock().await;
     let project = proj_guard
         .as_ref()
@@ -10446,9 +10541,7 @@ async fn git_switch_branch(
 ///
 /// Returns: Optional branch name string
 #[tauri::command]
-async fn git_current_branch(
-    state: tauri::State<'_, AppState>,
-) -> Result<Option<String>, String> {
+async fn git_current_branch(state: tauri::State<'_, AppState>) -> Result<Option<String>, String> {
     let proj_guard = state.current_project.lock().await;
     let project = proj_guard
         .as_ref()
@@ -10470,9 +10563,7 @@ async fn git_current_branch(
 ///
 /// Returns: True if there are uncommitted changes
 #[tauri::command]
-async fn git_has_changes(
-    state: tauri::State<'_, AppState>,
-) -> Result<bool, String> {
+async fn git_has_changes(state: tauri::State<'_, AppState>) -> Result<bool, String> {
     let proj_guard = state.current_project.lock().await;
     let project = proj_guard
         .as_ref()
@@ -10529,7 +10620,10 @@ impl From<ProjectTemplate> for ProjectTemplateResponse {
 #[tauri::command]
 async fn list_project_templates() -> Result<Vec<ProjectTemplateResponse>, String> {
     let templates = TemplateManager::list_templates();
-    Ok(templates.into_iter().map(ProjectTemplateResponse::from).collect())
+    Ok(templates
+        .into_iter()
+        .map(ProjectTemplateResponse::from)
+        .collect())
 }
 
 /// Create a new project from a template
@@ -10553,13 +10647,19 @@ async fn create_project_from_template(
         // Try to find INI matching template signature
         repo.list()
             .iter()
-            .find(|e| e.signature.contains(&template.ini_signature) || 
-                      e.name.to_lowercase().contains(&template.ecu_type.to_lowercase()))
+            .find(|e| {
+                e.signature.contains(&template.ini_signature)
+                    || e.name
+                        .to_lowercase()
+                        .contains(&template.ecu_type.to_lowercase())
+            })
             .cloned()
-            .ok_or_else(|| format!(
-                "No matching INI found for {}. Please import an INI file for {} first.",
-                template.ini_signature, template.ecu_type
-            ))?
+            .ok_or_else(|| {
+                format!(
+                    "No matching INI found for {}. Please import an INI file for {} first.",
+                    template.ini_signature, template.ecu_type
+                )
+            })?
     };
 
     // Create project directory
@@ -10630,8 +10730,8 @@ async fn create_project_from_template(
         .map_err(|e| format!("Failed to create initial commit: {}", e))?;
 
     // Open the project
-    let project = Project::open(&project_path)
-        .map_err(|e| format!("Failed to open project: {}", e))?;
+    let project =
+        Project::open(&project_path).map_err(|e| format!("Failed to open project: {}", e))?;
 
     let response = CurrentProjectInfo {
         name: project.config.name.clone(),
@@ -11151,14 +11251,14 @@ async fn update_heatmap_custom_stops(
     stops: Vec<String>,
 ) -> Result<(), String> {
     let mut settings = load_settings(&app);
-    
+
     match context.as_str() {
         "value" => settings.heatmap_value_custom = stops,
         "change" => settings.heatmap_change_custom = stops,
         "coverage" => settings.heatmap_coverage_custom = stops,
         _ => return Err(format!("Unknown heatmap context: {}", context)),
     }
-    
+
     save_settings(&app, &settings);
     Ok(())
 }
@@ -11204,17 +11304,14 @@ fn find_java_binary() -> Result<PathBuf, String> {
             return Ok(java_path);
         }
     }
-    
+
     // 2. Check PATH using which/where command
     #[cfg(target_os = "windows")]
     let which_cmd = "where";
     #[cfg(not(target_os = "windows"))]
     let which_cmd = "which";
-    
-    if let Ok(output) = std::process::Command::new(which_cmd)
-        .arg("java")
-        .output()
-    {
+
+    if let Ok(output) = std::process::Command::new(which_cmd).arg("java").output() {
         if output.status.success() {
             let path_str = String::from_utf8_lossy(&output.stdout);
             let path = PathBuf::from(path_str.trim());
@@ -11223,7 +11320,7 @@ fn find_java_binary() -> Result<PathBuf, String> {
             }
         }
     }
-    
+
     // 3. Check common installation locations
     let common_locations = if cfg!(target_os = "windows") {
         vec![
@@ -11245,14 +11342,14 @@ fn find_java_binary() -> Result<PathBuf, String> {
             "/usr/lib/jvm/java-11-openjdk/bin/java",
         ]
     };
-    
+
     for location in common_locations {
         let path = PathBuf::from(location);
         if path.exists() {
             return Ok(path);
         }
     }
-    
+
     Err("Java not found. Please install JRE 11 or later and ensure JAVA_HOME is set or java is in PATH.".to_string())
 }
 
@@ -11265,7 +11362,7 @@ fn get_plugin_host_jar_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     if dev_path.exists() {
         return Ok(dev_path);
     }
-    
+
     // In production, use the bundled resources
     let resource_path = app
         .path()
@@ -11273,11 +11370,11 @@ fn get_plugin_host_jar_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
         .map_err(|e| format!("Failed to get resource dir: {}", e))?
         .join("resources")
         .join("plugin-host.jar");
-    
+
     if resource_path.exists() {
         return Ok(resource_path);
     }
-    
+
     Err(format!(
         "plugin-host.jar not found. Checked:\n  {}\n  {}",
         dev_path.display(),
@@ -11291,36 +11388,37 @@ async fn ensure_plugin_manager_initialized(
     app: &tauri::AppHandle,
 ) -> Result<std::sync::Arc<PluginManager>, String> {
     let mut pm_guard = state.plugin_manager.lock().await;
-    
+
     // Already initialized?
     if let Some(ref pm) = *pm_guard {
         return Ok(pm.clone());
     }
-    
+
     // Find Java binary
     let _java_path = find_java_binary()?;
-    
+
     // Get plugin-host.jar path
     let jar_path = get_plugin_host_jar_path(app)?;
-    
+
     // Create controller bridge with shared references to definition and tune
     // For now, create with empty Arc<RwLock> - we'll update them when ECU connects
     let definition = std::sync::Arc::new(std::sync::RwLock::new(None));
     let tune = std::sync::Arc::new(std::sync::RwLock::new(None));
     let bridge = std::sync::Arc::new(ControllerBridge::new(definition, tune));
-    
+
     // Store bridge for realtime data updates
     *state.controller_bridge.lock().await = Some(bridge.clone());
-    
+
     // Create plugin manager
     let pm = std::sync::Arc::new(PluginManager::new(jar_path, bridge));
-    
+
     // Start the JVM host
-    pm.start().map_err(|e| format!("Failed to start plugin host: {}", e))?;
-    
+    pm.start()
+        .map_err(|e| format!("Failed to start plugin host: {}", e))?;
+
     // Store in state
     *pm_guard = Some(pm.clone());
-    
+
     Ok(pm)
 }
 
@@ -11333,7 +11431,7 @@ async fn ensure_plugin_manager_initialized(
 #[tauri::command]
 fn check_jre() -> Result<String, String> {
     find_java_binary()?;
-    
+
     // Get version info
     let output = std::process::Command::new("java")
         .arg("-version")
@@ -11369,17 +11467,17 @@ async fn load_plugin(
     if !path.exists() {
         return Err(format!("JAR file not found: {}", jar_path));
     }
-    
+
     if path.extension().map(|e| e.to_ascii_lowercase()) != Some("jar".into()) {
         return Err("File must be a JAR file".to_string());
     }
-    
+
     // Ensure plugin manager is initialized (starts JVM if needed)
     let pm = ensure_plugin_manager_initialized(&state, &app).await?;
-    
+
     // Load the plugin via JVM host
     let info = pm.load_plugin(path).await?;
-    
+
     Ok(info)
 }
 
@@ -11390,15 +11488,12 @@ async fn load_plugin(
 ///
 /// Returns: Nothing on success
 #[tauri::command]
-async fn unload_plugin(
-    plugin_id: String,
-    state: tauri::State<'_, AppState>,
-) -> Result<(), String> {
+async fn unload_plugin(plugin_id: String, state: tauri::State<'_, AppState>) -> Result<(), String> {
     let pm_guard = state.plugin_manager.lock().await;
     let pm = pm_guard.as_ref().ok_or("Plugin manager not initialized")?;
-    
+
     pm.unload_plugin(&plugin_id).await?;
-    
+
     Ok(())
 }
 
@@ -11406,11 +11501,9 @@ async fn unload_plugin(
 ///
 /// Returns: Vector of PluginInfo for each loaded plugin
 #[tauri::command]
-async fn list_plugins(
-    state: tauri::State<'_, AppState>,
-) -> Result<Vec<PluginInfo>, String> {
+async fn list_plugins(state: tauri::State<'_, AppState>) -> Result<Vec<PluginInfo>, String> {
     let pm_guard = state.plugin_manager.lock().await;
-    
+
     match pm_guard.as_ref() {
         Some(pm) => Ok(pm.list_plugins()),
         None => Ok(vec![]), // No plugins loaded yet
@@ -11433,7 +11526,7 @@ async fn get_plugin_ui(
 ) -> Result<Option<SwingComponent>, String> {
     let pm_guard = state.plugin_manager.lock().await;
     let pm = pm_guard.as_ref().ok_or("Plugin manager not initialized")?;
-    
+
     Ok(pm.get_plugin_ui(&plugin_id))
 }
 
@@ -11454,9 +11547,9 @@ async fn send_plugin_event(
 ) -> Result<(), String> {
     let pm_guard = state.plugin_manager.lock().await;
     let pm = pm_guard.as_ref().ok_or("Plugin manager not initialized")?;
-    
+
     pm.send_plugin_event(&plugin_id, event).await?;
-    
+
     Ok(())
 }
 

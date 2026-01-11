@@ -276,7 +276,7 @@ mod tests {
         let def = Arc::new(RwLock::new(None));
         let tune = Arc::new(RwLock::new(None));
         let bridge = ControllerBridge::new(def, tune);
-        
+
         assert!(bridge.get_output_channel_names().is_empty());
         assert!(bridge.get_parameter_names().is_empty());
     }
@@ -286,13 +286,13 @@ mod tests {
         let def = Arc::new(RwLock::new(None));
         let tune = Arc::new(RwLock::new(None));
         let bridge = ControllerBridge::new(def, tune);
-        
+
         let mut data = HashMap::new();
         data.insert("rpm".to_string(), 3500.0);
         data.insert("afr".to_string(), 14.7);
-        
+
         bridge.update_realtime(data);
-        
+
         let cache = bridge.realtime_cache.read().unwrap();
         assert_eq!(cache.get("rpm"), Some(&3500.0));
         assert_eq!(cache.get("afr"), Some(&14.7));
@@ -303,16 +303,16 @@ mod tests {
         let def = Arc::new(RwLock::new(None));
         let tune = Arc::new(RwLock::new(None));
         let bridge = ControllerBridge::new(def, tune);
-        
+
         bridge.subscribe_output("rpm", "plugin1");
         bridge.subscribe_output("rpm", "plugin2");
         bridge.subscribe_output("afr", "plugin1");
-        
+
         let rpm_subs = bridge.get_output_subscribers("rpm");
         assert_eq!(rpm_subs.len(), 2);
-        
+
         bridge.unsubscribe_output("plugin1");
-        
+
         let rpm_subs = bridge.get_output_subscribers("rpm");
         assert_eq!(rpm_subs.len(), 1);
         assert_eq!(rpm_subs[0], "plugin2");

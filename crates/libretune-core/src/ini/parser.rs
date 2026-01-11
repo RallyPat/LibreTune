@@ -13,7 +13,7 @@ use super::{
     tables::{CurveDefinition, TableDefinition},
     types::{
         AnalysisFilter, CommandButtonCloseAction, CommandPart, ControllerCommand, DatalogEntry,
-        DatalogView, DialogComponent, DialogDefinition, FilterOperator, FTPBrowserConfig,
+        DatalogView, DialogComponent, DialogDefinition, FTPBrowserConfig, FilterOperator,
         FrontPageConfig, FrontPageIndicator, GammaEConfig, HelpTopic, IndicatorDefinition,
         IndicatorPanel, KeyAction, LoggerDefinition, MaintainConstantValue, Menu, MenuItem,
         PortEditorConfig, ReferenceTable, SettingGroup, SettingOption, VeAnalyzeConfig,
@@ -58,7 +58,7 @@ impl IncludeContext {
     fn resolve_include(&self, include_path: &str) -> Option<PathBuf> {
         let include_path = include_path.trim().trim_matches('"');
         let path = Path::new(include_path);
-        
+
         if path.is_absolute() {
             Some(path.to_path_buf())
         } else if let Some(base) = &self.base_dir {
@@ -79,10 +79,10 @@ pub fn parse_ini(content: &str) -> Result<EcuDefinition, IniError> {
 pub fn parse_ini_from_path(path: &Path) -> Result<EcuDefinition, IniError> {
     let content = read_ini_file(path)?;
     let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
-    
+
     let mut ctx = IncludeContext::new(Some(path));
     ctx.included_files.insert(canonical);
-    
+
     parse_ini_internal(&content, &mut ctx)
 }
 
@@ -92,8 +92,7 @@ fn read_ini_file(path: &Path) -> Result<String, IniError> {
         Ok(content) => Ok(content),
         Err(e) => {
             if e.kind() == std::io::ErrorKind::InvalidData {
-                let bytes = std::fs::read(path)
-                    .map_err(|e| IniError::IoError(e.to_string()))?;
+                let bytes = std::fs::read(path).map_err(|e| IniError::IoError(e.to_string()))?;
                 Ok(String::from_utf8_lossy(&bytes).into_owned())
             } else if e.kind() == std::io::ErrorKind::NotFound {
                 Err(IniError::IncludeNotFound(path.display().to_string()))
@@ -209,31 +208,32 @@ fn parse_ini_internal(content: &str, ctx: &mut IncludeContext) -> Result<EcuDefi
                     if ctx.depth >= MAX_INCLUDE_DEPTH {
                         return Err(IniError::IncludeDepthExceeded(MAX_INCLUDE_DEPTH));
                     }
-                    
+
                     // Get canonical path for circular reference detection
-                    let canonical = resolved_path.canonicalize()
+                    let canonical = resolved_path
+                        .canonicalize()
                         .unwrap_or_else(|_| resolved_path.clone());
-                    
+
                     // Check for circular includes
                     if ctx.included_files.contains(&canonical) {
                         return Err(IniError::CircularInclude(
-                            resolved_path.display().to_string()
+                            resolved_path.display().to_string(),
                         ));
                     }
-                    
+
                     // Read and parse the included file
                     let included_content = read_ini_file(&resolved_path)?;
-                    
+
                     // Save current base_dir and update for nested includes
                     let prev_base = ctx.base_dir.clone();
                     ctx.base_dir = resolved_path.parent().map(|p| p.to_path_buf());
                     ctx.included_files.insert(canonical.clone());
                     ctx.depth += 1;
-                    
+
                     // Parse included content and merge into current definition
                     let included_def = parse_ini_internal(&included_content, ctx)?;
                     merge_definitions(&mut definition, included_def);
-                    
+
                     // Restore context
                     ctx.base_dir = prev_base;
                     ctx.depth -= 1;
@@ -348,73 +348,75 @@ fn parse_ini_internal(content: &str, ctx: &mut IncludeContext) -> Result<EcuDefi
 fn merge_definitions(target: &mut EcuDefinition, source: EcuDefinition) {
     // Merge defines (source overrides)
     target.defines.extend(source.defines);
-    
+
     // Merge constants (source overrides)
     target.constants.extend(source.constants);
-    
+
     // Merge output channels
     target.output_channels.extend(source.output_channels);
-    
+
     // Merge tables
     target.tables.extend(source.tables);
     target.table_map_to_name.extend(source.table_map_to_name);
-    
+
     // Merge curves
     target.curves.extend(source.curves);
-    
+
     // Merge gauges
     target.gauges.extend(source.gauges);
-    
+
     // Merge setting groups
     target.setting_groups.extend(source.setting_groups);
-    
+
     // Merge dialogs
     target.dialogs.extend(source.dialogs);
-    
+
     // Merge menus (append)
     target.menus.extend(source.menus);
-    
+
     // Merge help topics
     target.help_topics.extend(source.help_topics);
-    
+
     // Merge datalog entries (append)
     target.datalog_entries.extend(source.datalog_entries);
-    
+
     // Merge PC variables
     target.pc_variables.extend(source.pc_variables);
-    
+
     // Merge default values
     target.default_values.extend(source.default_values);
-    
+
     // Merge indicator panels
     target.indicator_panels.extend(source.indicator_panels);
-    
+
     // Merge controller commands
-    target.controller_commands.extend(source.controller_commands);
-    
+    target
+        .controller_commands
+        .extend(source.controller_commands);
+
     // Merge logger definitions
     target.logger_definitions.extend(source.logger_definitions);
-    
+
     // Merge port editors
     target.port_editors.extend(source.port_editors);
-    
+
     // Merge reference tables
     target.reference_tables.extend(source.reference_tables);
-    
+
     // Merge FTP browsers
     target.ftp_browsers.extend(source.ftp_browsers);
-    
+
     // Merge datalog views
     target.datalog_views.extend(source.datalog_views);
-    
+
     // Merge key actions (append)
     target.key_actions.extend(source.key_actions);
-    
+
     // Take frontpage from source if target doesn't have one
     if target.frontpage.is_none() && source.frontpage.is_some() {
         target.frontpage = source.frontpage;
     }
-    
+
     // For scalar values, only take from source if they appear to be set
     // (non-default values override)
     if !source.signature.is_empty() {
@@ -432,7 +434,7 @@ fn merge_definitions(target: &mut EcuDefinition, source: EcuDefinition) {
     if source.n_pages > 0 {
         target.n_pages = source.n_pages;
     }
-    
+
     // Merge analysis configs (source overrides target)
     if source.ve_analyze.is_some() {
         target.ve_analyze = source.ve_analyze;
@@ -443,10 +445,14 @@ fn merge_definitions(target: &mut EcuDefinition, source: EcuDefinition) {
     if source.gamma_e.is_some() {
         target.gamma_e = source.gamma_e;
     }
-    
+
     // Merge ConstantsExtensions (append)
-    target.maintain_constant_values.extend(source.maintain_constant_values);
-    target.requires_power_cycle.extend(source.requires_power_cycle);
+    target
+        .maintain_constant_values
+        .extend(source.maintain_constant_values);
+    target
+        .requires_power_cycle
+        .extend(source.requires_power_cycle);
 }
 
 /// Strip comments from a line (everything after ';')
@@ -608,10 +614,7 @@ fn parse_megatune(def: &mut EcuDefinition, key: &str, value: &str) {
 
 /// Parse [TunerStudio] section entries (INI section name - keep as-is)
 fn parse_tunerstudio(def: &mut EcuDefinition, key: &str, value: &str) {
-    eprintln!(
-        "[DEBUG] parse_ts: key = {:?}, value = {:?}",
-        key, value
-    );
+    eprintln!("[DEBUG] parse_ts: key = {:?}, value = {:?}", key, value);
     match key.to_lowercase().as_str() {
         "inispecversion" => {
             def.ini_spec_version = value.trim_matches('"').to_string();
@@ -1993,31 +1996,36 @@ fn parse_user_defined_entry(
                     if parts.len() >= 2 {
                         let label = parts[0].trim_matches('"').to_string();
                         let command = parts[1].trim().to_string();
-                        
+
                         // Parse optional condition and close behavior
                         let mut enabled_condition = None;
                         let mut on_close_behavior = None;
-                        
+
                         for part in parts.iter().skip(2) {
                             let trimmed = part.trim();
                             if trimmed.starts_with('{') && trimmed.ends_with('}') {
-                                enabled_condition = Some(trimmed.trim_matches(|c| c == '{' || c == '}').to_string());
+                                enabled_condition = Some(
+                                    trimmed.trim_matches(|c| c == '{' || c == '}').to_string(),
+                                );
                             } else {
                                 match trimmed.to_lowercase().as_str() {
                                     "clickoncloseifenabled" => {
-                                        on_close_behavior = Some(CommandButtonCloseAction::ClickOnCloseIfEnabled);
+                                        on_close_behavior =
+                                            Some(CommandButtonCloseAction::ClickOnCloseIfEnabled);
                                     }
                                     "clickoncloseifdisabled" => {
-                                        on_close_behavior = Some(CommandButtonCloseAction::ClickOnCloseIfDisabled);
+                                        on_close_behavior =
+                                            Some(CommandButtonCloseAction::ClickOnCloseIfDisabled);
                                     }
                                     "clickonclose" => {
-                                        on_close_behavior = Some(CommandButtonCloseAction::ClickOnClose);
+                                        on_close_behavior =
+                                            Some(CommandButtonCloseAction::ClickOnClose);
                                     }
                                     _ => {}
                                 }
                             }
                         }
-                        
+
                         dialog.components.push(DialogComponent::CommandButton {
                             label,
                             command,
@@ -2040,20 +2048,20 @@ fn parse_controller_command_entry(def: &mut EcuDefinition, key: &str, value: &st
     if parts.is_empty() {
         return;
     }
-    
+
     let name = key.to_string();
     let mut command_parts: Vec<CommandPart> = Vec::new();
     let mut enable_condition = None;
-    
+
     for part in &parts {
         let trimmed = part.trim();
-        
+
         // Check for enable condition (in braces)
         if trimmed.starts_with('{') && trimmed.ends_with('}') {
             enable_condition = Some(trimmed.trim_matches(|c| c == '{' || c == '}').to_string());
             continue;
         }
-        
+
         // Check if it's a quoted string (raw bytes) or a command reference
         if trimmed.starts_with('"') && trimmed.ends_with('"') {
             // Raw command string with potential hex escapes
@@ -2064,15 +2072,15 @@ fn parse_controller_command_entry(def: &mut EcuDefinition, key: &str, value: &st
             command_parts.push(CommandPart::Reference(trimmed.to_string()));
         }
     }
-    
+
     // If only one part and no parts parsed yet, it might be the old format "cmd_name = raw_string"
     if command_parts.is_empty() && !parts.is_empty() {
         command_parts.push(CommandPart::Raw(parts[0].trim_matches('"').to_string()));
     }
-    
+
     // Use command name as label (no separate label in new format)
     let label = name.clone();
-    
+
     def.controller_commands.insert(
         name.clone(),
         ControllerCommand {
@@ -2392,7 +2400,7 @@ fn parse_gamma_e_entry(def: &mut EcuDefinition, key: &str, value: &str) {
 /// Or: filter = std_Custom (standard custom filter)
 fn parse_analysis_filter(value: &str) -> Option<AnalysisFilter> {
     let parts = split_ini_line(value);
-    
+
     // Handle standard filters like "std_Custom", "std_DeadLambda"
     if parts.len() == 1 {
         let name = parts[0].trim();
@@ -2408,7 +2416,7 @@ fn parse_analysis_filter(value: &str) -> Option<AnalysisFilter> {
         }
         return None;
     }
-    
+
     // Full filter format: name, "displayName", channel, operator, defaultValue, userAdjustable
     if parts.len() >= 5 {
         let name = parts[0].trim().to_string();
@@ -2421,7 +2429,7 @@ fn parse_analysis_filter(value: &str) -> Option<AnalysisFilter> {
         } else {
             false
         };
-        
+
         return Some(AnalysisFilter {
             name,
             display_name,
@@ -2431,7 +2439,7 @@ fn parse_analysis_filter(value: &str) -> Option<AnalysisFilter> {
             user_adjustable,
         });
     }
-    
+
     None
 }
 
@@ -2442,7 +2450,7 @@ fn parse_analysis_filter(value: &str) -> Option<AnalysisFilter> {
 /// - requiresPowerCycle = name (mark constant as requiring ECU power cycle)
 fn parse_constants_extensions_entry(def: &mut EcuDefinition, key: &str, value: &str) {
     let key_lower = key.to_lowercase();
-    
+
     match key_lower.as_str() {
         "defaultvalue" => {
             // Format: defaultValue = constName, val1 val2 val3 ...
@@ -2467,9 +2475,12 @@ fn parse_constants_extensions_entry(def: &mut EcuDefinition, key: &str, value: &
             // The expression auto-updates the constant value
             if let Some(brace_start) = value.find('{') {
                 if let Some(brace_end) = value.rfind('}') {
-                    let const_name = value[..brace_start].trim_end_matches(',').trim().to_string();
+                    let const_name = value[..brace_start]
+                        .trim_end_matches(',')
+                        .trim()
+                        .to_string();
                     let expression = value[brace_start + 1..brace_end].trim().to_string();
-                    
+
                     def.maintain_constant_values.push(MaintainConstantValue {
                         constant_name: const_name,
                         expression,

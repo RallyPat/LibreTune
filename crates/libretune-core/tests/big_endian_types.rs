@@ -26,26 +26,59 @@ fn test_big_endian_type_detection() {
 "#;
 
     let def = EcuDefinition::from_str(ini_content).expect("Should parse successfully");
-    
+
     // Check global endianness is little (as specified)
     assert_eq!(def.endianness, Endianness::Little);
-    
+
     // Normal types should have no override
-    let normal_u16 = def.constants.get("normalU16").expect("normalU16 should exist");
-    assert!(normal_u16.endianness_override.is_none(), "normalU16 should use global endianness");
-    
-    let normal_s16 = def.constants.get("normalS16").expect("normalS16 should exist");
-    assert!(normal_s16.endianness_override.is_none(), "normalS16 should use global endianness");
-    
+    let normal_u16 = def
+        .constants
+        .get("normalU16")
+        .expect("normalU16 should exist");
+    assert!(
+        normal_u16.endianness_override.is_none(),
+        "normalU16 should use global endianness"
+    );
+
+    let normal_s16 = def
+        .constants
+        .get("normalS16")
+        .expect("normalS16 should exist");
+    assert!(
+        normal_s16.endianness_override.is_none(),
+        "normalS16 should use global endianness"
+    );
+
     // Big-endian types should have override
-    let big_u16 = def.constants.get("bigEndianU16").expect("bigEndianU16 should exist");
-    assert_eq!(big_u16.endianness_override, Some(Endianness::Big), "BU16 should force big endian");
-    
-    let big_s32 = def.constants.get("bigEndianS32").expect("bigEndianS32 should exist");
-    assert_eq!(big_s32.endianness_override, Some(Endianness::Big), "BS32 should force big endian");
-    
-    let big_u08 = def.constants.get("bigEndianU08").expect("bigEndianU08 should exist");
-    assert_eq!(big_u08.endianness_override, Some(Endianness::Big), "BU08 should force big endian");
+    let big_u16 = def
+        .constants
+        .get("bigEndianU16")
+        .expect("bigEndianU16 should exist");
+    assert_eq!(
+        big_u16.endianness_override,
+        Some(Endianness::Big),
+        "BU16 should force big endian"
+    );
+
+    let big_s32 = def
+        .constants
+        .get("bigEndianS32")
+        .expect("bigEndianS32 should exist");
+    assert_eq!(
+        big_s32.endianness_override,
+        Some(Endianness::Big),
+        "BS32 should force big endian"
+    );
+
+    let big_u08 = def
+        .constants
+        .get("bigEndianU08")
+        .expect("bigEndianU08 should exist");
+    assert_eq!(
+        big_u08.endianness_override,
+        Some(Endianness::Big),
+        "BU08 should force big endian"
+    );
 }
 
 #[test]
@@ -68,14 +101,19 @@ fn test_all_big_endian_types() {
 "#;
 
     let def = EcuDefinition::from_str(ini_content).expect("Should parse successfully");
-    
+
     // All B* types should have big endian override
-    for name in ["testBU08", "testBS08", "testBU16", "testBS16", "testBU32", "testBS32", "testBF32"] {
-        let constant = def.constants.get(name).unwrap_or_else(|| panic!("{} should exist", name));
+    for name in [
+        "testBU08", "testBS08", "testBU16", "testBS16", "testBU32", "testBS32", "testBF32",
+    ] {
+        let constant = def
+            .constants
+            .get(name)
+            .unwrap_or_else(|| panic!("{} should exist", name));
         assert_eq!(
-            constant.endianness_override, 
-            Some(Endianness::Big), 
-            "{} should have big endian override", 
+            constant.endianness_override,
+            Some(Endianness::Big),
+            "{} should have big endian override",
             name
         );
     }
@@ -101,14 +139,14 @@ fn test_mixed_endianness_parsing() {
 "#;
 
     let def = EcuDefinition::from_str(ini_content).expect("Should parse successfully");
-    
+
     // Global is big endian
     assert_eq!(def.endianness, Endianness::Big);
-    
+
     // Normal type has no override
     let normal = def.constants.get("normalField").unwrap();
     assert!(normal.endianness_override.is_none());
-    
+
     // B* type has explicit override
     let explicit = def.constants.get("explicitBig").unwrap();
     assert_eq!(explicit.endianness_override, Some(Endianness::Big));

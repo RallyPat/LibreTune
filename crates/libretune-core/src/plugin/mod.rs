@@ -4,10 +4,10 @@
 //! in LibreTune by spawning a headless JVM subprocess that introspects Swing UIs
 //! and communicates via JSON-RPC over stdin/stdout.
 
-mod protocol;
 mod bridge;
 mod manager;
+mod protocol;
 
-pub use protocol::*;
 pub use bridge::*;
 pub use manager::*;
+pub use protocol::*;

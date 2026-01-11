@@ -62,7 +62,10 @@ impl DataType {
     /// Returns (DataType, Option<Endianness>) where the endianness is Some(Big) for B* types
     pub fn from_ini_str_with_endianness(s: &str) -> Option<(Self, Option<Endianness>)> {
         let s = s.trim().to_uppercase();
-        let override_endian = if s.starts_with('B') && s.len() > 1 && s.chars().nth(1).map_or(false, |c| c.is_ascii_uppercase()) {
+        let override_endian = if s.starts_with('B')
+            && s.len() > 1
+            && s.chars().nth(1).map_or(false, |c| c.is_ascii_uppercase())
+        {
             // Types like BU08, BS16, BF32 force big-endian
             Some(Endianness::Big)
         } else {

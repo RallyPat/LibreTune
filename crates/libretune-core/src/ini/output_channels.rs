@@ -114,12 +114,10 @@ impl OutputChannel {
             if let Some(ref expr_str) = self.expression {
                 let mut parser = super::expression::Parser::new(expr_str);
                 match parser.parse() {
-                    Ok(expr) => {
-                        match super::expression::evaluate_simple(&expr, context) {
-                            Ok(value) => return Some(value.as_f64()),
-                            Err(_) => return None,
-                        }
-                    }
+                    Ok(expr) => match super::expression::evaluate_simple(&expr, context) {
+                        Ok(value) => return Some(value.as_f64()),
+                        Err(_) => return None,
+                    },
                     Err(_) => return None,
                 }
             }
