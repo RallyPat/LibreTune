@@ -1,0 +1,340 @@
+name: Nightly Build
+
+on:
+  schedule:
+    - cron: '0 3 * * *'  # Run at 3 AM UTC daily
+  workflow_dispatch:  # Allow manual triggering
+
+env:
+  CARGO_TERM_COLOR: always
+  NIGHTLY_DATE: ${{ github.run_id }}
+
+jobs:
+  check-changes:
+    name: Check for Recent Changes
+    runs-on: ubuntu-latest
+    outputs:
+      has_changes: ${{ steps.check.outputs.has_changes }}
+      date_stamp: ${{ steps.date.outputs.date }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Need full history to check commits
+
+      - name: Get date stamp
+        id: date
+        run: echo "date=$(date +%Y%m%d)" >> $GITHUB_OUTPUT
+
+      - name: Check for commits in last 24 hours
+        id: check
+        run: |
+          COMMIT_COUNT=$(git log --since="24 hours ago" --oneline | wc -l)
+          if [ "$COMMIT_COUNT" -gt 0 ] || [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+            echo "Found $COMMIT_COUNT commits in last 24 hours (or manual trigger)"
+          else
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+            echo "No commits in last 24 hours, skipping nightly build"
+          fi
+
+  test:
+    name: Run Tests
+    needs: check-changes
+    if: needs.check-changes.outputs.has_changes == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libgtk-3-dev libudev-dev
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build
+        run: cargo build --workspace
+
+      - name: Run tests
+        run: cargo test --workspace
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: crates/libretune-app/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: crates/libretune-app
+        run: npm ci
+
+      - name: Frontend type check
+        working-directory: crates/libretune-app
+        run: npx tsc --noEmit
+
+  build-linux:
+    name: Build Linux
+    needs: [check-changes, test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libgtk-3-dev \
+            libudev-dev
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: crates/libretune-app/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: crates/libretune-app
+        run: npm ci
+
+      - name: Stamp nightly version
+        working-directory: crates/libretune-app/src-tauri
+        run: |
+          DATE_STAMP=${{ needs.check-changes.outputs.date_stamp }}
+          sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"0.1.0-nightly.${DATE_STAMP}\"/" tauri.conf.json
+          echo "Version stamped as 0.1.0-nightly.${DATE_STAMP}"
+
+      - name: Build Tauri app (Linux)
+        working-directory: crates/libretune-app
+        run: npx tauri build --target x86_64-unknown-linux-gnu
+
+      - name: Prepare artifacts directory
+        working-directory: crates/libretune-app
+        run: |
+          mkdir -p artifacts/linux
+
+      - name: Copy Linux artifacts
+        working-directory: crates/libretune-app
+        run: |
+          # Copy AppImage if it exists (check both possible locations)
+          if [ -d "../../target/x86_64-unknown-linux-gnu/release/bundle/appimage" ]; then
+            cp ../../target/x86_64-unknown-linux-gnu/release/bundle/appimage/*.AppImage artifacts/linux/ 2>/dev/null || true
+          elif [ -d "src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/appimage" ]; then
+            cp src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/appimage/*.AppImage artifacts/linux/ 2>/dev/null || true
+          fi
+          # Copy DEB if it exists
+          if [ -d "../../target/x86_64-unknown-linux-gnu/release/bundle/deb" ]; then
+            cp ../../target/x86_64-unknown-linux-gnu/release/bundle/deb/*.deb artifacts/linux/ 2>/dev/null || true
+          elif [ -d "src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/deb" ]; then
+            cp src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/deb/*.deb artifacts/linux/ 2>/dev/null || true
+          fi
+          # Copy RPM if it exists
+          if [ -d "../../target/x86_64-unknown-linux-gnu/release/bundle/rpm" ]; then
+            cp ../../target/x86_64-unknown-linux-gnu/release/bundle/rpm/*.rpm artifacts/linux/ 2>/dev/null || true
+          elif [ -d "src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/rpm" ]; then
+            cp src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/rpm/*.rpm artifacts/linux/ 2>/dev/null || true
+          fi
+          # List what we found
+          echo "=== Artifacts copied ==="
+          ls -lh artifacts/linux/ || echo "No artifacts found"
+
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v6
+        with:
+          name: linux-x86_64-${{ needs.check-changes.outputs.date_stamp }}
+          path: crates/libretune-app/artifacts/linux/*
+          if-no-files-found: warn
+          retention-days: 7
+
+  build-windows:
+    name: Build Windows
+    needs: [check-changes, test]
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: crates/libretune-app/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: crates/libretune-app
+        run: npm ci
+
+      - name: Stamp nightly version
+        working-directory: crates/libretune-app/src-tauri
+        shell: pwsh
+        run: |
+          $dateStamp = "${{ needs.check-changes.outputs.date_stamp }}"
+          $content = Get-Content tauri.conf.json -Raw
+          $content = $content -replace '"version": "[^"]*"', "`"version`": `"0.1.0-nightly.$dateStamp`""
+          Set-Content tauri.conf.json $content
+          Write-Host "Version stamped as 0.1.0-nightly.$dateStamp"
+
+      - name: Build Tauri app (Windows)
+        working-directory: crates/libretune-app
+        run: npx tauri build --target x86_64-pc-windows-msvc
+
+      - name: Prepare artifacts directory
+        working-directory: crates/libretune-app
+        run: |
+          mkdir artifacts\windows
+
+      - name: Copy Windows artifacts
+        working-directory: crates/libretune-app
+        shell: cmd
+        run: |
+          REM Copy NSIS installer if it exists (check workspace root first, then local)
+          if exist "..\..\target\x86_64-pc-windows-msvc\release\bundle\nsis" (
+            for %%f in ("..\..\target\x86_64-pc-windows-msvc\release\bundle\nsis\*.exe") do copy "%%f" "artifacts\windows\" >nul 2>&1
+          )
+          if exist "src-tauri\target\x86_64-pc-windows-msvc\release\bundle\nsis" (
+            for %%f in ("src-tauri\target\x86_64-pc-windows-msvc\release\bundle\nsis\*.exe") do copy "%%f" "artifacts\windows\" >nul 2>&1
+          )
+          REM Copy MSI installer if it exists
+          if exist "..\..\target\x86_64-pc-windows-msvc\release\bundle\msi" (
+            for %%f in ("..\..\target\x86_64-pc-windows-msvc\release\bundle\msi\*.msi") do copy "%%f" "artifacts\windows\" >nul 2>&1
+          )
+          if exist "src-tauri\target\x86_64-pc-windows-msvc\release\bundle\msi" (
+            for %%f in ("src-tauri\target\x86_64-pc-windows-msvc\release\bundle\msi\*.msi") do copy "%%f" "artifacts\windows\" >nul 2>&1
+          )
+          REM List what we found
+          echo === Artifacts copied ===
+          dir artifacts\windows\ || echo No artifacts found
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v6
+        with:
+          name: windows-x86_64-${{ needs.check-changes.outputs.date_stamp }}
+          path: crates/libretune-app/artifacts/windows/*
+          if-no-files-found: warn
+          retention-days: 7
+
+  build-macos:
+    name: Build macOS
+    needs: [check-changes, test]
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: crates/libretune-app/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: crates/libretune-app
+        run: npm ci
+
+      - name: Stamp nightly version
+        working-directory: crates/libretune-app/src-tauri
+        run: |
+          DATE_STAMP=${{ needs.check-changes.outputs.date_stamp }}
+          sed -i '' "s/\"version\": \"[^\"]*\"/\"version\": \"0.1.0-nightly.${DATE_STAMP}\"/" tauri.conf.json
+          echo "Version stamped as 0.1.0-nightly.${DATE_STAMP}"
+
+      - name: Add Rust targets
+        run: |
+          rustup target add aarch64-apple-darwin
+          rustup target add x86_64-apple-darwin
+
+      - name: Build Tauri app (macOS ARM)
+        working-directory: crates/libretune-app
+        run: npx tauri build --target aarch64-apple-darwin
+
+      - name: Build Tauri app (macOS Intel)
+        working-directory: crates/libretune-app
+        run: npx tauri build --target x86_64-apple-darwin
+
+      - name: Prepare artifacts directory
+        working-directory: crates/libretune-app
+        run: |
+          mkdir -p artifacts/macos
+
+      - name: Copy and package macOS artifacts
+        working-directory: crates/libretune-app
+        run: |
+          # Copy DMG files (check workspace root first, then local)
+          for dmg in ../../target/*/release/bundle/dmg/*.dmg; do
+            if [ -f "$dmg" ]; then
+              cp "$dmg" "artifacts/macos/$(basename "$dmg")"
+            fi
+          done
+          # Also check local src-tauri/target
+          for dmg in src-tauri/target/*/release/bundle/dmg/*.dmg; do
+            if [ -f "$dmg" ]; then
+              cp "$dmg" "artifacts/macos/$(basename "$dmg")"
+            fi
+          done
+          # Zip .app bundles to preserve permissions (check workspace root first)
+          for app_bundle in ../../target/*/release/bundle/macos/*.app; do
+            if [ -d "$app_bundle" ]; then
+              zip_name="artifacts/macos/$(basename "$app_bundle" .app).zip"
+              mkdir -p artifacts/macos
+              echo "Zipping $app_bundle to $zip_name"
+              abs_zip_path="$(pwd)/$zip_name"
+              cd "$(dirname "$app_bundle")"
+              zip -r "$abs_zip_path" "$(basename "$app_bundle")"
+              cd - > /dev/null
+            fi
+          done
+          # Also check local src-tauri/target
+          for app_bundle in src-tauri/target/*/release/bundle/macos/*.app; do
+            if [ -d "$app_bundle" ]; then
+              zip_name="artifacts/macos/$(basename "$app_bundle" .app).zip"
+              mkdir -p artifacts/macos
+              echo "Zipping $app_bundle to $zip_name"
+              abs_zip_path="$(pwd)/$zip_name"
+              cd "$(dirname "$app_bundle")"
+              zip -r "$abs_zip_path" "$(basename "$app_bundle")"
+              cd - > /dev/null
+            fi
+          done
+          # List what we found
+          echo "=== Artifacts copied ==="
+          ls -lh artifacts/macos/ || echo "No artifacts found"
+
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v6
+        with:
+          name: macos-universal-${{ needs.check-changes.outputs.date_stamp }}
+          path: crates/libretune-app/artifacts/macos/*
+          if-no-files-found: warn
+          retention-days: 7
