@@ -36,7 +36,7 @@
 .embedded-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 6px;
   padding: 6px 10px;
   background: rgba(0, 0, 0, 0.3);
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
@@ -46,6 +46,7 @@
   font-size: 12px;
   font-weight: 500;
   color: #ccc;
+  flex: 1;
 }
 
 .pop-out-btn {
@@ -65,6 +66,32 @@
 .pop-out-btn:hover {
   background: rgba(74, 158, 255, 0.3);
   color: #4a9eff;
+}
+
+/* Embedded toggle button for color shade */
+.embedded-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  background: rgba(255, 255, 255, 0.1);
+  border: none;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+  opacity: 0.6;
+}
+
+.embedded-toggle:hover {
+  background: rgba(74, 158, 255, 0.3);
+  opacity: 1;
+}
+
+.embedded-toggle.active {
+  background: rgba(74, 158, 255, 0.4);
+  opacity: 1;
 }
 
 .editor-header {

@@ -1,5 +1,6 @@
-import { useRef, useEffect, useState } from 'react';
+import { useRef, useEffect, useState, useCallback } from 'react';
 import { ArrowLeft } from 'lucide-react';
+import { valueToHeatmapColor, HeatmapScheme } from '../../utils/heatmapColors';
 
 interface TableEditor3DProps {
   title: string;
@@ -7,9 +8,10 @@ interface TableEditor3DProps {
   y_bins: number[];
   z_values: number[][];
   onBack: () => void;
+  heatmapScheme?: HeatmapScheme | string[]; // Optional heatmap color scheme
 }
 
-export default function TableEditor3D({ title, x_bins, y_bins, z_values, onBack }: TableEditor3DProps) {
+export default function TableEditor3D({ title, x_bins, y_bins, z_values, onBack, heatmapScheme = 'tunerstudio' }: TableEditor3DProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [yawAngle, setYawAngle] = useState(250);
   const [rollAngle, setRollAngle] = useState(0);
@@ -56,19 +58,17 @@ export default function TableEditor3D({ title, x_bins, y_bins, z_values, onBack 
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
-  const _getCellColor = (_value: number, _x: number, _y: number) => {
+  const _getCellColor = useCallback((value: number, _x: number, _y: number) => {
     if (!showColorShade) return '#4CAF50';
 
     const minVal = Math.min(...z_values.flat());
     const maxVal = Math.max(...z_values.flat());
-    const range = maxVal - minVal;
 
-    if (range === 0) return '#888888';
+    if (minVal === maxVal) return '#888888';
 
-    const ratio = (_value - minVal) / range;
-    const hue = (1 - ratio) * 240;
-    return `hsl(${hue}, 60%, 45%)`;
-  };
+    // Use centralized heatmap utility
+    return valueToHeatmapColor(value, minVal, maxVal, heatmapScheme);
+  }, [showColorShade, z_values, heatmapScheme]);
 
   const project3D = (x: number, y: number, z: number) => {
     const x_bin = x_bins[Math.min(x, x_size - 1)];

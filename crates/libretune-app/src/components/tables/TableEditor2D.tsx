@@ -6,6 +6,7 @@ import TableGrid from './TableGrid';
 import TableContextMenu from './TableContextMenu';
 import RebinDialog from '../dialogs/RebinDialog';
 import CellEditDialog from '../dialogs/CellEditDialog';
+import { useHeatmapSettings } from '../../utils/useHeatmapSettings';
 import './TableComponents.css';
 import './TableEditor2D.css';
 
@@ -55,7 +56,7 @@ export default function TableEditor2D({
   const [selectedCells, setSelectedCells] = useState<Set<string>>(new Set());
   const [lockedCells, setLockedCells] = useState<Set<string>>(new Set());
   const [historyTrail, setHistoryTrail] = useState<[number, number][]>([]);
-  const [showColorShade, setShowColorShade] = useState(false);
+  const [showColorShade, setShowColorShade] = useState(true);
   const [showHistoryTrail, setShowHistoryTrail] = useState(false);
   const [clipboard, setClipboard] = useState<[number, number][]>([]);
   const [canUndo, setCanUndo] = useState(false);
@@ -81,6 +82,9 @@ export default function TableEditor2D({
 
   const [followMode, setFollowMode] = useState(false);
   const [activeCell, setActiveCell] = useState<[number, number] | null>(null);
+  
+  // Get heatmap scheme from user settings
+  const { settings: heatmapSettings } = useHeatmapSettings();
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -486,6 +490,13 @@ export default function TableEditor2D({
       {embedded && (
         <div className="embedded-header">
           <span className="embedded-title">{title}</span>
+          <button 
+            className={`embedded-toggle ${showColorShade ? 'active' : ''}`}
+            onClick={() => setShowColorShade(!showColorShade)}
+            title="Toggle Color Shade"
+          >
+            🎨
+          </button>
           {onOpenInTab && (
             <button 
               className="pop-out-btn" 
@@ -593,6 +604,9 @@ export default function TableEditor2D({
           showLiveCursor={followMode && realtimeData !== undefined}
           liveCursorX={realtimeData?.rpm}  // Use RPM for X-axis (common for VE tables)
           liveCursorY={realtimeData?.map}  // Use MAP for Y-axis
+          // Heatmap color settings
+          showColorShade={showColorShade}
+          heatmapScheme={heatmapSettings.valueScheme}
         />
       </div>
 

@@ -142,6 +142,14 @@
   --value-leaner: #f44336;
   --value-unchanged: #808080;
   
+  /* Heatmap colors - TunerStudio classic gradient */
+  --heatmap-stop-0: #0000FF;  /* Blue (cold/low) */
+  --heatmap-stop-1: #00FFFF;  /* Cyan */
+  --heatmap-stop-2: #00FF00;  /* Green */
+  --heatmap-stop-3: #FFFF00;  /* Yellow */
+  --heatmap-stop-4: #FF8000;  /* Orange */
+  --heatmap-stop-5: #FF0000;  /* Red (hot/high) */
+  
   /* History trail */
   --trail-color: #1976d2;
   --trail-dot: #64b5f6;
@@ -251,6 +259,14 @@
   --value-leaner: #d32f2f;
   --value-unchanged: #757575;
   
+  /* Heatmap colors - adjusted for light backgrounds */
+  --heatmap-stop-0: #0044CC;  /* Darker blue */
+  --heatmap-stop-1: #00AAAA;  /* Darker cyan */
+  --heatmap-stop-2: #00AA00;  /* Darker green */
+  --heatmap-stop-3: #CCAA00;  /* Darker yellow */
+  --heatmap-stop-4: #CC6600;  /* Darker orange */
+  --heatmap-stop-5: #CC0000;  /* Darker red */
+  
   /* History trail */
   --trail-color: #1976d2;
   --trail-dot: #42a5f5;
@@ -344,6 +360,14 @@
   --value-richer: #58a6ff;
   --value-leaner: #f85149;
   
+  /* Heatmap colors - GitHub-style palette */
+  --heatmap-stop-0: #1f6feb;  /* GitHub blue */
+  --heatmap-stop-1: #3fb950;  /* GitHub green */
+  --heatmap-stop-2: #56d364;  /* Light green */
+  --heatmap-stop-3: #d29922;  /* GitHub yellow */
+  --heatmap-stop-4: #db6d28;  /* GitHub orange */
+  --heatmap-stop-5: #f85149;  /* GitHub red */
+  
   --scrollbar-track: #0d1117;
   --scrollbar-thumb: #30363d;
   --scrollbar-thumb-hover: #484f58;
@@ -425,6 +449,14 @@
   
   --value-richer: #78a9ff;
   --value-leaner: #fa4d56;
+  
+  /* Heatmap colors - IBM Carbon palette */
+  --heatmap-stop-0: #4589ff;  /* Carbon blue */
+  --heatmap-stop-1: #33b1ff;  /* Carbon cyan */
+  --heatmap-stop-2: #42be65;  /* Carbon green */
+  --heatmap-stop-3: #f1c21b;  /* Carbon yellow */
+  --heatmap-stop-4: #ff832b;  /* Carbon orange */
+  --heatmap-stop-5: #fa4d56;  /* Carbon red */
   
   --scrollbar-track: #161616;
   --scrollbar-thumb: #393939;

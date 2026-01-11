@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { open, save } from '@tauri-apps/plugin-dialog';
+import { valueToHeatmapColor } from '../../utils/heatmapColors';
 import './AutoTuneLive.css';
 
 // =============================================================================
@@ -48,6 +50,11 @@ interface TableData {
   z_values: number[][];
 }
 
+interface TableInfo {
+  name: string;
+  title: string;
+}
+
 interface AutoTuneLiveProps {
   tableName?: string;
   onClose?: () => void;
@@ -57,10 +64,13 @@ interface AutoTuneLiveProps {
 // AutoTune Live Component
 // =============================================================================
 
-export function AutoTuneLive({ tableName = 'veTable1', onClose }: AutoTuneLiveProps) {
+export function AutoTuneLive({ tableName: initialTableName = 'veTable1', onClose }: AutoTuneLiveProps) {
   // State
   const [isRunning, setIsRunning] = useState(false);
+  const [selectedTable, setSelectedTable] = useState(initialTableName);
+  const [availableTables, setAvailableTables] = useState<TableInfo[]>([]);
   const [tableData, setTableData] = useState<TableData | null>(null);
+  const [_referenceData, setReferenceData] = useState<TableData | null>(null);
   const [heatmapData, setHeatmapData] = useState<HeatmapEntry[]>([]);
   const [lockedCells, setLockedCells] = useState<Set<string>>(new Set());
   const [selectedCells, _setSelectedCells] = useState<Set<string>>(new Set());
@@ -95,8 +105,12 @@ export function AutoTuneLive({ tableName = 'veTable1', onClose }: AutoTuneLivePr
 
   // Load initial table data
   useEffect(() => {
+    loadAvailableTables();
+  }, []);
+
+  useEffect(() => {
     loadTableData();
-  }, [tableName]);
+  }, [selectedTable]);
 
   // Poll heatmap data when running
   useEffect(() => {
@@ -114,19 +128,82 @@ export function AutoTuneLive({ tableName = 'veTable1', onClose }: AutoTuneLivePr
     return () => clearInterval(interval);
   }, [isRunning]);
 
+  const loadAvailableTables = useCallback(async () => {
+    try {
+      const tables = await invoke<TableInfo[]>('get_available_tables');
+      setAvailableTables(tables);
+    } catch (e) {
+      console.error('Failed to load available tables:', e);
+    }
+  }, []);
+
   const loadTableData = useCallback(async () => {
     try {
-      const data = await invoke<TableData>('get_table_data', { tableName });
+      const data = await invoke<TableData>('get_table_data', { tableName: selectedTable });
       setTableData(data);
     } catch (e) {
       setError(`Failed to load table: ${e}`);
     }
-  }, [tableName]);
+  }, [selectedTable]);
+
+  const loadReferenceTable = useCallback(async () => {
+    try {
+      const filePath = await open({
+        title: 'Load Reference Table (CSV)',
+        filters: [{ name: 'CSV Files', extensions: ['csv'] }],
+        multiple: false,
+      });
+      
+      if (filePath && typeof filePath === 'string') {
+        // Parse CSV reference table
+        const content = await invoke<string>('read_file_contents', { path: filePath });
+        const lines = content.trim().split('\n');
+        const zValues: number[][] = [];
+        
+        for (const line of lines) {
+          const row = line.split(',').map((v) => parseFloat(v.trim()) || 0);
+          zValues.push(row);
+        }
+        
+        if (tableData) {
+          setReferenceData({
+            ...tableData,
+            z_values: zValues,
+          });
+        }
+      }
+    } catch (e) {
+      setError(`Failed to load reference: ${e}`);
+    }
+  }, [tableData]);
+
+  const saveReferenceTable = useCallback(async () => {
+    if (!tableData) return;
+    
+    try {
+      const filePath = await save({
+        title: 'Save Reference Table (CSV)',
+        filters: [{ name: 'CSV Files', extensions: ['csv'] }],
+        defaultPath: `${tableData.name}_reference.csv`,
+      });
+      
+      if (filePath) {
+        // Convert table to CSV
+        const csvContent = tableData.z_values
+          .map((row) => row.map((v) => v.toFixed(2)).join(','))
+          .join('\n');
+        
+        await invoke('write_file_contents', { path: filePath, content: csvContent });
+      }
+    } catch (e) {
+      setError(`Failed to save reference: ${e}`);
+    }
+  }, [tableData]);
 
   const startAutoTune = useCallback(async () => {
     try {
       await invoke('start_autotune', {
-        tableName,
+        tableName: selectedTable,
         settings,
         filters,
         authorityLimits: authority,
@@ -136,7 +213,7 @@ export function AutoTuneLive({ tableName = 'veTable1', onClose }: AutoTuneLivePr
     } catch (e) {
       setError(`Failed to start AutoTune: ${e}`);
     }
-  }, [tableName, settings, filters, authority]);
+  }, [selectedTable, settings, filters, authority]);
 
   const stopAutoTune = useCallback(async () => {
     try {
@@ -222,30 +299,28 @@ export function AutoTuneLive({ tableName = 'veTable1', onClose }: AutoTuneLivePr
       }
 
       if (!entry || showHeatmap === 'none') {
-        // Default value-based coloring
-        const normalized = Math.min(1, Math.max(0, value / 100));
-        return `hsl(${120 - normalized * 120}, 70%, 40%)`;
+        // Default value-based coloring using centralized heatmap utility
+        return valueToHeatmapColor(value, 0, 100, 'tunerstudio');
       }
 
       if (showHeatmap === 'weighting') {
-        // Blue (low) to Yellow (high) for hit weighting
+        // Coverage/weighting heatmap using centralized utility
         const w = Math.min(1, entry.hit_weighting);
-        return `hsl(${60 - w * 180}, 80%, ${30 + w * 20}%)`;
+        return valueToHeatmapColor(w, 0, 1, 'tunerstudio');
       }
 
       if (showHeatmap === 'change') {
-        // Change magnitude: red = richer (negative), blue = leaner (positive)
+        // Change magnitude: uses centralized utility
+        // Positive change = leaner (towards red), negative = richer (towards blue)
         const change = entry.recommended_value - entry.beginning_value;
         if (Math.abs(change) < 0.5) {
           return 'var(--cell-neutral)';
         }
-        if (change < 0) {
-          const intensity = Math.min(1, Math.abs(change) / authority.max_change_per_cell);
-          return `hsl(0, 80%, ${50 - intensity * 20}%)`;  // Red for richer
-        } else {
-          const intensity = Math.min(1, change / authority.max_change_per_cell);
-          return `hsl(210, 80%, ${50 - intensity * 20}%)`; // Blue for leaner
-        }
+        // Normalize change to 0-1 range, where 0.5 = no change
+        const maxChange = authority.max_change_per_cell || 10;
+        const normalizedChange = (change / maxChange + 1) / 2; // Maps -max..+max to 0..1
+        const clampedChange = Math.max(0, Math.min(1, normalizedChange));
+        return valueToHeatmapColor(clampedChange, 0, 1, 'tunerstudio');
       }
 
       return 'var(--cell-default)';
@@ -276,8 +351,26 @@ export function AutoTuneLive({ tableName = 'veTable1', onClose }: AutoTuneLivePr
     <div className="autotune-live">
       {/* Header */}
       <div className="autotune-header">
-        <h2>AutoTune Live - {tableData.title}</h2>
+        <div className="autotune-title-row">
+          <h2>AutoTune Live</h2>
+          <select
+            className="autotune-table-selector"
+            value={selectedTable}
+            onChange={(e) => setSelectedTable(e.target.value)}
+            disabled={isRunning}
+          >
+            {availableTables.map((t) => (
+              <option key={t.name} value={t.name}>{t.title || t.name}</option>
+            ))}
+          </select>
+        </div>
         <div className="autotune-controls">
+          <button onClick={loadReferenceTable} title="Load reference table from CSV">
+            📂 Load Ref
+          </button>
+          <button onClick={saveReferenceTable} disabled={!tableData} title="Save current table as reference">
+            💾 Save Ref
+          </button>
           {isRunning ? (
             <button onClick={stopAutoTune} className="autotune-stop">
               ⏹ Stop
@@ -343,7 +436,7 @@ export function AutoTuneLive({ tableName = 'veTable1', onClose }: AutoTuneLivePr
                       return (
                         <td
                           key={x}
-                          className={`autotune-cell ${isLocked ? 'locked' : ''} ${isSelected ? 'selected' : ''} ${isCurrent ? 'current' : ''}`}
+                          className={`autotune-cell ${isLocked ? 'locked' : ''} ${isSelected ? 'selected' : ''} ${isCurrent ? 'current' : ''} ${entry && entry.hit_count > 0 ? 'has-hits' : ''}`}
                           style={{ backgroundColor: getCellColor(x, y, value) }}
                           onClick={() => toggleCellLock(x, y)}
                           title={
@@ -360,6 +453,11 @@ export function AutoTuneLive({ tableName = 'veTable1', onClose }: AutoTuneLivePr
                             value.toFixed(1)
                           )}
                           {isLocked && <span className="cell-lock-icon">🔒</span>}
+                          {entry && entry.hit_count > 0 && (
+                            <span className="cell-hit-badge" title={`${entry.hit_count} hits`}>
+                              {entry.hit_count > 99 ? '99+' : entry.hit_count}
+                            </span>
+                          )}
                         </td>
                       );
                     })}

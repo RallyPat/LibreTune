@@ -10,6 +10,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { ArrowLeft, Save, Zap, Undo2, Redo2 } from 'lucide-react';
 import TsGauge from '../gauges/TsGauge';
 import { TsGaugeConfig } from '../dashboards/dashTypes';
+import { valueToHeatmapColor } from '../../utils/heatmapColors';
 import './CurveEditor.css';
 
 /** Simple gauge info from backend INI [GaugeConfigurations] */
@@ -179,18 +180,9 @@ export default function CurveEditor({
   }, [contextMenu]);
 
   // Helper to compute cell background color based on value position in range
-  // Blue for low values, transitioning through cyan/green/yellow to red for high values
+  // Uses centralized heatmap color utility for consistent styling
   const getCellColor = useCallback((value: number, min: number, max: number): string => {
-    const range = max - min || 1;
-    const normalized = Math.max(0, Math.min(1, (value - min) / range));
-    
-    // Color gradient: blue -> cyan -> green -> yellow -> red
-    // Using HSL: blue=240, cyan=180, green=120, yellow=60, red=0
-    const hue = (1 - normalized) * 240; // 240 (blue) to 0 (red)
-    const saturation = 70;
-    const lightness = 35 + normalized * 15; // Slightly lighter for higher values
-    
-    return `hsl(${hue}, ${saturation}%, ${lightness}%)`;
+    return valueToHeatmapColor(value, min, max, 'tunerstudio');
   }, []);
 
   // Chart dimensions based on mode

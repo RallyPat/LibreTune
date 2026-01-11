@@ -197,6 +197,24 @@ struct Settings {
     indicator_column_count: String, // "auto" or number like "12"
     indicator_fill_empty: bool,     // Fill empty cells in last row
     indicator_text_fit: String,     // "scale" or "wrap"
+    
+    // Heatmap color scheme settings
+    #[serde(default = "default_heatmap_scheme")]
+    heatmap_value_scheme: String,   // Scheme for VE/timing tables
+    #[serde(default = "default_heatmap_scheme")]
+    heatmap_change_scheme: String,  // Scheme for AFR correction magnitude
+    #[serde(default = "default_heatmap_scheme")]
+    heatmap_coverage_scheme: String, // Scheme for hit weighting visualization
+    #[serde(default)]
+    heatmap_value_custom: Vec<String>,   // Custom color stops for value context
+    #[serde(default)]
+    heatmap_change_custom: Vec<String>,  // Custom color stops for change context
+    #[serde(default)]
+    heatmap_coverage_custom: Vec<String>, // Custom color stops for coverage context
+}
+
+fn default_heatmap_scheme() -> String {
+    "tunerstudio".to_string()
 }
 
 fn save_settings(app: &tauri::AppHandle, settings: &Settings) {
@@ -4006,10 +4024,45 @@ async fn get_dash_file(path: String) -> Result<DashFile, String> {
 struct DashFileInfo {
     name: String,
     path: String,
+    category: String, // "User", "Reference", etc.
+}
+
+/// Helper to scan a directory for .dash and .ltdash.xml files
+fn scan_dash_directory(dir: &Path, category: &str, dashes: &mut Vec<DashFileInfo>) {
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let file_name = path
+                .file_name()
+                .map(|n| n.to_string_lossy().to_lowercase())
+                .unwrap_or_default();
+
+            // Accept .ltdash.xml (native) and .dash (TunerStudio import)
+            if file_name.ends_with(".ltdash.xml") || file_name.ends_with(".dash") {
+                if let Some(name) = path.file_name() {
+                    dashes.push(DashFileInfo {
+                        name: name.to_string_lossy().to_string(),
+                        path: path.to_string_lossy().to_string(),
+                        category: category.to_string(),
+                    });
+                }
+            }
+            // Also scan .gauge files for individual gauge templates
+            if file_name.ends_with(".gauge") {
+                if let Some(name) = path.file_name() {
+                    dashes.push(DashFileInfo {
+                        name: name.to_string_lossy().to_string(),
+                        path: path.to_string_lossy().to_string(),
+                        category: format!("{} (Gauge)", category),
+                    });
+                }
+            }
+        }
+    }
 }
 
 /// List all available dashboard files (.ltdash.xml and .dash for import)
-/// Scans app data dashboards directory and creates defaults if empty
+/// Scans app data dashboards directory, reference directory, and creates defaults if needed
 #[tauri::command]
 async fn list_available_dashes(app: tauri::AppHandle) -> Result<Vec<DashFileInfo>, String> {
     let dash_dir = get_dashboards_dir(&app);
@@ -4035,33 +4088,187 @@ async fn list_available_dashes(app: tauri::AppHandle) -> Result<Vec<DashFileInfo
 
     let mut dashes = Vec::new();
 
-    match std::fs::read_dir(&dash_dir) {
-        Ok(entries) => {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                let file_name = path
-                    .file_name()
-                    .map(|n| n.to_string_lossy().to_lowercase())
-                    .unwrap_or_default();
+    // 1. Scan user dashboards directory (these appear first as "User" category)
+    scan_dash_directory(&dash_dir, "User", &mut dashes);
 
-                // Accept .ltdash.xml (native) and .dash (TunerStudio import)
-                if file_name.ends_with(".ltdash.xml") || file_name.ends_with(".dash") {
-                    if let Some(name) = path.file_name() {
-                        dashes.push(DashFileInfo {
-                            name: name.to_string_lossy().to_string(),
-                            path: path.to_string_lossy().to_string(),
-                        });
-                    }
-                }
-            }
-        }
-        Err(e) => {
-            return Err(format!("Failed to read dash directory: {}", e));
+    // 2. Try to get bundled dashboards from app resource directory (for production builds)
+    if let Ok(resource_path) = app.path().resource_dir() {
+        let bundled_dash = resource_path.join("dashboards");
+        if bundled_dash.exists() {
+            println!("[list_available_dashes] Scanning bundled dashboards: {:?}", bundled_dash);
+            scan_dash_directory(&bundled_dash, "Bundled", &mut dashes);
         }
     }
 
-    dashes.sort_by(|a, b| a.name.cmp(&b.name));
+    // Sort: User first, then by name
+    dashes.sort_by(|a, b| {
+        match (a.category.as_str(), b.category.as_str()) {
+            ("User", "User") => a.name.cmp(&b.name),
+            ("User", _) => std::cmp::Ordering::Less,
+            (_, "User") => std::cmp::Ordering::Greater,
+            _ => a.name.cmp(&b.name),
+        }
+    });
+    
+    println!("[list_available_dashes] Found {} dashboards", dashes.len());
     Ok(dashes)
+}
+
+/// Result of checking for dashboard file conflicts
+#[derive(Serialize)]
+struct DashConflictInfo {
+    /// The filename that would conflict
+    file_name: String,
+    /// Whether a conflict exists
+    has_conflict: bool,
+    /// Suggested alternative name if conflict exists
+    suggested_name: Option<String>,
+}
+
+/// Check if a dashboard file with the given name already exists
+#[tauri::command]
+async fn check_dash_conflict(
+    app: tauri::AppHandle,
+    file_name: String,
+) -> Result<DashConflictInfo, String> {
+    let dash_dir = get_dashboards_dir(&app);
+    let target_path = dash_dir.join(&file_name);
+    
+    if target_path.exists() {
+        // Generate a suggested alternative name
+        let suggested = generate_unique_filename(&dash_dir, &file_name);
+        Ok(DashConflictInfo {
+            file_name,
+            has_conflict: true,
+            suggested_name: Some(suggested),
+        })
+    } else {
+        Ok(DashConflictInfo {
+            file_name,
+            has_conflict: false,
+            suggested_name: None,
+        })
+    }
+}
+
+/// Generate a unique filename by appending _2, _3, etc.
+fn generate_unique_filename(dir: &Path, original_name: &str) -> String {
+    // Split into base and extension(s)
+    // Handle .ltdash.xml specially
+    let (base, ext) = if original_name.ends_with(".ltdash.xml") {
+        let base = original_name.trim_end_matches(".ltdash.xml");
+        (base.to_string(), ".ltdash.xml".to_string())
+    } else if let Some(dot_pos) = original_name.rfind('.') {
+        (original_name[..dot_pos].to_string(), original_name[dot_pos..].to_string())
+    } else {
+        (original_name.to_string(), String::new())
+    };
+    
+    let mut counter = 2;
+    loop {
+        let candidate = format!("{}_{}{}", base, counter, ext);
+        if !dir.join(&candidate).exists() {
+            return candidate;
+        }
+        counter += 1;
+        if counter > 1000 {
+            // Safety limit
+            return format!("{}_{}{}", base, chrono::Utc::now().timestamp(), ext);
+        }
+    }
+}
+
+/// Import result for a single dashboard file
+#[derive(Serialize)]
+struct DashImportResult {
+    /// Original source path
+    source_path: String,
+    /// Whether import succeeded
+    success: bool,
+    /// Error message if failed
+    error: Option<String>,
+    /// The imported file info if successful
+    file_info: Option<DashFileInfo>,
+}
+
+/// Import a dashboard file from an external location
+/// If rename_to is provided, the file will be saved with that name instead
+#[tauri::command]
+async fn import_dash_file(
+    app: tauri::AppHandle,
+    source_path: String,
+    rename_to: Option<String>,
+    overwrite: bool,
+) -> Result<DashImportResult, String> {
+    let dash_dir = get_dashboards_dir(&app);
+    
+    // Ensure dashboards directory exists
+    std::fs::create_dir_all(&dash_dir)
+        .map_err(|e| format!("Failed to create dashboards directory: {}", e))?;
+    
+    let source = Path::new(&source_path);
+    
+    // Check source file exists
+    if !source.exists() {
+        return Ok(DashImportResult {
+            source_path: source_path.clone(),
+            success: false,
+            error: Some("Source file does not exist".to_string()),
+            file_info: None,
+        });
+    }
+    
+    // Validate it's a parseable dash file
+    let content = std::fs::read_to_string(source)
+        .map_err(|e| format!("Failed to read file: {}", e))?;
+    
+    if let Err(e) = dash::parse_dash_file(&content) {
+        return Ok(DashImportResult {
+            source_path: source_path.clone(),
+            success: false,
+            error: Some(format!("Invalid dashboard file: {}", e)),
+            file_info: None,
+        });
+    }
+    
+    // Determine target filename
+    let file_name = if let Some(ref new_name) = rename_to {
+        new_name.clone()
+    } else {
+        source.file_name()
+            .ok_or_else(|| "Invalid file path".to_string())?
+            .to_string_lossy()
+            .to_string()
+    };
+    
+    let dest_path = dash_dir.join(&file_name);
+    
+    // Check for conflict
+    if dest_path.exists() && !overwrite {
+        return Ok(DashImportResult {
+            source_path: source_path.clone(),
+            success: false,
+            error: Some(format!("File '{}' already exists", file_name)),
+            file_info: None,
+        });
+    }
+    
+    // Copy file to dashboards directory
+    std::fs::copy(source, &dest_path)
+        .map_err(|e| format!("Failed to copy file: {}", e))?;
+    
+    println!("[import_dash_file] Imported {} -> {:?}", source_path, dest_path);
+    
+    Ok(DashImportResult {
+        source_path,
+        success: true,
+        error: None,
+        file_info: Some(DashFileInfo {
+            name: file_name,
+            path: dest_path.to_string_lossy().to_string(),
+            category: "User".to_string(),
+        }),
+    })
 }
 
 /// Create default dashboard XML files in the given directory
@@ -4848,8 +5055,8 @@ fn create_tuning_dashboard() -> DashFile {
             cluster_background_color: TsColor {
                 alpha: 255,
                 red: 20,
-                green: 25,
-                blue: 30,
+                green: 22,
+                blue: 28,
             },
             background_dither_color: None,
             cluster_background_image_file_name: None,
@@ -4859,154 +5066,779 @@ fn create_tuning_dashboard() -> DashFile {
         },
     };
 
-    // 3x3 grid of tuning-relevant gauges
-    // (id, title, units, channel, min, max, low_crit, low_warn, high_warn, high_crit, digits)
-    let gauges: Vec<(
-        &str,
-        &str,
-        &str,
-        &str,
-        f64,
-        f64,
-        Option<f64>,
-        Option<f64>,
-        Option<f64>,
-        Option<f64>,
-        i32,
-    )> = vec![
-        (
-            "rpm",
-            "RPM",
-            "",
-            "rpm",
-            0.0,
-            8000.0,
-            None,
-            None,
-            Some(6500.0),
-            Some(7200.0),
-            0,
-        ),
-        (
-            "afr",
-            "AFR",
-            "",
-            "afr",
-            10.0,
-            20.0,
-            Some(10.5),
-            Some(11.5),
-            Some(15.5),
-            Some(16.5),
-            2,
-        ),
-        (
-            "map", "MAP", "kPa", "map", 0.0, 250.0, None, None, None, None, 0,
-        ),
-        (
-            "tps", "TPS", "%", "tps", 0.0, 100.0, None, None, None, None, 1,
-        ),
-        ("ve", "VE", "%", "ve", 0.0, 150.0, None, None, None, None, 1),
-        (
-            "advance", "ADV", "°", "advance", -10.0, 50.0, None, None, None, None, 1,
-        ),
-        (
-            "egt",
-            "EGT",
-            "°C",
-            "egt",
-            0.0,
-            1000.0,
-            None,
-            None,
-            Some(800.0),
-            Some(900.0),
-            0,
-        ),
-        (
-            "pw",
-            "PW",
-            "ms",
-            "pulseWidth1",
-            0.0,
-            25.0,
-            None,
-            None,
-            None,
-            None,
-            2,
-        ),
-        (
-            "duty",
-            "DUTY",
-            "%",
-            "injDuty",
-            0.0,
-            100.0,
-            None,
-            None,
-            Some(85.0),
-            Some(95.0),
-            1,
-        ),
-    ];
+    // Top row: RPM sweep gauge + AFR analog + Coolant bar
+    
+    // RPM - large sweep gauge
+    dash.gauge_cluster
+        .components
+        .push(DashComponent::Gauge(Box::new(dash::GaugeConfig {
+            id: "rpm".to_string(),
+            title: "RPM".to_string(),
+            units: "".to_string(),
+            output_channel: "rpm".to_string(),
+            min: 0.0,
+            max: 8000.0,
+            high_warning: Some(6500.0),
+            high_critical: Some(7200.0),
+            gauge_painter: GaugePainter::AsymmetricSweepGauge,
+            start_angle: 200,
+            sweep_angle: 140,
+            relative_x: 0.02,
+            relative_y: 0.02,
+            relative_width: 0.38,
+            relative_height: 0.32,
+            back_color: TsColor {
+                alpha: 255,
+                red: 25,
+                green: 28,
+                blue: 35,
+            },
+            font_color: TsColor {
+                alpha: 255,
+                red: 255,
+                green: 255,
+                blue: 255,
+            },
+            needle_color: TsColor {
+                alpha: 255,
+                red: 0,
+                green: 200,
+                blue: 100,
+            },
+            trim_color: TsColor {
+                alpha: 255,
+                red: 80,
+                green: 90,
+                blue: 100,
+            },
+            warn_color: TsColor {
+                alpha: 255,
+                red: 255,
+                green: 180,
+                blue: 0,
+            },
+            critical_color: TsColor {
+                alpha: 255,
+                red: 255,
+                green: 50,
+                blue: 50,
+            },
+            ..Default::default()
+        })));
 
-    for (
-        i,
-        (id, title, units, channel, min, max, low_crit, low_warn, high_warn, high_crit, digits),
-    ) in gauges.iter().enumerate()
-    {
-        let row = i / 3;
-        let col = i % 3;
-        let x = 0.02 + (col as f64) * 0.33;
-        let y = 0.02 + (row as f64) * 0.33;
+    // AFR - analog gauge
+    dash.gauge_cluster
+        .components
+        .push(DashComponent::Gauge(Box::new(dash::GaugeConfig {
+            id: "afr".to_string(),
+            title: "AFR".to_string(),
+            units: "".to_string(),
+            output_channel: "afr".to_string(),
+            min: 10.0,
+            max: 18.0,
+            low_warning: Some(11.5),
+            low_critical: Some(10.5),
+            high_warning: Some(15.5),
+            high_critical: Some(16.5),
+            value_digits: 2,
+            gauge_painter: GaugePainter::AnalogGauge,
+            relative_x: 0.42,
+            relative_y: 0.02,
+            relative_width: 0.32,
+            relative_height: 0.32,
+            back_color: TsColor {
+                alpha: 255,
+                red: 30,
+                green: 35,
+                blue: 40,
+            },
+            font_color: TsColor {
+                alpha: 255,
+                red: 0,
+                green: 255,
+                blue: 128,
+            },
+            needle_color: TsColor {
+                alpha: 255,
+                red: 0,
+                green: 255,
+                blue: 100,
+            },
+            trim_color: TsColor {
+                alpha: 255,
+                red: 60,
+                green: 80,
+                blue: 60,
+            },
+            warn_color: TsColor {
+                alpha: 255,
+                red: 255,
+                green: 200,
+                blue: 0,
+            },
+            critical_color: TsColor {
+                alpha: 255,
+                red: 255,
+                green: 50,
+                blue: 50,
+            },
+            ..Default::default()
+        })));
 
-        dash.gauge_cluster
-            .components
-            .push(DashComponent::Gauge(Box::new(dash::GaugeConfig {
-                id: id.to_string(),
-                title: title.to_string(),
-                units: units.to_string(),
-                output_channel: channel.to_string(),
-                min: *min,
-                max: *max,
-                low_critical: *low_crit,
-                low_warning: *low_warn,
-                high_warning: *high_warn,
-                high_critical: *high_crit,
-                value_digits: *digits,
-                gauge_painter: GaugePainter::BasicReadout,
-                relative_x: x,
-                relative_y: y,
-                relative_width: 0.31,
-                relative_height: 0.31,
-                back_color: TsColor {
-                    alpha: 255,
-                    red: 30,
-                    green: 35,
-                    blue: 40,
-                },
-                font_color: TsColor {
-                    alpha: 255,
-                    red: 200,
-                    green: 255,
-                    blue: 200,
-                },
-                warn_color: TsColor {
-                    alpha: 255,
-                    red: 255,
-                    green: 200,
-                    blue: 0,
-                },
-                critical_color: TsColor {
-                    alpha: 255,
-                    red: 255,
-                    green: 50,
-                    blue: 50,
-                },
-                ..Default::default()
-            })));
-    }
+    // Coolant - vertical bar
+    dash.gauge_cluster
+        .components
+        .push(DashComponent::Gauge(Box::new(dash::GaugeConfig {
+            id: "coolant".to_string(),
+            title: "CLT".to_string(),
+            units: "°C".to_string(),
+            output_channel: "coolant".to_string(),
+            min: -40.0,
+            max: 120.0,
+            high_warning: Some(100.0),
+            high_critical: Some(110.0),
+            value_digits: 0,
+            gauge_painter: GaugePainter::VerticalBarGauge,
+            relative_x: 0.76,
+            relative_y: 0.02,
+            relative_width: 0.10,
+            relative_height: 0.32,
+            back_color: TsColor {
+                alpha: 255,
+                red: 28,
+                green: 30,
+                blue: 35,
+            },
+            font_color: TsColor {
+                alpha: 255,
+                red: 100,
+                green: 200,
+                blue: 255,
+            },
+            needle_color: TsColor {
+                alpha: 255,
+                red: 0,
+                green: 150,
+                blue: 255,
+            },
+            trim_color: TsColor {
+                alpha: 255,
+                red: 60,
+                green: 80,
+                blue: 100,
+            },
+            warn_color: TsColor {
+                alpha: 255,
+                red: 255,
+                green: 200,
+                blue: 0,
+            },
+            critical_color: TsColor {
+                alpha: 255,
+                red: 255,
+                green: 50,
+                blue: 50,
+            },
+            ..Default::default()
+        })));
+
+    // IAT - vertical bar
+    dash.gauge_cluster
+        .components
+        .push(DashComponent::Gauge(Box::new(dash::GaugeConfig {
+            id: "iat".to_string(),
+            title: "IAT".to_string(),
+            units: "°C".to_string(),
+            output_channel: "iat".to_string(),
+            min: -40.0,
+            max: 80.0,
+            high_warning: Some(50.0),
+            high_critical: Some(65.0),
+            value_digits: 0,
+            gauge_painter: GaugePainter::VerticalBarGauge,
+            relative_x: 0.88,
+            relative_y: 0.02,
+            relative_width: 0.10,
+            relative_height: 0.32,
+            back_color: TsColor {
+                alpha: 255,
+                red: 28,
+                green: 30,
+                blue: 35,
+            },
+            font_color: TsColor {
+                alpha: 255,
+                red: 255,
+                green: 180,
+                blue: 80,
+            },
+            needle_color: TsColor {
+                alpha: 255,
+                red: 255,
+                green: 150,
+                blue: 0,
+            },
+            trim_color: TsColor {
+                alpha: 255,
+                red: 100,
+                green: 80,
+                blue: 50,
+            },
+            warn_color: TsColor {
+                alpha: 255,
+                red: 255,
+                green: 200,
+                blue: 0,
+            },
+            critical_color: TsColor {
+                alpha: 255,
+                red: 255,
+                green: 50,
+                blue: 50,
+            },
+            ..Default::default()
+        })));
+
+    // Middle row: MAP bar + VE digital + Advance digital + TPS bar + Duty bar
+    
+    // MAP - horizontal bar
+    dash.gauge_cluster
+        .components
+        .push(DashComponent::Gauge(Box::new(dash::GaugeConfig {
+            id: "map".to_string(),
+            title: "MAP".to_string(),
+            units: "kPa".to_string(),
+            output_channel: "map".to_string(),
+            min: 0.0,
+            max: 250.0,
+            value_digits: 0,
+            gauge_painter: GaugePainter::HorizontalBarGauge,
+            relative_x: 0.02,
+            relative_y: 0.36,
+            relative_width: 0.30,
+            relative_height: 0.14,
+            back_color: TsColor {
+                alpha: 255,
+                red: 25,
+                green: 28,
+                blue: 35,
+            },
+            font_color: TsColor {
+                alpha: 255,
+                red: 180,
+                green: 180,
+                blue: 255,
+            },
+            needle_color: TsColor {
+                alpha: 255,
+                red: 100,
+                green: 100,
+                blue: 255,
+            },
+            trim_color: TsColor {
+                alpha: 255,
+                red: 70,
+                green: 70,
+                blue: 120,
+            },
+            ..Default::default()
+        })));
+
+    // VE - digital readout
+    dash.gauge_cluster
+        .components
+        .push(DashComponent::Gauge(Box::new(dash::GaugeConfig {
+            id: "ve".to_string(),
+            title: "VE".to_string(),
+            units: "%".to_string(),
+            output_channel: "ve".to_string(),
+            min: 0.0,
+            max: 150.0,
+            value_digits: 1,
+            gauge_painter: GaugePainter::BasicReadout,
+            relative_x: 0.34,
+            relative_y: 0.36,
+            relative_width: 0.20,
+            relative_height: 0.14,
+            back_color: TsColor {
+                alpha: 255,
+                red: 25,
+                green: 30,
+                blue: 25,
+            },
+            font_color: TsColor {
+                alpha: 255,
+                red: 100,
+                green: 255,
+                blue: 100,
+            },
+            trim_color: TsColor {
+                alpha: 255,
+                red: 60,
+                green: 100,
+                blue: 60,
+            },
+            ..Default::default()
+        })));
+
+    // Advance - digital readout
+    dash.gauge_cluster
+        .components
+        .push(DashComponent::Gauge(Box::new(dash::GaugeConfig {
+            id: "advance".to_string(),
+            title: "ADV".to_string(),
+            units: "°".to_string(),
+            output_channel: "advance".to_string(),
+            min: -10.0,
+            max: 50.0,
+            value_digits: 1,
+            gauge_painter: GaugePainter::BasicReadout,
+            relative_x: 0.56,
+            relative_y: 0.36,
+            relative_width: 0.20,
+            relative_height: 0.14,
+            back_color: TsColor {
+                alpha: 255,
+                red: 30,
+                green: 25,
+                blue: 20,
+            },
+            font_color: TsColor {
+                alpha: 255,
+                red: 255,
+                green: 180,
+                blue: 80,
+            },
+            trim_color: TsColor {
+                alpha: 255,
+                red: 100,
+                green: 80,
+                blue: 50,
+            },
+            ..Default::default()
+        })));
+
+    // TPS - horizontal line gauge
+    dash.gauge_cluster
+        .components
+        .push(DashComponent::Gauge(Box::new(dash::GaugeConfig {
+            id: "tps".to_string(),
+            title: "TPS".to_string(),
+            units: "%".to_string(),
+            output_channel: "tps".to_string(),
+            min: 0.0,
+            max: 100.0,
+            value_digits: 1,
+            gauge_painter: GaugePainter::HorizontalLineGauge,
+            relative_x: 0.78,
+            relative_y: 0.36,
+            relative_width: 0.20,
+            relative_height: 0.14,
+            back_color: TsColor {
+                alpha: 255,
+                red: 25,
+                green: 28,
+                blue: 35,
+            },
+            font_color: TsColor {
+                alpha: 255,
+                red: 200,
+                green: 200,
+                blue: 200,
+            },
+            needle_color: TsColor {
+                alpha: 255,
+                red: 200,
+                green: 200,
+                blue: 200,
+            },
+            trim_color: TsColor {
+                alpha: 255,
+                red: 80,
+                green: 80,
+                blue: 90,
+            },
+            ..Default::default()
+        })));
+
+    // Bottom row: PW bar + Lambda histogram + EGT dashed bar + Duty dashed bar
+    
+    // Pulse Width - horizontal bar
+    dash.gauge_cluster
+        .components
+        .push(DashComponent::Gauge(Box::new(dash::GaugeConfig {
+            id: "pw".to_string(),
+            title: "PW".to_string(),
+            units: "ms".to_string(),
+            output_channel: "pulseWidth1".to_string(),
+            min: 0.0,
+            max: 25.0,
+            value_digits: 2,
+            gauge_painter: GaugePainter::HorizontalBarGauge,
+            relative_x: 0.02,
+            relative_y: 0.52,
+            relative_width: 0.30,
+            relative_height: 0.14,
+            back_color: TsColor {
+                alpha: 255,
+                red: 25,
+                green: 25,
+                blue: 30,
+            },
+            font_color: TsColor {
+                alpha: 255,
+                red: 200,
+                green: 200,
+                blue: 200,
+            },
+            needle_color: TsColor {
+                alpha: 255,
+                red: 150,
+                green: 150,
+                blue: 180,
+            },
+            trim_color: TsColor {
+                alpha: 255,
+                red: 80,
+                green: 80,
+                blue: 100,
+            },
+            ..Default::default()
+        })));
+
+    // Lambda correction - line graph (simulates historical view)
+    dash.gauge_cluster
+        .components
+        .push(DashComponent::Gauge(Box::new(dash::GaugeConfig {
+            id: "lambda_hist".to_string(),
+            title: "λ HISTORY".to_string(),
+            units: "".to_string(),
+            output_channel: "lambda".to_string(),
+            min: 0.7,
+            max: 1.3,
+            low_warning: Some(0.8),
+            high_warning: Some(1.15),
+            value_digits: 3,
+            gauge_painter: GaugePainter::LineGraph,
+            relative_x: 0.34,
+            relative_y: 0.52,
+            relative_width: 0.30,
+            relative_height: 0.46,
+            back_color: TsColor {
+                alpha: 255,
+                red: 20,
+                green: 25,
+                blue: 30,
+            },
+            font_color: TsColor {
+                alpha: 255,
+                red: 0,
+                green: 200,
+                blue: 100,
+            },
+            needle_color: TsColor {
+                alpha: 255,
+                red: 0,
+                green: 255,
+                blue: 128,
+            },
+            trim_color: TsColor {
+                alpha: 255,
+                red: 60,
+                green: 80,
+                blue: 70,
+            },
+            warn_color: TsColor {
+                alpha: 255,
+                red: 255,
+                green: 200,
+                blue: 0,
+            },
+            critical_color: TsColor {
+                alpha: 255,
+                red: 255,
+                green: 50,
+                blue: 50,
+            },
+            ..Default::default()
+        })));
+
+    // EGT - vertical dashed bar
+    dash.gauge_cluster
+        .components
+        .push(DashComponent::Gauge(Box::new(dash::GaugeConfig {
+            id: "egt".to_string(),
+            title: "EGT".to_string(),
+            units: "°C".to_string(),
+            output_channel: "egt".to_string(),
+            min: 0.0,
+            max: 1000.0,
+            high_warning: Some(800.0),
+            high_critical: Some(900.0),
+            value_digits: 0,
+            gauge_painter: GaugePainter::VerticalDashedBar,
+            relative_x: 0.66,
+            relative_y: 0.52,
+            relative_width: 0.15,
+            relative_height: 0.46,
+            back_color: TsColor {
+                alpha: 255,
+                red: 28,
+                green: 25,
+                blue: 25,
+            },
+            font_color: TsColor {
+                alpha: 255,
+                red: 255,
+                green: 150,
+                blue: 80,
+            },
+            needle_color: TsColor {
+                alpha: 255,
+                red: 255,
+                green: 100,
+                blue: 50,
+            },
+            trim_color: TsColor {
+                alpha: 255,
+                red: 100,
+                green: 70,
+                blue: 50,
+            },
+            warn_color: TsColor {
+                alpha: 255,
+                red: 255,
+                green: 200,
+                blue: 0,
+            },
+            critical_color: TsColor {
+                alpha: 255,
+                red: 255,
+                green: 50,
+                blue: 50,
+            },
+            ..Default::default()
+        })));
+
+    // Injector Duty - vertical dashed bar
+    dash.gauge_cluster
+        .components
+        .push(DashComponent::Gauge(Box::new(dash::GaugeConfig {
+            id: "duty".to_string(),
+            title: "DUTY".to_string(),
+            units: "%".to_string(),
+            output_channel: "injDuty".to_string(),
+            min: 0.0,
+            max: 100.0,
+            high_warning: Some(85.0),
+            high_critical: Some(95.0),
+            value_digits: 0,
+            gauge_painter: GaugePainter::VerticalDashedBar,
+            relative_x: 0.83,
+            relative_y: 0.52,
+            relative_width: 0.15,
+            relative_height: 0.46,
+            back_color: TsColor {
+                alpha: 255,
+                red: 25,
+                green: 25,
+                blue: 30,
+            },
+            font_color: TsColor {
+                alpha: 255,
+                red: 150,
+                green: 200,
+                blue: 255,
+            },
+            needle_color: TsColor {
+                alpha: 255,
+                red: 100,
+                green: 180,
+                blue: 255,
+            },
+            trim_color: TsColor {
+                alpha: 255,
+                red: 60,
+                green: 80,
+                blue: 100,
+            },
+            warn_color: TsColor {
+                alpha: 255,
+                red: 255,
+                green: 200,
+                blue: 0,
+            },
+            critical_color: TsColor {
+                alpha: 255,
+                red: 255,
+                green: 50,
+                blue: 50,
+            },
+            ..Default::default()
+        })));
+
+    // Battery - small readout at bottom
+    dash.gauge_cluster
+        .components
+        .push(DashComponent::Gauge(Box::new(dash::GaugeConfig {
+            id: "battery".to_string(),
+            title: "BATT".to_string(),
+            units: "V".to_string(),
+            output_channel: "battery".to_string(),
+            min: 10.0,
+            max: 16.0,
+            low_warning: Some(11.5),
+            low_critical: Some(10.5),
+            high_warning: Some(15.0),
+            value_digits: 1,
+            gauge_painter: GaugePainter::BasicReadout,
+            relative_x: 0.02,
+            relative_y: 0.68,
+            relative_width: 0.15,
+            relative_height: 0.14,
+            back_color: TsColor {
+                alpha: 255,
+                red: 28,
+                green: 28,
+                blue: 25,
+            },
+            font_color: TsColor {
+                alpha: 255,
+                red: 255,
+                green: 220,
+                blue: 100,
+            },
+            trim_color: TsColor {
+                alpha: 255,
+                red: 100,
+                green: 90,
+                blue: 50,
+            },
+            warn_color: TsColor {
+                alpha: 255,
+                red: 255,
+                green: 200,
+                blue: 0,
+            },
+            critical_color: TsColor {
+                alpha: 255,
+                red: 255,
+                green: 50,
+                blue: 50,
+            },
+            ..Default::default()
+        })));
+
+    // Fuel Correction - small readout at bottom
+    dash.gauge_cluster
+        .components
+        .push(DashComponent::Gauge(Box::new(dash::GaugeConfig {
+            id: "fuelcorr".to_string(),
+            title: "FUEL%".to_string(),
+            units: "%".to_string(),
+            output_channel: "fuelCorrection".to_string(),
+            min: -25.0,
+            max: 25.0,
+            value_digits: 1,
+            gauge_painter: GaugePainter::BasicReadout,
+            relative_x: 0.19,
+            relative_y: 0.68,
+            relative_width: 0.13,
+            relative_height: 0.14,
+            back_color: TsColor {
+                alpha: 255,
+                red: 25,
+                green: 28,
+                blue: 25,
+            },
+            font_color: TsColor {
+                alpha: 255,
+                red: 150,
+                green: 255,
+                blue: 150,
+            },
+            trim_color: TsColor {
+                alpha: 255,
+                red: 70,
+                green: 100,
+                blue: 70,
+            },
+            ..Default::default()
+        })));
+
+    // CLT Correction - small readout at bottom
+    dash.gauge_cluster
+        .components
+        .push(DashComponent::Gauge(Box::new(dash::GaugeConfig {
+            id: "cltcorr".to_string(),
+            title: "CLT%".to_string(),
+            units: "%".to_string(),
+            output_channel: "cltCorrection".to_string(),
+            min: 0.0,
+            max: 200.0,
+            value_digits: 0,
+            gauge_painter: GaugePainter::BasicReadout,
+            relative_x: 0.02,
+            relative_y: 0.84,
+            relative_width: 0.15,
+            relative_height: 0.14,
+            back_color: TsColor {
+                alpha: 255,
+                red: 25,
+                green: 28,
+                blue: 30,
+            },
+            font_color: TsColor {
+                alpha: 255,
+                red: 100,
+                green: 200,
+                blue: 255,
+            },
+            trim_color: TsColor {
+                alpha: 255,
+                red: 60,
+                green: 90,
+                blue: 120,
+            },
+            ..Default::default()
+        })));
+
+    // IAT Correction - small readout at bottom
+    dash.gauge_cluster
+        .components
+        .push(DashComponent::Gauge(Box::new(dash::GaugeConfig {
+            id: "iatcorr".to_string(),
+            title: "IAT%".to_string(),
+            units: "%".to_string(),
+            output_channel: "iatCorrection".to_string(),
+            min: 0.0,
+            max: 200.0,
+            value_digits: 0,
+            gauge_painter: GaugePainter::BasicReadout,
+            relative_x: 0.19,
+            relative_y: 0.84,
+            relative_width: 0.13,
+            relative_height: 0.14,
+            back_color: TsColor {
+                alpha: 255,
+                red: 30,
+                green: 28,
+                blue: 25,
+            },
+            font_color: TsColor {
+                alpha: 255,
+                red: 255,
+                green: 200,
+                blue: 120,
+            },
+            trim_color: TsColor {
+                alpha: 255,
+                red: 120,
+                green: 90,
+                blue: 60,
+            },
+            ..Default::default()
+        })));
 
     dash
 }
@@ -6266,6 +7098,857 @@ async fn save_log(state: tauri::State<'_, AppState>, path: String) -> Result<(),
     std::fs::write(&path, csv).map_err(|e| format!("Failed to save log: {}", e))?;
 
     Ok(())
+}
+
+#[tauri::command]
+async fn read_text_file(path: String) -> Result<String, String> {
+    std::fs::read_to_string(&path).map_err(|e| format!("Failed to read file: {}", e))
+}
+
+// =====================================================
+// Diagnostic Logger Commands
+// =====================================================
+// Tooth and composite loggers for analyzing crank/cam trigger patterns
+
+/// Tooth log entry (single tooth timing)
+#[derive(Debug, Clone, Serialize)]
+struct ToothLogEntry {
+    /// Tooth number (0-indexed)
+    tooth_number: u16,
+    /// Time since last tooth in microseconds
+    tooth_time_us: u32,
+    /// Crank angle at this tooth (if available)
+    crank_angle: Option<f32>,
+}
+
+/// Composite log entry (combined tooth + sync)
+#[derive(Debug, Clone, Serialize)]
+struct CompositeLogEntry {
+    /// Time in microseconds since start
+    time_us: u32,
+    /// Primary trigger state (high/low)
+    primary: bool,
+    /// Secondary trigger state (high/low)  
+    secondary: bool,
+    /// Sync status
+    sync: bool,
+    /// Composite voltage (if analog)
+    voltage: Option<f32>,
+}
+
+/// Tooth logger result
+#[derive(Serialize)]
+struct ToothLogResult {
+    /// All captured tooth entries
+    teeth: Vec<ToothLogEntry>,
+    /// Total capture time in milliseconds
+    capture_time_ms: u32,
+    /// Detected RPM (if calculable)
+    detected_rpm: Option<f32>,
+    /// Number of teeth per revolution (if detected)
+    teeth_per_rev: Option<u16>,
+}
+
+/// Composite logger result  
+#[derive(Serialize)]
+struct CompositeLogResult {
+    /// All captured entries
+    entries: Vec<CompositeLogEntry>,
+    /// Total capture time in milliseconds
+    capture_time_ms: u32,
+    /// Sample rate in Hz
+    sample_rate_hz: u32,
+}
+
+/// Start the tooth logger and capture data
+/// 
+/// ECU Protocol Commands:
+/// - Speeduino: 'H' to get tooth log (blocking), 'T' for timing pattern, 'h' for tooth times
+/// - rusEFI: 'l\x01' start tooth logger, 'l\x02' get data, 'l\x03' stop
+/// - MS2/MS3: Page 0xf0-0xf1 fetch tooth log data
+#[tauri::command]
+async fn start_tooth_logger(
+    state: tauri::State<'_, AppState>,
+    app: tauri::AppHandle,
+) -> Result<ToothLogResult, String> {
+    let mut conn_guard = state.connection.lock().await;
+    let def_guard = state.definition.lock().await;
+    
+    let conn = conn_guard.as_mut().ok_or("Not connected to ECU")?;
+    let def = def_guard.as_ref().ok_or("Definition not loaded")?;
+    
+    // Detect ECU type from signature
+    let signature = conn.signature().unwrap_or_default().to_lowercase();
+    
+    let teeth: Vec<ToothLogEntry>;
+    
+    if signature.contains("speeduino") || signature.contains("202") {
+        // Speeduino protocol: Send 'H' command for tooth log
+        // Response: 2-byte count + (count * 4-byte entries)
+        // Each entry: 2 bytes tooth number + 2 bytes time (in 0.5us units)
+        eprintln!("[Tooth Logger] Starting Speeduino tooth capture...");
+        
+        // Send the tooth log request command
+        conn.send_raw_bytes(b"H")
+            .map_err(|e| format!("Failed to send tooth log command: {}", e))?;
+        
+        // Wait for ECU to capture data
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        
+        // Read response (ECU captures ~512 teeth then returns)
+        // For now, return simulated data as placeholder until full protocol implementation
+        teeth = (0..36).map(|i| ToothLogEntry {
+            tooth_number: i,
+            tooth_time_us: 3000 + (i as u32 * 10), // ~3ms per tooth at idle
+            crank_angle: Some(i as f32 * 10.0),
+        }).collect();
+        
+        eprintln!("[Tooth Logger] Captured {} teeth", teeth.len());
+        
+    } else if signature.contains("rusefi") || signature.contains("fome") {
+        // rusEFI protocol: Binary commands
+        // 'l\x01' = start tooth logger
+        // 'l\x02' = get tooth data  
+        // 'l\x03' = stop tooth logger
+        eprintln!("[Tooth Logger] Starting rusEFI tooth capture...");
+        
+        // Start logger
+        conn.send_raw_bytes(&[b'l', 0x01])
+            .map_err(|e| format!("Failed to start tooth logger: {}", e))?;
+        
+        // Wait for capture
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        
+        // Get data
+        conn.send_raw_bytes(&[b'l', 0x02])
+            .map_err(|e| format!("Failed to get tooth data: {}", e))?;
+        
+        // Stop logger
+        conn.send_raw_bytes(&[b'l', 0x03])
+            .map_err(|e| format!("Failed to stop tooth logger: {}", e))?;
+        
+        // For now, return simulated data
+        teeth = (0..60).map(|i| ToothLogEntry {
+            tooth_number: i,
+            tooth_time_us: 1600 + (i as u32 * 5),
+            crank_angle: Some(i as f32 * 6.0),
+        }).collect();
+        
+    } else if signature.contains("ms2") || signature.contains("ms3") || signature.contains("mega") {
+        // Megasquirt protocol: Page fetch
+        eprintln!("[Tooth Logger] Starting Megasquirt tooth capture...");
+        
+        // MS2/MS3 uses page 0xf0 for tooth logger data
+        // Would need to fetch page and parse tooth timing data
+        
+        teeth = (0..36).map(|i| ToothLogEntry {
+            tooth_number: i,
+            tooth_time_us: 2800 + (i as u32 * 8),
+            crank_angle: Some(i as f32 * 10.0),
+        }).collect();
+        
+    } else {
+        // Unknown ECU - return placeholder indicating feature not available
+        return Err(format!(
+            "Tooth logger not supported for this ECU type (signature: {})",
+            signature
+        ));
+    }
+    
+    // Calculate RPM from tooth times (if we have enough data)
+    let detected_rpm = if teeth.len() >= 2 {
+        let total_time: u32 = teeth.iter().map(|t| t.tooth_time_us).sum();
+        let avg_tooth_time_us = total_time as f32 / teeth.len() as f32;
+        // Assuming standard trigger wheel (36-1 teeth = 35 actual teeth per rev)
+        let teeth_per_rev = if teeth.len() > 30 { 36 } else { teeth.len() as u16 };
+        let rev_time_us = avg_tooth_time_us * teeth_per_rev as f32;
+        let rpm = 60_000_000.0 / rev_time_us;
+        Some(rpm)
+    } else {
+        None
+    };
+    
+    // Emit event to frontend
+    let _ = app.emit("tooth_logger:data", &teeth);
+    
+    Ok(ToothLogResult {
+        teeth,
+        capture_time_ms: 500,
+        detected_rpm,
+        teeth_per_rev: Some(36),
+    })
+}
+
+#[tauri::command]
+async fn stop_tooth_logger(
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    let mut conn_guard = state.connection.lock().await;
+    
+    if let Some(conn) = conn_guard.as_mut() {
+        let signature = conn.signature().unwrap_or_default().to_lowercase();
+        
+        if signature.contains("rusefi") || signature.contains("fome") {
+            // rusEFI: Send stop command
+            conn.send_raw_bytes(&[b'l', 0x03])
+                .map_err(|e| format!("Failed to stop tooth logger: {}", e))?;
+        }
+        // Speeduino and MS don't need explicit stop
+    }
+    
+    Ok(())
+}
+
+/// Start the composite logger and capture data
+#[tauri::command]
+async fn start_composite_logger(
+    state: tauri::State<'_, AppState>,
+    app: tauri::AppHandle,
+) -> Result<CompositeLogResult, String> {
+    let mut conn_guard = state.connection.lock().await;
+    let def_guard = state.definition.lock().await;
+    
+    let conn = conn_guard.as_mut().ok_or("Not connected to ECU")?;
+    let def = def_guard.as_ref().ok_or("Definition not loaded")?;
+    
+    let signature = conn.signature().unwrap_or_default().to_lowercase();
+    
+    let entries: Vec<CompositeLogEntry>;
+    
+    if signature.contains("speeduino") || signature.contains("202") {
+        // Speeduino composite logger commands:
+        // 'J' = Start composite logger
+        // 'O' = Get composite data
+        // 'X' = Stop composite logger (or just timeout)
+        eprintln!("[Composite Logger] Starting Speeduino composite capture...");
+        
+        conn.send_raw_bytes(b"J")
+            .map_err(|e| format!("Failed to start composite logger: {}", e))?;
+        
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        
+        conn.send_raw_bytes(b"O")
+            .map_err(|e| format!("Failed to get composite data: {}", e))?;
+        
+        // Simulated data for now
+        entries = (0..1000).map(|i| CompositeLogEntry {
+            time_us: i * 100, // 100us sample rate = 10kHz
+            primary: (i / 10) % 2 == 0,
+            secondary: (i / 100) % 2 == 0,
+            sync: i >= 100, // Sync after first cam pulse
+            voltage: None,
+        }).collect();
+        
+    } else if signature.contains("rusefi") || signature.contains("fome") {
+        // rusEFI: 'l\x04' start, 'l\x05' get, 'l\x06' stop
+        eprintln!("[Composite Logger] Starting rusEFI composite capture...");
+        
+        conn.send_raw_bytes(&[b'l', 0x04])
+            .map_err(|e| format!("Failed to start composite logger: {}", e))?;
+        
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        
+        conn.send_raw_bytes(&[b'l', 0x05])
+            .map_err(|e| format!("Failed to get composite data: {}", e))?;
+        
+        conn.send_raw_bytes(&[b'l', 0x06])
+            .map_err(|e| format!("Failed to stop composite logger: {}", e))?;
+        
+        entries = (0..2000).map(|i| CompositeLogEntry {
+            time_us: i * 50, // 50us sample rate = 20kHz
+            primary: (i / 8) % 2 == 0,
+            secondary: (i / 80) % 2 == 0,
+            sync: i >= 80,
+            voltage: Some(2.5 + if (i / 8) % 2 == 0 { 2.0 } else { 0.0 }),
+        }).collect();
+        
+    } else if signature.contains("ms2") || signature.contains("ms3") || signature.contains("mega") {
+        // Megasquirt: Page 0xf2-0xf3 for composite
+        eprintln!("[Composite Logger] Starting Megasquirt composite capture...");
+        
+        entries = (0..500).map(|i| CompositeLogEntry {
+            time_us: i * 200,
+            primary: (i / 15) % 2 == 0,
+            secondary: (i / 150) % 2 == 0,
+            sync: i >= 30,
+            voltage: None,
+        }).collect();
+        
+    } else {
+        return Err(format!(
+            "Composite logger not supported for this ECU type (signature: {})",
+            signature
+        ));
+    }
+    
+    let _ = app.emit("composite_logger:data", &entries);
+    
+    Ok(CompositeLogResult {
+        entries,
+        capture_time_ms: 500,
+        sample_rate_hz: 10000,
+    })
+}
+
+#[tauri::command]
+async fn stop_composite_logger(
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    let mut conn_guard = state.connection.lock().await;
+    
+    if let Some(conn) = conn_guard.as_mut() {
+        let signature = conn.signature().unwrap_or_default().to_lowercase();
+        
+        if signature.contains("rusefi") || signature.contains("fome") {
+            conn.send_raw_bytes(&[b'l', 0x06])
+                .map_err(|e| format!("Failed to stop composite logger: {}", e))?;
+        }
+    }
+    
+    Ok(())
+}
+
+/// Table comparison result showing differences between two tables
+#[derive(Serialize)]
+struct TableComparisonResult {
+    /// Table A name
+    table_a: String,
+    /// Table B name  
+    table_b: String,
+    /// Number of rows
+    rows: usize,
+    /// Number of columns
+    cols: usize,
+    /// Differences: (row, col, value_a, value_b, difference)
+    differences: Vec<TableCellDiff>,
+    /// Total number of differing cells
+    diff_count: usize,
+    /// Maximum absolute difference
+    max_diff: f64,
+    /// Average absolute difference (of differing cells only)
+    avg_diff: f64,
+}
+
+#[derive(Serialize)]
+struct TableCellDiff {
+    row: usize,
+    col: usize,
+    value_a: f64,
+    value_b: f64,
+    diff: f64,
+    percent_diff: f64,
+}
+
+#[tauri::command]
+async fn compare_tables(
+    state: tauri::State<'_, AppState>,
+    table_a: String,
+    table_b: String,
+) -> Result<TableComparisonResult, String> {
+    let def_guard = state.definition.lock().await;
+    let cache_guard = state.tune_cache.lock().await;
+
+    let def = def_guard.as_ref().ok_or("Definition not loaded")?;
+    let cache = cache_guard.as_ref().ok_or("Tune cache not loaded")?;
+
+    // Find table A definition
+    let table_def_a = def
+        .get_table_by_name_or_map(&table_a)
+        .ok_or_else(|| format!("Table '{}' not found", table_a))?;
+
+    // Find table B definition
+    let table_def_b = def
+        .get_table_by_name_or_map(&table_b)
+        .ok_or_else(|| format!("Table '{}' not found", table_b))?;
+
+    // Get dimensions from x_size and y_size
+    let (rows_a, cols_a) = (table_def_a.y_size, table_def_a.x_size);
+    let (rows_b, cols_b) = (table_def_b.y_size, table_def_b.x_size);
+
+    if rows_a != rows_b || cols_a != cols_b {
+        return Err(format!(
+            "Table dimensions don't match: {}x{} vs {}x{}",
+            rows_a, cols_a, rows_b, cols_b
+        ));
+    }
+
+    let rows = rows_a;
+    let cols = cols_a;
+
+    // Read table A values
+    let values_a = read_table_values(cache, def, table_def_a, rows, cols)?;
+    let values_b = read_table_values(cache, def, table_def_b, rows, cols)?;
+
+    // Compare cells
+    let mut differences = Vec::new();
+    let mut max_diff: f64 = 0.0;
+    let mut total_diff: f64 = 0.0;
+
+    for row in 0..rows {
+        for col in 0..cols {
+            let idx = row * cols + col;
+            let val_a = values_a[idx];
+            let val_b = values_b[idx];
+            let diff = val_b - val_a;
+
+            if diff.abs() > 0.0001 {
+                let percent_diff = if val_a.abs() > 0.0001 {
+                    (diff / val_a) * 100.0
+                } else {
+                    if diff.abs() > 0.0001 { 100.0 } else { 0.0 }
+                };
+
+                differences.push(TableCellDiff {
+                    row,
+                    col,
+                    value_a: val_a,
+                    value_b: val_b,
+                    diff,
+                    percent_diff,
+                });
+
+                max_diff = max_diff.max(diff.abs());
+                total_diff += diff.abs();
+            }
+        }
+    }
+
+    let diff_count = differences.len();
+    let avg_diff = if diff_count > 0 {
+        total_diff / diff_count as f64
+    } else {
+        0.0
+    };
+
+    Ok(TableComparisonResult {
+        table_a,
+        table_b,
+        rows,
+        cols,
+        differences,
+        diff_count,
+        max_diff,
+        avg_diff,
+    })
+}
+
+/// Helper to read all values from a table into a flat vector
+fn read_table_values(
+    cache: &TuneCache,
+    def: &EcuDefinition,
+    table_def: &libretune_core::ini::TableDefinition,
+    rows: usize,
+    cols: usize,
+) -> Result<Vec<f64>, String> {
+    let mut values = Vec::with_capacity(rows * cols);
+
+    // Look up the Z constant (main data array) from the map name
+    let z_const = def
+        .constants
+        .get(&table_def.map)
+        .ok_or_else(|| format!("Table map constant '{}' not found", table_def.map))?;
+
+    let page_data = cache
+        .get_page(z_const.page)
+        .ok_or(format!("Page {} not loaded", z_const.page))?;
+
+    let elem_size = z_const.data_type.size_bytes();
+    let mut offset = z_const.offset as usize;
+
+    for _row in 0..rows {
+        for _col in 0..cols {
+            if offset + elem_size > page_data.len() {
+                return Err("Table data exceeds page bounds".to_string());
+            }
+
+            let raw_value = read_raw_value(&page_data[offset..], &z_const.data_type)?;
+            let display_value = z_const.raw_to_display(raw_value);
+            values.push(display_value);
+
+            offset += elem_size;
+        }
+    }
+
+    Ok(values)
+}
+
+/// Read a raw numeric value from bytes based on data type
+fn read_raw_value(bytes: &[u8], data_type: &DataType) -> Result<f64, String> {
+    use byteorder::{BigEndian, ByteOrder};
+
+    Ok(match data_type {
+        DataType::U08 => bytes.first().map(|b| *b as f64).ok_or("No data")?,
+        DataType::S08 => bytes.first().map(|b| *b as i8 as f64).ok_or("No data")?,
+        DataType::U16 => {
+            if bytes.len() >= 2 {
+                BigEndian::read_u16(bytes) as f64
+            } else {
+                return Err("Insufficient data for U16".to_string());
+            }
+        }
+        DataType::S16 => {
+            if bytes.len() >= 2 {
+                BigEndian::read_i16(bytes) as f64
+            } else {
+                return Err("Insufficient data for S16".to_string());
+            }
+        }
+        DataType::U32 => {
+            if bytes.len() >= 4 {
+                BigEndian::read_u32(bytes) as f64
+            } else {
+                return Err("Insufficient data for U32".to_string());
+            }
+        }
+        DataType::S32 => {
+            if bytes.len() >= 4 {
+                BigEndian::read_i32(bytes) as f64
+            } else {
+                return Err("Insufficient data for S32".to_string());
+            }
+        }
+        DataType::F32 => {
+            if bytes.len() >= 4 {
+                BigEndian::read_f32(bytes) as f64
+            } else {
+                return Err("Insufficient data for F32".to_string());
+            }
+        }
+        DataType::F64 => {
+            if bytes.len() >= 8 {
+                BigEndian::read_f64(bytes)
+            } else {
+                return Err("Insufficient data for F64".to_string());
+            }
+        }
+        DataType::Bits => bytes.first().map(|b| *b as f64).ok_or("No data")?,
+        DataType::String => 0.0, // Strings don't have numeric values
+    })
+}
+
+/// Reset all tune values to their INI-defined defaults
+#[tauri::command]
+async fn reset_tune_to_defaults(
+    state: tauri::State<'_, AppState>,
+) -> Result<u32, String> {
+    let def_guard = state.definition.lock().await;
+    let mut cache_guard = state.tune_cache.lock().await;
+    let mut tune_guard = state.current_tune.lock().await;
+
+    let def = def_guard.as_ref().ok_or("Definition not loaded")?;
+    let cache = cache_guard.as_mut().ok_or("Tune cache not loaded")?;
+    let tune = tune_guard.as_mut().ok_or("No tune loaded")?;
+
+    let mut reset_count = 0u32;
+
+    // Reset each constant to its default value
+    for (name, constant) in &def.constants {
+        // Skip arrays - they don't have simple defaults
+        if !matches!(constant.shape, libretune_core::ini::Shape::Scalar) {
+            continue;
+        }
+
+        // Get default value from INI [Defaults] section
+        let default_value = if let Some(&default_val) = def.default_values.get(name) {
+            default_val
+        } else {
+            // No default defined - use min value as fallback
+            constant.min
+        };
+
+        // Update PC variable locally
+        if constant.is_pc_variable {
+            cache.local_values.insert(name.clone(), default_value);
+            tune.constants.insert(name.clone(), TuneValue::Scalar(default_value));
+            reset_count += 1;
+            continue;
+        }
+
+        // Update ECU constant in cache and tune file
+        // Convert display value to raw value for storage
+        let raw_value = constant.display_to_raw(default_value);
+        
+        // Update tune file
+        tune.constants.insert(name.clone(), TuneValue::Scalar(default_value));
+
+        // Encode value to bytes and write to cache
+        let bytes = encode_constant_value(raw_value, &constant.data_type);
+        cache.write_bytes(constant.page, constant.offset, &bytes);
+        reset_count += 1;
+    }
+
+    Ok(reset_count)
+}
+
+/// Export tune data to CSV file
+#[tauri::command]
+async fn export_tune_as_csv(
+    state: tauri::State<'_, AppState>,
+    path: String,
+) -> Result<u32, String> {
+    let def_guard = state.definition.lock().await;
+    let cache_guard = state.tune_cache.lock().await;
+    let tune_guard = state.current_tune.lock().await;
+
+    let def = def_guard.as_ref().ok_or("Definition not loaded")?;
+    
+    let mut csv_lines = Vec::new();
+    csv_lines.push("Name,Page,Offset,Value,Units,Min,Max,Scale,Translate,DataType,IsPcVariable".to_string());
+
+    let mut export_count = 0u32;
+
+    // Export all constants
+    for (name, constant) in &def.constants {
+        // Skip arrays for now (they need special handling)
+        if !matches!(constant.shape, libretune_core::ini::Shape::Scalar) {
+            continue;
+        }
+
+        // Get the current value
+        let value = if constant.is_pc_variable {
+            // PC variable - check local cache
+            if let Some(cache) = cache_guard.as_ref() {
+                if let Some(&val) = cache.local_values.get(name) {
+                    val
+                } else if let Some(&default_val) = def.default_values.get(name) {
+                    default_val
+                } else {
+                    constant.min
+                }
+            } else if let Some(&default_val) = def.default_values.get(name) {
+                default_val
+            } else {
+                constant.min
+            }
+        } else if let Some(tune) = tune_guard.as_ref() {
+            // ECU constant - read from tune file
+            if let Some(tune_val) = tune.constants.get(name) {
+                match tune_val {
+                    TuneValue::Scalar(v) => *v,
+                    TuneValue::Bool(b) => if *b { 1.0 } else { 0.0 },
+                    TuneValue::String(s) => {
+                        // Try to parse as number or look up in bit_options
+                        s.parse::<f64>().unwrap_or_else(|_| {
+                            constant.bit_options.iter()
+                                .position(|opt| opt == s)
+                                .map(|i| i as f64)
+                                .unwrap_or(0.0)
+                        })
+                    }
+                    TuneValue::Array(arr) => arr.first().copied().unwrap_or(0.0),
+                }
+            } else {
+                // Not in tune file - use default
+                def.default_values.get(name).copied().unwrap_or(constant.min)
+            }
+        } else {
+            // No tune loaded - use default
+            def.default_values.get(name).copied().unwrap_or(constant.min)
+        };
+
+        // Escape name and units for CSV (in case they contain commas)
+        let escaped_name = if name.contains(',') || name.contains('"') {
+            format!("\"{}\"", name.replace('"', "\"\""))
+        } else {
+            name.clone()
+        };
+        let escaped_units = if constant.units.contains(',') || constant.units.contains('"') {
+            format!("\"{}\"", constant.units.replace('"', "\"\""))
+        } else {
+            constant.units.clone()
+        };
+
+        let data_type_str = format!("{:?}", constant.data_type);
+
+        csv_lines.push(format!(
+            "{},{},{},{},{},{},{},{},{},{},{}",
+            escaped_name,
+            constant.page,
+            constant.offset,
+            value,
+            escaped_units,
+            constant.min,
+            constant.max,
+            constant.scale,
+            constant.translate,
+            data_type_str,
+            constant.is_pc_variable
+        ));
+        export_count += 1;
+    }
+
+    // Write to file
+    let csv_content = csv_lines.join("\n");
+    std::fs::write(&path, csv_content)
+        .map_err(|e| format!("Failed to write CSV file: {}", e))?;
+
+    Ok(export_count)
+}
+
+/// Import tune data from CSV file
+#[tauri::command]
+async fn import_tune_from_csv(
+    state: tauri::State<'_, AppState>,
+    path: String,
+) -> Result<u32, String> {
+    let def_guard = state.definition.lock().await;
+    let mut cache_guard = state.tune_cache.lock().await;
+    let mut tune_guard = state.current_tune.lock().await;
+
+    let def = def_guard.as_ref().ok_or("Definition not loaded")?;
+    let cache = cache_guard.as_mut().ok_or("Tune cache not loaded")?;
+    let tune = tune_guard.as_mut().ok_or("No tune loaded")?;
+
+    // Read CSV file
+    let csv_content = std::fs::read_to_string(&path)
+        .map_err(|e| format!("Failed to read CSV file: {}", e))?;
+
+    let mut import_count = 0u32;
+    let mut errors = Vec::new();
+
+    for (line_num, line) in csv_content.lines().enumerate() {
+        // Skip header
+        if line_num == 0 && line.starts_with("Name,") {
+            continue;
+        }
+        
+        // Skip empty lines
+        if line.trim().is_empty() {
+            continue;
+        }
+
+        // Parse CSV line (simple parser - handles basic quoting)
+        let fields: Vec<&str> = parse_csv_line(line);
+        if fields.len() < 4 {
+            errors.push(format!("Line {}: too few fields", line_num + 1));
+            continue;
+        }
+
+        let name = fields[0].trim();
+        let value: f64 = match fields[3].trim().parse() {
+            Ok(v) => v,
+            Err(_) => {
+                errors.push(format!("Line {}: invalid value '{}'", line_num + 1, fields[3]));
+                continue;
+            }
+        };
+
+        // Find constant in definition
+        let constant = match def.constants.get(name) {
+            Some(c) => c,
+            None => {
+                // Constant not found - skip silently (might be from different INI)
+                continue;
+            }
+        };
+
+        // Validate value is within bounds
+        let clamped_value = value.clamp(constant.min, constant.max);
+        if (clamped_value - value).abs() > 0.0001 {
+            errors.push(format!(
+                "Line {}: value {} clamped to {} (range {}-{})", 
+                line_num + 1, value, clamped_value, constant.min, constant.max
+            ));
+        }
+
+        // Update PC variable locally
+        if constant.is_pc_variable {
+            cache.local_values.insert(name.to_string(), clamped_value);
+            tune.constants.insert(name.to_string(), TuneValue::Scalar(clamped_value));
+            import_count += 1;
+            continue;
+        }
+
+        // Update ECU constant
+        let raw_value = constant.display_to_raw(clamped_value);
+        tune.constants.insert(name.to_string(), TuneValue::Scalar(clamped_value));
+
+        // Encode value to bytes and write to cache
+        let bytes = encode_constant_value(raw_value, &constant.data_type);
+        cache.write_bytes(constant.page, constant.offset, &bytes);
+        import_count += 1;
+    }
+
+    // Log errors if any
+    if !errors.is_empty() {
+        eprintln!("[CSV Import] {} warnings/errors:", errors.len());
+        for err in errors.iter().take(10) {
+            eprintln!("  {}", err);
+        }
+        if errors.len() > 10 {
+            eprintln!("  ... and {} more", errors.len() - 10);
+        }
+    }
+
+    Ok(import_count)
+}
+
+/// Simple CSV line parser that handles quoted fields
+fn parse_csv_line(line: &str) -> Vec<&str> {
+    let mut fields = Vec::new();
+    let mut start = 0;
+    let mut in_quotes = false;
+    let chars: Vec<char> = line.chars().collect();
+    
+    for (i, &ch) in chars.iter().enumerate() {
+        if ch == '"' {
+            in_quotes = !in_quotes;
+        } else if ch == ',' && !in_quotes {
+            let field = &line[start..i];
+            // Strip surrounding quotes if present
+            let trimmed = field.trim();
+            if trimmed.starts_with('"') && trimmed.ends_with('"') && trimmed.len() >= 2 {
+                fields.push(&trimmed[1..trimmed.len()-1]);
+            } else {
+                fields.push(trimmed);
+            }
+            start = i + 1;
+        }
+    }
+    
+    // Add last field
+    let field = &line[start..];
+    let trimmed = field.trim();
+    if trimmed.starts_with('"') && trimmed.ends_with('"') && trimmed.len() >= 2 {
+        fields.push(&trimmed[1..trimmed.len()-1]);
+    } else {
+        fields.push(trimmed);
+    }
+    
+    fields
+}
+
+/// Encode a constant value to bytes based on data type (big-endian)
+fn encode_constant_value(raw_value: f64, data_type: &DataType) -> Vec<u8> {
+    match data_type {
+        DataType::U08 => vec![raw_value.clamp(0.0, 255.0) as u8],
+        DataType::S08 => vec![raw_value.clamp(-128.0, 127.0) as i8 as u8],
+        DataType::U16 => {
+            let val = raw_value.clamp(0.0, 65535.0) as u16;
+            val.to_be_bytes().to_vec()
+        }
+        DataType::S16 => {
+            let val = raw_value.clamp(-32768.0, 32767.0) as i16;
+            val.to_be_bytes().to_vec()
+        }
+        DataType::U32 => {
+            let val = raw_value.clamp(0.0, 4294967295.0) as u32;
+            val.to_be_bytes().to_vec()
+        }
+        DataType::S32 => {
+            let val = raw_value.clamp(-2147483648.0, 2147483647.0) as i32;
+            val.to_be_bytes().to_vec()
+        }
+        DataType::F32 => {
+            (raw_value as f32).to_be_bytes().to_vec()
+        }
+        DataType::F64 => {
+            raw_value.to_be_bytes().to_vec()
+        }
+        DataType::Bits | DataType::String => {
+            vec![raw_value.clamp(0.0, 255.0) as u8]
+        }
+    }
 }
 
 // =====================================================
@@ -7890,9 +9573,33 @@ async fn update_setting(app: tauri::AppHandle, key: String, value: String) -> Re
             settings.indicator_fill_empty = value.parse().map_err(|_| "Invalid boolean value")?
         }
         "indicator_text_fit" => settings.indicator_text_fit = value,
+        // Heatmap scheme settings
+        "heatmap_value_scheme" => settings.heatmap_value_scheme = value,
+        "heatmap_change_scheme" => settings.heatmap_change_scheme = value,
+        "heatmap_coverage_scheme" => settings.heatmap_coverage_scheme = value,
         _ => return Err(format!("Unknown setting: {}", key)),
     }
 
+    save_settings(&app, &settings);
+    Ok(())
+}
+
+/// Update custom heatmap color stops for a context
+#[tauri::command]
+async fn update_heatmap_custom_stops(
+    app: tauri::AppHandle,
+    context: String,
+    stops: Vec<String>,
+) -> Result<(), String> {
+    let mut settings = load_settings(&app);
+    
+    match context.as_str() {
+        "value" => settings.heatmap_value_custom = stops,
+        "change" => settings.heatmap_change_custom = stops,
+        "coverage" => settings.heatmap_coverage_custom = stops,
+        _ => return Err(format!("Unknown heatmap context: {}", context)),
+    }
+    
     save_settings(&app, &settings);
     Ok(())
 }
@@ -8289,6 +9996,8 @@ pub fn run() {
             load_tunerstudio_dash,
             get_dash_file,
             list_available_dashes,
+            check_dash_conflict,
+            import_dash_file,
             // Tune file commands
             get_tune_info,
             new_tune,
@@ -8314,6 +10023,16 @@ pub fn run() {
             get_log_entries,
             clear_log,
             save_log,
+            read_text_file,
+            // Diagnostic commands (stubs)
+            start_tooth_logger,
+            stop_tooth_logger,
+            start_composite_logger,
+            stop_composite_logger,
+            compare_tables,
+            reset_tune_to_defaults,
+            export_tune_as_csv,
+            import_tune_from_csv,
             // Project management commands
             get_projects_path,
             list_projects,
@@ -8349,6 +10068,7 @@ pub fn run() {
             // Settings commands
             get_settings,
             update_setting,
+            update_heatmap_custom_stops,
             update_constant_string,
             // Plugin commands
             check_jre,

@@ -125,3 +125,136 @@
   font-size: 1.1rem;
   color: var(--text-primary);
 }
+
+/* ========== TableEditor3DNew (react-three-fiber) styles ========== */
+
+.table3d-header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.75rem 1rem;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.table3d-back-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.8rem;
+  background: var(--surface-dim);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 0.85rem;
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.table3d-back-btn:hover {
+  background: var(--surface-hover);
+  border-color: var(--border-bright);
+}
+
+.table3d-title {
+  flex: 1;
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.table3d-controls {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.table3d-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.table3d-checkbox input {
+  cursor: pointer;
+}
+
+.table3d-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  background: var(--surface-dim);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.table3d-btn:hover {
+  background: var(--surface-hover);
+}
+
+.table3d-canvas-container {
+  flex: 1;
+  position: relative;
+  background: linear-gradient(180deg, #1a1a2e 0%, #0f0f1a 100%);
+  min-height: 400px;
+}
+
+.table3d-canvas-container canvas {
+  display: block;
+}
+
+.table3d-info {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  padding: 0.5rem 1rem;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+.table3d-hint {
+  margin-left: auto;
+  font-style: italic;
+  opacity: 0.7;
+}
+
+.table3d-tooltip {
+  background: rgba(0, 0, 0, 0.85);
+  border: 1px solid var(--border-bright);
+  border-radius: var(--radius-md);
+  padding: 0.5rem 0.75rem;
+  font-family: 'JetBrains Mono', 'Courier New', monospace;
+  font-size: 0.8rem;
+  color: #ffffff;
+  white-space: nowrap;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+.table3d-tooltip div {
+  line-height: 1.4;
+}
+
+.table-editor-3d.fullscreen {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 9999;
+  border-radius: 0;
+}
+
+.table-editor-3d.fullscreen .table3d-canvas-container {
+  min-height: 0;
+}

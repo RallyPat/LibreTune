@@ -4,6 +4,7 @@ import App from "./App";
 import PopOutWindow from "./PopOutWindow";
 import { LoadingProvider } from "./components/LoadingContext";
 import { ToastProvider } from "./components/ToastContext";
+import { UnitPreferencesProvider } from "./utils/useUnitPreferences";
 
 /**
  * Root component that determines whether to render App or PopOutWindow
@@ -52,7 +53,9 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
     <LoadingProvider>
       <ToastProvider>
-        <Root />
+        <UnitPreferencesProvider>
+          <Root />
+        </UnitPreferencesProvider>
       </ToastProvider>
     </LoadingProvider>
   </React.StrictMode>,

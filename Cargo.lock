@@ -1972,6 +1972,7 @@ dependencies = [
 name = "libretune-app"
 version = "0.1.0"
 dependencies = [
+ "byteorder",
  "chrono",
  "dirs 5.0.1",
  "libretune-core",

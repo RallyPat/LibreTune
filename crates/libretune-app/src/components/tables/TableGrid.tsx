@@ -1,4 +1,5 @@
-import { useState, useRef, useMemo } from 'react';
+import { useState, useRef, useMemo, useCallback } from 'react';
+import { valueToHeatmapColor, HeatmapScheme } from '../../utils/heatmapColors';
 
 interface TableGridProps {
   x_bins: number[];
@@ -18,6 +19,9 @@ interface TableGridProps {
   liveCursorX?: number; // Current X-axis value (e.g., RPM)
   liveCursorY?: number; // Current Y-axis value (e.g., MAP/TPS)
   showLiveCursor?: boolean;
+  // Heatmap color props
+  showColorShade?: boolean; // Whether to show heatmap colors
+  heatmapScheme?: HeatmapScheme | string[]; // Scheme name or custom color stops
 }
 
 export default function TableGrid({
@@ -37,6 +41,8 @@ export default function TableGrid({
   liveCursorX,
   liveCursorY,
   showLiveCursor = false,
+  showColorShade = true,
+  heatmapScheme = 'tunerstudio',
 }: TableGridProps) {
   const gridRef = useRef<HTMLDivElement>(null);
   const [editingCell, setEditingCell] = useState<[number, number] | null>(null);
@@ -87,7 +93,7 @@ export default function TableGrid({
     return { x: xPos, y: yPos };
   }, [showLiveCursor, liveCursorX, liveCursorY, x_bins, y_bins]);
 
-  const getCellColor = (value: number, x: number, y: number) => {
+  const getCellColor = useCallback((value: number, x: number, y: number) => {
     const cellKey = `${x},${y}`;
     const isLocked = lockedCells?.has(cellKey);
 
@@ -95,16 +101,19 @@ export default function TableGrid({
       return { background: 'var(--surface-dim)' };
     }
 
+    if (!showColorShade) {
+      return { background: 'var(--surface)' };
+    }
+
     const minVal = Math.min(...z_values.flat());
     const maxVal = Math.max(...z_values.flat());
-    const range = maxVal - minVal;
 
-    if (range === 0) return { background: 'var(--surface)' };
+    if (minVal === maxVal) return { background: 'var(--surface)' };
 
-    const ratio = (value - minVal) / range;
-    const hue = (1 - ratio) * 240;
-    return { background: `hsl(${hue}, 60%, 45%)` };
-  };
+    // Use centralized heatmap utility
+    const color = valueToHeatmapColor(value, minVal, maxVal, heatmapScheme);
+    return { background: color };
+  }, [lockedCells, showColorShade, z_values, heatmapScheme]);
 
   const handleKeyDown = (e: KeyboardEvent, x: number, y: number) => {
     if (e.key === 'Enter' && editingCell) {

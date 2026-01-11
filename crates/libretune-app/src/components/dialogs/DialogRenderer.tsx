@@ -230,8 +230,12 @@ function DialogField({
             value={strValue}
             disabled={!isEnabled}
             onChange={(e) => setStrValue(e.target.value)}
-            onBlur={() => {
-              // TODO: Add update_constant_string command when implemented
+            onBlur={async () => {
+              try {
+                await invoke('update_constant_string', { name: constant.name, value: strValue });
+              } catch (err) {
+                console.error('Failed to update string constant:', err);
+              }
               onUpdate?.();
             }}
             placeholder={constant.help || ''}

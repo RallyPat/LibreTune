@@ -28,10 +28,6 @@ export { StatusBar, StatusIndicator, LoggingIndicator } from './StatusBar';
 export { TableEditor } from './TableEditor';
 export type { TableData, CellPosition } from './TableEditor';
 
-// Gauges
-export { Gauge } from './Gauges';
-export type { GaugeConfig } from './Gauges';
-
 // Dialogs
 export {
   SaveDialog,

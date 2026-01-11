@@ -5,8 +5,9 @@
  * Supports all gauge types, indicators, embedded images, and proper positioning.
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { save } from '@tauri-apps/plugin-dialog';
 import {
   DashFile,
   DashFileInfo,
@@ -18,20 +19,27 @@ import {
 import TsGauge from '../gauges/TsGauge';
 import TsIndicator from '../gauges/TsIndicator';
 import GaugeContextMenu, { ContextMenuState } from './GaugeContextMenu';
+import ImportDashboardDialog from '../dialogs/ImportDashboardDialog';
+import DashboardDesigner from './DashboardDesigner';
 import './TsDashboard.css';
 
 interface TsDashboardProps {
   realtimeData?: Record<string, number>;
   initialDashPath?: string;
+  isConnected?: boolean;
 }
 
-export default function TsDashboard({ realtimeData = {}, initialDashPath }: TsDashboardProps) {
+export default function TsDashboard({ realtimeData = {}, initialDashPath, isConnected = false }: TsDashboardProps) {
   const [dashFile, setDashFile] = useState<DashFile | null>(null);
   const [availableDashes, setAvailableDashes] = useState<DashFileInfo[]>([]);
   const [selectedPath, setSelectedPath] = useState<string>(initialDashPath || '');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showSelector, setShowSelector] = useState(false);
+  
+  // Gauge sweep animation state (sportscar-style min→max→min on load)
+  const [sweepActive, setSweepActive] = useState(false);
+  const [sweepValues, setSweepValues] = useState<Record<string, number>>({});
 
   // Context menu state
   const [contextMenu, setContextMenu] = useState<ContextMenuState>({
@@ -45,11 +53,71 @@ export default function TsDashboard({ realtimeData = {}, initialDashPath }: TsDa
   const [designerMode, setDesignerMode] = useState(false);
   const [gaugeDemoActive, setGaugeDemoActive] = useState(false);
   const [demoValues, setDemoValues] = useState<Record<string, number>>({});
+  
+  // Designer mode state
+  const [selectedGaugeId, setSelectedGaugeId] = useState<string | null>(null);
+  const [gridSnap, setGridSnap] = useState(5); // 5% snap
+  const [showGrid, setShowGrid] = useState(true);
+  
+  // Import dialog state
+  const [showImportDialog, setShowImportDialog] = useState(false);
+  
+  // Dashboard management dialogs
+  const [showNewDialog, setShowNewDialog] = useState(false);
+  const [showRenameDialog, setShowRenameDialog] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [newDashName, setNewDashName] = useState('');
+  const [renameName, setRenameName] = useState('');
+  
+  // Dynamic scaling state for responsive dashboard sizing
+  const [scale, setScale] = useState(1);
+  const dashboardWrapperRef = useRef<HTMLDivElement>(null);
 
   // Build embedded images map
   const embeddedImages = dashFile 
     ? buildEmbeddedImageMap(dashFile.gauge_cluster.embedded_images)
     : new Map<string, string>();
+
+  // Calculate dashboard aspect ratio from gauge bounding box
+  // Find the maximum extent of all gauges to determine the design's aspect ratio
+  // NOTE: This must be before early returns to comply with React Rules of Hooks
+  const dashboardBounds = useMemo(() => {
+    if (!dashFile) {
+      return { maxX: 1.0, maxY: 1.0, aspectRatio: 1.0, minSize: 50 };
+    }
+    
+    const components = dashFile.gauge_cluster.components;
+    let maxX = 0;
+    let maxY = 0;
+    let minShortestSize = Infinity;
+    
+    components.forEach((comp) => {
+      if (isGauge(comp)) {
+        const g = comp.Gauge;
+        maxX = Math.max(maxX, (g.relative_x ?? 0) + (g.relative_width ?? 0.25));
+        maxY = Math.max(maxY, (g.relative_y ?? 0) + (g.relative_height ?? 0.25));
+        if (g.shortest_size > 0) {
+          minShortestSize = Math.min(minShortestSize, g.shortest_size);
+        }
+      } else if (isIndicator(comp)) {
+        const i = comp.Indicator;
+        maxX = Math.max(maxX, (i.relative_x ?? 0) + (i.relative_width ?? 0.1));
+        maxY = Math.max(maxY, (i.relative_y ?? 0) + (i.relative_height ?? 0.05));
+      }
+    });
+    
+    // Clamp to reasonable bounds (at least 1.0 to cover the full area)
+    maxX = Math.max(1.0, maxX);
+    maxY = Math.max(1.0, maxY);
+    
+    // Aspect ratio is width / height
+    const aspectRatio = maxX / maxY;
+    
+    // Minimum dashboard size based on smallest gauge requirement
+    const minSize = minShortestSize === Infinity ? 50 : minShortestSize;
+    
+    return { maxX, maxY, aspectRatio, minSize };
+  }, [dashFile]);
 
   // Gauge demo animation
   useEffect(() => {
@@ -75,6 +143,52 @@ export default function TsDashboard({ realtimeData = {}, initialDashPath }: TsDa
 
     return () => clearInterval(interval);
   }, [gaugeDemoActive, dashFile]);
+
+  // Sportscar-style gauge sweep animation (min → max → min)
+  const startGaugeSweep = useCallback((file: DashFile) => {
+    setSweepActive(true);
+    
+    const duration = 1500; // 1.5 seconds total
+    const startTime = performance.now();
+    
+    // Easing function: ease-in-out for smooth acceleration/deceleration
+    const easeInOut = (t: number) => t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+    
+    const animate = (currentTime: number) => {
+      const elapsed = currentTime - startTime;
+      const rawProgress = Math.min(elapsed / duration, 1);
+      
+      // Convert to sweep position: 0→1 (rising) then 1→0 (falling)
+      // 0-0.5 progress = sweep up (0→1), 0.5-1 progress = sweep down (1→0)
+      const sweepPosition = rawProgress < 0.5 
+        ? easeInOut(rawProgress * 2) // 0→1 with easing
+        : easeInOut(1 - (rawProgress - 0.5) * 2); // 1→0 with easing
+      
+      const newValues: Record<string, number> = {};
+      
+      file.gauge_cluster.components.forEach((comp) => {
+        if (isGauge(comp)) {
+          const gauge = comp.Gauge;
+          const range = gauge.max - gauge.min;
+          // Interpolate from min to max based on sweep position
+          const value = gauge.min + range * sweepPosition;
+          newValues[gauge.output_channel] = value;
+        }
+      });
+      
+      setSweepValues(newValues);
+      
+      if (rawProgress < 1) {
+        requestAnimationFrame(animate);
+      } else {
+        // Animation complete
+        setSweepActive(false);
+        setSweepValues({});
+      }
+    };
+    
+    requestAnimationFrame(animate);
+  }, []);
 
   // Handle right-click context menu
   const handleContextMenu = useCallback((e: React.MouseEvent, gaugeId: string | null) => {
@@ -106,24 +220,189 @@ export default function TsDashboard({ realtimeData = {}, initialDashPath }: TsDa
     }
   }, [selectedPath]);
 
+  // Save dashboard to file
+  const handleSaveDashboard = useCallback(async () => {
+    if (!dashFile || !selectedPath) return;
+    
+    try {
+      await invoke('save_dashboard_layout', { 
+        name: selectedPath.split('/').pop()?.replace(/\.(ltdash\.xml|dash)$/i, '') || 'Dashboard',
+        layout: dashFile
+      });
+      console.log('Dashboard saved successfully');
+    } catch (e) {
+      console.error('Failed to save dashboard:', e);
+    }
+  }, [dashFile, selectedPath]);
+
+  // Exit designer mode
+  const handleExitDesigner = useCallback(() => {
+    setDesignerMode(false);
+    setSelectedGaugeId(null);
+  }, []);
+
+  // Load/refresh available dashboards list
+  const refreshDashboardList = useCallback(async () => {
+    try {
+      const dashes = await invoke<DashFileInfo[]>('list_available_dashes');
+      setAvailableDashes(dashes);
+      return dashes;
+    } catch (e) {
+      console.error('Failed to load available dashes:', e);
+      return [];
+    }
+  }, []);
+
+  // Handle import completion - refresh list and optionally select first imported
+  const handleImportComplete = useCallback(async (imported: DashFileInfo[]) => {
+    await refreshDashboardList();
+    
+    // Select the first imported dashboard if any were imported
+    if (imported.length > 0) {
+      setSelectedPath(imported[0].path);
+    }
+    
+    setShowImportDialog(false);
+  }, [refreshDashboardList]);
+
+  // Create new dashboard from template
+  const handleNewDashboard = useCallback(async () => {
+    if (!newDashName.trim()) return;
+    
+    try {
+      // Create a new dashboard with basic template
+      const newPath = await invoke<string>('create_new_dashboard', { 
+        name: newDashName.trim(),
+        template: 'basic' 
+      });
+      await refreshDashboardList();
+      setSelectedPath(newPath);
+      setShowNewDialog(false);
+      setNewDashName('');
+    } catch (e) {
+      console.error('Failed to create dashboard:', e);
+    }
+  }, [newDashName, refreshDashboardList]);
+
+  // Rename current dashboard
+  const handleRenameDashboard = useCallback(async () => {
+    if (!renameName.trim() || !selectedPath) return;
+    
+    try {
+      const newPath = await invoke<string>('rename_dashboard', { 
+        path: selectedPath, 
+        newName: renameName.trim() 
+      });
+      await refreshDashboardList();
+      setSelectedPath(newPath);
+      setShowRenameDialog(false);
+      setRenameName('');
+    } catch (e) {
+      console.error('Failed to rename dashboard:', e);
+    }
+  }, [renameName, selectedPath, refreshDashboardList]);
+
+  // Delete current dashboard
+  const handleDeleteDashboard = useCallback(async () => {
+    if (!selectedPath) return;
+    
+    try {
+      await invoke('delete_dashboard', { path: selectedPath });
+      const dashes = await refreshDashboardList();
+      // Select next available dashboard
+      if (dashes.length > 0) {
+        setSelectedPath(dashes[0].path);
+      } else {
+        setSelectedPath('');
+        setDashFile(null);
+      }
+      setShowDeleteConfirm(false);
+    } catch (e) {
+      console.error('Failed to delete dashboard:', e);
+    }
+  }, [selectedPath, refreshDashboardList]);
+
+  // Duplicate current dashboard
+  const handleDuplicateDashboard = useCallback(async () => {
+    if (!dashFile || !selectedPath) return;
+    
+    try {
+      // Generate a name for the copy
+      const currentName = selectedPath.split('/').pop()?.replace(/\.(ltdash\.xml|dash)$/i, '') || 'Dashboard';
+      const copyName = `${currentName} (Copy)`;
+      
+      const newPath = await invoke<string>('duplicate_dashboard', { 
+        path: selectedPath,
+        newName: copyName
+      });
+      await refreshDashboardList();
+      setSelectedPath(newPath);
+    } catch (e) {
+      console.error('Failed to duplicate dashboard:', e);
+    }
+  }, [dashFile, selectedPath, refreshDashboardList]);
+
+  // Export dashboard to file
+  const handleExportDashboard = useCallback(async () => {
+    if (!dashFile) return;
+    
+    try {
+      const currentName = selectedPath.split('/').pop()?.replace(/\.(ltdash\.xml|dash)$/i, '') || 'Dashboard';
+      const filePath = await save({
+        title: 'Export Dashboard',
+        filters: [{ name: 'Dashboard Files', extensions: ['ltdash.xml'] }],
+        defaultPath: `${currentName}.ltdash.xml`,
+      });
+      
+      if (filePath) {
+        await invoke('export_dashboard', { dashFile, path: filePath });
+      }
+    } catch (e) {
+      console.error('Failed to export dashboard:', e);
+    }
+  }, [dashFile, selectedPath]);
+
+  // Dynamic scaling - scale dashboard down when viewport is too small
+  useEffect(() => {
+    if (!dashboardWrapperRef.current) return;
+    
+    const wrapper = dashboardWrapperRef.current;
+    
+    const resizeObserver = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const { width: containerWidth, height: containerHeight } = entry.contentRect;
+        
+        // Calculate minimum size needed based on aspect ratio and minimum gauge sizes
+        // Assume dashboards need at least 600px width at scale 1.0 for readability
+        const minDashWidth = 600;
+        const minDashHeight = minDashWidth / 1.6; // Assume ~16:10 default aspect
+        
+        // Calculate scale factor based on container size
+        const scaleX = containerWidth / minDashWidth;
+        const scaleY = containerHeight / minDashHeight;
+        const newScale = Math.min(1, Math.min(scaleX, scaleY));
+        
+        setScale(Math.max(0.5, newScale)); // Minimum 50% scale
+      }
+    });
+    
+    resizeObserver.observe(wrapper);
+    return () => resizeObserver.disconnect();
+  }, []);
+
   // Load available dashboards
   useEffect(() => {
-    const loadAvailableDashes = async () => {
-      try {
-        const dashes = await invoke<DashFileInfo[]>('list_available_dashes');
-        setAvailableDashes(dashes);
-        
-        // If no initial path, select first available
-        if (!selectedPath && dashes.length > 0) {
-          // Prefer Basic.ltdash.xml as the default
-          const basicDash = dashes.find(d => d.name === 'Basic.ltdash.xml');
-          setSelectedPath(basicDash?.path || dashes[0].path);
-        }
-      } catch (e) {
-        console.error('Failed to load available dashes:', e);
+    const loadInitial = async () => {
+      const dashes = await refreshDashboardList();
+      
+      // If no initial path, select first available
+      if (!selectedPath && dashes.length > 0) {
+        // Prefer Basic.ltdash.xml as the default
+        const basicDash = dashes.find(d => d.name === 'Basic.ltdash.xml');
+        setSelectedPath(basicDash?.path || dashes[0].path);
       }
     };
-    loadAvailableDashes();
+    loadInitial();
   }, []);
 
   // Load selected dashboard
@@ -142,6 +421,16 @@ export default function TsDashboard({ realtimeData = {}, initialDashPath }: TsDa
         const file = await invoke<DashFile>('get_dash_file', { path: selectedPath });
         console.log('[TsDashboard] Loaded:', file.gauge_cluster.components.length, 'components');
         setDashFile(file);
+        
+        // Determine if engine is running (check common RPM channel names)
+        const rpm = realtimeData['RPMValue'] ?? realtimeData['rpm'] ?? realtimeData['RPM'] ?? 0;
+        const looksLikeRunning = realtimeData['looksLikeRunning'] === 1;
+        const isEngineRunning = rpm > 50 || looksLikeRunning;
+        
+        // Trigger gauge sweep animation if not connected or engine not running
+        if (!isConnected || !isEngineRunning) {
+          startGaugeSweep(file);
+        }
       } catch (e) {
         console.error('Failed to load dashboard:', e);
         setError(String(e));
@@ -199,15 +488,58 @@ export default function TsDashboard({ realtimeData = {}, initialDashPath }: TsDa
     <div className="ts-dashboard-container">
       {/* Header with dashboard selector */}
       <div className="ts-dashboard-header">
-        <span className="ts-dashboard-title">
-          {dashFile.bibliography.author} Dashboard
-        </span>
-        <button 
-          className="ts-dashboard-selector-btn"
-          onClick={() => setShowSelector(!showSelector)}
-        >
-          Change Dashboard ▼
-        </button>
+        <div className="ts-dashboard-header-left">
+          <span className="ts-dashboard-title">
+            {dashFile.bibliography.author || selectedPath.split('/').pop()?.replace(/\.(ltdash\.xml|dash)$/i, '') || 'Dashboard'}
+          </span>
+          <button 
+            className="ts-dashboard-selector-btn"
+            onClick={() => setShowSelector(!showSelector)}
+          >
+            Change ▼
+          </button>
+        </div>
+        <div className="ts-dashboard-header-right">
+          <button 
+            className="ts-dashboard-action-btn"
+            onClick={() => { setNewDashName(''); setShowNewDialog(true); }}
+            title="New Dashboard"
+          >
+            ➕ New
+          </button>
+          <button 
+            className="ts-dashboard-action-btn"
+            onClick={handleDuplicateDashboard}
+            title="Duplicate Dashboard"
+          >
+            📋 Duplicate
+          </button>
+          <button 
+            className="ts-dashboard-action-btn"
+            onClick={() => { 
+              const currentName = selectedPath.split('/').pop()?.replace(/\.(ltdash\.xml|dash)$/i, '') || '';
+              setRenameName(currentName);
+              setShowRenameDialog(true); 
+            }}
+            title="Rename Dashboard"
+          >
+            ✏️ Rename
+          </button>
+          <button 
+            className="ts-dashboard-action-btn danger"
+            onClick={() => setShowDeleteConfirm(true)}
+            title="Delete Dashboard"
+          >
+            🗑️ Delete
+          </button>
+          <button 
+            className="ts-dashboard-action-btn"
+            onClick={handleExportDashboard}
+            title="Export Dashboard"
+          >
+            💾 Export
+          </button>
+        </div>
       </div>
 
       {/* Dashboard selector dropdown */}
@@ -216,57 +548,222 @@ export default function TsDashboard({ realtimeData = {}, initialDashPath }: TsDa
           <div className="ts-dashboard-selector" onClick={e => e.stopPropagation()}>
             <h3>Select Dashboard</h3>
             <div className="ts-dashboard-list">
-              {availableDashes.map((dash) => (
-                <button
-                  key={dash.path}
-                  className={`ts-dashboard-option ${dash.path === selectedPath ? 'selected' : ''}`}
-                  onClick={() => handleDashSelect(dash.path)}
-                >
-                  {dash.name}
-                </button>
-              ))}
+              {/* Group dashboards by category */}
+              {(() => {
+                const categories = new Map<string, DashFileInfo[]>();
+                availableDashes.forEach(dash => {
+                  const cat = dash.category || 'Other';
+                  if (!categories.has(cat)) {
+                    categories.set(cat, []);
+                  }
+                  categories.get(cat)!.push(dash);
+                });
+                
+                // Sort categories: User first, then Reference, then others
+                const sortedCats = Array.from(categories.keys()).sort((a, b) => {
+                  if (a === 'User') return -1;
+                  if (b === 'User') return 1;
+                  if (a === 'Reference') return -1;
+                  if (b === 'Reference') return 1;
+                  return a.localeCompare(b);
+                });
+                
+                return sortedCats.map(category => (
+                  <div key={category} className="ts-dashboard-category">
+                    <div className="ts-dashboard-category-header">
+                      {category}
+                      <span className="ts-dashboard-category-count">
+                        ({categories.get(category)!.length})
+                      </span>
+                    </div>
+                    <div className="ts-dashboard-category-items">
+                      {categories.get(category)!.map((dash) => (
+                        <button
+                          key={dash.path}
+                          className={`ts-dashboard-option ${dash.path === selectedPath ? 'selected' : ''}`}
+                          onClick={() => handleDashSelect(dash.path)}
+                          title={dash.path}
+                        >
+                          {dash.name.replace(/\.(ltdash\.xml|dash|gauge)$/i, '')}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ));
+              })()}
+            </div>
+            
+            {/* Import button */}
+            <div className="ts-dashboard-import-section">
+              <button
+                className="ts-dashboard-import-btn"
+                onClick={() => {
+                  setShowSelector(false);
+                  setShowImportDialog(true);
+                }}
+              >
+                📁 Import Dashboard Files...
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      
+      {/* Import dialog */}
+      <ImportDashboardDialog
+        isOpen={showImportDialog}
+        onClose={() => setShowImportDialog(false)}
+        onImportComplete={handleImportComplete}
+      />
+
+      {/* New Dashboard Dialog */}
+      {showNewDialog && (
+        <div className="ts-dashboard-dialog-overlay" onClick={() => setShowNewDialog(false)}>
+          <div className="ts-dashboard-dialog" onClick={e => e.stopPropagation()}>
+            <h3>New Dashboard</h3>
+            <div className="ts-dashboard-dialog-content">
+              <label>Dashboard Name:</label>
+              <input
+                type="text"
+                value={newDashName}
+                onChange={(e) => setNewDashName(e.target.value)}
+                placeholder="My Dashboard"
+                autoFocus
+                onKeyDown={(e) => e.key === 'Enter' && handleNewDashboard()}
+              />
+            </div>
+            <div className="ts-dashboard-dialog-buttons">
+              <button onClick={() => setShowNewDialog(false)}>Cancel</button>
+              <button 
+                className="primary" 
+                onClick={handleNewDashboard}
+                disabled={!newDashName.trim()}
+              >
+                Create
+              </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Dashboard canvas */}
+      {/* Rename Dashboard Dialog */}
+      {showRenameDialog && (
+        <div className="ts-dashboard-dialog-overlay" onClick={() => setShowRenameDialog(false)}>
+          <div className="ts-dashboard-dialog" onClick={e => e.stopPropagation()}>
+            <h3>Rename Dashboard</h3>
+            <div className="ts-dashboard-dialog-content">
+              <label>New Name:</label>
+              <input
+                type="text"
+                value={renameName}
+                onChange={(e) => setRenameName(e.target.value)}
+                placeholder="Dashboard Name"
+                autoFocus
+                onKeyDown={(e) => e.key === 'Enter' && handleRenameDashboard()}
+              />
+            </div>
+            <div className="ts-dashboard-dialog-buttons">
+              <button onClick={() => setShowRenameDialog(false)}>Cancel</button>
+              <button 
+                className="primary" 
+                onClick={handleRenameDashboard}
+                disabled={!renameName.trim()}
+              >
+                Rename
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Dialog */}
+      {showDeleteConfirm && (
+        <div className="ts-dashboard-dialog-overlay" onClick={() => setShowDeleteConfirm(false)}>
+          <div className="ts-dashboard-dialog" onClick={e => e.stopPropagation()}>
+            <h3>Delete Dashboard?</h3>
+            <div className="ts-dashboard-dialog-content">
+              <p>Are you sure you want to delete "{selectedPath.split('/').pop()?.replace(/\.(ltdash\.xml|dash)$/i, '')}"?</p>
+              <p className="warning">This action cannot be undone.</p>
+            </div>
+            <div className="ts-dashboard-dialog-buttons">
+              <button onClick={() => setShowDeleteConfirm(false)}>Cancel</button>
+              <button className="danger" onClick={handleDeleteDashboard}>Delete</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Designer Mode - full screen editor */}
+      {designerMode && dashFile ? (
+        <DashboardDesigner
+          dashFile={dashFile}
+          onDashFileChange={setDashFile}
+          selectedGaugeId={selectedGaugeId}
+          onSelectGauge={setSelectedGaugeId}
+          gridSnap={gridSnap}
+          onGridSnapChange={setGridSnap}
+          showGrid={showGrid}
+          onShowGridChange={setShowGrid}
+          onSave={handleSaveDashboard}
+          onExit={handleExitDesigner}
+        />
+      ) : (
+        <>
+      {/* Dashboard scaling wrapper - handles dynamic scaling for small viewports */}
       <div 
-        className={`ts-dashboard ${designerMode ? 'designer-mode' : ''}`}
-        style={{
-          backgroundColor: bgColor,
-          backgroundImage: bgImageUrl ? `url(${bgImageUrl})` : undefined,
-          backgroundSize: cluster.cluster_background_image_style === 'Stretch' ? 'cover' 
-                        : cluster.cluster_background_image_style === 'Fit' ? 'contain'
-                        : cluster.cluster_background_image_style === 'Center' ? 'auto'
-                        : undefined,
-          backgroundRepeat: cluster.cluster_background_image_style === 'Tile' ? 'repeat' : 'no-repeat',
-          backgroundPosition: 'center',
+        ref={dashboardWrapperRef}
+        className="ts-dashboard-wrapper"
+      >
+        {/* Dashboard canvas with derived aspect ratio */}
+        <div 
+          className={`ts-dashboard ${designerMode ? 'designer-mode' : ''}`}
+          style={{
+            backgroundColor: bgColor,
+            backgroundImage: bgImageUrl ? `url(${bgImageUrl})` : undefined,
+            backgroundSize: cluster.cluster_background_image_style === 'Stretch' ? 'cover' 
+                          : cluster.cluster_background_image_style === 'Fit' ? 'contain'
+                          : cluster.cluster_background_image_style === 'Center' ? 'auto'
+                          : undefined,
+            backgroundRepeat: cluster.cluster_background_image_style === 'Tile' ? 'repeat' : 'no-repeat',
+            backgroundPosition: 'center',
+            aspectRatio: `${dashboardBounds.aspectRatio}`,
+            transform: scale < 1 ? `scale(${scale})` : undefined,
+            transformOrigin: 'top center',
         }}
         onContextMenu={(e) => handleContextMenu(e, null)}
       >
         {cluster.components.map((component, index) => {
-          // Helper to clamp relative positions to 0-1 range
-          const clampPercent = (v: number | undefined | null) => 
-            Math.max(0, Math.min(1, v ?? 0)) * 100;
+          // Convert relative positions to percentages - allow values outside 0-1 range
+          // (TunerStudio dashboards can have negative positions or >1.0 for extending beyond bounds)
+          const toPercent = (v: number | undefined | null) => ((v ?? 0) * 100);
 
           if (isGauge(component)) {
             const gauge = component.Gauge;
-            // Use demo values if demo mode is active, otherwise realtime data
-            const value = gaugeDemoActive 
-              ? (demoValues[gauge.output_channel] ?? gauge.value)
-              : (realtimeData[gauge.output_channel] ?? gauge.value);
+            // Priority: sweep animation > demo mode > realtime data > default
+            const value = sweepActive
+              ? (sweepValues[gauge.output_channel] ?? gauge.min)
+              : gaugeDemoActive 
+                ? (demoValues[gauge.output_channel] ?? gauge.value)
+                : (realtimeData[gauge.output_channel] ?? gauge.value);
+            
+            // Build gauge style with shape_locked_to_aspect and shortest_size support
+            const gaugeStyle: React.CSSProperties = {
+              left: `${toPercent(gauge.relative_x)}%`,
+              top: `${toPercent(gauge.relative_y)}%`,
+              width: `${toPercent(gauge.relative_width)}%`,
+              height: `${toPercent(gauge.relative_height)}%`,
+              // Enforce minimum size from shortest_size property
+              minWidth: gauge.shortest_size > 0 ? `${gauge.shortest_size}px` : undefined,
+              minHeight: gauge.shortest_size > 0 ? `${gauge.shortest_size}px` : undefined,
+              // Force square aspect ratio when shape is locked
+              aspectRatio: gauge.shape_locked_to_aspect ? '1 / 1' : undefined,
+            };
             
             return (
               <div
                 key={gauge.id || `gauge-${index}`}
                 className={`ts-component ts-gauge ${designerMode ? 'editable' : ''}`}
-                style={{
-                  left: `${clampPercent(gauge.relative_x)}%`,
-                  top: `${clampPercent(gauge.relative_y)}%`,
-                  width: `${clampPercent(gauge.relative_width)}%`,
-                  height: `${clampPercent(gauge.relative_height)}%`,
-                }}
+                style={gaugeStyle}
                 onContextMenu={(e) => handleContextMenu(e, gauge.id)}
               >
                 <TsGauge 
@@ -288,10 +785,10 @@ export default function TsDashboard({ realtimeData = {}, initialDashPath }: TsDa
                 key={indicator.id || `indicator-${index}`}
                 className={`ts-component ts-indicator ${designerMode ? 'editable' : ''}`}
                 style={{
-                  left: `${clampPercent(indicator.relative_x)}%`,
-                  top: `${clampPercent(indicator.relative_y)}%`,
-                  width: `${clampPercent(indicator.relative_width)}%`,
-                  height: `${clampPercent(indicator.relative_height)}%`,
+                  left: `${toPercent(indicator.relative_x)}%`,
+                  top: `${toPercent(indicator.relative_y)}%`,
+                  width: `${toPercent(indicator.relative_width)}%`,
+                  height: `${toPercent(indicator.relative_height)}%`,
                 }}
                 onContextMenu={(e) => handleContextMenu(e, indicator.id)}
               >
@@ -306,6 +803,7 @@ export default function TsDashboard({ realtimeData = {}, initialDashPath }: TsDa
 
           return null;
         })}
+        </div>
       </div>
 
       {/* Context Menu */}
@@ -353,6 +851,8 @@ export default function TsDashboard({ realtimeData = {}, initialDashPath }: TsDa
           console.log('Replace gauge with:', channel, gaugeInfo);
         }}
       />
+        </>
+      )}
     </div>
   );
 }

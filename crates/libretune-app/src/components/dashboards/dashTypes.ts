@@ -18,7 +18,10 @@ export function tsColorToRgba(color: TsColor | null | undefined): string {
   if (!color) {
     return 'rgba(128, 128, 128, 1)'; // Default gray if color is null/undefined
   }
-  return `rgba(${color.red ?? 128}, ${color.green ?? 128}, ${color.blue ?? 128}, ${(color.alpha ?? 255) / 255})`;
+  // TunerStudio treats alpha=0 as fully opaque (their default), not transparent
+  // So we map 0 -> 1.0 (fully opaque) and 1-255 -> normal alpha range
+  const alpha = (color.alpha ?? 255) === 0 ? 1 : (color.alpha ?? 255) / 255;
+  return `rgba(${color.red ?? 128}, ${color.green ?? 128}, ${color.blue ?? 128}, ${alpha})`;
 }
 
 /** Convert TsColor to CSS hex string */
@@ -73,7 +76,11 @@ export type GaugePainter =
   | 'AnalogBarGauge'
   | 'AnalogMovingBarGauge'
   | 'Histogram'
-  | 'LineGraph';
+  | 'LineGraph'
+  | 'RoundGauge'
+  | 'RoundDashedGauge'
+  | 'FuelMeter'
+  | 'Tachometer';
 
 /** Indicator painter type */
 export type IndicatorPainter = 'BasicRectangleIndicator';
@@ -235,6 +242,7 @@ export interface DashFile {
 export interface DashFileInfo {
   name: string;
   path: string;
+  category: string; // "User", "Reference", "Bundled", etc.
 }
 
 /** Build embedded image map for quick lookup */

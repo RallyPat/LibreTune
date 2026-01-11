@@ -15,10 +15,49 @@
   gap: 16px;
 }
 
+.datalog-header .header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
 .datalog-header h2 {
   margin: 0;
   font-size: 20px;
   color: var(--text-primary);
+}
+
+.mode-badge {
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.mode-badge.live {
+  background: rgba(255, 68, 68, 0.2);
+  color: #ff6666;
+  border: 1px solid rgba(255, 68, 68, 0.3);
+}
+
+.mode-badge.playback {
+  background: rgba(74, 158, 255, 0.2);
+  color: #4a9eff;
+  border: 1px solid rgba(74, 158, 255, 0.3);
+}
+
+.loaded-file {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  padding: 4px 8px;
+  background: var(--bg-secondary);
+  border-radius: 4px;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .datalog-controls {
@@ -129,6 +168,10 @@
   color: var(--text-muted);
 }
 
+.status-indicator.playback {
+  color: var(--accent, #4a9eff);
+}
+
 .status-stat {
   font-size: 13px;
   color: var(--text-secondary);
@@ -230,4 +273,71 @@
 
 .log-chart-canvas {
   display: block;
+}
+
+/* Playback bar */
+.playback-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  background: var(--bg-secondary);
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+}
+
+.playback-time {
+  font-size: 12px;
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+  min-width: 50px;
+}
+
+.playback-time:last-child {
+  text-align: right;
+}
+
+.playback-slider {
+  flex: 1;
+  height: 6px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: var(--bg-subtle);
+  border-radius: 3px;
+  outline: none;
+  cursor: pointer;
+}
+
+.playback-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  background: var(--accent, #4a9eff);
+  border-radius: 50%;
+  cursor: grab;
+  transition: transform 0.1s;
+}
+
+.playback-slider::-webkit-slider-thumb:hover {
+  transform: scale(1.2);
+}
+
+.playback-slider::-webkit-slider-thumb:active {
+  cursor: grabbing;
+  transform: scale(1.1);
+}
+
+.playback-slider::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  background: var(--accent, #4a9eff);
+  border: none;
+  border-radius: 50%;
+  cursor: grab;
+}
+
+.playback-slider::-moz-range-track {
+  background: var(--bg-subtle);
+  border-radius: 3px;
+  height: 6px;
 }

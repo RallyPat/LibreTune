@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef, useEffect, KeyboardEvent, useMemo } from 'react';
 import './TableEditor.css';
+import TableEditor3DNew from '../tables/TableEditor3DNew';
 
 export interface TableData {
   name: string;
@@ -96,6 +97,9 @@ export function TableEditor({
   
   // Track if heatmap coloring is enabled
   const [heatmapEnabled, setHeatmapEnabled] = useState(true);
+  
+  // Track if 3D view is enabled
+  const [show3D, setShow3D] = useState(false);
   
   // Store original data on first render
   useEffect(() => {
@@ -824,9 +828,31 @@ export function TableEditor({
         followMode={followMode}
         onToggleFollowMode={() => setFollowMode(!followMode)}
         hasOutputChannels={!!data.xOutputChannel}
+        show3D={show3D}
+        onToggle3D={() => setShow3D(!show3D)}
       />
 
+      {/* 3D View */}
+      {show3D && (
+        <TableEditor3DNew
+          title={data.name}
+          x_bins={data.xAxis}
+          y_bins={data.yAxis}
+          z_values={data.zValues}
+          x_label={data.xLabel}
+          y_label={data.yLabel}
+          z_label={data.zLabel}
+          x_units={data.xUnits}
+          y_units={data.yUnits}
+          z_units={data.zUnits}
+          onBack={() => setShow3D(false)}
+          selectedCell={selection ? { x: selection.start.col, y: selection.start.row } : null}
+          liveCell={livePosition ? { x: livePosition.col, y: livePosition.row } : null}
+        />
+      )}
+
       {/* Table */}
+      {!show3D && (
       <div className="table-grid-container">
         <table className="table-grid">
           <thead>
@@ -889,6 +915,7 @@ export function TableEditor({
           </tbody>
         </table>
       </div>
+      )}
 
       {/* Status */}
       <div className="table-status">
@@ -925,6 +952,8 @@ interface TableToolbarProps {
   followMode: boolean;
   onToggleFollowMode: () => void;
   hasOutputChannels: boolean;
+  show3D: boolean;
+  onToggle3D: () => void;
 }
 
 function TableToolbar({
@@ -948,6 +977,8 @@ function TableToolbar({
   followMode,
   onToggleFollowMode,
   hasOutputChannels,
+  show3D,
+  onToggle3D,
 }: TableToolbarProps) {
   return (
     <div className="table-toolbar">
@@ -1087,6 +1118,14 @@ function TableToolbar({
         title={hasOutputChannels ? `Follow Mode (F) - ${followMode ? 'ON' : 'OFF'}` : 'Follow Mode unavailable (no output channels defined)'}
       >
         🎯 Follow
+      </button>
+      
+      <button
+        className={`table-toolbar-btn table-toolbar-btn-3d ${show3D ? 'active' : ''}`}
+        onClick={onToggle3D}
+        title={`3D View - ${show3D ? 'ON' : 'OFF'}`}
+      >
+        🧊 3D
       </button>
     </div>
   );

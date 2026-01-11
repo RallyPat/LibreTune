@@ -6,30 +6,68 @@ This directory contains built release artifacts for LibreTune.
 
 ```
 releases/
-├── macos/        # macOS builds (.app bundles, .dmg installers)
-├── windows/      # Windows builds (.exe installers, .msi packages)
-└── linux/        # Linux builds (.AppImage, .deb packages)
+├── linux/                              # Linux builds
+│   ├── libretune-app_x.x.x_amd64.AppImage
+│   └── libretune-app_x.x.x_amd64.deb
+├── macos/                              # macOS builds
+│   ├── libretune-app.app/              # Universal binary (Intel + Apple Silicon)
+│   └── libretune-app_x.x.x.dmg
+├── windows/                            # Windows builds
+│   ├── libretune-app_x.x.x_x64-setup.exe
+│   └── libretune-app_x.x.x_x64.msi
+└── BUILD_INFO.txt                      # Build metadata
 ```
 
 ## Building Releases
 
 ### Local Build (Current Platform)
 
-To build for your current platform:
+Build for your current platform using the build script:
 
 ```bash
+# From project root
 ./scripts/build-release.sh
+
+# Or from libretune-app directory with npm
+cd crates/libretune-app
+npm run release
 ```
 
-To clean build artifacts before building:
+To clean the releases directory before building:
 
 ```bash
 ./scripts/build-release.sh --clean
+# or
+npm run release:clean
 ```
 
-### Automated Multi-Platform Builds
+### Platform-Specific Behavior
 
-For building on all platforms (macOS, Windows, Linux), use GitHub Actions:
+| Platform | Targets Built | Notes |
+|----------|--------------|-------|
+| **Linux** | AppImage, .deb | Native x86_64 build |
+| **macOS** | .app (universal), .dmg | Builds both x86_64 and ARM64, merges with `lipo` |
+| **Windows** | .exe (NSIS), .msi | Native x64 build |
+
+### Prerequisites
+
+**Linux (Ubuntu/Debian):**
+```bash
+sudo apt install libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+```
+
+**macOS:**
+```bash
+xcode-select --install
+```
+
+**Windows:**
+- Visual Studio Build Tools with "Desktop development with C++" workload
+- Or full Visual Studio 2019/2022 with C++ components
+
+### Automated Multi-Platform Builds (CI)
+
+For building on all platforms simultaneously, use GitHub Actions:
 
 1. Push a tag (e.g., `v0.1.0`):
    ```bash

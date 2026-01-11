@@ -1,0 +1,380 @@
+/**
+ * Dashboard Designer Styles
+ * 
+ * Provides styling for the interactive dashboard editor including:
+ * - Toolbar with undo/redo, copy/paste, grid controls
+ * - Canvas with snap-to-grid overlay
+ * - Draggable/resizable gauge placeholders
+ * - Property editor panel
+ */
+
+.dashboard-designer {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--bg-primary, #1a1a1a);
+}
+
+/* Toolbar */
+.designer-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--bg-secondary, #252525);
+  border-bottom: 1px solid var(--border-color, #333);
+  flex-shrink: 0;
+}
+
+.toolbar-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.toolbar-separator {
+  width: 1px;
+  height: 24px;
+  background: var(--border-color, #444);
+  margin: 0 4px;
+}
+
+.toolbar-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: var(--bg-tertiary, #2a2a2a);
+  border: 1px solid var(--border-color, #444);
+  border-radius: 4px;
+  color: var(--text-primary, #e0e0e0);
+  cursor: pointer;
+  font-size: 12px;
+  transition: all 0.15s ease;
+}
+
+.toolbar-btn:hover:not(:disabled) {
+  background: var(--bg-hover, #333);
+  border-color: var(--border-hover, #555);
+}
+
+.toolbar-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.toolbar-btn.active {
+  background: var(--accent-color, #3a7bd5);
+  border-color: var(--accent-color, #3a7bd5);
+}
+
+.toolbar-btn.primary {
+  background: var(--accent-color, #3a7bd5);
+  border-color: var(--accent-color, #3a7bd5);
+}
+
+.toolbar-btn.primary:hover:not(:disabled) {
+  background: var(--accent-hover, #2563eb);
+  border-color: var(--accent-hover, #2563eb);
+}
+
+.toolbar-btn.danger:hover:not(:disabled) {
+  background: var(--danger-color, #dc2626);
+  border-color: var(--danger-color, #dc2626);
+}
+
+.toolbar-select {
+  padding: 6px 8px;
+  background: var(--bg-tertiary, #2a2a2a);
+  border: 1px solid var(--border-color, #444);
+  border-radius: 4px;
+  color: var(--text-primary, #e0e0e0);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.toolbar-select:hover {
+  border-color: var(--border-hover, #555);
+}
+
+/* Main content area */
+.designer-content {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+/* Canvas area */
+.designer-canvas {
+  flex: 1;
+  position: relative;
+  background: var(--canvas-bg, #1e1e1e);
+  overflow: hidden;
+  min-height: 400px;
+}
+
+/* Grid overlay when enabled */
+.designer-canvas.show-grid {
+  background-image: 
+    linear-gradient(rgba(255,255,255,0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.05) 1px, transparent 1px);
+  background-size: var(--grid-size, 5%) var(--grid-size, 5%);
+}
+
+/* Gauge placeholder in designer */
+.designer-gauge {
+  position: absolute;
+  background: rgba(60, 60, 60, 0.8);
+  border: 2px dashed #666;
+  border-radius: 4px;
+  cursor: move;
+  transition: border-color 0.15s, box-shadow 0.15s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.designer-gauge:hover {
+  border-color: var(--accent-color, #3a7bd5);
+}
+
+.designer-gauge.selected {
+  border-color: var(--accent-color, #3a7bd5);
+  border-style: solid;
+  box-shadow: 0 0 0 2px rgba(58, 123, 213, 0.3);
+}
+
+.designer-gauge.dragging {
+  opacity: 0.8;
+  cursor: grabbing;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+.designer-gauge.resizing {
+  border-color: var(--warning-color, #f59e0b);
+}
+
+.gauge-preview {
+  padding: 8px;
+  text-align: center;
+  pointer-events: none;
+}
+
+.gauge-label {
+  color: var(--text-secondary, #aaa);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  overflow: hidden;
+  display: block;
+}
+
+/* Resize handles */
+.resize-handle {
+  position: absolute;
+  background: var(--accent-color, #3a7bd5);
+  border: 1px solid var(--bg-primary, #1a1a1a);
+  z-index: 10;
+}
+
+/* Corner handles */
+.resize-handle-nw,
+.resize-handle-ne,
+.resize-handle-sw,
+.resize-handle-se {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+}
+
+.resize-handle-nw { top: -5px; left: -5px; cursor: nw-resize; }
+.resize-handle-ne { top: -5px; right: -5px; cursor: ne-resize; }
+.resize-handle-sw { bottom: -5px; left: -5px; cursor: sw-resize; }
+.resize-handle-se { bottom: -5px; right: -5px; cursor: se-resize; }
+
+/* Edge handles */
+.resize-handle-n,
+.resize-handle-s {
+  height: 6px;
+  left: 20%;
+  right: 20%;
+  border-radius: 2px;
+}
+
+.resize-handle-n { top: -3px; cursor: n-resize; }
+.resize-handle-s { bottom: -3px; cursor: s-resize; }
+
+.resize-handle-e,
+.resize-handle-w {
+  width: 6px;
+  top: 20%;
+  bottom: 20%;
+  border-radius: 2px;
+}
+
+.resize-handle-e { right: -3px; cursor: e-resize; }
+.resize-handle-w { left: -3px; cursor: w-resize; }
+
+/* Property editor panel */
+.designer-properties {
+  width: 280px;
+  background: var(--bg-secondary, #252525);
+  border-left: 1px solid var(--border-color, #333);
+  padding: 16px;
+  overflow-y: auto;
+  flex-shrink: 0;
+}
+
+.designer-properties h3 {
+  margin: 0 0 16px 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary, #e0e0e0);
+  border-bottom: 1px solid var(--border-color, #333);
+  padding-bottom: 8px;
+}
+
+.designer-properties .no-selection {
+  color: var(--text-muted, #666);
+  font-size: 13px;
+  font-style: italic;
+}
+
+/* Property editor form */
+.property-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.property-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.property-group.half {
+  flex: 1;
+}
+
+.property-group label {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-secondary, #aaa);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.property-group input[type="text"],
+.property-group input[type="number"],
+.property-group select {
+  padding: 8px 10px;
+  background: var(--bg-tertiary, #2a2a2a);
+  border: 1px solid var(--border-color, #444);
+  border-radius: 4px;
+  color: var(--text-primary, #e0e0e0);
+  font-size: 13px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.property-group input:focus,
+.property-group select:focus {
+  outline: none;
+  border-color: var(--accent-color, #3a7bd5);
+  box-shadow: 0 0 0 2px rgba(58, 123, 213, 0.2);
+}
+
+.property-row {
+  display: flex;
+  gap: 8px;
+}
+
+.property-section {
+  margin-top: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-color, #333);
+}
+
+.property-section h4 {
+  margin: 0 0 8px 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary, #aaa);
+}
+
+.checkbox-label {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 13px !important;
+  text-transform: none !important;
+}
+
+.checkbox-label input[type="checkbox"] {
+  width: auto;
+  cursor: pointer;
+}
+
+/* Add gauge button */
+.add-gauge-btn {
+  position: absolute;
+  bottom: 16px;
+  right: 16px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 16px;
+  background: var(--accent-color, #3a7bd5);
+  border: none;
+  border-radius: 20px;
+  color: white;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  transition: all 0.15s ease;
+}
+
+.add-gauge-btn:hover {
+  background: var(--accent-hover, #2563eb);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  transform: translateY(-1px);
+}
+
+/* Color picker input */
+.property-group input[type="color"] {
+  width: 100%;
+  height: 36px;
+  padding: 2px;
+  border: 1px solid var(--border-color, #444);
+  border-radius: 4px;
+  background: var(--bg-tertiary, #2a2a2a);
+  cursor: pointer;
+}
+
+.property-group input[type="color"]::-webkit-color-swatch-wrapper {
+  padding: 2px;
+}
+
+.property-group input[type="color"]::-webkit-color-swatch {
+  border: none;
+  border-radius: 2px;
+}
+
+/* Responsive adjustments */
+@media (max-width: 800px) {
+  .designer-content {
+    flex-direction: column;
+  }
+  
+  .designer-properties {
+    width: 100%;
+    max-height: 40%;
+    border-left: none;
+    border-top: 1px solid var(--border-color, #333);
+  }
+}

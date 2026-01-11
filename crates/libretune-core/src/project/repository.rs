@@ -154,6 +154,30 @@ impl IniRepository {
         }
     }
 
+    /// Extract the content between the first pair of double quotes in a value string.
+    /// Handles INI comments (;) that may appear after the closing quote.
+    /// e.g., `"rusEFI master.2026.01.08" ; comment` -> `rusEFI master.2026.01.08`
+    fn extract_quoted_value(value: &str) -> String {
+        let value = value.trim();
+
+        // Find the first opening quote
+        if let Some(start) = value.find('"') {
+            // Find the closing quote after the opening quote
+            if let Some(end) = value[start + 1..].find('"') {
+                return value[start + 1..start + 1 + end].to_string();
+            }
+        }
+
+        // Fallback: strip comment (anything after unquoted ';'), then trim quotes
+        value
+            .split(';')
+            .next()
+            .unwrap_or("")
+            .trim()
+            .trim_matches('"')
+            .to_string()
+    }
+
     /// Extract name and signature from INI content
     fn extract_ini_info(content: &str) -> io::Result<(String, String)> {
         let mut name = String::new();
@@ -165,14 +189,14 @@ impl IniRepository {
             // Look for signature in [MegaTune] section
             if line.starts_with("signature") {
                 if let Some(val) = line.split('=').nth(1) {
-                    signature = val.trim().trim_matches('"').to_string();
+                    signature = Self::extract_quoted_value(val);
                 }
             }
 
             // Look for nEmu in [MegaTune] section for display name
             if line.starts_with("nEmu") {
                 if let Some(val) = line.split('=').nth(1) {
-                    name = val.trim().trim_matches('"').to_string();
+                    name = Self::extract_quoted_value(val);
                 }
             }
         }

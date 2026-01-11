@@ -64,19 +64,23 @@ export default function TsIndicator({ config, isOn, embeddedImages }: TsIndicato
         border: '1px solid rgba(100, 100, 100, 0.5)',
         borderRadius: '2px',
         overflow: 'hidden',
-        fontFamily: config.font_family || 'sans-serif',
+        fontFamily: config.font_family || 'Arial, sans-serif',
         fontStyle: config.italic_font ? 'italic' : 'normal',
+        boxSizing: 'border-box',
       }}
     >
       <span
         style={{
           color: textColor,
-          fontSize: 'clamp(8px, 80%, 14px)',
-          fontWeight: 'bold',
+          fontSize: 'clamp(7px, 1.8vmin, 12px)',
+          fontWeight: 500,
           textAlign: 'center',
-          padding: '2px',
-          lineHeight: 1.1,
-          wordBreak: 'break-word',
+          padding: '1px 3px',
+          lineHeight: 1.15,
+          whiteSpace: 'nowrap',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          maxWidth: '100%',
         }}
       >
         {text}

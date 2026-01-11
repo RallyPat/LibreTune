@@ -46,17 +46,28 @@ The project aims to provide professional ECU tuning workflow and functionality w
 
 ### 4. Gauge Rendering (TunerStudio-Compatible)
 - Location: `crates/libretune-app/src/components/gauges/TsGauge.tsx`
-- Gauge Types Implemented:
-  - BasicReadout - Digital numeric display
-  - HorizontalBarGauge - Horizontal progress bar
-  - VerticalBarGauge - Vertical progress bar
-  - AnalogGauge - Classic circular dial with needle
-  - AsymmetricSweepGauge - Curved sweep gauge
-  - HorizontalLineGauge - Horizontal line indicator
-  - VerticalDashedBar - Vertical dashed bar gauge
-- Pending Types: RoundGauge, RoundDashedGauge, FuelMeter, Tachometer, NumeralGauge, BarFill
+- **Enhanced in Jan 2026**: All gauge types now feature metallic bezels, shadows, gradients, and 3D effects
+- Gauge Types Implemented (9 of 13):
+  - BasicReadout - LCD-style digital numeric display with metallic frame and inset shadows
+  - HorizontalBarGauge - Horizontal progress bar with rounded corners and gradient fills
+  - VerticalBarGauge - Vertical progress bar with tick marks and 3D gradient effects
+  - AnalogGauge - Classic circular dial with metallic bezel, minor ticks, gradient needle, center cap
+  - AsymmetricSweepGauge - Curved sweep gauge with glowing tip, warning zones, gradient fills
+  - HorizontalLineGauge - Horizontal line indicator with position dot and glow effect
+  - VerticalDashedBar - Segmented vertical bar with per-segment zone coloring
+  - Histogram - Bar chart distribution visualization centered on current value
+  - LineGraph - Time-series line chart with filled gradient area and current value dot
+- Pending Types: RoundGauge, RoundDashedGauge, FuelMeter, Tachometer
 
-### 5. Dialog System
+### 5. Professional Default Dashboards
+- Location: `crates/libretune-app/src-tauri/src/lib.rs` (create_*_dashboard functions)
+- Three professionally designed dashboards:
+  - **Basic**: Large analog RPM + digital AFR + vertical CLT/IAT bars + horizontal MAP bar + battery/advance/VE/PW readouts
+  - **Racing**: Giant center RPM analog + oil pressure/water temp vertical bars + speed/AFR/boost/fuel digital readouts
+  - **Tuning**: Mixed layout with sweep gauge, analog gauge, vertical bars, horizontal bars, lambda line graph, EGT/duty dashed bars, correction factor readouts
+- All dashboards use consistent dark color scheme with accent colors matching gauge purposes
+
+### 6. Dialog System
 - Location: `crates/libretune-app/src/components/dialogs/`
 - Files:
   - `SaveLoadBurnDialogs.tsx` - Save/Load/Burn tunes
@@ -66,17 +77,17 @@ The project aims to provide professional ECU tuning workflow and functionality w
   - `RebinDialog.tsx` - Table re-binning with interpolation
   - `CellEditDialog.tsx` - Cell value editing dialog
 
-### 6. Menu & Navigation
+### 7. Menu & Navigation
 - Location: `crates/libretune-app/src/components/MenuManager.ts`
 - Parses INI [Menu] sections, builds hierarchical menu tree
 - Location: `crates/libretune-app/src/components/HotkeyManager.ts`
 - Global keyboard shortcuts (see HotkeyManager for complete list)
 
-### 7. Action Management
+### 8. Action Management
 - Location: `crates/libretune-app/src/components/ActionManagement.tsx`
 - Features: Action list, queue system, recording/playback
 
-### 8. Pop-out Windows (Multi-Monitor)
+### 9. Pop-out Windows (Multi-Monitor)
 - Location: `crates/libretune-app/src/PopOutWindow.tsx` - Standalone pop-out window renderer
 - Location: `crates/libretune-app/src/PopOutWindow.css` - Pop-out window styles
 - Features:
@@ -170,7 +181,7 @@ Based on analysis of common ECU tuning software patterns:
 - Field types: scalar (number), bits (dropdown/checkbox), array (table reference)
 
 ## Remaining Tasks for Future Agents
-[ ] Fix smooth_table bug (weight array indexing issue in table_ops.rs)
+[x] Fix smooth_table bug (weight array indexing issue in table_ops.rs) - FIXED, all 10 tests pass
 [ ] Add more AutoTune algorithms (lambda compensation, transient filtering)
 [ ] Implement 3D table with react-three-fiber for better visualization
 [ ] Add data logging/playback features
@@ -179,7 +190,7 @@ Based on analysis of common ECU tuning software patterns:
 [ ] Add plugin system for extensibility
 [ ] Add user manual/help system
 [ ] Implement project templates
-[ ] Add tune comparison/diff view
+[x] Add tune comparison/diff view - Implemented compare_tables command
 [ ] Implement Git integration for tune versioning
 [ ] Add unit conversion layer (°C↔°F, kPa↔PSI, AFR↔Lambda) with user preferences
 [ ] Add user-configurable status bar channel selection
@@ -201,8 +212,82 @@ Based on analysis of common ECU tuning software patterns:
 [ ] User-driven tune migration between INI versions
 [x] Frontend dialogs for restore points and project import
 [x] Pop-out windows for multi-monitor support (dock-back, bidirectional sync)
+[x] CSV export/import for tune data - Implemented with file dialogs
+[x] Reset tune to defaults - Implemented reset_tune_to_defaults command
+[x] Tooth logger (Speeduino/rusEFI/MS2) - Backend + ToothLoggerView.tsx
+[x] Composite logger (Speeduino/rusEFI/MS2) - Backend + CompositeLoggerView.tsx
 
 ## Recent Changes (Session History)
+
+### Data Tools & Diagnostic Loggers - Completed Jan 11, 2026
+- **CSV Export/Import** (`lib.rs`):
+  - `export_tune_as_csv` - Exports all scalar constants to CSV with metadata
+  - `import_tune_from_csv` - Parses CSV, validates bounds, applies to tune
+  - `parse_csv_line()` - Helper for quoted field handling
+  - `encode_constant_value()` - Converts display values to raw bytes
+  - Frontend file dialogs using `@tauri-apps/plugin-dialog`
+
+- **Reset to Defaults** (`lib.rs`):
+  - `reset_tune_to_defaults` - Resets all constants to INI default values
+  - Reads from `def.default_values` or uses min value as fallback
+  - Updates both TuneCache and TuneFile
+
+- **Table Comparison** (`lib.rs`):
+  - `compare_tables` - Compares two tables cell-by-cell
+  - Returns `TableComparisonResult` with differences, max_diff, avg_diff
+  - `read_table_values()` - Helper to extract table data from cache
+  - `read_raw_value()` - Generic byte-to-value conversion
+
+- **Tooth Logger** (`lib.rs` + `ToothLoggerView.tsx`):
+  - Backend supports Speeduino (`H` command), rusEFI (`l\x01-03`), MS2/MS3
+  - `ToothLogEntry` struct: tooth_number, tooth_time_us, crank_angle
+  - `ToothLogResult` with detected_rpm and teeth_per_rev calculation
+  - Frontend: Canvas-based bar chart, statistics panel, CSV export
+  - CSS: Dark theme, capture button animation, stat cards
+
+- **Composite Logger** (`lib.rs` + `CompositeLoggerView.tsx`):
+  - Backend supports Speeduino (`J`/`O`/`X`), rusEFI (`l\x04-06`), MS2/MS3
+  - `CompositeLogEntry` struct: time_us, primary, secondary, sync, voltage
+  - Multi-channel waveform display with zoom/scroll controls
+  - Sync status detection with lost-sync counting
+  - Legend with color-coded channels
+
+- **Frontend menu updates** (`App.tsx`):
+  - Reset to Defaults now works with success toast
+  - Tooth/Composite logger show capture status toasts
+  - CSV export uses save dialog, import uses open dialog
+  - Proper error handling for each command
+
+### Dashboard System Enhancement - Completed Jan 9, 2026
+- **TsGauge.tsx major upgrade**:
+  - All gauge types now feature metallic bezels, shadows, and gradient fills
+  - Added `createMetallicGradient()` helper for realistic bezel effects
+  - Added `lightenColor()` and `darkenColor()` utility functions
+  - Added `roundRect()` helper for rounded corner shapes
+  - Added embedded font loading with FontFace API
+  
+- **Gauge type improvements**:
+  - BasicReadout: LCD-style display with metallic frame, inset shadows, gradient background
+  - HorizontalBarGauge: Rounded corners, gradient fill, highlight stripe
+  - VerticalBarGauge: Tick marks on side, gradient fill, segment highlighting
+  - AnalogGauge: Multi-layer metallic bezel, minor tick marks, gradient needle, metallic center cap
+  - AsymmetricSweepGauge: Glowing tip, gradient arc fill, track background with inset
+  - HorizontalLineGauge: Gradient track, glowing position indicator
+  - VerticalDashedBar: Per-segment zone coloring, gradient fills, glow on top segment
+
+- **New gauge types implemented**:
+  - Histogram: Bar chart distribution centered on current value, colored zones
+  - LineGraph: Time-series chart with gradient fill area and current value dot
+
+- **Default dashboard redesign** (`lib.rs`):
+  - Tuning dashboard now uses mixed gauge types (sweep, analog, bars, line graph, dashed bars)
+  - Added lambda history line graph, EGT/duty dashed bars, correction factor readouts
+  - Consistent dark color scheme with purpose-matched accent colors
+
+- **Dashboard browser categories**:
+  - `list_available_dashes()` now scans reference/TunerStudioMS/Dash directory
+  - Added category field (User, Reference) for grouping in UI
+  - TsDashboard.tsx groups dashboards by category with collapsible headers
 
 ### Frontend Dialogs for Restore Points & Project Import - Completed Jan 7, 2026
 - **RestorePointsDialog.tsx** (new component):

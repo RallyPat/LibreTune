@@ -31,3 +31,9 @@ dist/
 
 # Reference materials (not for distribution)
 /reference/
+
+# Release build outputs
+/releases/linux/
+/releases/macos/
+/releases/windows/
+/releases/BUILD_INFO.txt

@@ -47,8 +47,20 @@
 }
 
 .toolbar-button svg {
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
+}
+
+/* Recording indicator - red pulsing circle */
+.toolbar-button .icon-recording {
+  color: var(--error);
+  fill: var(--error);
+  animation: pulse-recording 1s ease-in-out infinite;
+}
+
+@keyframes pulse-recording {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
 }
 
 .toolbar-separator {

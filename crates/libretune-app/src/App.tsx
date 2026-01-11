@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
-import { open } from "@tauri-apps/plugin-dialog";
+import { open, save } from "@tauri-apps/plugin-dialog";
 import { ThemeProvider, useTheme, ThemeName } from "./themes";
 import {
   TunerLayout,
@@ -26,11 +26,14 @@ import {
   DataLogView,
 } from "./components/tuner-ui";
 import TsDashboard from "./components/dashboards/TsDashboard";
+import { ToothLoggerView, CompositeLoggerView } from "./components/diagnostics";
 import DialogRenderer, { DialogDefinition as RendererDialogDef } from "./components/dialogs/DialogRenderer";
 import HelpViewer, { HelpTopicData } from "./components/dialogs/HelpViewer";
 import SignatureMismatchDialog, { SignatureMismatchInfo } from "./components/dialogs/SignatureMismatchDialog";
 import TuneMismatchDialog, { TuneMismatchInfo } from "./components/dialogs/TuneMismatchDialog";
 import TuneComparisonDialog from "./components/dialogs/TuneComparisonDialog";
+import TableComparisonDialog from "./components/dialogs/TableComparisonDialog";
+import PerformanceFieldsDialog from "./components/dialogs/PerformanceFieldsDialog";
 import RestorePointsDialog from "./components/dialogs/RestorePointsDialog";
 import ImportProjectWizard from "./components/dialogs/ImportProjectWizard";
 import ErrorDetailsDialog, { useErrorDialog } from "./components/dialogs/ErrorDetailsDialog";
@@ -152,7 +155,7 @@ interface PortEditorConfig {
 
 // Tab content types
 interface TabContent {
-  type: "dashboard" | "table" | "curve" | "dialog" | "portEditor" | "settings" | "project" | "autotune" | "datalog";
+  type: "dashboard" | "table" | "curve" | "dialog" | "portEditor" | "settings" | "project" | "autotune" | "datalog" | "tooth-logger" | "composite-logger";
   data?: TunerTableData | RendererDialogDef | PortEditorConfig | string;
 }
 
@@ -280,6 +283,12 @@ function AppContent() {
   
   // Tune comparison dialog state
   const [tuneComparisonOpen, setTuneComparisonOpen] = useState(false);
+  
+  // Table comparison dialog state
+  const [tableComparisonOpen, setTableComparisonOpen] = useState(false);
+  
+  // Performance calculator dialog state
+  const [performanceDialogOpen, setPerformanceDialogOpen] = useState(false);
   
   // Restore points dialog state
   const [restorePointsOpen, setRestorePointsOpen] = useState(false);
@@ -1251,9 +1260,12 @@ function AppContent() {
           setActiveTabId("dashboard");
           break;
         case "std_ms2gentherm":
+          // Thermistor table generator wizard
+          showToast("Thermistor Table Generator - coming soon! This will calculate calibration tables from temperature/resistance pairs.", "info");
+          break;
         case "std_thermfactor":
-          // Thermistor wizard - could open a specific dialog or tab
-          console.log("Thermistor wizard not yet implemented:", target);
+          // Thermistor factor calculator
+          showToast("Thermistor Factor Calculator - coming soon! This will compute Steinhart-Hart coefficients.", "info");
           break;
         case "std_separator":
           // Separator - no action needed
@@ -1264,7 +1276,7 @@ function AppContent() {
           openTarget(target, label);
       }
     },
-    [openTarget]
+    [openTarget, showToast]
   );
 
   // Open help topic in a viewer
@@ -1289,6 +1301,24 @@ function AppContent() {
       }
     },
     []
+  );
+
+  // Call a stub backend command - shows "coming soon" toast on expected error
+  const invokeStubFeature = useCallback(
+    async (command: string, featureName: string, args?: Record<string, unknown>) => {
+      try {
+        await invoke(command, args);
+      } catch (err) {
+        // Expected "not yet implemented" errors show as info toast
+        const errMsg = String(err);
+        if (errMsg.includes("not yet implemented")) {
+          showToast(`${featureName} - coming soon!`, "info");
+        } else {
+          showToast(`${featureName} failed: ${errMsg}`, "error");
+        }
+      }
+    },
+    [showToast]
   );
 
   // Tab handlers
@@ -1501,6 +1531,29 @@ function AppContent() {
       ],
     };
 
+    // Edit menu with table editing actions (stubs for global undo/redo)
+    const editMenu: TunerMenuItem = {
+      id: "edit",
+      label: "&Edit",
+      items: [
+        { id: "undo", label: "&Undo\tCtrl+Z", onClick: () => showToast("Undo - use table-specific controls", "info"), disabled: !currentProject },
+        { id: "redo", label: "&Redo\tCtrl+Y", onClick: () => showToast("Redo - use table-specific controls", "info"), disabled: !currentProject },
+        { id: "sep1", label: "", separator: true },
+        { id: "cut", label: "Cu&t\tCtrl+X", onClick: () => showToast("Cut - select cells in table first", "info"), disabled: !currentProject },
+        { id: "copy", label: "&Copy\tCtrl+C", onClick: () => showToast("Copy - select cells in table first", "info"), disabled: !currentProject },
+        { id: "paste", label: "&Paste\tCtrl+V", onClick: () => showToast("Paste - select cells in table first", "info"), disabled: !currentProject },
+        { id: "sep2", label: "", separator: true },
+        { id: "reset-defaults", label: "Reset to &Defaults", onClick: async () => {
+          try {
+            const count = await invoke<number>("reset_tune_to_defaults");
+            showToast(`Reset ${count} values to defaults`, "success");
+          } catch (err) {
+            showToast(`Reset failed: ${err}`, "error");
+          }
+        }, disabled: !currentProject },
+      ],
+    };
+
     // Build tuning menus from backend
     // Helper function to recursively convert backend menu items to TunerMenuItem
     const convertMenuItems = (items: BackendMenuItem[], prefix: string): TunerMenuItem["items"] => {
@@ -1556,8 +1609,44 @@ function AppContent() {
         { id: "autotune", label: "&AutoTune Live", onClick: () => openTarget("autotune", "AutoTune Live"), disabled: !currentProject },
         { id: "datalog", label: "&Data Logging", onClick: () => openTarget("datalog", "Data Logging"), disabled: !currentProject },
         { id: "sep1", label: "", separator: true },
-        { id: "plugins", label: "&Plugins...", onClick: () => setPluginPanelOpen(true) },
+        { id: "tooth-logger", label: "&Tooth Logger", onClick: () => openTarget("tooth-logger", "Tooth Logger"), disabled: !currentProject },
+        { id: "composite-logger", label: "&Composite Logger", onClick: () => openTarget("composite-logger", "Composite Logger"), disabled: !currentProject },
         { id: "sep2", label: "", separator: true },
+        { id: "compare-tables", label: "Table &Comparison", onClick: () => setTableComparisonOpen(true), disabled: !currentProject },
+        { id: "performance", label: "&Performance Calculator", onClick: () => setPerformanceDialogOpen(true), disabled: !currentProject },
+        { id: "export-csv", label: "&Export Tune as CSV", onClick: async () => {
+          try {
+            const filePath = await save({
+              title: "Export Tune as CSV",
+              filters: [{ name: "CSV Files", extensions: ["csv"] }],
+              defaultPath: "tune_export.csv",
+            });
+            if (filePath) {
+              const count = await invoke<number>("export_tune_as_csv", { path: filePath });
+              showToast(`Exported ${count} values to CSV`, "success");
+            }
+          } catch (err) {
+            showToast(`Export failed: ${err}`, "error");
+          }
+        }, disabled: !currentProject },
+        { id: "import-csv", label: "&Import Tune from CSV", onClick: async () => {
+          try {
+            const filePath = await open({
+              title: "Import Tune from CSV",
+              filters: [{ name: "CSV Files", extensions: ["csv"] }],
+              multiple: false,
+            });
+            if (filePath && typeof filePath === "string") {
+              const count = await invoke<number>("import_tune_from_csv", { path: filePath });
+              showToast(`Imported ${count} values from CSV`, "success");
+            }
+          } catch (err) {
+            showToast(`Import failed: ${err}`, "error");
+          }
+        }, disabled: !currentProject },
+        { id: "sep3", label: "", separator: true },
+        { id: "plugins", label: "&Plugins...", onClick: () => setPluginPanelOpen(true) },
+        { id: "sep4", label: "", separator: true },
         { id: "connection", label: "&ECU Connection...", onClick: () => setConnectionDialogOpen(true) },
         { id: "settings", label: "&Settings...", onClick: () => setSettingsDialogOpen(true) },
       ],
@@ -1568,17 +1657,19 @@ function AppContent() {
       label: "&Help",
       items: [
         { id: "docs", label: "&Documentation", onClick: () => window.open("https://libretune.org/docs", "_blank") },
+        { id: "shortcuts", label: "&Keyboard Shortcuts", onClick: () => showToast("Keyboard shortcuts: Ctrl+S (Save), Ctrl+B (Burn), Ctrl+Z (Undo), etc.", "info") },
+        { id: "sep1", label: "", separator: true },
         { id: "about", label: "&About LibreTune", onClick: () => setAboutDialogOpen(true) },
       ],
     };
 
     // Only show tuning menus if a project is open
     if (currentProject) {
-      return [fileMenu, viewMenu, ...tuningMenus, toolsMenu, helpMenu];
+      return [fileMenu, editMenu, viewMenu, ...tuningMenus, toolsMenu, helpMenu];
     } else {
       return [fileMenu, viewMenu, helpMenu];
     }
-  }, [backendMenus, theme, sidebarVisible, status.state, openTarget, handleStdTarget, openHelpTopic, currentProject]);
+  }, [backendMenus, theme, sidebarVisible, status.state, openTarget, handleStdTarget, openHelpTopic, currentProject, invokeStubFeature, showToast]);
 
   // Toolbar items
   const toolbarItems: ToolbarItem[] = useMemo(
@@ -1756,7 +1847,8 @@ function AppContent() {
     switch (content.type) {
       case "dashboard":
         return <TsDashboard 
-          realtimeData={realtimeData} 
+          realtimeData={realtimeData}
+          isConnected={status.state === 'Connected'}
         />;
       case "table":
         return (
@@ -1835,6 +1927,10 @@ function AppContent() {
         );
       case "datalog":
         return <DataLogView realtimeData={realtimeData} />;
+      case "tooth-logger":
+        return <ToothLoggerView onClose={() => handleTabClose("tooth-logger")} />;
+      case "composite-logger":
+        return <CompositeLoggerView onClose={() => handleTabClose("composite-logger")} />;
       default:
         return null;
     }
@@ -1950,6 +2046,19 @@ function AppContent() {
           // ECU tune has been saved to project, refresh UI
           await checkStatus();
         }}
+      />
+      
+      {/* Table Comparison Dialog */}
+      <TableComparisonDialog
+        isOpen={tableComparisonOpen}
+        onClose={() => setTableComparisonOpen(false)}
+      />
+      
+      {/* Performance Calculator Dialog */}
+      <PerformanceFieldsDialog
+        isOpen={performanceDialogOpen}
+        onClose={() => setPerformanceDialogOpen(false)}
+        realtimeData={realtimeData}
       />
       
       {/* Signature Mismatch Dialog */}

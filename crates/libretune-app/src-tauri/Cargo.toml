@@ -28,4 +28,5 @@ dirs = "5"
 tokio = { workspace = true }
 tauri-plugin-dialog = "2"
 chrono = { workspace = true }
+byteorder = "1"
 

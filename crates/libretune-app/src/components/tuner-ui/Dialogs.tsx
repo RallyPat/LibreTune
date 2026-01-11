@@ -1,6 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { open, save } from '@tauri-apps/plugin-dialog';
+import { HeatmapScheme, getAvailableSchemes } from '../../utils/heatmapColors';
+import { useUnitPreferences } from '../../utils/useUnitPreferences';
+import { TemperatureUnit, PressureUnit, AfrUnit, SpeedUnit, FuelType, STOICH_AFR } from '../../utils/unitConversions';
 import './Dialogs.css';
 
 // =============================================================================
@@ -456,6 +459,22 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
   const [indicatorTextFit, setIndicatorTextFit] = useState('scale');
   const [currentIniPath, setCurrentIniPath] = useState<string | null>(null);
   const [switchingIni, setSwitchingIni] = useState(false);
+  
+  // Heatmap settings
+  const [heatmapValueScheme, setHeatmapValueScheme] = useState<HeatmapScheme>('tunerstudio');
+  const [heatmapChangeScheme, setHeatmapChangeScheme] = useState<HeatmapScheme>('tunerstudio');
+  const [heatmapCoverageScheme, setHeatmapCoverageScheme] = useState<HeatmapScheme>('tunerstudio');
+  
+  // Gauge/Dashboard settings
+  const [gaugeSnapToGrid, setGaugeSnapToGrid] = useState(true);
+  const [gaugeFreeMove, setGaugeFreeMove] = useState(false);
+  const [gaugeLock, setGaugeLock] = useState(false);
+  
+  // Unit preferences from context
+  const unitPrefs = useUnitPreferences();
+  
+  // Available heatmap schemes
+  const availableSchemes = getAvailableSchemes();
 
   useEffect(() => {
     setLocalTheme(theme);
@@ -468,6 +487,14 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
         setIndicatorFillEmpty(settings.indicator_fill_empty || false);
         setIndicatorTextFit(settings.indicator_text_fit || 'scale');
         setCurrentIniPath(settings.last_ini_path || null);
+        // Heatmap settings
+        setHeatmapValueScheme(settings.heatmap_value_scheme || 'tunerstudio');
+        setHeatmapChangeScheme(settings.heatmap_change_scheme || 'tunerstudio');
+        setHeatmapCoverageScheme(settings.heatmap_coverage_scheme || 'tunerstudio');
+        // Gauge settings
+        setGaugeSnapToGrid(settings.gauge_snap_to_grid ?? true);
+        setGaugeFreeMove(settings.gauge_free_move ?? false);
+        setGaugeLock(settings.gauge_lock ?? false);
       }).catch(console.error);
 
       // Load demo mode state (runtime flag)
@@ -545,9 +572,17 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
     await invoke('update_setting', { key: 'indicator_column_count', value: indicatorColumnCount });
     await invoke('update_setting', { key: 'indicator_fill_empty', value: indicatorFillEmpty.toString() });
     await invoke('update_setting', { key: 'indicator_text_fit', value: indicatorTextFit });
+    // Update heatmap settings
+    await invoke('update_setting', { key: 'heatmap_value_scheme', value: heatmapValueScheme });
+    await invoke('update_setting', { key: 'heatmap_change_scheme', value: heatmapChangeScheme });
+    await invoke('update_setting', { key: 'heatmap_coverage_scheme', value: heatmapCoverageScheme });
+    // Update gauge settings
+    await invoke('update_setting', { key: 'gauge_snap_to_grid', value: gaugeSnapToGrid.toString() });
+    await invoke('update_setting', { key: 'gauge_free_move', value: gaugeFreeMove.toString() });
+    await invoke('update_setting', { key: 'gauge_lock', value: gaugeLock.toString() });
     onSettingsChange?.({ units: localUnits, autoBurnOnClose, indicatorColumnCount, indicatorFillEmpty, indicatorTextFit });
     onClose();
-  }, [localTheme, localUnits, autoBurnOnClose, indicatorColumnCount, indicatorFillEmpty, indicatorTextFit, onThemeChange, onSettingsChange, onClose]);
+  }, [localTheme, localUnits, autoBurnOnClose, indicatorColumnCount, indicatorFillEmpty, indicatorTextFit, heatmapValueScheme, heatmapChangeScheme, heatmapCoverageScheme, gaugeSnapToGrid, gaugeFreeMove, gaugeLock, onThemeChange, onSettingsChange, onClose]);
 
   if (!isOpen) return null;
 
@@ -574,13 +609,96 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
           </div>
           
           <div className="dialog-form-group">
-            <label>Units</label>
+            <label>Units Preset</label>
             <select
               value={localUnits}
-              onChange={(e) => setLocalUnits(e.target.value)}
+              onChange={(e) => {
+                setLocalUnits(e.target.value);
+                if (e.target.value === 'metric') {
+                  unitPrefs.useMetricUnits();
+                } else if (e.target.value === 'imperial') {
+                  unitPrefs.useUSUnits();
+                }
+              }}
             >
               <option value="metric">Metric (°C, kPa)</option>
-              <option value="imperial">Imperial (°F, psi)</option>
+              <option value="imperial">Imperial (°F, PSI)</option>
+              <option value="custom">Custom</option>
+            </select>
+          </div>
+
+          <h3 style={{ marginTop: '1.5rem', marginBottom: '0.5rem' }}>Unit Preferences</h3>
+
+          <div className="dialog-form-group">
+            <label>Temperature</label>
+            <select
+              value={unitPrefs.preferences.temperature}
+              onChange={(e) => {
+                unitPrefs.updatePreference('temperature', e.target.value as TemperatureUnit);
+                setLocalUnits('custom');
+              }}
+            >
+              <option value="C">Celsius (°C)</option>
+              <option value="F">Fahrenheit (°F)</option>
+              <option value="K">Kelvin (K)</option>
+            </select>
+          </div>
+
+          <div className="dialog-form-group">
+            <label>Pressure</label>
+            <select
+              value={unitPrefs.preferences.pressure}
+              onChange={(e) => {
+                unitPrefs.updatePreference('pressure', e.target.value as PressureUnit);
+                setLocalUnits('custom');
+              }}
+            >
+              <option value="kPa">Kilopascals (kPa)</option>
+              <option value="PSI">PSI</option>
+              <option value="bar">Bar</option>
+              <option value="inHg">Inches of Mercury (inHg)</option>
+            </select>
+          </div>
+
+          <div className="dialog-form-group">
+            <label>Air-Fuel Ratio</label>
+            <select
+              value={unitPrefs.preferences.afr}
+              onChange={(e) => {
+                unitPrefs.updatePreference('afr', e.target.value as AfrUnit);
+                setLocalUnits('custom');
+              }}
+            >
+              <option value="AFR">AFR (Air-Fuel Ratio)</option>
+              <option value="Lambda">Lambda (λ)</option>
+            </select>
+          </div>
+
+          <div className="dialog-form-group">
+            <label>Speed</label>
+            <select
+              value={unitPrefs.preferences.speed}
+              onChange={(e) => {
+                unitPrefs.updatePreference('speed', e.target.value as SpeedUnit);
+                setLocalUnits('custom');
+              }}
+            >
+              <option value="km/h">km/h</option>
+              <option value="mph">mph</option>
+            </select>
+          </div>
+
+          <div className="dialog-form-group">
+            <label>Fuel Type (for Lambda ↔ AFR)</label>
+            <select
+              value={unitPrefs.preferences.fuelType}
+              onChange={(e) => unitPrefs.updatePreference('fuelType', e.target.value as FuelType)}
+            >
+              <option value="gasoline">Gasoline (λ=1 @ {STOICH_AFR.gasoline}:1)</option>
+              <option value="e85">E85 (λ=1 @ {STOICH_AFR.e85}:1)</option>
+              <option value="ethanol">Ethanol (λ=1 @ {STOICH_AFR.ethanol}:1)</option>
+              <option value="methanol">Methanol (λ=1 @ {STOICH_AFR.methanol}:1)</option>
+              <option value="diesel">Diesel (λ=1 @ {STOICH_AFR.diesel}:1)</option>
             </select>
           </div>
 
@@ -636,6 +754,88 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
               </div>
             </>
           )}
+
+          <h3 style={{ marginTop: '1.5rem', marginBottom: '0.5rem' }}>Heatmap Colors</h3>
+          
+          <div className="dialog-form-group">
+            <label>Value Tables (VE, Timing)</label>
+            <select
+              value={heatmapValueScheme}
+              onChange={(e) => setHeatmapValueScheme(e.target.value as HeatmapScheme)}
+            >
+              {availableSchemes.filter(s => s.id !== 'custom').map(scheme => (
+                <option key={scheme.id} value={scheme.id}>
+                  {scheme.name} {scheme.colorblindSafe && '(colorblind-safe)'}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="dialog-form-group">
+            <label>Change Display (AFR Correction)</label>
+            <select
+              value={heatmapChangeScheme}
+              onChange={(e) => setHeatmapChangeScheme(e.target.value as HeatmapScheme)}
+            >
+              {availableSchemes.filter(s => s.id !== 'custom').map(scheme => (
+                <option key={scheme.id} value={scheme.id}>
+                  {scheme.name} {scheme.colorblindSafe && '(colorblind-safe)'}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="dialog-form-group">
+            <label>Coverage Display (Hit Weighting)</label>
+            <select
+              value={heatmapCoverageScheme}
+              onChange={(e) => setHeatmapCoverageScheme(e.target.value as HeatmapScheme)}
+            >
+              {availableSchemes.filter(s => s.id !== 'custom').map(scheme => (
+                <option key={scheme.id} value={scheme.id}>
+                  {scheme.name} {scheme.colorblindSafe && '(colorblind-safe)'}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <h3 style={{ marginTop: '1.5rem', marginBottom: '0.5rem' }}>Dashboard</h3>
+          
+          <div className="dialog-form-group">
+            <label>
+              <input
+                type="checkbox"
+                checked={gaugeSnapToGrid}
+                onChange={(e) => setGaugeSnapToGrid(e.target.checked)}
+              />
+              Snap gauges to grid
+            </label>
+            <span className="dialog-form-note">Align gauges when dragging in designer mode</span>
+          </div>
+
+          <div className="dialog-form-group">
+            <label>
+              <input
+                type="checkbox"
+                checked={gaugeFreeMove}
+                onChange={(e) => setGaugeFreeMove(e.target.checked)}
+              />
+              Free move (ignore snap)
+            </label>
+            <span className="dialog-form-note">Allow gauges to be placed anywhere</span>
+          </div>
+
+          <div className="dialog-form-group">
+            <label>
+              <input
+                type="checkbox"
+                checked={gaugeLock}
+                onChange={(e) => setGaugeLock(e.target.checked)}
+              />
+              Lock gauge positions
+            </label>
+            <span className="dialog-form-note">Prevent accidental gauge movement</span>
+          </div>
 
           <h3 style={{ marginTop: '1.5rem', marginBottom: '0.5rem' }}>Indicator Panel</h3>
           
