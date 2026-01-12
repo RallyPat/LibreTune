@@ -11,11 +11,11 @@ Modern, open-source ECU tuning software for EpicEFI, Speeduino, rusEFI, and othe
 
 | Platform | Stable Release | Nightly Build | Notes |
 |----------|----------------|---------------|-------|
-| **Linux** | [AppImage / DEB / RPM](https://github.com/RallyPat/LibreTune/releases/latest) | [Nightly](https://github.com/RallyPat/LibreTune/releases/tag/nightly) | AppImage is portable, no install needed |
-| **Windows** | [Installer (MSI/EXE)](https://github.com/RallyPat/LibreTune/releases/latest) | [Portable EXE](https://github.com/RallyPat/LibreTune/releases/tag/nightly) | Nightly is portable, no install needed |
-| **macOS** | [DMG (ARM64 & Intel)](https://github.com/RallyPat/LibreTune/releases/latest) | [Nightly](https://github.com/RallyPat/LibreTune/releases/tag/nightly) | Separate builds for Apple Silicon and Intel |
+| **Linux** |  No Stable releases at this time, please use the nightly. | [Nightly](https://github.com/RallyPat/LibreTune/releases/tag/nightly) | AppImage is portable, no install needed |
+| **Windows** |  No Stable releases at this time, please use the nightly. | [Portable EXE](https://github.com/RallyPat/LibreTune/releases/tag/nightly) | Nightly is portable, no install needed |
+| **macOS** |   No Stable releases at this time, please use the nightly. | [Nightly](https://github.com/RallyPat/LibreTune/releases/tag/nightly) | Separate builds for Apple Silicon and Intel |
 
-> ⚠️ **Nightly builds** are automatically generated from the latest code and may be unstable. For production use, download stable releases.
+> ⚠️ **Nightly builds** are automatically generated from the latest code and may be unstable.
 
 ![LibreTune Table Editor](docs/screenshots/table-editor.png)
 
