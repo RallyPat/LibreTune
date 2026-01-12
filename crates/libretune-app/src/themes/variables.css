@@ -469,3 +469,529 @@
   --surface: var(--bg-surface);
   --surface-hover: var(--bg-hover);
 }
+
+/* =============================================
+   SYNTHWAVE THEME (80s Retro Neon)
+   ============================================= */
+[data-theme="synthwave"] {
+  color-scheme: dark;
+  
+  /* Background colors - deep purple/blue */
+  --bg-app: #1a1a2e;
+  --bg-surface: #16213e;
+  --bg-elevated: #1f2b4d;
+  --bg-input: #0f1729;
+  --bg-hover: #2a3a5e;
+  --bg-active: #3a4a6e;
+  --bg-selected: #e94560;
+  --bg-dashboard: #0a0a1a;
+  
+  /* Menu/toolbar backgrounds */
+  --bg-menubar: #16213e;
+  --bg-toolbar: #1a1a2e;
+  --bg-statusbar: #0f1729;
+  --bg-sidebar: #0f1729;
+  --bg-tab: #16213e;
+  --bg-tab-active: #1a1a2e;
+  
+  /* Text colors - neon tints */
+  --text-primary: #eee5ff;
+  --text-secondary: #c8b8e8;
+  --text-muted: #9080b0;
+  --text-disabled: #605080;
+  --text-inverse: #1a1a2e;
+  --text-link: #00ffff;
+  
+  /* Border colors - neon glow hints */
+  --border-default: #4a3a6a;
+  --border-subtle: #3a2a5a;
+  --border-strong: #6a5a8a;
+  --border-focus: #ff00ff;
+  
+  /* Accent colors - hot pink and cyan */
+  --primary: #ff00ff;
+  --primary-hover: #ff44ff;
+  --primary-active: #cc00cc;
+  --primary-text: #ffffff;
+  
+  --accent: #00ffff;
+  --accent-hover: #44ffff;
+  --accent-text: #000000;
+  
+  /* Status colors - neon variants */
+  --success: #00ff88;
+  --success-bg: #0a3a2a;
+  --warning: #ffff00;
+  --warning-bg: #3a3a0a;
+  --error: #ff0044;
+  --error-bg: #3a0a1a;
+  --info: #00aaff;
+  --info-bg: #0a2a3a;
+  
+  /* Gauge colors - full neon */
+  --gauge-bg: #0a0a1a;
+  --gauge-face: #1a1a2e;
+  --gauge-bezel: #4a3a6a;
+  --gauge-needle: #00ffff;
+  --gauge-needle-shadow: rgba(0, 255, 255, 0.5);
+  --gauge-text: #eee5ff;
+  --gauge-tick: #8070a0;
+  --gauge-tick-major: #c0b0e0;
+  --gauge-warning: #ffff00;
+  --gauge-critical: #ff0044;
+  --gauge-normal: #00ff88;
+  
+  /* Table editor colors */
+  --table-bg: #0f1729;
+  --table-header-bg: #16213e;
+  --table-cell-bg: #1a1a2e;
+  --table-cell-hover: #2a3a5e;
+  --table-cell-selected: #e94560;
+  --table-cell-editing: #ff00ff;
+  --table-axis-bg: #16213e;
+  --table-grid-line: #3a2a5a;
+  
+  /* Value change colors */
+  --value-richer: #00ffff;
+  --value-leaner: #ff0044;
+  --value-unchanged: #8070a0;
+  
+  /* Heatmap colors - synthwave gradient */
+  --heatmap-stop-0: #00ffff;  /* Cyan */
+  --heatmap-stop-1: #00ff88;  /* Neon green */
+  --heatmap-stop-2: #ffff00;  /* Yellow */
+  --heatmap-stop-3: #ff8800;  /* Orange */
+  --heatmap-stop-4: #ff00ff;  /* Magenta */
+  --heatmap-stop-5: #ff0044;  /* Hot pink */
+  
+  /* History trail */
+  --trail-color: #ff00ff;
+  --trail-dot: #00ffff;
+  
+  /* Live cursor */
+  --cursor-live: #00ffff;
+  --cursor-trail: #ff00ff;
+  --cursor-selected: #ff0044;
+  --cursor-active: #00ff88;
+  
+  /* Scrollbar */
+  --scrollbar-track: #0f1729;
+  --scrollbar-thumb: #4a3a6a;
+  --scrollbar-thumb-hover: #6a5a8a;
+  
+  /* Alias variables */
+  --bg-primary: var(--bg-app);
+  --bg-secondary: var(--bg-surface);
+  --bg-subtle: var(--bg-hover);
+  --surface: var(--bg-surface);
+  --surface-hover: var(--bg-hover);
+}
+
+/* =============================================
+   SOLARIZED DARK THEME
+   ============================================= */
+[data-theme="solarized"] {
+  color-scheme: dark;
+  
+  /* Solarized base colors */
+  --bg-app: #002b36;
+  --bg-surface: #073642;
+  --bg-elevated: #0a3f4d;
+  --bg-input: #002b36;
+  --bg-hover: #094959;
+  --bg-active: #0b5567;
+  --bg-selected: #268bd2;
+  --bg-dashboard: #001e26;
+  
+  --bg-menubar: #073642;
+  --bg-toolbar: #002b36;
+  --bg-statusbar: #002b36;
+  --bg-sidebar: #002b36;
+  --bg-tab: #073642;
+  --bg-tab-active: #002b36;
+  
+  /* Solarized text colors */
+  --text-primary: #93a1a1;
+  --text-secondary: #839496;
+  --text-muted: #657b83;
+  --text-disabled: #586e75;
+  --text-inverse: #002b36;
+  --text-link: #268bd2;
+  
+  /* Border colors */
+  --border-default: #586e75;
+  --border-subtle: #073642;
+  --border-strong: #657b83;
+  --border-focus: #268bd2;
+  
+  /* Solarized accent colors */
+  --primary: #b58900;
+  --primary-hover: #cb9a00;
+  --primary-active: #9a7400;
+  --primary-text: #002b36;
+  
+  --accent: #268bd2;
+  --accent-hover: #3a9fe0;
+  --accent-text: #002b36;
+  
+  /* Solarized status colors */
+  --success: #859900;
+  --success-bg: #1a2a00;
+  --warning: #cb4b16;
+  --warning-bg: #2a1a0a;
+  --error: #dc322f;
+  --error-bg: #2a0a0a;
+  --info: #268bd2;
+  --info-bg: #0a1a2a;
+  
+  /* Gauge colors */
+  --gauge-bg: #001e26;
+  --gauge-face: #002b36;
+  --gauge-bezel: #586e75;
+  --gauge-needle: #859900;
+  --gauge-needle-shadow: rgba(133, 153, 0, 0.3);
+  --gauge-text: #93a1a1;
+  --gauge-tick: #657b83;
+  --gauge-tick-major: #839496;
+  --gauge-warning: #cb4b16;
+  --gauge-critical: #dc322f;
+  --gauge-normal: #859900;
+  
+  /* Table colors */
+  --table-bg: #002b36;
+  --table-header-bg: #073642;
+  --table-cell-bg: #002b36;
+  --table-cell-hover: #094959;
+  --table-cell-selected: #268bd2;
+  --table-axis-bg: #073642;
+  --table-grid-line: #094959;
+  
+  --value-richer: #268bd2;
+  --value-leaner: #dc322f;
+  --value-unchanged: #657b83;
+  
+  /* Heatmap - Solarized palette */
+  --heatmap-stop-0: #268bd2;
+  --heatmap-stop-1: #2aa198;
+  --heatmap-stop-2: #859900;
+  --heatmap-stop-3: #b58900;
+  --heatmap-stop-4: #cb4b16;
+  --heatmap-stop-5: #dc322f;
+  
+  --scrollbar-track: #002b36;
+  --scrollbar-thumb: #586e75;
+  --scrollbar-thumb-hover: #657b83;
+  
+  --bg-primary: var(--bg-app);
+  --bg-secondary: var(--bg-surface);
+  --bg-subtle: var(--bg-hover);
+  --surface: var(--bg-surface);
+  --surface-hover: var(--bg-hover);
+}
+
+/* =============================================
+   NORD THEME (Arctic, muted)
+   ============================================= */
+[data-theme="nord"] {
+  color-scheme: dark;
+  
+  /* Nord Polar Night */
+  --bg-app: #2e3440;
+  --bg-surface: #3b4252;
+  --bg-elevated: #434c5e;
+  --bg-input: #2e3440;
+  --bg-hover: #4c566a;
+  --bg-active: #5e6a7a;
+  --bg-selected: #5e81ac;
+  --bg-dashboard: #242933;
+  
+  --bg-menubar: #3b4252;
+  --bg-toolbar: #2e3440;
+  --bg-statusbar: #2e3440;
+  --bg-sidebar: #2e3440;
+  --bg-tab: #3b4252;
+  --bg-tab-active: #2e3440;
+  
+  /* Nord Snow Storm */
+  --text-primary: #eceff4;
+  --text-secondary: #e5e9f0;
+  --text-muted: #d8dee9;
+  --text-disabled: #4c566a;
+  --text-inverse: #2e3440;
+  --text-link: #88c0d0;
+  
+  /* Border colors */
+  --border-default: #4c566a;
+  --border-subtle: #3b4252;
+  --border-strong: #5e6a7a;
+  --border-focus: #88c0d0;
+  
+  /* Nord Frost */
+  --primary: #88c0d0;
+  --primary-hover: #8fbcbb;
+  --primary-active: #81a1c1;
+  --primary-text: #2e3440;
+  
+  --accent: #bf616a;
+  --accent-hover: #d08770;
+  --accent-text: #2e3440;
+  
+  /* Nord Aurora */
+  --success: #a3be8c;
+  --success-bg: #2a3a2a;
+  --warning: #ebcb8b;
+  --warning-bg: #3a3a2a;
+  --error: #bf616a;
+  --error-bg: #3a2a2a;
+  --info: #81a1c1;
+  --info-bg: #2a3a4a;
+  
+  /* Gauge colors */
+  --gauge-bg: #242933;
+  --gauge-face: #2e3440;
+  --gauge-bezel: #4c566a;
+  --gauge-needle: #a3be8c;
+  --gauge-needle-shadow: rgba(163, 190, 140, 0.3);
+  --gauge-text: #eceff4;
+  --gauge-tick: #d8dee9;
+  --gauge-tick-major: #e5e9f0;
+  --gauge-warning: #ebcb8b;
+  --gauge-critical: #bf616a;
+  --gauge-normal: #a3be8c;
+  
+  /* Table colors */
+  --table-bg: #2e3440;
+  --table-header-bg: #3b4252;
+  --table-cell-bg: #2e3440;
+  --table-cell-hover: #4c566a;
+  --table-cell-selected: #5e81ac;
+  --table-axis-bg: #3b4252;
+  --table-grid-line: #4c566a;
+  
+  --value-richer: #88c0d0;
+  --value-leaner: #bf616a;
+  --value-unchanged: #d8dee9;
+  
+  /* Heatmap - Nord palette */
+  --heatmap-stop-0: #5e81ac;
+  --heatmap-stop-1: #88c0d0;
+  --heatmap-stop-2: #a3be8c;
+  --heatmap-stop-3: #ebcb8b;
+  --heatmap-stop-4: #d08770;
+  --heatmap-stop-5: #bf616a;
+  
+  --scrollbar-track: #2e3440;
+  --scrollbar-thumb: #4c566a;
+  --scrollbar-thumb-hover: #5e6a7a;
+  
+  --bg-primary: var(--bg-app);
+  --bg-secondary: var(--bg-surface);
+  --bg-subtle: var(--bg-hover);
+  --surface: var(--bg-surface);
+  --surface-hover: var(--bg-hover);
+}
+
+/* =============================================
+   DRACULA THEME
+   ============================================= */
+[data-theme="dracula"] {
+  color-scheme: dark;
+  
+  /* Dracula background */
+  --bg-app: #282a36;
+  --bg-surface: #343746;
+  --bg-elevated: #3e4154;
+  --bg-input: #21222c;
+  --bg-hover: #44475a;
+  --bg-active: #555866;
+  --bg-selected: #bd93f9;
+  --bg-dashboard: #1e1f29;
+  
+  --bg-menubar: #343746;
+  --bg-toolbar: #282a36;
+  --bg-statusbar: #21222c;
+  --bg-sidebar: #21222c;
+  --bg-tab: #343746;
+  --bg-tab-active: #282a36;
+  
+  /* Dracula foreground */
+  --text-primary: #f8f8f2;
+  --text-secondary: #dcdcdc;
+  --text-muted: #6272a4;
+  --text-disabled: #44475a;
+  --text-inverse: #282a36;
+  --text-link: #8be9fd;
+  
+  /* Border colors */
+  --border-default: #44475a;
+  --border-subtle: #343746;
+  --border-strong: #555866;
+  --border-focus: #bd93f9;
+  
+  /* Dracula colors */
+  --primary: #bd93f9;
+  --primary-hover: #caa4ff;
+  --primary-active: #a67eea;
+  --primary-text: #282a36;
+  
+  --accent: #ff79c6;
+  --accent-hover: #ff92d0;
+  --accent-text: #282a36;
+  
+  /* Dracula palette */
+  --success: #50fa7b;
+  --success-bg: #1a3a2a;
+  --warning: #ffb86c;
+  --warning-bg: #3a2a1a;
+  --error: #ff5555;
+  --error-bg: #3a1a1a;
+  --info: #8be9fd;
+  --info-bg: #1a2a3a;
+  
+  /* Gauge colors */
+  --gauge-bg: #1e1f29;
+  --gauge-face: #282a36;
+  --gauge-bezel: #44475a;
+  --gauge-needle: #50fa7b;
+  --gauge-needle-shadow: rgba(80, 250, 123, 0.3);
+  --gauge-text: #f8f8f2;
+  --gauge-tick: #6272a4;
+  --gauge-tick-major: #dcdcdc;
+  --gauge-warning: #ffb86c;
+  --gauge-critical: #ff5555;
+  --gauge-normal: #50fa7b;
+  
+  /* Table colors */
+  --table-bg: #21222c;
+  --table-header-bg: #343746;
+  --table-cell-bg: #282a36;
+  --table-cell-hover: #44475a;
+  --table-cell-selected: #bd93f9;
+  --table-axis-bg: #343746;
+  --table-grid-line: #44475a;
+  
+  --value-richer: #8be9fd;
+  --value-leaner: #ff5555;
+  --value-unchanged: #6272a4;
+  
+  /* Heatmap - Dracula palette */
+  --heatmap-stop-0: #8be9fd;
+  --heatmap-stop-1: #50fa7b;
+  --heatmap-stop-2: #f1fa8c;
+  --heatmap-stop-3: #ffb86c;
+  --heatmap-stop-4: #ff79c6;
+  --heatmap-stop-5: #ff5555;
+  
+  --scrollbar-track: #21222c;
+  --scrollbar-thumb: #44475a;
+  --scrollbar-thumb-hover: #555866;
+  
+  --bg-primary: var(--bg-app);
+  --bg-secondary: var(--bg-surface);
+  --bg-subtle: var(--bg-hover);
+  --surface: var(--bg-surface);
+  --surface-hover: var(--bg-hover);
+}
+
+/* =============================================
+   HIGH CONTRAST THEME (Accessibility)
+   ============================================= */
+[data-theme="highcontrast"] {
+  color-scheme: dark;
+  
+  /* Pure black/white backgrounds */
+  --bg-app: #000000;
+  --bg-surface: #0a0a0a;
+  --bg-elevated: #1a1a1a;
+  --bg-input: #000000;
+  --bg-hover: #2a2a2a;
+  --bg-active: #3a3a3a;
+  --bg-selected: #ffff00;
+  --bg-dashboard: #000000;
+  
+  --bg-menubar: #0a0a0a;
+  --bg-toolbar: #000000;
+  --bg-statusbar: #000000;
+  --bg-sidebar: #000000;
+  --bg-tab: #0a0a0a;
+  --bg-tab-active: #000000;
+  
+  /* Maximum contrast text */
+  --text-primary: #ffffff;
+  --text-secondary: #e0e0e0;
+  --text-muted: #c0c0c0;
+  --text-disabled: #606060;
+  --text-inverse: #000000;
+  --text-link: #00ffff;
+  
+  /* High visibility borders */
+  --border-default: #ffffff;
+  --border-subtle: #808080;
+  --border-strong: #ffffff;
+  --border-focus: #ffff00;
+  
+  /* High contrast accents */
+  --primary: #ffff00;
+  --primary-hover: #ffff66;
+  --primary-active: #cccc00;
+  --primary-text: #000000;
+  
+  --accent: #00ff00;
+  --accent-hover: #66ff66;
+  --accent-text: #000000;
+  
+  /* High visibility status */
+  --success: #00ff00;
+  --success-bg: #003300;
+  --warning: #ffff00;
+  --warning-bg: #333300;
+  --error: #ff0000;
+  --error-bg: #330000;
+  --info: #00ffff;
+  --info-bg: #003333;
+  
+  /* Gauge colors - maximum visibility */
+  --gauge-bg: #000000;
+  --gauge-face: #0a0a0a;
+  --gauge-bezel: #ffffff;
+  --gauge-needle: #00ff00;
+  --gauge-needle-shadow: rgba(0, 255, 0, 0.5);
+  --gauge-text: #ffffff;
+  --gauge-tick: #ffffff;
+  --gauge-tick-major: #ffffff;
+  --gauge-warning: #ffff00;
+  --gauge-critical: #ff0000;
+  --gauge-normal: #00ff00;
+  
+  /* Table colors */
+  --table-bg: #000000;
+  --table-header-bg: #1a1a1a;
+  --table-cell-bg: #0a0a0a;
+  --table-cell-hover: #2a2a2a;
+  --table-cell-selected: #ffff00;
+  --table-cell-editing: #00ffff;
+  --table-axis-bg: #1a1a1a;
+  --table-grid-line: #ffffff;
+  
+  --value-richer: #00ffff;
+  --value-leaner: #ff0000;
+  --value-unchanged: #ffffff;
+  
+  /* Heatmap - high contrast gradient */
+  --heatmap-stop-0: #0000ff;
+  --heatmap-stop-1: #00ffff;
+  --heatmap-stop-2: #00ff00;
+  --heatmap-stop-3: #ffff00;
+  --heatmap-stop-4: #ff8800;
+  --heatmap-stop-5: #ff0000;
+  
+  --scrollbar-track: #000000;
+  --scrollbar-thumb: #808080;
+  --scrollbar-thumb-hover: #ffffff;
+  
+  --bg-primary: var(--bg-app);
+  --bg-secondary: var(--bg-surface);
+  --bg-subtle: var(--bg-hover);
+  --surface: var(--bg-surface);
+  --surface-hover: var(--bg-hover);
+}

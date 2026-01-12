@@ -1,1 +1,1 @@
-export { ThemeProvider, useTheme, type ThemeName } from './theme-context';
+export { ThemeProvider, useTheme, type ThemeName, THEME_INFO } from './theme-context';

@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { open, save } from "@tauri-apps/plugin-dialog";
-import { ThemeProvider, useTheme, ThemeName } from "./themes";
+import { ThemeProvider, useTheme, ThemeName, THEME_INFO } from "./themes";
 import {
   TunerLayout,
   MenuItem as TunerMenuItem,
@@ -1553,12 +1553,12 @@ function AppContent() {
         {
           id: "theme",
           label: "&Theme",
-          items: [
-            { id: "dark", label: "Dark", checked: theme === "dark", onClick: () => setTheme("dark") },
-            { id: "light", label: "Light", checked: theme === "light", onClick: () => setTheme("light") },
-            { id: "midnight", label: "Midnight", checked: theme === "midnight", onClick: () => setTheme("midnight") },
-            { id: "carbon", label: "Carbon", checked: theme === "carbon", onClick: () => setTheme("carbon") },
-          ],
+          items: Object.entries(THEME_INFO).map(([key, info]) => ({
+            id: key,
+            label: info.label,
+            checked: theme === key,
+            onClick: () => setTheme(key as ThemeName),
+          })),
         },
       ],
     };
@@ -2335,16 +2335,44 @@ function SettingsView() {
       {/* Theme Section */}
       <div style={{ marginBottom: 16 }}>
         <label style={{ display: "block", marginBottom: 8 }}>Theme</label>
-        <select
-          value={theme}
-          onChange={(e) => setTheme(e.target.value as ThemeName)}
-          style={{ padding: 8, minWidth: 200 }}
-        >
-          <option value="dark">Dark</option>
-          <option value="light">Light</option>
-          <option value="midnight">Midnight</option>
-          <option value="carbon">Carbon</option>
-        </select>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          {Object.entries(THEME_INFO).map(([key, info]) => (
+            <label 
+              key={key}
+              style={{ 
+                display: 'flex', 
+                alignItems: 'center', 
+                gap: 10, 
+                padding: '6px 8px',
+                background: theme === key ? 'var(--bg-selected)' : 'transparent',
+                borderRadius: 4,
+                cursor: 'pointer',
+              }}
+            >
+              <input
+                type="radio"
+                name="theme"
+                value={key}
+                checked={theme === key}
+                onChange={() => setTheme(key as ThemeName)}
+                style={{ margin: 0 }}
+              />
+              {/* Color swatch preview */}
+              <div style={{ 
+                display: 'flex', 
+                gap: 2, 
+                borderRadius: 3, 
+                overflow: 'hidden',
+                border: '1px solid var(--border-default)',
+              }}>
+                <div style={{ width: 16, height: 16, background: info.bg }} />
+                <div style={{ width: 16, height: 16, background: info.primary }} />
+                <div style={{ width: 16, height: 16, background: info.accent }} />
+              </div>
+              <span style={{ flex: 1 }}>{info.label}</span>
+            </label>
+          ))}
+        </div>
       </div>
 
       {/* Help Icons Section */}
