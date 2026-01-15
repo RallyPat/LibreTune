@@ -1,0 +1,30 @@
+Manifest-Version: 1.0
+Created-By: Apache Maven Bundle Plugin 5.1.8
+Build-Jdk-Spec: 20
+Bundle-Description: The slf4j API
+Bundle-DocURL: http://www.slf4j.org
+Bundle-License: http://www.opensource.org/licenses/mit-license.php
+Bundle-ManifestVersion: 2
+Bundle-Name: SLF4J API Module
+Bundle-SymbolicName: slf4j.api
+Bundle-Vendor: SLF4J.ORG
+Bundle-Version: 2.0.9
+Export-Package: org.slf4j;uses:="org.slf4j.event,org.slf4j.helpers,org.s
+ lf4j.spi";version="2.0.9",org.slf4j.event;uses:="org.slf4j,org.slf4j.he
+ lpers";version="2.0.9",org.slf4j.helpers;uses:="org.slf4j,org.slf4j.eve
+ nt,org.slf4j.spi";version="2.0.9",org.slf4j.spi;uses:="org.slf4j,org.sl
+ f4j.event,org.slf4j.helpers";version="2.0.9",org.slf4j;uses:="org.slf4j
+ .event,org.slf4j.helpers,org.slf4j.spi";version="1.7.36"
+Implementation-Title: slf4j-api
+Implementation-Version: 2.0.9
+Import-Package: org.slf4j.spi;version="[2.0.9,3)"
+Multi-Release: true
+Require-Capability: osgi.extender;filter:="(&(osgi.extender=osgi.service
+ loader.processor)(version>=1.0.0)(!(version>=2.0.0)))",osgi.serviceload
+ er;filter:="(osgi.serviceloader=org.slf4j.spi.SLF4JServiceProvider)";os
+ gi.serviceloader="org.slf4j.spi.SLF4JServiceProvider",osgi.ee;filter:="
+ (&(osgi.ee=JavaSE)(version=1.8))"
+Tool: Bnd-6.3.1.202206071316
+X-Compile-Source-JDK: 8
+X-Compile-Target-JDK: 8
+
