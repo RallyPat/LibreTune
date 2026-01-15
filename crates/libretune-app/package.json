@@ -1,13 +1,13 @@
 {
-  "name": "libretune-app",
-  "description": "Modern ECU tuning software for Speeduino, EpicEFI, and compatible ECUs",
+  "name": "猪猪侠调教",
+  "description": "用于Speeduino、EpicEFI和兼容ECU的现代ECU调教软件",
   "version": "0.1.0",
   "private": true,
   "license": "GPL-2.0-only",
-  "author": "LibreTune Contributors",
+  "author": "RallyPat、FFGG、LibreTune Contributors",
   "repository": {
     "type": "git",
-    "url": "https://github.com/RallyPat/LibreTune.git"
+    "url": "https://github.com/FFGG10-29/LibreTune.git"
   },
   "type": "module",
   "scripts": {
