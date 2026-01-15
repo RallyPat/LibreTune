@@ -111,15 +111,15 @@ export function TunerLayout({
 
   return (
     <div className="tuner-layout">
-      {/* Menu Bar */}
+      {/* 主菜单 */}
       <MenuBar items={menuItems} />
       
-      {/* Toolbar */}
+      {/* 工具栏 */}
       <Toolbar items={toolbarItems} />
       
-      {/* Main content area */}
+      {/* 主要容器 */}
       <div className="tuner-layout-main">
-        {/* Sidebar */}
+        {/* 底部工具栏 */}
         {sidebarVisible && (
           <Sidebar
             items={sidebarItems}

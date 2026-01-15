@@ -16,7 +16,7 @@ export function StatusBar({ items, connected, ecuName }: StatusBarProps) {
       <div className="statusbar-section statusbar-section-left">
         <div className={`statusbar-connection ${connected ? 'connected' : 'disconnected'}`}>
           <ConnectionIcon connected={connected} />
-          <span>{connected ? (ecuName || 'Connected') : 'Disconnected'}</span>
+          <span>{connected ? (ecuName || '已连接') : '未连接'}</span>
         </div>
       </div>
 
@@ -117,7 +117,7 @@ export function LoggingIndicator({
         <svg viewBox="0 0 16 16" className="statusbar-icon">
           <circle cx="8" cy="8" r="5" fill="none" stroke="currentColor" strokeWidth="1.5" />
         </svg>
-        <span>Not Logging</span>
+        <span>没有记录日志</span>
       </span>
     );
   }
@@ -129,7 +129,7 @@ export function LoggingIndicator({
           <animate attributeName="opacity" values="1;0.5;1" dur="1s" repeatCount="indefinite" />
         </circle>
       </svg>
-      <span>Logging</span>
+      <span>日志记录中</span>
       {duration && <span className="logging-duration">{duration}</span>}
     </span>
   );

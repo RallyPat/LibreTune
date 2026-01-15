@@ -108,7 +108,7 @@ export default function ImportProjectWizard({
         {/* Header */}
         <div className="import-wizard-header">
           <FileArchive size={22} className="header-icon" />
-          <h2>Import TS Project</h2>
+          <h2>导入TunerStudio项目</h2>
           <button className="close-btn" onClick={handleClose}>
             <X size={18} />
           </button>
@@ -120,12 +120,12 @@ export default function ImportProjectWizard({
           <div className="step-indicators">
             <div className={`step-indicator ${step === 'select' ? 'active' : 'completed'}`}>
               <span className="step-number">1</span>
-              <span className="step-label">Select Folder</span>
+              <span className="step-label">选择文件夹</span>
             </div>
             <ArrowRight size={16} className="step-arrow" />
             <div className={`step-indicator ${step === 'confirm' ? 'active' : ''}`}>
               <span className="step-number">2</span>
-              <span className="step-label">Confirm Import</span>
+              <span className="step-label">确定导入</span>
             </div>
           </div>
 
@@ -144,25 +144,25 @@ export default function ImportProjectWizard({
                 {loading ? (
                   <>
                     <Loader size={32} className="spinner" />
-                    <p>Analyzing project...</p>
+                    <p>分析项目中..</p>
                   </>
                 ) : (
                   <>
                     <FolderOpen size={48} />
-                    <p>Click to select a TS project folder</p>
+                    <p>单击以选择TS项目文件夹</p>
                     <span className="hint">
-                      Look for a folder containing <code>project.properties</code>
+                      查找包含以下内容的文件夹 <code>project.properties</code>
                     </span>
                   </>
                 )}
               </div>
               <div className="import-info">
-                <h4>What gets imported:</h4>
+                <h4>导入的内容：</h4>
                 <ul>
-                  <li>Current tune (CurrentTune.msq)</li>
-                  <li>PC variables (pcVariableValues.msq)</li>
-                  <li>Restore points / backups</li>
-                  <li>Connection settings</li>
+                  <li>当前调教 (CurrentTune.msq)</li>
+                  <li>PC变量(pcVariableValues.msq)</li>
+                  <li>还原点/备份</li>
+                  <li>连接设置</li>
                 </ul>
               </div>
             </div>
@@ -208,8 +208,8 @@ export default function ImportProjectWizard({
 
               <div className="import-note">
                 <p>
-                  The project will be imported to your LibreTune projects folder and opened
-                  automatically.
+                  该项目将被导入到您的猪猪侠调教项目文件夹并打开
+                  自动.
                 </p>
               </div>
             </div>
@@ -220,25 +220,25 @@ export default function ImportProjectWizard({
         <div className="import-wizard-footer">
           {step === 'select' && (
             <button className="btn-cancel" onClick={handleClose}>
-              Cancel
+              取消
             </button>
           )}
 
           {step === 'confirm' && (
             <>
               <button className="btn-back" onClick={() => setStep('select')} disabled={importing}>
-                Back
+                返回
               </button>
               <button className="btn-import" onClick={handleImport} disabled={importing}>
                 {importing ? (
                   <>
                     <Loader size={14} className="spinner" />
-                    Importing...
+                    导入中...
                   </>
                 ) : (
                   <>
                     <FileArchive size={14} />
-                    Import Project
+                    导入项目
                   </>
                 )}
               </button>

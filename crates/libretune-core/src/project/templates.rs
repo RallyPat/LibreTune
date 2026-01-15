@@ -64,8 +64,8 @@ impl TemplateManager {
         ProjectTemplate {
             id: "speeduino-4cyl-na".to_string(),
             name: "Speeduino 4-Cylinder NA".to_string(),
-            description: "Standard 4-cylinder naturally aspirated engine with Speeduino ECU. \
-                          Includes safe baseline fuel and ignition maps."
+            description: "配备Speeduino ECU的标准4缸自然吸气发动机。 \
+                          包括安全基线燃料和点火图。"
                 .to_string(),
             ecu_type: "Speeduino".to_string(),
             ini_signature: "speeduino 202310".to_string(),
@@ -93,9 +93,9 @@ impl TemplateManager {
     fn rusefi_proteus_template() -> ProjectTemplate {
         ProjectTemplate {
             id: "rusefi-proteus-f4".to_string(),
-            name: "rusEFI Proteus F4".to_string(),
-            description: "rusEFI Proteus board with STM32F4 processor. \
-                          Versatile ECU for various engine configurations."
+            name: "Proteus".to_string(),
+            description: "Proteus全取代电脑，配备STM32F4或者STM32H7处理器。 \
+                          适用于各种发动机配置的通用ECU。"
                 .to_string(),
             ecu_type: "rusEFI".to_string(),
             ini_signature: "rusEFI master".to_string(),
@@ -121,8 +121,8 @@ impl TemplateManager {
         ProjectTemplate {
             id: "epicefi-standard".to_string(),
             name: "epicEFI".to_string(),
-            description: "epicEFI ECU based on rusEFI. \
-                          Compatible with rusEFI tune format and features."
+            description: "基于rusEFI的epicEFI全取代电脑。 \
+                          与rusEFI程序格式和功能兼容。"
                 .to_string(),
             ecu_type: "epicEFI".to_string(),
             ini_signature: "rusEFI epicECU".to_string(),

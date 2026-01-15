@@ -228,7 +228,7 @@ function AppContent() {
         }
       } catch (e) {
         // Not fatal - no definition loaded or call failed
-        console.warn('get_protocol_defaults failed:', e);
+        console.warn('获取协议默认值失败:', e);
       }
       
       // Fetch status bar channel defaults from INI FrontPage
@@ -238,7 +238,7 @@ function AppContent() {
           setStatusBarChannels(defaults);
         }
       } catch (e) {
-        console.warn('get_status_bar_defaults failed:', e);
+        console.warn('获取状态栏默认设置失败:', e);
       }
     })();
   }, [status.has_definition]);
@@ -329,7 +329,7 @@ function AppContent() {
     const inTauri = !!(window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
     setIsTauri(inTauri);
     if (!inTauri) {
-      console.warn("Running in browser mode. Use `npm run tauri dev` for full functionality.");
+      console.warn("在浏览器模式下运行。使用`npm run tauri dev`实现完整功能。");
     }
   }, []);
 
@@ -343,7 +343,7 @@ function AppContent() {
   }, [isTauri]);
 
   async function initializeApp() {
-    showLoading("Initializing LibreTune...");
+    showLoading("正在初始化LibreTune。...");
     try {
       // Initialize INI repository
       await invoke("init_ini_repository");
@@ -364,7 +364,7 @@ function AppContent() {
           indicator_column_count?: string;
           indicator_fill_empty?: boolean;
           indicator_text_fit?: string;
-        }>("get_settings");
+        }>("获取设置");
         if (settings.units_system) setUnitsSystem(settings.units_system as 'metric' | 'imperial');
         if (settings.auto_burn_on_close !== undefined) setAutoBurnOnClose(settings.auto_burn_on_close);
         // Legacy dashboard settings (removed with TabbedDashboard)
@@ -372,7 +372,7 @@ function AppContent() {
         // if (settings.indicator_fill_empty !== undefined) { ... }
         // if (settings.indicator_text_fit) { ... }
       } catch (e) {
-        console.warn("Failed to load settings:", e);
+        console.warn("加载设置失败：", e);
       }
       
       // Check if there's already a project open (from previous session)
@@ -385,12 +385,12 @@ function AppContent() {
           await fetchMenuTree(values);
           
           // Initialize dashboard tab
-          setTabs([{ id: "dashboard", title: "Dashboard", icon: "dashboard", closable: false }]);
+          setTabs([{ id: "dashboard", title: "仪表盘", icon: "dashboard", closable: false }]);
           setTabContents({ dashboard: { type: "dashboard" } });
           setActiveTabId("dashboard");
         } catch (menuError) {
-          console.error("Failed to load menus:", menuError);
-          showToast("Menu loading failed. Some features may be unavailable.", "warning");
+          console.error("加载菜单失败：", menuError);
+          showToast("菜单加载失败。某些功能可能不可用。", "warning");
         }
       }
       
@@ -399,8 +399,8 @@ function AppContent() {
       setPorts(p);
       if (p.length > 0 && !selectedPort) setSelectedPort(p[0]);
     } catch (e) {
-      console.error("Failed to initialize app:", e);
-      showToast("Failed to initialize application: " + e, "error");
+      console.error("初始化应用失败：", e);
+      showToast("应用初始化失败： " + e, "error");
     } finally {
       hideLoading();
     }
@@ -413,12 +413,12 @@ function AppContent() {
     (async () => {
       try {
         unlisten = await listen<SignatureMismatchInfo>("signature:mismatch", (event) => {
-          console.log("Signature mismatch detected:", event.payload);
+          console.log("检测到签名不匹配：", event.payload);
           setSignatureMismatchInfo(event.payload);
           setSignatureMismatchOpen(true);
         });
       } catch (e) {
-        console.error("Failed to listen for signature:mismatch events:", e);
+        console.error("未能侦听签名：不匹配事件：", e);
       }
     })();
     
@@ -434,11 +434,11 @@ function AppContent() {
     (async () => {
       try {
         unlisten = await listen("tune:migration_needed", () => {
-          console.log("Tune migration needed - opening dialog");
+          console.log("调整所需的迁移-打开对话框");
           setMigrationReportOpen(true);
         });
       } catch (e) {
-        console.error("Failed to listen for tune:migration_needed events:", e);
+        console.error("未能监听tune:migration_needed事件：", e);
       }
     })();
     
@@ -454,10 +454,10 @@ function AppContent() {
     (async () => {
       try {
         unlisten = await listen<string>("ini:changed", async (event) => {
-          console.log("INI changed:", event.payload);
+          console.log("配置文件已更改:", event.payload);
           if (event.payload === "resync_required" && status.state === "Connected") {
             // Re-sync ECU data with new INI (uses resilient sync)
-            showLoading("Syncing with ECU...");
+            showLoading("与ECU同步...");
             try {
               await doSync();
             } finally {
@@ -466,7 +466,7 @@ function AppContent() {
           }
         });
       } catch (e) {
-        console.error("Failed to listen for ini:changed events:", e);
+        console.error("监听配置文件失败：更改的事件：", e);
       }
     })();
     
@@ -482,12 +482,12 @@ function AppContent() {
     (async () => {
       try {
         unlisten = await listen<TuneMismatchInfo>("tune:mismatch", (event) => {
-          console.log("Tune mismatch detected:", event.payload);
+          console.log("检测到程序不匹配：", event.payload);
           setTuneMismatchInfo(event.payload);
           setTuneMismatchOpen(true);
         });
       } catch (e) {
-        console.error("Failed to listen for tune:mismatch events:", e);
+        console.error("未能监听程序：不匹配事件：", e);
       }
     })();
     
@@ -503,7 +503,7 @@ function AppContent() {
     (async () => {
       try {
         unlisten = await listen<string>("tune:loaded", async (event) => {
-          console.log("Tune loaded from:", event.payload);
+          console.log("程序加载自：", event.payload);
           // Refresh ALL open tables when tune is loaded (INI updated or tune file loaded)
           // Small delay to ensure state is current
           await new Promise(resolve => setTimeout(resolve, 50));
@@ -525,7 +525,7 @@ function AppContent() {
           
           const totalToRefresh = tablesToRefresh.length + curvesToRefresh.length;
           if (totalToRefresh > 0) {
-            console.log(`[tune:loaded] Refreshing ${tablesToRefresh.length} table(s) and ${curvesToRefresh.length} curve(s)`);
+            console.log(`[程序:已加载] 正在刷新 ${tablesToRefresh.length} 表格和 ${curvesToRefresh.length} 曲线`);
             const updatedTabs = { ...currentTabContents };
             
             // Refresh all tables and curves in parallel
@@ -544,9 +544,9 @@ function AppContent() {
                     yOutputChannel: data.y_output_channel ?? undefined,
                   };
                   updatedTabs[tabId] = { type: "table", data: tableData };
-                  console.log(`[tune:loaded] ✓ Refreshed table '${tabId}': ${data.z_values.length} values`);
+                  console.log(`[程序:已加载] ✓ 已更新表格和 '${tabId}': ${data.z_values.length} 个值`);
                 } catch (e) {
-                  console.error(`[tune:loaded] ✗ Failed to refresh table '${tabId}':`, e);
+                  console.error(`[程序:已加载] ✗ 刷新表格失败 '${tabId}':`, e);
                 }
               }),
               ...curvesToRefresh.map(async (tabId) => {
@@ -561,21 +561,21 @@ function AppContent() {
                     yLabel: data.y_label,
                   };
                   updatedTabs[tabId] = { type: "curve", data: tableData };
-                  console.log(`[tune:loaded] ✓ Refreshed curve '${tabId}': ${data.x_bins.length} points`);
+                  console.log(`[程序:已加载] ✓ 刷新曲线 '${tabId}': ${data.x_bins.length} 个点`);
                 } catch (e) {
-                  console.error(`[tune:loaded] ✗ Failed to refresh curve '${tabId}':`, e);
+                  console.error(`[程序:已加载] ✗ 刷新曲线失败 '${tabId}':`, e);
                 }
               })
             ]);
             
             setTabContents(updatedTabs);
-            console.log(`[tune:loaded] ✓ Completed refreshing ${totalToRefresh} item(s)`);
+            console.log(`[程序:已加载] ✓ 已完成刷新${totalToRefresh}条`);
           } else {
-            console.log("[tune:loaded] No open tables or curves to refresh");
+            console.log("[程序:已加载] 没有要刷新的已经打开的表或曲线");
           }
         });
       } catch (e) {
-        console.error("Failed to listen for tune:loaded events:", e);
+        console.error("监听（程序加载）事件失败:", e);
       }
     })();
     
@@ -997,7 +997,7 @@ function AppContent() {
       setCurrentProject(project);
       
       // Show loading spinner while we fetch menus and initialize
-      showLoading("Loading project...");
+      showLoading("加载项目中...");
       
       try {
         // Refresh menus for the new project
@@ -1013,8 +1013,8 @@ function AppContent() {
         const projects = await invoke<ProjectInfo[]>("list_projects");
         setAvailableProjects(projects);
       } catch (menuError) {
-        console.error("Failed to load menus:", menuError);
-        showToast("Project created but menu loading failed. Some features may be unavailable.", "warning");
+        console.error("加载菜单失败：", menuError);
+        showToast("项目已创建，但菜单加载失败。某些功能可能不可用。", "warning");
       } finally {
         hideLoading();
       }
@@ -1022,10 +1022,10 @@ function AppContent() {
       const { message, details } = formatError(e);
       if (details) {
         // Complex error - show detailed dialog for bug reporting
-        showError("Failed to Create Project", message, details);
+        showError("创建项目失败", message, details);
       } else {
         // Simple error - use toast
-        showToast("Failed to create project: " + message, "error");
+        showToast("创建项目失败: " + message, "error");
       }
     }
   }
@@ -1033,7 +1033,7 @@ function AppContent() {
   async function openProject(path: string) {
     // Close dialog immediately
     setOpenProjectDialogOpen(false);
-    showLoading("Loading project...");
+    showLoading("加载项目...");
     
     try {
       const project = await invoke<CurrentProject>("open_project", { path });
@@ -1055,15 +1055,15 @@ function AppContent() {
         setTabContents({ dashboard: { type: "dashboard" } });
         setActiveTabId("dashboard");
       } catch (menuError) {
-        console.error("Failed to load menus:", menuError);
-        showToast("Project opened but menu loading failed. Some features may be unavailable.", "warning");
+        console.error("加载菜单失败：", menuError);
+        showToast("项目已创建，但菜单加载失败。某些功能可能不可用。", "warning");
       }
     } catch (e) {
       const { message, details } = formatError(e);
       if (details) {
-        showError("Failed to Open Project", message, details);
+        showError("打开项目失败", message, details);
       } else {
-        showToast("Failed to open project: " + message, "error");
+        showToast("打开项目失败: " + message, "error");
       }
     } finally {
       hideLoading();
@@ -1081,16 +1081,16 @@ function AppContent() {
       setTabContents({});
       setActiveTabId(null);
     } catch (e) {
-      showToast("Failed to close project: " + e, "error");
+      showToast("关闭项目失败: " + e, "error");
     }
   }
 
   async function handleCreateRestorePoint() {
     try {
       const result = await invoke<{ filename: string; size: number; timestamp: string }>("create_restore_point");
-      showToast(`Restore point created: ${result.filename}`, "success");
+      showToast(`创建还原点成功: ${result.filename}`, "success");
     } catch (e) {
-      showToast("Failed to create restore point: " + e, "error");
+      showToast("创建还原点失败: " + e, "error");
     }
   }
 
@@ -1106,7 +1106,7 @@ function AppContent() {
       }
     } catch (e) {
       console.error(e);
-      showToast("Failed to import INI: " + e, "error");
+      showToast("导入配置文件失败: " + e, "error");
     }
   }
 
@@ -1124,7 +1124,7 @@ function AppContent() {
 
       // Handle special built-in views
       if (name === "autotune") {
-        const newTab: Tab = { id: "autotune", title: "AutoTune Live", icon: "autotune" };
+        const newTab: Tab = { id: "autotune", title: "自动调教", icon: "autotune" };
         setTabs([...tabs, newTab]);
         setTabContents({ ...tabContents, autotune: { type: "autotune", data: "" } }); // Empty = auto-detect VE table
         setActiveTabId("autotune");
@@ -1132,7 +1132,7 @@ function AppContent() {
       }
 
       if (name === "datalog") {
-        const newTab: Tab = { id: "datalog", title: "Data Logging", icon: "datalog" };
+        const newTab: Tab = { id: "datalog", title: "数据日志", icon: "datalog" };
         setTabs([...tabs, newTab]);
         setTabContents({ ...tabContents, datalog: { type: "datalog" } });
         setActiveTabId("datalog");
@@ -1292,11 +1292,11 @@ function AppContent() {
           break;
         case "std_ms2gentherm":
           // Thermistor table generator wizard
-          showToast("Thermistor Table Generator - coming soon! This will calculate calibration tables from temperature/resistance pairs.", "info");
+          showToast("热敏电阻表生成器-即将推出！这将根据温度/电阻对计算校准表。", "info");
           break;
         case "std_thermfactor":
           // Thermistor factor calculator
-          showToast("Thermistor Factor Calculator - coming soon! This will compute Steinhart-Hart coefficients.", "info");
+          showToast("热敏电阻系数计算器-即将推出！这将计算Steinhart-Hart系数。", "info");
           break;
         case "std_separator":
           // Separator - no action needed
@@ -1428,7 +1428,7 @@ function AppContent() {
         handleTabClose(tabId);
       } catch (e) {
         console.error('Failed to create pop-out window:', e);
-        showToast('Failed to pop out tab: ' + e, 'error');
+        showToast('弹出表格失败: ' + e, 'error');
         // Clean up localStorage
         localStorage.removeItem(storageKey);
       }
@@ -1509,55 +1509,55 @@ function AppContent() {
     const fileMenuItems: TunerMenuItem["items"] = currentProject
       ? [
           // Project open - show full menu
-          { id: "new-project", label: "&New Project...", onClick: () => setProjectDialogOpen(true) },
-          { id: "open-project", label: "&Open Project...", onClick: () => setOpenProjectDialogOpen(true) },
-          { id: "import-project", label: "&Import TS Project...", onClick: () => setImportProjectOpen(true) },
-          { id: "close-project", label: "&Close Project", onClick: closeProject },
+          { id: "new-project", label: "&新项目...", onClick: () => setProjectDialogOpen(true) },
+          { id: "open-project", label: "&打开项目...", onClick: () => setOpenProjectDialogOpen(true) },
+          { id: "import-project", label: "&导入TunerStudio项目...", onClick: () => setImportProjectOpen(true) },
+          { id: "close-project", label: "&关闭项目", onClick: closeProject },
           { id: "sep1", label: "", separator: true },
-          { id: "save", label: "&Save Tune\tCtrl+S", onClick: () => setSaveDialogOpen(true) },
-          { id: "saveas", label: "Save Tune &As...", onClick: () => setSaveDialogOpen(true) },
-          { id: "load", label: "&Load Tune...\tCtrl+O", onClick: () => setLoadDialogOpen(true) },
+          { id: "save", label: "&保存程序\tCtrl+S", onClick: () => setSaveDialogOpen(true) },
+          { id: "saveas", label: "将程序&另存为...", onClick: () => setSaveDialogOpen(true) },
+          { id: "load", label: "&加载程序...\tCtrl+O", onClick: () => setLoadDialogOpen(true) },
           { id: "sep2", label: "", separator: true },
-          { id: "create-restore", label: "Create &Restore Point", onClick: handleCreateRestorePoint },
-          { id: "restore-points", label: "Restore &Points...", onClick: () => setRestorePointsOpen(true) },
-          { id: "tune-history", label: "Tune &History...", onClick: () => setTuneHistoryOpen(true) },
+          { id: "create-restore", label: "创建&还原点", onClick: handleCreateRestorePoint },
+          { id: "restore-points", label: "还原&点...", onClick: () => setRestorePointsOpen(true) },
+          { id: "tune-history", label: "程序&历史...", onClick: () => setTuneHistoryOpen(true) },
           { id: "sep3", label: "", separator: true },
-          { id: "burn", label: "&Burn to ECU\tCtrl+B", onClick: () => setBurnDialogOpen(true), disabled: status.state !== "Connected" },
+          { id: "burn", label: "&烧录到ECU\tCtrl+B", onClick: () => setBurnDialogOpen(true), disabled: status.state !== "Connected" },
           { id: "sep4", label: "", separator: true },
-          { id: "exit", label: "E&xit", onClick: () => window.close() },
+          { id: "exit", label: "退&出", onClick: () => window.close() },
         ]
       : [
           // No project open - limited menu
-          { id: "new-project", label: "&New Project...\tCtrl+N", onClick: () => setProjectDialogOpen(true) },
-          { id: "open-project", label: "&Open Project...\tCtrl+O", onClick: () => setOpenProjectDialogOpen(true) },
-          { id: "import-project", label: "&Import TS Project...", onClick: () => setImportProjectOpen(true) },
+          { id: "new-project", label: "&新项目...\tCtrl+N", onClick: () => setProjectDialogOpen(true) },
+          { id: "open-project", label: "&打开项目...\tCtrl+O", onClick: () => setOpenProjectDialogOpen(true) },
+          { id: "import-project", label: "&导入TunerStudio项目...", onClick: () => setImportProjectOpen(true) },
           { id: "sep1", label: "", separator: true },
-          { id: "import-ini", label: "&Import ECU Definition...", onClick: importIniToRepository },
+          { id: "import-ini", label: "&导入ECU定义...", onClick: importIniToRepository },
           { id: "sep2", label: "", separator: true },
-          { id: "exit", label: "E&xit", onClick: () => window.close() },
+          { id: "exit", label: "退&出", onClick: () => window.close() },
         ];
 
     const fileMenu: TunerMenuItem = {
       id: "file",
-      label: "&File",
+      label: "&文件",
       items: fileMenuItems,
     };
 
     // View menu is always available
     const viewMenu: TunerMenuItem = {
       id: "view",
-      label: "&View",
+      label: "&视图",
       items: [
-        { id: "sidebar", label: "Toggle &Sidebar", onClick: () => setSidebarVisible(!sidebarVisible) },
+        { id: "sidebar", label: "切换 &边栏", onClick: () => setSidebarVisible(!sidebarVisible) },
         { id: "sep1", label: "", separator: true },
         {
           id: "theme",
-          label: "&Theme",
+          label: "&主题",
           items: [
-            { id: "dark", label: "Dark", checked: theme === "dark", onClick: () => setTheme("dark") },
-            { id: "light", label: "Light", checked: theme === "light", onClick: () => setTheme("light") },
-            { id: "midnight", label: "Midnight", checked: theme === "midnight", onClick: () => setTheme("midnight") },
-            { id: "carbon", label: "Carbon", checked: theme === "carbon", onClick: () => setTheme("carbon") },
+            { id: "dark", label: "暗黑", checked: theme === "dark", onClick: () => setTheme("dark") },
+            { id: "light", label: "明亮", checked: theme === "light", onClick: () => setTheme("light") },
+            { id: "midnight", label: "中亮", checked: theme === "midnight", onClick: () => setTheme("midnight") },
+            { id: "carbon", label: "碳黑", checked: theme === "carbon", onClick: () => setTheme("carbon") },
           ],
         },
       ],
@@ -1566,21 +1566,21 @@ function AppContent() {
     // Edit menu with table editing actions (stubs for global undo/redo)
     const editMenu: TunerMenuItem = {
       id: "edit",
-      label: "&Edit",
+      label: "&编辑",
       items: [
-        { id: "undo", label: "&Undo\tCtrl+Z", onClick: () => showToast("Undo - use table-specific controls", "info"), disabled: !currentProject },
-        { id: "redo", label: "&Redo\tCtrl+Y", onClick: () => showToast("Redo - use table-specific controls", "info"), disabled: !currentProject },
+        { id: "undo", label: "&撤销\tCtrl+Z", onClick: () => showToast("撤消-使用特定于表的控件", "info"), disabled: !currentProject },
+        { id: "redo", label: "&重新应用\tCtrl+Y", onClick: () => showToast("重做-使用特定于表的控件", "info"), disabled: !currentProject },
         { id: "sep1", label: "", separator: true },
-        { id: "cut", label: "Cu&t\tCtrl+X", onClick: () => showToast("Cut - select cells in table first", "info"), disabled: !currentProject },
-        { id: "copy", label: "&Copy\tCtrl+C", onClick: () => showToast("Copy - select cells in table first", "info"), disabled: !currentProject },
-        { id: "paste", label: "&Paste\tCtrl+V", onClick: () => showToast("Paste - select cells in table first", "info"), disabled: !currentProject },
+        { id: "cut", label: "剪&切\tCtrl+X", onClick: () => showToast("剪切-先选择表格中的单元格", "info"), disabled: !currentProject },
+        { id: "copy", label: "&复制\tCtrl+C", onClick: () => showToast("复制-先选择表中的单元格", "info"), disabled: !currentProject },
+        { id: "paste", label: "&粘贴\tCtrl+V", onClick: () => showToast("粘贴-先选择表中的单元格", "info"), disabled: !currentProject },
         { id: "sep2", label: "", separator: true },
-        { id: "reset-defaults", label: "Reset to &Defaults", onClick: async () => {
+        { id: "reset-defaults", label: "重置到&默认", onClick: async () => {
           try {
-            const count = await invoke<number>("reset_tune_to_defaults");
-            showToast(`Reset ${count} values to defaults`, "success");
+            const count = await invoke<number>("重置为默认设置");
+            showToast(`重置 ${count} 个值到默认`, "success");
           } catch (err) {
-            showToast(`Reset failed: ${err}`, "error");
+            showToast(`重置: ${err}`, "error");
           }
         }, disabled: !currentProject },
       ],
@@ -1636,17 +1636,17 @@ function AppContent() {
 
     const toolsMenu: TunerMenuItem = {
       id: "tools",
-      label: "&Tools",
+      label: "&工具",
       items: [
-        { id: "autotune", label: "&AutoTune Live", onClick: () => openTarget("autotune", "AutoTune Live"), disabled: !currentProject },
-        { id: "datalog", label: "&Data Logging", onClick: () => openTarget("datalog", "Data Logging"), disabled: !currentProject },
+        { id: "autotune", label: "&自动调教", onClick: () => openTarget("autotune", "AutoTune Live"), disabled: !currentProject },
+        { id: "datalog", label: "&数据日志", onClick: () => openTarget("datalog", "Data Logging"), disabled: !currentProject },
         { id: "sep1", label: "", separator: true },
-        { id: "tooth-logger", label: "&Tooth Logger", onClick: () => openTarget("tooth-logger", "Tooth Logger"), disabled: !currentProject },
-        { id: "composite-logger", label: "&Composite Logger", onClick: () => openTarget("composite-logger", "Composite Logger"), disabled: !currentProject },
+        { id: "tooth-logger", label: "&齿-日志", onClick: () => openTarget("tooth-logger", "Tooth Logger"), disabled: !currentProject },
+        { id: "composite-logger", label: "&组合日志", onClick: () => openTarget("composite-logger", "Composite Logger"), disabled: !currentProject },
         { id: "sep2", label: "", separator: true },
-        { id: "compare-tables", label: "Table &Comparison", onClick: () => setTableComparisonOpen(true), disabled: !currentProject },
-        { id: "performance", label: "&Performance Calculator", onClick: () => setPerformanceDialogOpen(true), disabled: !currentProject },
-        { id: "export-csv", label: "&Export Tune as CSV", onClick: async () => {
+        { id: "compare-tables", label: "表格&对比", onClick: () => setTableComparisonOpen(true), disabled: !currentProject },
+        { id: "performance", label: "&性能计算器", onClick: () => setPerformanceDialogOpen(true), disabled: !currentProject },
+        { id: "export-csv", label: "&导出调教为表格", onClick: async () => {
           try {
             const filePath = await save({
               title: "Export Tune as CSV",
@@ -1655,7 +1655,7 @@ function AppContent() {
             });
             if (filePath) {
               const count = await invoke<number>("export_tune_as_csv", { path: filePath });
-              showToast(`Exported ${count} values to CSV`, "success");
+              showToast(`导出 ${count}程序为表格`, "success");
             }
           } catch (err) {
             showToast(`Export failed: ${err}`, "error");
@@ -1677,24 +1677,24 @@ function AppContent() {
           }
         }, disabled: !currentProject },
         { id: "sep3", label: "", separator: true },
-        { id: "plugins", label: "&Plugins...", onClick: () => setPluginPanelOpen(true) },
+        { id: "plugins", label: "&插件...", onClick: () => setPluginPanelOpen(true) },
         { id: "sep4", label: "", separator: true },
-        { id: "connection", label: "&ECU Connection...", onClick: () => setConnectionDialogOpen(true) },
-        { id: "settings", label: "&Settings...", onClick: () => setSettingsDialogOpen(true) },
+        { id: "connection", label: "&ECU连接...", onClick: () => setConnectionDialogOpen(true) },
+        { id: "settings", label: "&设置...", onClick: () => setSettingsDialogOpen(true) },
       ],
     };
 
     const helpMenu: TunerMenuItem = {
       id: "help",
-      label: "&Help",
+      label: "&帮助",
       items: [
-        { id: "docs", label: "&User Manual", onClick: () => setUserManualOpen(true) },
-        { id: "shortcuts", label: "&Keyboard Shortcuts", onClick: () => {
+        { id: "docs", label: "&用户手册", onClick: () => setUserManualOpen(true) },
+        { id: "shortcuts", label: "&键盘快捷键", onClick: () => {
           setUserManualSection('reference/shortcuts');
           setUserManualOpen(true);
         }},
         { id: "sep1", label: "", separator: true },
-        { id: "about", label: "&About LibreTune", onClick: () => setAboutDialogOpen(true) },
+        { id: "about", label: "&关于猪猪侠调教软件", onClick: () => setAboutDialogOpen(true) },
       ],
     };
 
@@ -1709,23 +1709,23 @@ function AppContent() {
   // Toolbar items
   const toolbarItems: ToolbarItem[] = useMemo(
     () => [
-      { id: "open", icon: "open", tooltip: "Open Tune", onClick: () => setLoadDialogOpen(true) },
-      { id: "save", icon: "save", tooltip: "Save Tune", onClick: () => setSaveDialogOpen(true), disabled: !status.has_definition },
-      { id: "burn", icon: "burn", tooltip: "Burn to ECU", onClick: () => setBurnDialogOpen(true), disabled: status.state !== "Connected" },
+      { id: "open", icon: "open", tooltip: "打开程序", onClick: () => setLoadDialogOpen(true) },
+      { id: "save", icon: "save", tooltip: "保存程序", onClick: () => setSaveDialogOpen(true), disabled: !status.has_definition },
+      { id: "burn", icon: "burn", tooltip: "烧录到ECU", onClick: () => setBurnDialogOpen(true), disabled: status.state !== "Connected" },
       { id: "sep1", icon: "", tooltip: "", separator: true },
       {
         id: "connect",
         icon: status.state === "Connected" ? "disconnect" : "connect",
-        tooltip: status.state === "Connected" ? "Disconnect" : "Connect to ECU",
+        tooltip: status.state === "Connected" ? "断开连接" : "连接到ECU",
         active: status.state === "Connected",
         onClick: () => setConnectionDialogOpen(true),
       },
-      { id: "realtime", icon: "realtime", tooltip: "Realtime Dashboard", onClick: () => setActiveTabId("dashboard") },
+      { id: "realtime", icon: "realtime", tooltip: "实时仪表板", onClick: () => setActiveTabId("dashboard") },
       { id: "sep2", icon: "", tooltip: "", separator: true },
       {
         id: "log-start",
         icon: isLogging ? "log-stop" : "log-start",
-        tooltip: isLogging ? "Stop Logging" : "Start Logging",
+        tooltip: isLogging ? "停止日志" : "开始日志",
         active: isLogging,
         onClick: async () => {
           try {
@@ -1742,7 +1742,7 @@ function AppContent() {
         },
       },
       { id: "sep3", icon: "", tooltip: "", separator: true },
-      { id: "settings", icon: "settings", tooltip: "Settings", onClick: () => setSettingsDialogOpen(true) },
+      { id: "settings", icon: "settings", tooltip: "设置", onClick: () => setSettingsDialogOpen(true) },
     ],
     [status, isLogging]
   );
@@ -1822,7 +1822,7 @@ function AppContent() {
         content: (
           <span 
             className="sync-warning-indicator" 
-            title={`Some ECU pages could not be read. This may cause display issues or missing data.\n\nErrors:\n${syncStatus.errors.join('\n')}`}
+            title={`无法读取某些ECU页面。这可能会导致显示问题或数据丢失。\n\nErrors:\n${syncStatus.errors.join('\n')}`}
             style={{ 
               color: '#f59e0b', 
               cursor: 'help',
@@ -2050,7 +2050,7 @@ function AppContent() {
         onConnect={connect}
         onDisconnect={disconnect}
         onRefreshPorts={refreshPorts}
-        statusMessage={syncing && syncProgress ? `Syncing ECU data... ${syncProgress.percent}%` : undefined}
+        statusMessage={syncing && syncProgress ? `同步ECU数据... ${syncProgress.percent}%` : undefined}
         iniDefaults={iniDefaults ?? undefined}
         onApplyIniDefaults={applyIniDefaults}
       />
@@ -2116,7 +2116,7 @@ function AppContent() {
           await doSync();
         }}
         onContinue={async () => {
-          console.log("Continuing with mismatched INI - syncing anyway");
+          console.log("继续使用不匹配的INI-无论如何都要同步");
           setSignatureMismatchOpen(false);
           // User explicitly chose to continue - sync even though INI doesn't match
           await doSync();
@@ -2184,7 +2184,7 @@ function AppContent() {
           // Refresh UI after loading restore point
           const values = await fetchConstants();
           await fetchMenuTree(values);
-          showToast("Restore point loaded successfully", "success");
+          showToast("还原点已成功加载", "success");
         }}
       />
       
@@ -2199,7 +2199,7 @@ function AppContent() {
         isOpen={importProjectOpen}
         onClose={() => setImportProjectOpen(false)}
         onImportComplete={async (projectPath) => {
-          showToast("Project imported successfully", "success");
+          showToast("项目导入成功", "success");
           // Refresh project list
           const projects = await invoke<ProjectInfo[]>("list_projects");
           setAvailableProjects(projects);
@@ -2215,8 +2215,8 @@ function AppContent() {
             setTabContents({ dashboard: { type: "dashboard" } });
             setActiveTabId("dashboard");
           } catch (e) {
-            console.error("Failed to open imported project:", e);
-            showToast("Project imported but failed to open: " + e, "error");
+            console.error("无法打开导入的项目:", e);
+            showToast("项目已导入，但无法打开: " + e, "error");
           }
         }}
       />
@@ -2226,7 +2226,7 @@ function AppContent() {
         isOpen={migrationReportOpen}
         onClose={() => setMigrationReportOpen(false)}
         onProceed={() => {
-          console.log("User proceeding with migration");
+          console.log("用户正在进行迁移");
         }}
       />
       
@@ -2414,10 +2414,10 @@ function NoProjectView({
     }}>
       <div style={{ marginBottom: 32 }}>
         <h1 style={{ fontSize: 32, marginBottom: 8, color: "var(--text-primary)" }}>
-          LibreTune
+          猪猪侠调教
         </h1>
         <p style={{ color: "var(--text-muted)", fontSize: 14 }}>
-          Open-source ECU tuning software
+          通用开源ECU调教软件
         </p>
       </div>
       
@@ -2434,7 +2434,7 @@ function NoProjectView({
             cursor: "pointer",
           }}
         >
-          New Project
+          新项目
         </button>
         <button
           onClick={onBrowseProject}
@@ -2448,13 +2448,13 @@ function NoProjectView({
             cursor: "pointer",
           }}
         >
-          Open Project
+          打开项目
         </button>
       </div>
       
       {projects.length > 0 && (
         <div style={{ maxWidth: 500, width: "100%" }}>
-          <h3 style={{ marginBottom: 16, color: "var(--text-secondary)" }}>Recent Projects</h3>
+          <h3 style={{ marginBottom: 16, color: "var(--text-secondary)" }}>最近项目</h3>
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {projects.slice(0, 5).map((project) => (
               <div
@@ -2600,9 +2600,9 @@ function NewProjectDialog({
           maxHeight: "80vh",
           overflow: "auto",
         }}>
-          <h2 style={{ marginBottom: 8 }}>New Project</h2>
+          <h2 style={{ marginBottom: 8 }}>新项目</h2>
           <p style={{ color: "var(--text-muted)", marginBottom: 24 }}>
-            Choose a template to get started quickly, or start from scratch.
+            选择一个模板以快速开始，或从头开始。
           </p>
           
           <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 16, marginBottom: 24 }}>
@@ -2675,7 +2675,7 @@ function NewProjectDialog({
           
           <div style={{ display: "flex", gap: 12, justifyContent: "flex-end" }}>
             <button onClick={onClose} style={{ padding: "10px 20px" }}>
-              Cancel
+              取消
             </button>
           </div>
         </div>
@@ -2707,7 +2707,7 @@ function NewProjectDialog({
             onClick={() => setMode("select")}
             style={{ padding: "4px 12px", marginBottom: 16, fontSize: 13 }}
           >
-            ← Back
+            ← 返回
           </button>
           
           <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 24 }}>
@@ -2736,7 +2736,7 @@ function NewProjectDialog({
           
           <div style={{ marginBottom: 20 }}>
             <label style={{ display: "block", marginBottom: 8, fontWeight: 500 }}>
-              Project Name
+              项目名称
             </label>
             <input
               type="text"
@@ -2774,7 +2774,7 @@ function NewProjectDialog({
           
           <div style={{ display: "flex", gap: 12, justifyContent: "flex-end" }}>
             <button onClick={onClose} style={{ padding: "10px 20px" }}>
-              Cancel
+              取消
             </button>
             <button
               onClick={createFromTemplate}
@@ -2819,14 +2819,14 @@ function NewProjectDialog({
           onClick={() => setMode("select")}
           style={{ padding: "4px 12px", marginBottom: 16, fontSize: 13 }}
         >
-          ← Back
+          ← 返回
         </button>
         
-        <h2 style={{ marginBottom: 24 }}>New Project</h2>
+        <h2 style={{ marginBottom: 24 }}>新项目</h2>
         
         <div style={{ marginBottom: 20 }}>
           <label style={{ display: "block", marginBottom: 8, fontWeight: 500 }}>
-            Project Name
+            项目名称
           </label>
           <input
             type="text"
@@ -2848,14 +2848,14 @@ function NewProjectDialog({
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
             <label style={{ fontWeight: 500 }}>ECU Definition</label>
             <button onClick={onImportIni} style={{ padding: "4px 12px", fontSize: 13 }}>
-              Import INI...
+              导入配置文件...
             </button>
           </div>
           
           {inis.length === 0 ? (
             <div style={{ padding: 20, textAlign: "center", color: "var(--text-muted)", background: "var(--bg-elevated)", borderRadius: 6 }}>
-              No ECU definitions imported yet.<br/>
-              Click "Import INI..." to add an ECU definition file.
+              尚未导入ECU配置文件<br/>
+             点击“ 导入配置文件...”添加ECU配置文件。
             </div>
           ) : (
             <div style={{ maxHeight: 200, overflow: "auto", border: "1px solid var(--border-default)", borderRadius: 6 }}>
@@ -2883,7 +2883,7 @@ function NewProjectDialog({
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
             <label style={{ fontWeight: 500 }}>Import Existing Tune (Optional)</label>
             <button onClick={browseTune} style={{ padding: "4px 12px", fontSize: 13 }}>
-              Browse...
+              浏览...
             </button>
           </div>
           <div style={{ 
@@ -2901,18 +2901,18 @@ function NewProjectDialog({
                   onClick={() => { setTunePath(""); setTuneFileName(""); }}
                   style={{ padding: "2px 8px", fontSize: 12 }}
                 >
-                  Clear
+                  清除
                 </button>
               </div>
             ) : (
-              <span>Start with a blank tune, or import an existing .xml or .msq file</span>
+              <span>从空白程序开始，或导入现有的.xml或.msq文件</span>
             )}
           </div>
         </div>
         
         <div style={{ display: "flex", gap: 12, justifyContent: "flex-end" }}>
           <button onClick={onClose} style={{ padding: "10px 20px" }}>
-            Cancel
+            取消
           </button>
           <button
             onClick={() => onCreate(projectName, selectedIni, tunePath || undefined)}
@@ -2926,7 +2926,7 @@ function NewProjectDialog({
               cursor: (!projectName.trim() || !selectedIni) ? "not-allowed" : "pointer",
             }}
           >
-            Create Project
+            新建项目
           </button>
         </div>
       </div>
@@ -2966,12 +2966,12 @@ function OpenProjectDialog({
         maxHeight: "80vh",
         overflow: "auto",
       }}>
-        <h2 style={{ marginBottom: 24 }}>Open Project</h2>
+        <h2 style={{ marginBottom: 24 }}>打开项目</h2>
         
         {projects.length === 0 ? (
           <div style={{ padding: 40, textAlign: "center", color: "var(--text-muted)" }}>
-            No projects found.<br/>
-            Create a new project to get started.
+           没有程序<br/>
+            创建一个新项目以开始。
           </div>
         ) : (
           <div style={{ maxHeight: 400, overflow: "auto" }}>
@@ -3000,7 +3000,7 @@ function OpenProjectDialog({
         
         <div style={{ display: "flex", gap: 12, justifyContent: "flex-end", marginTop: 20 }}>
           <button onClick={onClose} style={{ padding: "10px 20px" }}>
-            Cancel
+            取消
           </button>
         </div>
       </div>

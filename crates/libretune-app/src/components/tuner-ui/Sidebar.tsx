@@ -253,7 +253,7 @@ export function Sidebar({ items, width, onResize, onItemSelect }: SidebarProps) 
   return (
     <div className="sidebar" style={{ width }}>
       <div className="sidebar-header">
-        <span className="sidebar-title">Project</span>
+        <span className="sidebar-title">项目</span>
       </div>
       <div className="sidebar-search">
         <svg className="search-icon" viewBox="0 0 16 16" fill="currentColor">
@@ -263,7 +263,7 @@ export function Sidebar({ items, width, onResize, onItemSelect }: SidebarProps) 
           ref={searchInputRef}
           type="text"
           className="search-input"
-          placeholder="Search... (Ctrl+K)"
+          placeholder="搜索... (Ctrl+K)"
           value={searchQuery}
           onChange={handleSearchChange}
         />
@@ -276,7 +276,7 @@ export function Sidebar({ items, width, onResize, onItemSelect }: SidebarProps) 
       <div className="sidebar-content">
         {filteredItems.length === 0 && searchQuery ? (
           <div className="search-no-results">
-            No results for "{searchQuery}"
+           无 "{searchQuery}"相关的结果
           </div>
         ) : (
           <TreeView
