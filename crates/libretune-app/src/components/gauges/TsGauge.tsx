@@ -3,9 +3,10 @@
  * 
  * Renders gauges based on TS GaugePainter types.
  * Uses canvas for all gauge rendering with high-quality visual effects.
+ * Wrapped in React.memo with custom comparator for performance optimization.
  */
 
-import { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { TsGaugeConfig, TsColor, tsColorToRgba, tsColorToHex } from '../dashboards/dashTypes';
 
 interface TsGaugeProps {
@@ -20,7 +21,13 @@ const loadedFonts = new Set<string>();
 // Cache for loaded HTMLImageElement objects (for canvas drawImage)
 const loadedImages = new Map<string, HTMLImageElement>();
 
-export default function TsGauge({ config, value, embeddedImages }: TsGaugeProps) {
+// Threshold for value change to trigger redraw (0.5% of gauge range)
+const VALUE_CHANGE_THRESHOLD_PERCENT = 0.5;
+
+/**
+ * Internal TsGauge component - wrapped in React.memo below
+ */
+function TsGaugeInner({ config, value, embeddedImages }: TsGaugeProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [fontsReady, setFontsReady] = useState(false);
   const [imagesReady, setImagesReady] = useState(false);
@@ -140,6 +147,17 @@ export default function TsGauge({ config, value, embeddedImages }: TsGaugeProps)
       : `"${customFont}", Arial, Helvetica, sans-serif`;
   }, [config.font_family]);
 
+  const getFontSpec = useCallback((
+    size: number,
+    options?: { bold?: boolean; monospace?: boolean }
+  ): string => {
+    const italic = config.italic_font ? 'italic ' : '';
+    const bold = options?.bold ? 'bold ' : '';
+    const monospace = options?.monospace ?? false;
+    const adjustedSize = Math.max(1, size + (config.font_size_adjustment ?? 0));
+    return `${italic}${bold}${adjustedSize}px ${getFontFamily(monospace)}`;
+  }, [config.font_size_adjustment, config.italic_font, getFontFamily]);
+
   /** Get color based on value thresholds */
   const getValueColor = useCallback((): TsColor => {
     // Use != null to catch both null and undefined
@@ -194,6 +212,10 @@ export default function TsGauge({ config, value, embeddedImages }: TsGaugeProps)
     return `#${(0x1000000 + R * 0x10000 + G * 0x100 + B).toString(16).slice(1)}`;
   };
 
+  // Ref to track pending rAF and last drawn value
+  const rafIdRef = useRef<number | null>(null);
+  const lastDrawnValueRef = useRef<number | null>(null);
+
   useEffect(() => {
     if (!fontsReady || !imagesReady) return;
     
@@ -203,84 +225,116 @@ export default function TsGauge({ config, value, embeddedImages }: TsGaugeProps)
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    // Set canvas size to match container
-    const rect = canvas.getBoundingClientRect();
-    const dpr = window.devicePixelRatio || 1;
-    canvas.width = rect.width * dpr;
-    canvas.height = rect.height * dpr;
-    
-    // Reset transform before scaling to prevent accumulation
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.scale(dpr, dpr);
-
-    // Clear canvas
-    ctx.clearRect(0, 0, rect.width, rect.height);
-
-    // Enable anti-aliasing for smoother rendering
-    if (config.antialiasing_on !== false) {
-      ctx.imageSmoothingEnabled = true;
-      ctx.imageSmoothingQuality = 'high';
+    // Skip redraw if value hasn't changed significantly (within threshold)
+    const range = config.max - config.min;
+    const threshold = range * (VALUE_CHANGE_THRESHOLD_PERCENT / 100);
+    if (lastDrawnValueRef.current !== null && 
+        Math.abs(clampedValue - lastDrawnValueRef.current) < threshold) {
+      return;
     }
-    
-    // Get needle image if configured
-    const needleImage = getEmbeddedImage(config.needle_image_file_name);
-    
-    // Get background image if configured
-    const bgImage = getEmbeddedImage(config.background_image_file_name);
 
-    // Render based on gauge painter type
-    switch (config.gauge_painter) {
-      case 'BasicReadout':
-        drawBasicReadout(ctx, rect.width, rect.height);
-        break;
-      case 'HorizontalBarGauge':
-        drawHorizontalBar(ctx, rect.width, rect.height);
-        break;
-      case 'VerticalBarGauge':
-        drawVerticalBar(ctx, rect.width, rect.height);
-        break;
-      case 'AnalogGauge':
-      case 'BasicAnalogGauge':
-      case 'CircleAnalogGauge':
-        drawAnalogGauge(ctx, rect.width, rect.height, needleImage, bgImage);
-        break;
-      case 'AsymmetricSweepGauge':
-        drawSweepGauge(ctx, rect.width, rect.height);
-        break;
-      case 'HorizontalLineGauge':
-        drawHorizontalLine(ctx, rect.width, rect.height);
-        break;
-      case 'VerticalDashedBar':
-        drawVerticalDashedBar(ctx, rect.width, rect.height);
-        break;
-      case 'Histogram':
-        drawHistogram(ctx, rect.width, rect.height);
-        break;
-      case 'LineGraph':
-        drawLineGraph(ctx, rect.width, rect.height);
-        break;
-      case 'AnalogBarGauge':
-        drawAnalogBarGauge(ctx, rect.width, rect.height);
-        break;
-      case 'AnalogMovingBarGauge':
-        drawAnalogMovingBarGauge(ctx, rect.width, rect.height);
-        break;
-      case 'RoundGauge':
-        drawRoundGauge(ctx, rect.width, rect.height);
-        break;
-      case 'RoundDashedGauge':
-        drawRoundDashedGauge(ctx, rect.width, rect.height);
-        break;
-      case 'FuelMeter':
-        drawFuelMeter(ctx, rect.width, rect.height);
-        break;
-      case 'Tachometer':
-        drawTachometer(ctx, rect.width, rect.height);
-        break;
-      default:
-        // Fallback to basic readout for unimplemented types
-        drawBasicReadout(ctx, rect.width, rect.height);
+    // Cancel any pending rAF to avoid redundant redraws
+    if (rafIdRef.current !== null) {
+      cancelAnimationFrame(rafIdRef.current);
     }
+
+    // Schedule draw on next animation frame (throttles to 60fps max)
+    rafIdRef.current = requestAnimationFrame(() => {
+      rafIdRef.current = null;
+      lastDrawnValueRef.current = clampedValue;
+
+      // Set canvas size to match container
+      const rect = canvas.getBoundingClientRect();
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = rect.width * dpr;
+      canvas.height = rect.height * dpr;
+      
+      // Reset transform before scaling to prevent accumulation
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.scale(dpr, dpr);
+
+      // Clear canvas
+      ctx.clearRect(0, 0, rect.width, rect.height);
+
+      // Enable anti-aliasing for smoother rendering
+      if (config.antialiasing_on === false) {
+        ctx.imageSmoothingEnabled = false;
+      } else {
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+      }
+    
+      // Get needle image if configured
+      const needleImage = getEmbeddedImage(config.needle_image_file_name);
+      
+      // Get background image if configured
+      const bgImage = getEmbeddedImage(config.background_image_file_name);
+
+      // Render based on gauge painter type
+      switch (config.gauge_painter) {
+        case 'BasicReadout':
+          drawBasicReadout(ctx, rect.width, rect.height);
+          break;
+        case 'HorizontalBarGauge':
+          drawHorizontalBar(ctx, rect.width, rect.height);
+          break;
+        case 'VerticalBarGauge':
+          drawVerticalBar(ctx, rect.width, rect.height);
+          break;
+        case 'AnalogGauge':
+        case 'BasicAnalogGauge':
+        case 'CircleAnalogGauge':
+          drawAnalogGauge(ctx, rect.width, rect.height, needleImage, bgImage);
+          break;
+        case 'AsymmetricSweepGauge':
+          drawSweepGauge(ctx, rect.width, rect.height);
+          break;
+        case 'HorizontalLineGauge':
+          drawHorizontalLine(ctx, rect.width, rect.height);
+          break;
+        case 'HorizontalDashedBar':
+          drawHorizontalDashedBar(ctx, rect.width, rect.height);
+          break;
+        case 'VerticalDashedBar':
+          drawVerticalDashedBar(ctx, rect.width, rect.height);
+          break;
+        case 'Histogram':
+          drawHistogram(ctx, rect.width, rect.height);
+          break;
+        case 'LineGraph':
+          drawLineGraph(ctx, rect.width, rect.height);
+          break;
+        case 'AnalogBarGauge':
+          drawAnalogBarGauge(ctx, rect.width, rect.height);
+          break;
+        case 'AnalogMovingBarGauge':
+          drawAnalogMovingBarGauge(ctx, rect.width, rect.height);
+          break;
+        case 'RoundGauge':
+          drawRoundGauge(ctx, rect.width, rect.height);
+          break;
+        case 'RoundDashedGauge':
+          drawRoundDashedGauge(ctx, rect.width, rect.height);
+          break;
+        case 'FuelMeter':
+          drawFuelMeter(ctx, rect.width, rect.height);
+          break;
+        case 'Tachometer':
+          drawTachometer(ctx, rect.width, rect.height);
+          break;
+        default:
+          // Fallback to basic readout for unimplemented types
+          drawBasicReadout(ctx, rect.width, rect.height);
+      }
+    }); // End of requestAnimationFrame callback
+
+    // Cleanup: cancel pending rAF on unmount or re-render
+    return () => {
+      if (rafIdRef.current !== null) {
+        cancelAnimationFrame(rafIdRef.current);
+        rafIdRef.current = null;
+      }
+    };
   }, [config, clampedValue, value, embeddedImages, fontsReady, imagesReady, getValueColor, createMetallicGradient, getEmbeddedImage, getFontFamily]);
 
   /** Draw digital readout (LCD style) with improved visuals */
@@ -336,7 +390,7 @@ export default function TsGauge({ config, value, embeddedImages }: TsGaugeProps)
 
     // Title at top
     ctx.fillStyle = tsColorToRgba(config.trim_color);
-    ctx.font = `${titleFontSize}px ${getFontFamily()}`;
+    ctx.font = getFontSpec(titleFontSize);
     ctx.textAlign = 'center';
     ctx.textBaseline = 'top';
     ctx.fillText(config.title, width / 2, padding + 2);
@@ -353,7 +407,7 @@ export default function TsGauge({ config, value, embeddedImages }: TsGaugeProps)
     
     ctx.fillStyle = tsColorToRgba(valueColor);
     // Use monospace or LCD-style font for values
-    ctx.font = `bold ${valueFontSize}px ${getFontFamily(true)}`;
+    ctx.font = getFontSpec(valueFontSize, { bold: true, monospace: true });
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(valueText, width / 2, height / 2 + titleFontSize * 0.3);
@@ -361,7 +415,7 @@ export default function TsGauge({ config, value, embeddedImages }: TsGaugeProps)
 
     // Units at bottom
     ctx.fillStyle = tsColorToRgba(config.trim_color);
-    ctx.font = `${unitsFontSize}px ${getFontFamily()}`;
+    ctx.font = getFontSpec(unitsFontSize);
     ctx.textAlign = 'center';
     ctx.textBaseline = 'bottom';
     ctx.fillText(config.units, width / 2, height - padding - 2);
@@ -400,7 +454,7 @@ export default function TsGauge({ config, value, embeddedImages }: TsGaugeProps)
 
     // Title
     ctx.fillStyle = tsColorToRgba(config.trim_color);
-    ctx.font = `${Math.max(9, height * 0.14)}px Arial, sans-serif`;
+    ctx.font = getFontSpec(Math.max(9, height * 0.14));
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
     ctx.fillText(config.title, padding, 3);
@@ -449,7 +503,7 @@ export default function TsGauge({ config, value, embeddedImages }: TsGaugeProps)
     ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
     ctx.shadowBlur = 2;
     ctx.fillStyle = tsColorToRgba(config.font_color);
-    ctx.font = `bold ${Math.max(11, height * 0.18)}px 'Courier New', monospace`;
+    ctx.font = getFontSpec(Math.max(11, height * 0.18), { bold: true, monospace: true });
     ctx.textAlign = 'right';
     ctx.textBaseline = 'top';
     ctx.fillText(`${clampedValue.toFixed(config.value_digits)} ${config.units}`, width - padding, 3);
@@ -479,7 +533,7 @@ export default function TsGauge({ config, value, embeddedImages }: TsGaugeProps)
     ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
     ctx.shadowBlur = 2;
     ctx.fillStyle = tsColorToRgba(config.trim_color);
-    ctx.font = `bold ${Math.max(9, labelHeight * 0.75)}px Arial, sans-serif`;
+    ctx.font = getFontSpec(Math.max(9, labelHeight * 0.75), { bold: true });
     ctx.textAlign = 'center';
     ctx.textBaseline = 'top';
     ctx.fillText(config.title, width / 2, 3);
@@ -542,7 +596,7 @@ export default function TsGauge({ config, value, embeddedImages }: TsGaugeProps)
     ctx.shadowColor = 'rgba(0, 0, 0, 0.6)';
     ctx.shadowBlur = 3;
     ctx.fillStyle = tsColorToRgba(config.font_color);
-    ctx.font = `bold ${Math.max(11, labelHeight * 0.9)}px 'Courier New', monospace`;
+    ctx.font = getFontSpec(Math.max(11, labelHeight * 0.9), { bold: true, monospace: true });
     ctx.textAlign = 'center';
     ctx.textBaseline = 'bottom';
     ctx.fillText(`${clampedValue.toFixed(config.value_digits)}`, width / 2, height - 2);
@@ -581,7 +635,9 @@ export default function TsGauge({ config, value, embeddedImages }: TsGaugeProps)
     ctx.shadowColor = 'transparent';
 
     // Metallic bezel - outer ring
-    const bezelWidth = Math.max(6, radius * 0.08);
+    const bezelWidth = config.border_width > 0
+      ? Math.min(radius * 0.3, config.border_width)
+      : Math.max(6, radius * 0.08);
     const bezelGradient = createMetallicGradient(ctx, centerX, centerY, radius + 2, radius - bezelWidth, config.trim_color);
     ctx.beginPath();
     ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
@@ -613,7 +669,7 @@ export default function TsGauge({ config, value, embeddedImages }: TsGaugeProps)
 
     // Calculate angles (TS uses degrees, canvas uses radians)
     // Use actual values from config, only fallback if truly undefined
-    const startDeg = config.start_angle ?? 225;
+    const startDeg = config.sweep_begin_degree ?? config.start_angle ?? 225;
     const sweepDeg = config.sweep_angle ?? 270;
     const ccw = config.counter_clockwise ?? false;
     
@@ -661,7 +717,7 @@ export default function TsGauge({ config, value, embeddedImages }: TsGaugeProps)
     const tickRadius = faceRadius - Math.max(10, faceRadius * 0.12);
     const majorTicks = config.major_ticks > 0 ? config.major_ticks : (config.max - config.min) / 10;
     const numMajorTicks = Math.floor((config.max - config.min) / majorTicks) + 1;
-    const minorTicksPerMajor = 4;
+    const minorTicksPerMajor = config.minor_ticks > 0 ? config.minor_ticks : 0;
 
     const cullLabels = radius < 70;
     const trimHex = tsColorToHex(config.trim_color);
@@ -670,22 +726,25 @@ export default function TsGauge({ config, value, embeddedImages }: TsGaugeProps)
     // Minor ticks
     ctx.strokeStyle = darkenColor(trimHex, 30);
     ctx.lineWidth = 1;
-    for (let i = 0; i < (numMajorTicks - 1) * minorTicksPerMajor; i++) {
-      if (i % minorTicksPerMajor === 0) continue;
-      const tickPercent = i / ((numMajorTicks - 1) * minorTicksPerMajor);
-      const tickAngle = angleAt(tickPercent);
-      const innerRadius = tickRadius - (faceRadius * 0.05);
-      ctx.beginPath();
-      ctx.moveTo(centerX + Math.cos(tickAngle) * innerRadius, centerY + Math.sin(tickAngle) * innerRadius);
-      ctx.lineTo(centerX + Math.cos(tickAngle) * tickRadius, centerY + Math.sin(tickAngle) * tickRadius);
-      ctx.stroke();
+    if (minorTicksPerMajor > 0) {
+      const totalMinorTicks = (numMajorTicks - 1) * minorTicksPerMajor;
+      for (let i = 0; i < totalMinorTicks; i++) {
+        if (i % minorTicksPerMajor === 0) continue;
+        const tickPercent = i / totalMinorTicks;
+        const tickAngle = angleAt(tickPercent);
+        const innerRadius = tickRadius - (faceRadius * 0.05);
+        ctx.beginPath();
+        ctx.moveTo(centerX + Math.cos(tickAngle) * innerRadius, centerY + Math.sin(tickAngle) * innerRadius);
+        ctx.lineTo(centerX + Math.cos(tickAngle) * tickRadius, centerY + Math.sin(tickAngle) * tickRadius);
+        ctx.stroke();
+      }
     }
 
     // Major ticks and labels
     ctx.strokeStyle = trimHex;
     ctx.fillStyle = fontHex;
     const fontSize = Math.max(8, faceRadius * 0.14);
-    ctx.font = `${fontSize}px Arial, sans-serif`;
+    ctx.font = getFontSpec(fontSize);
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
 
@@ -777,7 +836,7 @@ export default function TsGauge({ config, value, embeddedImages }: TsGaugeProps)
     ctx.shadowColor = 'rgba(0, 0, 0, 0.4)';
     ctx.shadowBlur = 2;
     ctx.fillStyle = fontHex;
-    ctx.font = `bold ${Math.max(9, faceRadius * 0.13)}px Arial, sans-serif`;
+    ctx.font = getFontSpec(Math.max(9, faceRadius * 0.13), { bold: true });
     ctx.textAlign = 'center';
     ctx.fillText(config.title, centerX, centerY + faceRadius * 0.35);
     ctx.shadowColor = 'transparent';
@@ -785,11 +844,13 @@ export default function TsGauge({ config, value, embeddedImages }: TsGaugeProps)
     // Value display with background
     const valueFontSize = Math.max(11, faceRadius * 0.16);
     const valueText = `${clampedValue.toFixed(config.value_digits)} ${config.units}`;
-    ctx.font = `bold ${valueFontSize}px 'Courier New', monospace`;
+    ctx.font = getFontSpec(valueFontSize, { bold: true, monospace: true });
     const valueWidth = ctx.measureText(valueText).width;
     
     // Value background
-    const valueY = centerY + faceRadius * 0.55;
+    const valueY = config.display_value_at_180
+      ? centerY + faceRadius * 0.7
+      : centerY + faceRadius * 0.55;
     ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
     roundRect(ctx, centerX - valueWidth / 2 - 4, valueY - valueFontSize / 2 - 2, valueWidth + 8, valueFontSize + 4, 3);
     ctx.fill();
@@ -816,7 +877,7 @@ export default function TsGauge({ config, value, embeddedImages }: TsGaugeProps)
     ctx.fillRect(0, 0, width, height);
 
     // Calculate angles - use actual values, only fallback if truly undefined
-    const startDeg = config.start_angle ?? 210;
+    const startDeg = config.sweep_begin_degree ?? config.start_angle ?? 210;
     const sweepDeg = config.sweep_angle ?? 120;
     const ccw = config.counter_clockwise ?? false;
     
@@ -918,7 +979,7 @@ export default function TsGauge({ config, value, embeddedImages }: TsGaugeProps)
     
     ctx.strokeStyle = tsColorToHex(config.trim_color);
     ctx.fillStyle = tsColorToHex(config.font_color);
-    ctx.font = `${Math.max(8, radius * 0.1)}px Arial, sans-serif`;
+    ctx.font = getFontSpec(Math.max(8, radius * 0.1));
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
 
@@ -945,25 +1006,46 @@ export default function TsGauge({ config, value, embeddedImages }: TsGaugeProps)
       }
     }
 
+    const minorTicksPerMajor = config.minor_ticks > 0 ? config.minor_ticks : 0;
+    if (minorTicksPerMajor > 0 && numTicks > 1) {
+      const totalMinorTicks = (numTicks - 1) * minorTicksPerMajor;
+      ctx.strokeStyle = tsColorToHex(config.trim_color);
+      ctx.lineWidth = 1;
+      for (let i = 0; i < totalMinorTicks; i++) {
+        if (i % minorTicksPerMajor === 0) continue;
+        const tickPercent = i / totalMinorTicks;
+        const tickAngle = angleAt(tickPercent);
+        const minorInner = tickInnerRadius + 2;
+        const minorOuter = tickOuterRadius - 2;
+        ctx.beginPath();
+        ctx.moveTo(centerX + Math.cos(tickAngle) * minorInner, centerY + Math.sin(tickAngle) * minorInner);
+        ctx.lineTo(centerX + Math.cos(tickAngle) * minorOuter, centerY + Math.sin(tickAngle) * minorOuter);
+        ctx.stroke();
+      }
+    }
+
     // Value display in center with glow
     const fontHex = tsColorToHex(config.font_color);
     const valueFontSize = Math.max(18, radius * 0.28);
     ctx.shadowColor = valueHex;
     ctx.shadowBlur = 6;
     ctx.fillStyle = fontHex;
-    ctx.font = `bold ${valueFontSize}px 'Courier New', monospace`;
+    ctx.font = getFontSpec(valueFontSize, { bold: true, monospace: true });
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(clampedValue.toFixed(config.value_digits), centerX, centerY);
+    const sweepValueY = config.display_value_at_180
+      ? centerY + radius * 0.25
+      : centerY;
+    ctx.fillText(clampedValue.toFixed(config.value_digits), centerX, sweepValueY);
     ctx.shadowColor = 'transparent';
 
     // Title below value
-    ctx.font = `bold ${Math.max(10, radius * 0.11)}px Arial, sans-serif`;
+    ctx.font = getFontSpec(Math.max(10, radius * 0.11), { bold: true });
     ctx.fillText(config.title, centerX, centerY + radius * 0.35);
 
     // Units
     ctx.fillStyle = tsColorToHex(config.trim_color);
-    ctx.font = `${Math.max(9, radius * 0.09)}px Arial, sans-serif`;
+    ctx.font = getFontSpec(Math.max(9, radius * 0.09));
     ctx.fillText(config.units, centerX, centerY + radius * 0.5);
   };
 
@@ -983,7 +1065,7 @@ export default function TsGauge({ config, value, embeddedImages }: TsGaugeProps)
 
     // Title
     ctx.fillStyle = tsColorToHex(config.trim_color);
-    ctx.font = `bold ${Math.max(9, height * 0.16)}px Arial, sans-serif`;
+    ctx.font = getFontSpec(Math.max(9, height * 0.16), { bold: true });
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
     ctx.fillText(config.title, padding, 3);
@@ -1044,7 +1126,7 @@ export default function TsGauge({ config, value, embeddedImages }: TsGaugeProps)
     ctx.shadowColor = 'rgba(0, 0, 0, 0.4)';
     ctx.shadowBlur = 2;
     ctx.fillStyle = tsColorToHex(config.font_color);
-    ctx.font = `bold ${Math.max(11, height * 0.22)}px 'Courier New', monospace`;
+    ctx.font = getFontSpec(Math.max(11, height * 0.22), { bold: true, monospace: true });
     ctx.textAlign = 'right';
     ctx.textBaseline = 'top';
     ctx.fillText(`${clampedValue.toFixed(config.value_digits)} ${config.units}`, width - padding, 3);
@@ -1052,7 +1134,7 @@ export default function TsGauge({ config, value, embeddedImages }: TsGaugeProps)
 
     // Min/max labels
     ctx.fillStyle = tsColorToHex(config.trim_color);
-    ctx.font = `${Math.max(8, height * 0.12)}px Arial, sans-serif`;
+    ctx.font = getFontSpec(Math.max(8, height * 0.12));
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
     ctx.fillText(config.min.toFixed(0), padding, lineY + 8);
@@ -1085,7 +1167,7 @@ export default function TsGauge({ config, value, embeddedImages }: TsGaugeProps)
     ctx.shadowColor = 'rgba(0, 0, 0, 0.4)';
     ctx.shadowBlur = 2;
     ctx.fillStyle = tsColorToHex(config.trim_color);
-    ctx.font = `bold ${Math.max(9, labelHeight * 0.8)}px Arial, sans-serif`;
+    ctx.font = getFontSpec(Math.max(9, labelHeight * 0.8), { bold: true });
     ctx.textAlign = 'center';
     ctx.textBaseline = 'top';
     ctx.fillText(config.title, width / 2, 2);
@@ -1139,7 +1221,96 @@ export default function TsGauge({ config, value, embeddedImages }: TsGaugeProps)
     ctx.shadowColor = 'rgba(0, 0, 0, 0.4)';
     ctx.shadowBlur = 2;
     ctx.fillStyle = tsColorToHex(config.font_color);
-    ctx.font = `bold ${Math.max(11, labelHeight * 0.9)}px 'Courier New', monospace`;
+    ctx.font = getFontSpec(Math.max(11, labelHeight * 0.9), { bold: true, monospace: true });
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'bottom';
+    ctx.fillText(`${clampedValue.toFixed(config.value_digits)}`, width / 2, height - 2);
+    ctx.shadowColor = 'transparent';
+  };
+
+  /** Draw horizontal dashed bar gauge */
+  const drawHorizontalDashedBar = (ctx: CanvasRenderingContext2D, width: number, height: number) => {
+    const padding = 6;
+    const titleHeight = height * 0.15;
+    const valueHeight = height * 0.15;
+    const barHeight = height * 0.35;
+    const barWidth = width - padding * 2;
+    const barX = padding;
+    const barY = titleHeight + (height - titleHeight - valueHeight - barHeight) / 2;
+    const numSegments = 14;
+    const segmentWidth = barWidth / numSegments;
+    const segmentGap = 3;
+
+    // Background
+    const bgGradient = ctx.createLinearGradient(0, 0, 0, height);
+    const bgHex = tsColorToHex(config.back_color);
+    bgGradient.addColorStop(0, darkenColor(bgHex, 5));
+    bgGradient.addColorStop(0.5, lightenColor(bgHex, 5));
+    bgGradient.addColorStop(1, darkenColor(bgHex, 5));
+    ctx.fillStyle = bgGradient;
+    ctx.fillRect(0, 0, width, height);
+
+    // Title
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.4)';
+    ctx.shadowBlur = 2;
+    ctx.fillStyle = tsColorToHex(config.trim_color);
+    ctx.font = getFontSpec(Math.max(9, titleHeight * 0.6), { bold: true });
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    ctx.fillText(config.title, width / 2, 2);
+    ctx.shadowColor = 'transparent';
+
+    const fillPercent = (clampedValue - config.min) / (config.max - config.min);
+    const filledSegments = Math.ceil(fillPercent * numSegments);
+
+    for (let i = 0; i < numSegments; i++) {
+      const segmentX = barX + i * segmentWidth;
+      const isFilled = i < filledSegments;
+      const segmentPercent = i / numSegments;
+      const segmentValue = config.min + segmentPercent * (config.max - config.min);
+
+      let segmentColor: string;
+      if (config.high_critical !== null && segmentValue >= config.high_critical) {
+        segmentColor = isFilled ? tsColorToHex(config.critical_color) : '#401010';
+      } else if (config.high_warning !== null && segmentValue >= config.high_warning) {
+        segmentColor = isFilled ? tsColorToHex(config.warn_color) : '#403010';
+      } else {
+        segmentColor = isFilled ? tsColorToHex(config.needle_color) : '#303030';
+      }
+
+      if (isFilled) {
+        const segGradient = ctx.createLinearGradient(segmentX, 0, segmentX + segmentWidth, 0);
+        segGradient.addColorStop(0, darkenColor(segmentColor, 15));
+        segGradient.addColorStop(0.3, lightenColor(segmentColor, 20));
+        segGradient.addColorStop(0.7, lightenColor(segmentColor, 15));
+        segGradient.addColorStop(1, darkenColor(segmentColor, 10));
+        ctx.fillStyle = segGradient;
+
+        if (i === filledSegments - 1) {
+          ctx.shadowColor = segmentColor;
+          ctx.shadowBlur = 6;
+        }
+      } else {
+        ctx.fillStyle = segmentColor;
+      }
+
+      roundRect(
+        ctx,
+        segmentX + segmentGap / 2,
+        barY,
+        segmentWidth - segmentGap,
+        barHeight,
+        2
+      );
+      ctx.fill();
+      ctx.shadowColor = 'transparent';
+    }
+
+    // Value
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.4)';
+    ctx.shadowBlur = 2;
+    ctx.fillStyle = tsColorToHex(config.font_color);
+    ctx.font = getFontSpec(Math.max(11, valueHeight * 0.6), { bold: true, monospace: true });
     ctx.textAlign = 'center';
     ctx.textBaseline = 'bottom';
     ctx.fillText(`${clampedValue.toFixed(config.value_digits)}`, width / 2, height - 2);
@@ -1169,7 +1340,7 @@ export default function TsGauge({ config, value, embeddedImages }: TsGaugeProps)
     ctx.shadowColor = 'rgba(0, 0, 0, 0.4)';
     ctx.shadowBlur = 2;
     ctx.fillStyle = tsColorToHex(config.trim_color);
-    ctx.font = `bold ${Math.max(9, titleHeight * 0.8)}px Arial, sans-serif`;
+    ctx.font = getFontSpec(Math.max(9, titleHeight * 0.8), { bold: true });
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
     ctx.fillText(config.title, padding, 3);
@@ -1245,7 +1416,7 @@ export default function TsGauge({ config, value, embeddedImages }: TsGaugeProps)
 
     // Value display
     ctx.fillStyle = tsColorToHex(config.font_color);
-    ctx.font = `bold ${Math.max(10, valueHeight * 0.9)}px 'Courier New', monospace`;
+    ctx.font = getFontSpec(Math.max(10, valueHeight * 0.9), { bold: true, monospace: true });
     ctx.textAlign = 'right';
     ctx.textBaseline = 'top';
     ctx.fillText(`${clampedValue.toFixed(config.value_digits)} ${config.units}`, width - padding, 3);
@@ -1271,13 +1442,13 @@ export default function TsGauge({ config, value, embeddedImages }: TsGaugeProps)
     ctx.shadowColor = 'rgba(0, 0, 0, 0.4)';
     ctx.shadowBlur = 2;
     ctx.fillStyle = tsColorToHex(config.trim_color);
-    ctx.font = `bold ${Math.max(9, titleHeight * 0.8)}px Arial, sans-serif`;
+    ctx.font = getFontSpec(Math.max(9, titleHeight * 0.8), { bold: true });
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
     ctx.fillText(config.title, padding, 3);
 
     ctx.fillStyle = tsColorToHex(config.font_color);
-    ctx.font = `bold ${Math.max(10, titleHeight * 0.9)}px 'Courier New', monospace`;
+    ctx.font = getFontSpec(Math.max(10, titleHeight * 0.9), { bold: true, monospace: true });
     ctx.textAlign = 'right';
     ctx.fillText(`${clampedValue.toFixed(config.value_digits)} ${config.units}`, width - padding, 3);
     ctx.shadowColor = 'transparent';
@@ -1361,7 +1532,7 @@ export default function TsGauge({ config, value, embeddedImages }: TsGaugeProps)
 
     // Min/max labels on Y axis
     ctx.fillStyle = tsColorToHex(config.trim_color);
-    ctx.font = `${Math.max(7, graphHeight * 0.08)}px Arial, sans-serif`;
+    ctx.font = getFontSpec(Math.max(7, graphHeight * 0.08));
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
     ctx.fillText(config.max.toFixed(0), padding + 2, graphY + 2);
@@ -1446,7 +1617,7 @@ export default function TsGauge({ config, value, embeddedImages }: TsGaugeProps)
     const valueColorTs = getValueColor();
     ctx.fillStyle = tsColorToHex(valueColorTs);
     const fontSize = Math.max(12, radius * 0.2);
-    ctx.font = `bold ${fontSize}px ${getFontFamily(true)}`;
+    ctx.font = getFontSpec(fontSize, { bold: true, monospace: true });
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(clampedValue.toFixed(config.value_digits), centerX, centerY - radius * 0.3);
@@ -1454,14 +1625,14 @@ export default function TsGauge({ config, value, embeddedImages }: TsGaugeProps)
     // Units below value
     if (config.units) {
       ctx.fillStyle = tsColorToHex(config.font_color);
-      ctx.font = `${fontSize * 0.5}px ${getFontFamily()}`;
+      ctx.font = getFontSpec(fontSize * 0.5);
       ctx.fillText(config.units, centerX, centerY - radius * 0.1);
     }
     
     // Title at top
     if (config.title) {
       ctx.fillStyle = tsColorToHex(config.font_color);
-      ctx.font = `${fontSize * 0.5}px ${getFontFamily()}`;
+      ctx.font = getFontSpec(fontSize * 0.5);
       ctx.textBaseline = 'top';
       ctx.fillText(config.title, centerX, 4);
     }
@@ -1585,7 +1756,7 @@ export default function TsGauge({ config, value, embeddedImages }: TsGaugeProps)
     const valueTextColorTs = getValueColor();
     ctx.fillStyle = tsColorToHex(valueTextColorTs);
     const fontSize = Math.max(14, radius * 0.18);
-    ctx.font = `bold ${fontSize}px ${getFontFamily(true)}`;
+    ctx.font = getFontSpec(fontSize, { bold: true, monospace: true });
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(clampedValue.toFixed(config.value_digits), centerX, centerY - radius * 0.35);
@@ -1593,14 +1764,14 @@ export default function TsGauge({ config, value, embeddedImages }: TsGaugeProps)
     // Units
     if (config.units) {
       ctx.fillStyle = tsColorToHex(config.font_color);
-      ctx.font = `${fontSize * 0.6}px ${getFontFamily()}`;
+      ctx.font = getFontSpec(fontSize * 0.6);
       ctx.fillText(config.units, centerX, centerY - radius * 0.18);
     }
     
     // Title
     if (config.title) {
       ctx.fillStyle = tsColorToHex(config.font_color);
-      ctx.font = `${fontSize * 0.5}px ${getFontFamily()}`;
+      ctx.font = getFontSpec(fontSize * 0.5);
       ctx.textBaseline = 'top';
       ctx.fillText(config.title, centerX, 4);
     }
@@ -1666,7 +1837,7 @@ export default function TsGauge({ config, value, embeddedImages }: TsGaugeProps)
     const valueTextColorTs = getValueColor();
     const fontSize = Math.max(12, radius * 0.25);
     ctx.fillStyle = tsColorToHex(valueTextColorTs);
-    ctx.font = `bold ${fontSize}px ${getFontFamily(true)}`;
+    ctx.font = getFontSpec(fontSize, { bold: true, monospace: true });
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(clampedValue.toFixed(config.value_digits), centerX, centerY);
@@ -1674,14 +1845,14 @@ export default function TsGauge({ config, value, embeddedImages }: TsGaugeProps)
     // Units below value
     if (config.units) {
       ctx.fillStyle = tsColorToHex(config.font_color);
-      ctx.font = `${fontSize * 0.5}px ${getFontFamily()}`;
+      ctx.font = getFontSpec(fontSize * 0.5);
       ctx.fillText(config.units, centerX, centerY + fontSize * 0.6);
     }
     
     // Title at top
     if (config.title) {
       ctx.fillStyle = tsColorToHex(config.font_color);
-      ctx.font = `${fontSize * 0.4}px ${getFontFamily()}`;
+      ctx.font = getFontSpec(fontSize * 0.4);
       ctx.textBaseline = 'top';
       ctx.fillText(config.title, centerX, 4);
     }
@@ -1759,7 +1930,7 @@ export default function TsGauge({ config, value, embeddedImages }: TsGaugeProps)
     const valueTextColorTs = getValueColor();
     const fontSize = Math.max(12, radius * 0.28);
     ctx.fillStyle = tsColorToHex(valueTextColorTs);
-    ctx.font = `bold ${fontSize}px ${getFontFamily(true)}`;
+    ctx.font = getFontSpec(fontSize, { bold: true, monospace: true });
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(clampedValue.toFixed(config.value_digits), centerX, centerY);
@@ -1767,14 +1938,14 @@ export default function TsGauge({ config, value, embeddedImages }: TsGaugeProps)
     // Units
     if (config.units) {
       ctx.fillStyle = tsColorToHex(config.font_color);
-      ctx.font = `${fontSize * 0.45}px ${getFontFamily()}`;
+      ctx.font = getFontSpec(fontSize * 0.45);
       ctx.fillText(config.units, centerX, centerY + fontSize * 0.7);
     }
     
     // Title
     if (config.title) {
       ctx.fillStyle = tsColorToHex(config.font_color);
-      ctx.font = `${fontSize * 0.35}px ${getFontFamily()}`;
+      ctx.font = getFontSpec(fontSize * 0.35);
       ctx.textBaseline = 'top';
       ctx.fillText(config.title, centerX, 4);
     }
@@ -1843,7 +2014,7 @@ export default function TsGauge({ config, value, embeddedImages }: TsGaugeProps)
     const fAngle = arcStartAngle + arcSweep - Math.PI * 0.05;
     
     ctx.fillStyle = '#ffffff';
-    ctx.font = `bold ${radius * 0.18}px ${getFontFamily()}`;
+    ctx.font = getFontSpec(radius * 0.18, { bold: true });
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     
@@ -1853,20 +2024,20 @@ export default function TsGauge({ config, value, embeddedImages }: TsGaugeProps)
     // Fuel pump icon (simple representation)
     const iconY = centerY - radius * 0.15;
     ctx.fillStyle = '#aaaaaa';
-    ctx.font = `${radius * 0.25}px ${getFontFamily()}`;
+    ctx.font = getFontSpec(radius * 0.25);
     ctx.fillText('⛽', centerX, iconY);
     
     // Value below
     const valueTextColorTs = getValueColor();
     const fontSize = Math.max(10, radius * 0.2);
     ctx.fillStyle = tsColorToHex(valueTextColorTs);
-    ctx.font = `bold ${fontSize}px ${getFontFamily(true)}`;
+    ctx.font = getFontSpec(fontSize, { bold: true, monospace: true });
     ctx.fillText(`${clampedValue.toFixed(config.value_digits)}${config.units || '%'}`, centerX, centerY + radius * 0.35);
     
     // Title
     if (config.title) {
       ctx.fillStyle = tsColorToHex(config.font_color);
-      ctx.font = `${fontSize * 0.5}px ${getFontFamily()}`;
+      ctx.font = getFontSpec(fontSize * 0.5);
       ctx.textBaseline = 'top';
       ctx.fillText(config.title, centerX, 4);
     }
@@ -1940,7 +2111,7 @@ export default function TsGauge({ config, value, embeddedImages }: TsGaugeProps)
       const labelX = centerX + Math.cos(angle) * labelRadius;
       const labelY = centerY + Math.sin(angle) * labelRadius;
       
-      ctx.font = `bold ${radius * 0.12}px ${getFontFamily()}`;
+      ctx.font = getFontSpec(radius * 0.12, { bold: true });
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText(String(i), labelX, labelY);
@@ -2027,20 +2198,20 @@ export default function TsGauge({ config, value, embeddedImages }: TsGaugeProps)
     const valueTextColorTs = getValueColor();
     const fontSize = Math.max(10, radius * 0.16);
     ctx.fillStyle = tsColorToHex(valueTextColorTs);
-    ctx.font = `bold ${fontSize}px ${getFontFamily(true)}`;
+    ctx.font = getFontSpec(fontSize, { bold: true, monospace: true });
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(clampedValue.toFixed(0), centerX, centerY + radius * 0.35);
     
     // RPM label
     ctx.fillStyle = '#888888';
-    ctx.font = `${fontSize * 0.6}px ${getFontFamily()}`;
+    ctx.font = getFontSpec(fontSize * 0.6);
     ctx.fillText('RPM × 1000', centerX, centerY + radius * 0.52);
     
     // Title at top
     if (config.title) {
       ctx.fillStyle = tsColorToHex(config.font_color);
-      ctx.font = `${fontSize * 0.5}px ${getFontFamily()}`;
+      ctx.font = getFontSpec(fontSize * 0.5);
       ctx.textBaseline = 'top';
       ctx.fillText(config.title, centerX, 4);
     }
@@ -2057,3 +2228,35 @@ export default function TsGauge({ config, value, embeddedImages }: TsGaugeProps)
     />
   );
 }
+
+/**
+ * TsGauge - Memoized gauge component.
+ * 
+ * Uses custom comparator to skip re-renders when:
+ * - Config hasn't changed
+ * - Value change is below threshold (0.5% of gauge range)
+ * 
+ * This prevents unnecessary canvas redraws during high-frequency realtime updates.
+ */
+const TsGauge = React.memo(TsGaugeInner, (prevProps, nextProps) => {
+  // Always re-render if config changes
+  if (prevProps.config !== nextProps.config) {
+    return false;
+  }
+  
+  // Always re-render if embeddedImages change
+  if (prevProps.embeddedImages !== nextProps.embeddedImages) {
+    return false;
+  }
+  
+  // Skip re-render if value change is below threshold
+  const range = prevProps.config.max - prevProps.config.min;
+  const threshold = range * (VALUE_CHANGE_THRESHOLD_PERCENT / 100);
+  if (Math.abs(prevProps.value - nextProps.value) < threshold) {
+    return true; // Props are equal, skip re-render
+  }
+  
+  return false; // Props changed, re-render
+});
+
+export default TsGauge;

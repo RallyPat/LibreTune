@@ -9,6 +9,7 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { X, Car, Gauge, Fuel, Timer, Calculator, Save, RotateCcw } from 'lucide-react';
 import './PerformanceFieldsDialog.css';
+import { useChannels } from '../../stores/realtimeStore';
 
 export interface VehicleSpecs {
   injector_size_cc?: number;
@@ -139,12 +140,14 @@ function estimate0to60(hp: number, weight_lbs: number): number {
 interface Props {
   isOpen: boolean;
   onClose: () => void;
-  realtimeData?: Record<string, number>;
 }
 
 const STORAGE_KEY = 'libretune-vehicle-specs';
 
-export default function PerformanceFieldsDialog({ isOpen, onClose, realtimeData }: Props) {
+export default function PerformanceFieldsDialog({ isOpen, onClose }: Props) {
+  // Get realtime data from Zustand store
+  const realtimeData = useChannels(['rpm', 'vss', 'accel']);
+  
   // Vehicle specs form state
   const [weightLbs, setWeightLbs] = useState(3000);
   const [weightUnit, setWeightUnit] = useState<WeightUnit>('LBS');

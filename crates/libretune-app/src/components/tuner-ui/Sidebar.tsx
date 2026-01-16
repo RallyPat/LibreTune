@@ -8,11 +8,14 @@ interface SidebarProps {
   items: SidebarNode[];
   width: number;
   onResize: (width: number) => void;
-  onItemSelect: (item: SidebarNode) => void;
+  /** Callback when an item is selected. highlightTerm is the search query if user clicked from search results. */
+  onItemSelect: (item: SidebarNode, highlightTerm?: string) => void;
+  /** Index of searchable content for deep search (target -> terms) */
+  searchIndex?: Record<string, string[]>;
 }
 
 /** Recursively filter tree nodes by search query, preserving parent folders when children match */
-function filterTree(nodes: SidebarNode[], query: string): SidebarNode[] {
+function filterTree(nodes: SidebarNode[], query: string, searchIndex?: Record<string, string[]>): SidebarNode[] {
   if (!query.trim()) return nodes;
   
   const lowerQuery = query.toLowerCase();
@@ -21,17 +24,23 @@ function filterTree(nodes: SidebarNode[], query: string): SidebarNode[] {
     const labelMatches = node.label.toLowerCase().includes(lowerQuery);
     const idMatches = node.id.toLowerCase().includes(lowerQuery);
     
+    // Deep search: check if any indexed content for this node matches
+    const indexedTerms = searchIndex?.[node.id] || [];
+    const contentMatches = indexedTerms.some(term => 
+      term.toLowerCase().includes(lowerQuery)
+    );
+    
     if (node.children && node.children.length > 0) {
-      const filteredChildren = filterTree(node.children, query);
-      // Include folder if it has matching children OR its own label matches
-      if (filteredChildren.length > 0 || labelMatches || idMatches) {
+      const filteredChildren = filterTree(node.children, query, searchIndex);
+      // Include folder if it has matching children OR its own label/content matches
+      if (filteredChildren.length > 0 || labelMatches || idMatches || contentMatches) {
         acc.push({
           ...node,
           children: filteredChildren.length > 0 ? filteredChildren : node.children,
           expanded: true, // Auto-expand folders with matches
         });
       }
-    } else if (labelMatches || idMatches) {
+    } else if (labelMatches || idMatches || contentMatches) {
       acc.push(node);
     }
     
@@ -54,6 +63,22 @@ function collectFolderIds(nodes: SidebarNode[]): Set<string> {
   return ids;
 }
 
+/** Count leaf nodes (non-folder items) in the tree */
+function countLeafNodes(nodes: SidebarNode[]): number {
+  let count = 0;
+  function walk(items: SidebarNode[]) {
+    for (const item of items) {
+      if (item.children && item.children.length > 0) {
+        walk(item.children);
+      } else {
+        count++;
+      }
+    }
+  }
+  walk(nodes);
+  return count;
+}
+
 /** Highlight matching text in a label */
 function highlightMatch(label: string, query: string): React.ReactNode {
   if (!query.trim()) return label;
@@ -73,7 +98,7 @@ function highlightMatch(label: string, query: string): React.ReactNode {
   );
 }
 
-export function Sidebar({ items, width, onResize, onItemSelect }: SidebarProps) {
+export function Sidebar({ items, width, onResize, onItemSelect, searchIndex }: SidebarProps) {
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [searchQuery, setSearchQuery] = useState('');
   const [savedExpandedIds, setSavedExpandedIds] = useState<Set<string> | null>(null);
@@ -81,10 +106,10 @@ export function Sidebar({ items, width, onResize, onItemSelect }: SidebarProps) 
   const resizeRef = useRef<HTMLDivElement>(null);
   const isResizing = useRef(false);
 
-  // Filter tree based on search query
+  // Filter tree based on search query (with deep search via searchIndex)
   const filteredItems = useMemo(() => {
-    return filterTree(items, searchQuery);
-  }, [items, searchQuery]);
+    return filterTree(items, searchQuery, searchIndex);
+  }, [items, searchQuery, searchIndex]);
 
   // Auto-expand all folders when searching
   useEffect(() => {
@@ -237,18 +262,19 @@ export function Sidebar({ items, width, onResize, onItemSelect }: SidebarProps) 
       toggleExpand(item.id);
     } else {
       console.log('[Sidebar] Calling onItemSelect for leaf item', item);
-      onItemSelect(item);
+      // Pass searchQuery as highlightTerm so the dialog can highlight matching fields
+      onItemSelect(item, searchQuery.trim() || undefined);
     }
-  }, [toggleExpand, onItemSelect]);
+  }, [toggleExpand, onItemSelect, searchQuery]);
 
   const handleDoubleClick = useCallback((item: SidebarNode) => {
     if (item.children && item.children.length > 0) {
       // Expand/collapse all children
       toggleExpand(item.id);
     } else {
-      onItemSelect(item);
+      onItemSelect(item, searchQuery.trim() || undefined);
     }
-  }, [toggleExpand, onItemSelect]);
+  }, [toggleExpand, onItemSelect, searchQuery]);
 
   return (
     <div className="sidebar" style={{ width }}>
@@ -272,6 +298,17 @@ export function Sidebar({ items, width, onResize, onItemSelect }: SidebarProps) 
             ×
           </button>
         )}
+        <button 
+          className="expand-collapse-btn" 
+          onClick={() => {
+            const allFolderIds = collectFolderIds(items);
+            const isExpanded = expandedIds.size >= allFolderIds.size * 0.5;
+            setExpandedIds(isExpanded ? new Set() : allFolderIds);
+          }} 
+          title={expandedIds.size >= collectFolderIds(items).size * 0.5 ? "Collapse All" : "Expand All"}
+        >
+          {expandedIds.size >= collectFolderIds(items).size * 0.5 ? '⊟' : '⊞'}
+        </button>
       </div>
       <div className="sidebar-content">
         {filteredItems.length === 0 && searchQuery ? (
@@ -279,14 +316,21 @@ export function Sidebar({ items, width, onResize, onItemSelect }: SidebarProps) 
             No results for "{searchQuery}"
           </div>
         ) : (
-          <TreeView
-            items={filteredItems}
-            expandedIds={expandedIds}
-            onItemClick={handleItemClick}
-            onItemDoubleClick={handleDoubleClick}
-            level={0}
-            searchQuery={searchQuery}
-          />
+          <>
+            {searchQuery && (
+              <div className="search-results-count">
+                {countLeafNodes(filteredItems)} result{countLeafNodes(filteredItems) !== 1 ? 's' : ''}
+              </div>
+            )}
+            <TreeView
+              items={filteredItems}
+              expandedIds={expandedIds}
+              onItemClick={handleItemClick}
+              onItemDoubleClick={handleDoubleClick}
+              level={0}
+              searchQuery={searchQuery}
+            />
+          </>
         )}
       </div>
       <div
@@ -320,14 +364,25 @@ function TreeView({
       {items.map((item) => {
         const hasChildren = item.children && item.children.length > 0;
         const isExpanded = expandedIds.has(item.id);
+        const isDisabled = item.disabled === true;
 
         return (
           <li key={item.id} className="tree-item" role="treeitem">
             <div
-              className="tree-item-row"
+              className={`tree-item-row ${isDisabled ? 'tree-item-disabled' : ''}`}
               style={{ paddingLeft: level * 16 + 8 }}
-              onClick={() => onItemClick(item)}
-              onDoubleClick={() => onItemDoubleClick(item)}
+              onClick={() => {
+                // Always allow folder expand/collapse even if disabled
+                if (hasChildren || !isDisabled) {
+                  onItemClick(item);
+                }
+              }}
+              onDoubleClick={() => {
+                if (hasChildren || !isDisabled) {
+                  onItemDoubleClick(item);
+                }
+              }}
+              title={isDisabled ? item.disabledReason || 'Not available' : undefined}
             >
               <span className="tree-item-expander">
                 {hasChildren && (isExpanded ? '▼' : '▶')}

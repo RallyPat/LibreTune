@@ -732,11 +732,19 @@ function PropertyEditor({ component, onChange }: PropertyEditorProps) {
             onChange={(e) => updateGauge({ gauge_painter: e.target.value as TsGaugeConfig['gauge_painter'] })}
           >
             <option value="AnalogGauge">Analog Gauge</option>
+            <option value="BasicAnalogGauge">Basic Analog Gauge</option>
+            <option value="CircleAnalogGauge">Circle Analog Gauge</option>
             <option value="BasicReadout">Digital Readout</option>
             <option value="HorizontalBarGauge">Horizontal Bar</option>
+            <option value="HorizontalDashedBar">Horizontal Dashed Bar</option>
             <option value="VerticalBarGauge">Vertical Bar</option>
+            <option value="VerticalDashedBar">Vertical Dashed Bar</option>
+            <option value="HorizontalLineGauge">Horizontal Line</option>
+            <option value="AnalogBarGauge">Analog Bar</option>
+            <option value="AnalogMovingBarGauge">Analog Moving Bar</option>
             <option value="AsymmetricSweepGauge">Sweep Gauge</option>
             <option value="RoundGauge">Round Gauge</option>
+            <option value="RoundDashedGauge">Round Dashed Gauge</option>
             <option value="Tachometer">Tachometer</option>
             <option value="FuelMeter">Fuel Meter</option>
             <option value="LineGraph">Line Graph</option>
@@ -847,6 +855,17 @@ function PropertyEditor({ component, onChange }: PropertyEditorProps) {
             value={indicator.off_text || ''} 
             onChange={(e) => updateIndicator({ off_text: e.target.value })}
           />
+        </div>
+
+        <div className="property-group">
+          <label>Indicator Type</label>
+          <select
+            value={indicator.indicator_painter || 'BasicRectangleIndicator'}
+            onChange={(e) => updateIndicator({ indicator_painter: e.target.value as TsIndicatorConfig['indicator_painter'] })}
+          >
+            <option value="BasicRectangleIndicator">Rectangle</option>
+            <option value="BulbIndicator">Bulb</option>
+          </select>
         </div>
         
         <div className="property-section">

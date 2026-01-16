@@ -20,7 +20,12 @@
 /* Embedded mode (in dialog) */
 .curve-editor.embedded {
   max-width: 100%;
-  background: transparent;
+  min-height: 450px;
+  background: rgba(30, 30, 35, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  margin: 8px 0;
+  overflow: visible;
 }
 
 /* Header for standalone mode */
@@ -124,6 +129,7 @@
   flex-direction: column;
   padding: 8px;
   gap: 12px;
+  overflow: visible;
 }
 
 /* Chart container */

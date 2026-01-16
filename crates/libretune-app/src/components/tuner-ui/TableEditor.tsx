@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef, useEffect, KeyboardEvent, useMemo } from 'react';
+import { useChannels } from '../../stores/realtimeStore';
 import './TableEditor.css';
 import TableEditor3DNew from '../tables/TableEditor3DNew';
 
@@ -34,8 +35,6 @@ interface TableEditorProps {
   followMode?: boolean;
   livePosition?: CellPosition | null;
   showHistoryTrail?: boolean;
-  /** Real-time data dictionary for live cell highlighting */
-  realtimeData?: Record<string, number>;
 }
 
 // Selection can be a single cell or a range
@@ -65,8 +64,16 @@ export function TableEditor({
   followMode: _followMode = false,
   livePosition = null,
   showHistoryTrail: _showHistoryTrail = false,
-  realtimeData,
 }: TableEditorProps) {
+  // Get realtime data from Zustand store - only subscribe to channels needed for live position
+  const outputChannels = useMemo(() => {
+    const channels: string[] = [];
+    if (data.xOutputChannel) channels.push(data.xOutputChannel);
+    if (data.yOutputChannel) channels.push(data.yOutputChannel);
+    return channels;
+  }, [data.xOutputChannel, data.yOutputChannel]);
+  const realtimeData = useChannels(outputChannels);
+
   const [selection, setSelection] = useState<Selection | null>(null);
   const [isSelecting, setIsSelecting] = useState(false);
   const [editingCell, setEditingCell] = useState<CellPosition | null>(null);
@@ -125,7 +132,7 @@ export function TableEditor({
 
   // Calculate live cursor position from realtime data
   const calculatedLivePosition = useMemo((): CellPosition | null => {
-    if (!followMode || !realtimeData) return null;
+    if (!followMode) return null;
     
     const xChannel = data.xOutputChannel;
     const yChannel = data.yOutputChannel;

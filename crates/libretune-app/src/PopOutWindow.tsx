@@ -13,8 +13,10 @@ import { listen, emit, UnlistenFn } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { ThemeProvider } from './themes';
 import { TableEditor, TableData as TunerTableData, AutoTuneLive, DataLogView } from './components/tuner-ui';
+import CurveEditor, { CurveData, SimpleGaugeInfo } from './components/curves/CurveEditor';
 import TsDashboard from './components/dashboards/TsDashboard';
 import DialogRenderer, { DialogDefinition as RendererDialogDef } from './components/dialogs/DialogRenderer';
+import { useRealtimeStore } from './stores/realtimeStore';
 import { ArrowLeftToLine, X } from 'lucide-react';
 import './styles';
 import './PopOutWindow.css';
@@ -33,22 +35,27 @@ interface BackendTableData {
 
 interface BackendCurveData {
   name: string;
+  title: string;
   x_bins: number[];
   y_bins: number[];
   x_label: string;
   y_label: string;
+  x_axis?: [number, number, number] | null;
+  y_axis?: [number, number, number] | null;
+  x_output_channel?: string | null;
+  gauge?: string | null;
 }
 
 interface PopOutData {
   tabId: string;
   type: 'dashboard' | 'table' | 'curve' | 'dialog' | 'settings' | 'autotune' | 'datalog';
   title: string;
-  data?: TunerTableData | RendererDialogDef | string;
+  data?: TunerTableData | CurveData | RendererDialogDef | string;
+  gauge?: SimpleGaugeInfo | null;
 }
 
 export default function PopOutWindow() {
   const [popOutData, setPopOutData] = useState<PopOutData | null>(null);
-  const [realtimeData, setRealtimeData] = useState<Record<string, number>>({});
   const [constantValues, setConstantValues] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -116,14 +123,14 @@ export default function PopOutWindow() {
     setLoading(false);
   }, []);
 
-  // Listen for realtime updates
+  // Listen for realtime updates and update Zustand store
   useEffect(() => {
     let unlisten: UnlistenFn | null = null;
 
     (async () => {
       try {
         unlisten = await listen<Record<string, number>>('realtime:update', (event) => {
-          setRealtimeData(event.payload);
+          useRealtimeStore.getState().updateChannels(event.payload);
         });
       } catch (e) {
         console.error('Failed to listen for realtime updates:', e);
@@ -179,16 +186,30 @@ export default function PopOutWindow() {
           setPopOutData(prev => prev ? { ...prev, data: tableData } : null);
         } else {
           const data = await invoke<BackendCurveData>('get_curve_data', { curveName: popOutData.tabId });
-          const tableData: TunerTableData = {
+          const curveData: CurveData = {
             name: data.name,
-            xAxis: data.x_bins,
-            yAxis: [0],
-            zValues: [data.y_bins],
-            xLabel: data.x_label,
-            yLabel: data.y_label,
+            title: data.title,
+            x_bins: data.x_bins,
+            y_bins: data.y_bins,
+            x_label: data.x_label,
+            y_label: data.y_label,
+            x_axis: data.x_axis ?? null,
+            y_axis: data.y_axis ?? null,
+            x_output_channel: data.x_output_channel ?? null,
+            gauge: data.gauge ?? null,
           };
-          console.log('[PopOutWindow] Fetched curve data:', tableData);
-          setPopOutData(prev => prev ? { ...prev, data: tableData } : null);
+
+          let gaugeInfo: SimpleGaugeInfo | null = null;
+          if (data.gauge) {
+            try {
+              gaugeInfo = await invoke<SimpleGaugeInfo>('get_gauge_config', { gaugeName: data.gauge });
+            } catch (gaugeErr) {
+              console.warn(`[PopOutWindow] Failed to load gauge '${data.gauge}':`, gaugeErr);
+            }
+          }
+
+          console.log('[PopOutWindow] Fetched curve data:', curveData);
+          setPopOutData(prev => prev ? { ...prev, data: curveData, gauge: gaugeInfo } : null);
         }
       } catch (e) {
         console.error('[PopOutWindow] Failed to fetch table/curve data:', e);
@@ -243,6 +264,18 @@ export default function PopOutWindow() {
     }).catch(console.error);
   }, [popOutData]);
 
+  const handleCurveChange = useCallback((yBins: number[]) => {
+    if (!popOutData || popOutData.type !== 'curve' || !popOutData.data) return;
+    const curveData = popOutData.data as CurveData;
+    const updatedData = { ...curveData, y_bins: yBins };
+    setPopOutData(prev => prev ? { ...prev, data: updatedData } : null);
+    emit('table:updated', {
+      tabId: popOutData.tabId,
+      type: 'curve',
+      data: updatedData,
+    }).catch(console.error);
+  }, [popOutData]);
+
   // Dock back to main window
   const handleDockBack = useCallback(async () => {
     if (!popOutData) return;
@@ -274,10 +307,9 @@ export default function PopOutWindow() {
 
     switch (popOutData.type) {
       case 'dashboard':
-        return <TsDashboard realtimeData={realtimeData} />;
+        return <TsDashboard />;
       
       case 'table':
-      case 'curve':
         // Show loading while fetching data
         if (!popOutData.data) {
           return (
@@ -294,7 +326,23 @@ export default function PopOutWindow() {
               // Trigger burn dialog in main window
               emit('action:burn', {}).catch(console.error);
             }}
-            realtimeData={realtimeData}
+          />
+        );
+      case 'curve':
+        if (!popOutData.data) {
+          return (
+            <div className="popout-loading">
+              <p>Loading curve...</p>
+            </div>
+          );
+        }
+        return (
+          <CurveEditor
+            data={popOutData.data as CurveData}
+            embedded={false}
+            simpleGaugeInfo={popOutData.gauge ?? undefined}
+            onValuesChange={handleCurveChange}
+            onBack={handleClose}
           />
         );
       
@@ -334,7 +382,7 @@ export default function PopOutWindow() {
         );
       
       case 'datalog':
-        return <DataLogView realtimeData={realtimeData} />;
+        return <DataLogView />;
       
       default:
         return <div className="popout-unsupported">Unsupported content type</div>;

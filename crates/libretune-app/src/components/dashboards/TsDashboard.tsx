@@ -13,11 +13,11 @@
  * - Dashboard selector with categories
  * - Import from TunerStudio .dash files
  * - Responsive scaling for different screen sizes
+ * - Realtime data from Zustand store (per-channel subscription for efficiency)
  * 
  * @example
  * ```tsx
  * <TsDashboard
- *   realtimeData={realtimeData}
  *   isConnected={connectionStatus.state === 'Connected'}
  * />
  * ```
@@ -26,6 +26,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { save } from '@tauri-apps/plugin-dialog';
+import { useRealtimeStore } from '../../stores/realtimeStore';
 import {
   DashFile,
   DashFileInfo,
@@ -45,21 +46,32 @@ import './TsDashboard.css';
  * Props for the TsDashboard component.
  */
 interface TsDashboardProps {
-  /** Real-time ECU data keyed by channel name */
-  realtimeData?: Record<string, number>;
   /** Path to initially load (optional, uses last dashboard or default) */
   initialDashPath?: string;
   /** Whether ECU is connected (enables data display) */
   isConnected?: boolean;
 }
 
-export default function TsDashboard({ realtimeData = {}, initialDashPath, isConnected = false }: TsDashboardProps) {
+interface ChannelInfo {
+  name: string;
+  label?: string | null;
+  units: string;
+  scale: number;
+  translate: number;
+}
+
+export default function TsDashboard({ initialDashPath, isConnected = false }: TsDashboardProps) {
+  // Get realtime data from Zustand store - subscribes to all channel updates
+  const realtimeData = useRealtimeStore((state) => state.channels);
+
   const [dashFile, setDashFile] = useState<DashFile | null>(null);
   const [availableDashes, setAvailableDashes] = useState<DashFileInfo[]>([]);
   const [selectedPath, setSelectedPath] = useState<string>(initialDashPath || '');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showSelector, setShowSelector] = useState(false);
+  const [rpmChannel, setRpmChannel] = useState<string | null>(null);
+  const [channelInfoMap, setChannelInfoMap] = useState<Record<string, ChannelInfo>>({});
   
   // Gauge sweep animation state (sportscar-style min→max→min on load)
   const [sweepActive, setSweepActive] = useState(false);
@@ -92,6 +104,7 @@ export default function TsDashboard({ realtimeData = {}, initialDashPath, isConn
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [newDashName, setNewDashName] = useState('');
   const [renameName, setRenameName] = useState('');
+  const [showCompatReport, setShowCompatReport] = useState(false);
   
   // Dynamic scaling state for responsive dashboard sizing
   const [scale, setScale] = useState(1);
@@ -101,6 +114,29 @@ export default function TsDashboard({ realtimeData = {}, initialDashPath, isConn
   const embeddedImages = dashFile 
     ? buildEmbeddedImageMap(dashFile.gauge_cluster.embedded_images)
     : new Map<string, string>();
+
+  // Resolve RPM channel from INI output channels (INI-driven, no hardcoded names)
+  useEffect(() => {
+    const loadChannels = async () => {
+      try {
+        const channels = await invoke<ChannelInfo[]>('get_available_channels');
+        const map: Record<string, ChannelInfo> = {};
+        channels.forEach((ch) => {
+          map[ch.name] = ch;
+        });
+        setChannelInfoMap(map);
+        const rpmByUnits = channels.find((ch) => ch.units?.toLowerCase() === 'rpm');
+        const rpmByLabel = channels.find((ch) => ch.label?.toLowerCase().includes('rpm'));
+        const resolved = rpmByUnits?.name || rpmByLabel?.name || null;
+        setRpmChannel(resolved);
+      } catch (e) {
+        console.warn('[TsDashboard] Failed to load available channels:', e);
+        setRpmChannel(null);
+        setChannelInfoMap({});
+      }
+    };
+    loadChannels();
+  }, []);
 
   // Calculate dashboard aspect ratio from gauge bounding box
   // Find the maximum extent of all gauges to determine the design's aspect ratio
@@ -142,6 +178,89 @@ export default function TsDashboard({ realtimeData = {}, initialDashPath, isConn
     
     return { maxX, maxY, aspectRatio, minSize };
   }, [dashFile]);
+
+  const compatibilityReport = useMemo(() => {
+    if (!dashFile) return null;
+
+    const supportedGaugePainters = new Set([
+      'AnalogGauge',
+      'BasicAnalogGauge',
+      'CircleAnalogGauge',
+      'AsymmetricSweepGauge',
+      'BasicReadout',
+      'HorizontalBarGauge',
+      'HorizontalDashedBar',
+      'VerticalBarGauge',
+      'HorizontalLineGauge',
+      'VerticalDashedBar',
+      'AnalogBarGauge',
+      'AnalogMovingBarGauge',
+      'Histogram',
+      'LineGraph',
+      'RoundGauge',
+      'RoundDashedGauge',
+      'FuelMeter',
+      'Tachometer',
+    ]);
+    const supportedIndicatorPainters = new Set([
+      'BasicRectangleIndicator',
+      'BulbIndicator',
+    ]);
+
+    const gaugePainters: Record<string, number> = {};
+    const indicatorPainters: Record<string, number> = {};
+    const unsupportedGaugePainters = new Set<string>();
+    const unsupportedIndicatorPainters = new Set<string>();
+
+    let gauges = 0;
+    let indicators = 0;
+
+    dashFile.gauge_cluster.components.forEach((comp) => {
+      if (isGauge(comp)) {
+        gauges += 1;
+        const painter = comp.Gauge.gauge_painter || 'BasicReadout';
+        gaugePainters[painter] = (gaugePainters[painter] || 0) + 1;
+        if (!supportedGaugePainters.has(painter)) {
+          unsupportedGaugePainters.add(painter);
+        }
+      } else if (isIndicator(comp)) {
+        indicators += 1;
+        const painter = comp.Indicator.indicator_painter || 'BasicRectangleIndicator';
+        indicatorPainters[painter] = (indicatorPainters[painter] || 0) + 1;
+        if (!supportedIndicatorPainters.has(painter)) {
+          unsupportedIndicatorPainters.add(painter);
+        }
+      }
+    });
+
+    return {
+      total_components: dashFile.gauge_cluster.components.length,
+      gauges,
+      indicators,
+      gauge_painters: gaugePainters,
+      indicator_painters: indicatorPainters,
+      unsupported_gauge_painters: Array.from(unsupportedGaugePainters),
+      unsupported_indicator_painters: Array.from(unsupportedIndicatorPainters),
+    };
+  }, [dashFile]);
+
+  const hasCompatibilityIssues = useMemo(() => {
+    if (!compatibilityReport) return false;
+    return (
+      compatibilityReport.unsupported_gauge_painters.length > 0 ||
+      compatibilityReport.unsupported_indicator_painters.length > 0
+    );
+  }, [compatibilityReport]);
+
+  const handleCopyCompatReport = useCallback(async () => {
+    if (!compatibilityReport) return;
+    const reportJson = JSON.stringify(compatibilityReport, null, 2);
+    try {
+      await navigator.clipboard.writeText(reportJson);
+    } catch (e) {
+      console.warn('Failed to copy compatibility report:', e);
+    }
+  }, [compatibilityReport]);
 
   // Gauge demo animation
   useEffect(() => {
@@ -249,9 +368,9 @@ export default function TsDashboard({ realtimeData = {}, initialDashPath, isConn
     if (!dashFile || !selectedPath) return;
     
     try {
-      await invoke('save_dashboard_layout', { 
-        name: selectedPath.split('/').pop()?.replace(/\.(ltdash\.xml|dash)$/i, '') || 'Dashboard',
-        layout: dashFile
+      await invoke('save_dash_file', { 
+        path: selectedPath,
+        dashFile: dashFile,
       });
       console.log('Dashboard saved successfully');
     } catch (e) {
@@ -374,7 +493,7 @@ export default function TsDashboard({ realtimeData = {}, initialDashPath, isConn
       const currentName = selectedPath.split('/').pop()?.replace(/\.(ltdash\.xml|dash)$/i, '') || 'Dashboard';
       const filePath = await save({
         title: 'Export Dashboard',
-        filters: [{ name: 'Dashboard Files', extensions: ['ltdash.xml'] }],
+        filters: [{ name: 'Dashboard Files', extensions: ['ltdash.xml', 'dash', 'gauge'] }],
         defaultPath: `${currentName}.ltdash.xml`,
       });
       
@@ -446,10 +565,9 @@ export default function TsDashboard({ realtimeData = {}, initialDashPath, isConn
         console.log('[TsDashboard] Loaded:', file.gauge_cluster.components.length, 'components');
         setDashFile(file);
         
-        // Determine if engine is running (check common RPM channel names)
-        const rpm = realtimeData['RPMValue'] ?? realtimeData['rpm'] ?? realtimeData['RPM'] ?? 0;
-        const looksLikeRunning = realtimeData['looksLikeRunning'] === 1;
-        const isEngineRunning = rpm > 50 || looksLikeRunning;
+        // Determine if engine is running (INI-driven RPM channel)
+        const rpmValue = rpmChannel ? realtimeData[rpmChannel] : 0;
+        const isEngineRunning = typeof rpmValue === 'number' && rpmValue > 50;
         
         // Trigger gauge sweep animation if not connected or engine not running
         if (!isConnected || !isEngineRunning) {
@@ -464,7 +582,7 @@ export default function TsDashboard({ realtimeData = {}, initialDashPath, isConn
     };
 
     loadDashboard();
-  }, [selectedPath]);
+  }, [selectedPath, rpmChannel, realtimeData, isConnected]);
 
   const handleDashSelect = (path: string) => {
     setSelectedPath(path);
@@ -507,6 +625,29 @@ export default function TsDashboard({ realtimeData = {}, initialDashPath, isConn
   const bgImageUrl = cluster.cluster_background_image_file_name
     ? embeddedImages.get(cluster.cluster_background_image_file_name)
     : null;
+  const ditherColor = cluster.background_dither_color
+    ? tsColorToRgba(cluster.background_dither_color)
+    : null;
+  const ditherPattern = ditherColor
+    ? `repeating-linear-gradient(45deg, ${ditherColor} 0 1px, transparent 1px 3px)`
+    : null;
+  const imageSize = cluster.cluster_background_image_style === 'Stretch' ? 'cover'
+    : cluster.cluster_background_image_style === 'Fit' ? 'contain'
+    : cluster.cluster_background_image_style === 'Center' ? 'auto'
+    : undefined;
+  const backgroundImageLayers = [ditherPattern, bgImageUrl ? `url(${bgImageUrl})` : null]
+    .filter(Boolean)
+    .join(', ');
+  const backgroundSizeLayers = ditherPattern && bgImageUrl
+    ? `4px 4px, ${imageSize ?? 'auto'}`
+    : ditherPattern
+      ? '4px 4px'
+      : imageSize;
+  const backgroundRepeatLayers = ditherPattern && bgImageUrl
+    ? `repeat, ${cluster.cluster_background_image_style === 'Tile' ? 'repeat' : 'no-repeat'}`
+    : ditherPattern
+      ? 'repeat'
+      : (cluster.cluster_background_image_style === 'Tile' ? 'repeat' : 'no-repeat');
 
   return (
     <div className="ts-dashboard-container">
@@ -563,8 +704,33 @@ export default function TsDashboard({ realtimeData = {}, initialDashPath, isConn
           >
             💾 Export
           </button>
+          <button
+            className="ts-dashboard-action-btn"
+            onClick={() => setShowCompatReport(true)}
+            title="Compatibility Report"
+          >
+            🧪 Compatibility
+          </button>
         </div>
       </div>
+
+      {compatibilityReport && (
+        <div className={`ts-dashboard-compat ${hasCompatibilityIssues ? 'warn' : 'ok'}`}>
+          <span>
+            {hasCompatibilityIssues
+              ? 'Compatibility: unsupported features detected'
+              : 'Compatibility: full TunerStudio feature coverage detected'}
+          </span>
+          {hasCompatibilityIssues && (
+            <button
+              className="ts-dashboard-compat-btn"
+              onClick={() => setShowCompatReport(true)}
+            >
+              View Report
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Dashboard selector dropdown */}
       {showSelector && (
@@ -628,6 +794,26 @@ export default function TsDashboard({ realtimeData = {}, initialDashPath, isConn
               >
                 📁 Import Dashboard Files...
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showCompatReport && compatibilityReport && (
+        <div className="ts-dashboard-compat-overlay" onClick={() => setShowCompatReport(false)}>
+          <div className="ts-dashboard-compat-panel" onClick={(e) => e.stopPropagation()}>
+            <h3>Compatibility Report</h3>
+            <p>
+              {hasCompatibilityIssues
+                ? 'Some features are not yet supported.'
+                : 'All detected features are supported.'}
+            </p>
+            <pre>
+              {JSON.stringify(compatibilityReport, null, 2)}
+            </pre>
+            <div className="ts-dashboard-compat-actions">
+              <button onClick={handleCopyCompatReport}>Copy JSON</button>
+              <button onClick={() => setShowCompatReport(false)}>Close</button>
             </div>
           </div>
         </div>
@@ -743,12 +929,9 @@ export default function TsDashboard({ realtimeData = {}, initialDashPath, isConn
           className={`ts-dashboard ${designerMode ? 'designer-mode' : ''}`}
           style={{
             backgroundColor: bgColor,
-            backgroundImage: bgImageUrl ? `url(${bgImageUrl})` : undefined,
-            backgroundSize: cluster.cluster_background_image_style === 'Stretch' ? 'cover' 
-                          : cluster.cluster_background_image_style === 'Fit' ? 'contain'
-                          : cluster.cluster_background_image_style === 'Center' ? 'auto'
-                          : undefined,
-            backgroundRepeat: cluster.cluster_background_image_style === 'Tile' ? 'repeat' : 'no-repeat',
+            backgroundImage: backgroundImageLayers || undefined,
+            backgroundSize: backgroundSizeLayers,
+            backgroundRepeat: backgroundRepeatLayers,
             backgroundPosition: 'center',
             aspectRatio: `${dashboardBounds.aspectRatio}`,
             transform: scale < 1 ? `scale(${scale})` : undefined,
@@ -764,11 +947,12 @@ export default function TsDashboard({ realtimeData = {}, initialDashPath, isConn
           if (isGauge(component)) {
             const gauge = component.Gauge;
             // Priority: sweep animation > demo mode > realtime data > default
+            const hasChannel = !!channelInfoMap[gauge.output_channel];
             const value = sweepActive
               ? (sweepValues[gauge.output_channel] ?? gauge.min)
               : gaugeDemoActive 
                 ? (demoValues[gauge.output_channel] ?? gauge.value)
-                : (realtimeData[gauge.output_channel] ?? gauge.value);
+                : (hasChannel ? (realtimeData[gauge.output_channel] ?? gauge.value) : gauge.value);
             
             // Build gauge style with shape_locked_to_aspect and shortest_size support
             const gaugeStyle: React.CSSProperties = {
@@ -801,7 +985,8 @@ export default function TsDashboard({ realtimeData = {}, initialDashPath, isConn
 
           if (isIndicator(component)) {
             const indicator = component.Indicator;
-            const value = realtimeData[indicator.output_channel] ?? indicator.value;
+            const hasChannel = !!channelInfoMap[indicator.output_channel];
+            const value = hasChannel ? (realtimeData[indicator.output_channel] ?? indicator.value) : indicator.value;
             const isOn = value !== 0;
             
             return (

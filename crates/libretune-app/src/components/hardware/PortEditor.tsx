@@ -427,12 +427,12 @@ export default function PortEditor({
                           </div>
                           
                           <select
-                            value={assignedPin || ''}
+                            value={(!assignedPin || assignedPin === 'NONE' || assignedPin === 'INVALID') ? '' : assignedPin}
                             onChange={(e) => assignPin(assignment.id, e.target.value || null)}
-                            className={assignedPin ? 'has-value' : ''}
+                            className={assignedPin && assignedPin !== 'NONE' && assignedPin !== 'INVALID' ? 'has-value' : ''}
                           >
                             <option value="">Not Assigned</option>
-                            {assignedPin && (
+                            {assignedPin && assignedPin !== 'NONE' && assignedPin !== 'INVALID' && (
                               <option value={assignedPin}>
                                 {hardwarePins.find(p => p.id === assignedPin)?.name || assignedPin}
                               </option>

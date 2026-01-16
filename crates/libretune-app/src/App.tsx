@@ -4,6 +4,7 @@ import { listen, UnlistenFn } from "@tauri-apps/api/event";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { ThemeProvider, useTheme, ThemeName, THEME_INFO } from "./themes";
+import { useRealtimeStore, useChannels } from "./stores/realtimeStore";
 import {
   TunerLayout,
   MenuItem as TunerMenuItem,
@@ -28,6 +29,7 @@ import {
 import TsDashboard from "./components/dashboards/TsDashboard";
 import { ToothLoggerView, CompositeLoggerView } from "./components/diagnostics";
 import DialogRenderer, { DialogDefinition as RendererDialogDef } from "./components/dialogs/DialogRenderer";
+import CurveEditor, { CurveData, SimpleGaugeInfo } from "./components/curves/CurveEditor";
 import HelpViewer, { HelpTopicData } from "./components/dialogs/HelpViewer";
 import UserManualViewer from "./components/dialogs/UserManualViewer";
 import SignatureMismatchDialog, { SignatureMismatchInfo } from "./components/dialogs/SignatureMismatchDialog";
@@ -40,6 +42,7 @@ import ImportProjectWizard from "./components/dialogs/ImportProjectWizard";
 import MigrationReportDialog from "./components/dialogs/MigrationReportDialog";
 import TuneHistoryPanel from "./components/TuneHistoryPanel";
 import ErrorDetailsDialog, { useErrorDialog } from "./components/dialogs/ErrorDetailsDialog";
+import ErrorBoundary from "./components/common/ErrorBoundary";
 import { PluginPanel } from "./plugin";
 import { useLoading } from "./components/LoadingContext";
 import { useToast } from "./components/ToastContext";
@@ -124,6 +127,38 @@ interface BackendCurveData {
   gauge?: string | null;
 }
 
+interface ChannelInfo {
+  name: string;
+  label?: string | null;
+  units: string;
+  scale: number;
+  translate: number;
+}
+
+const toTunerTableData = (data: BackendTableData): TunerTableData => ({
+  name: data.name,
+  xAxis: data.x_bins,
+  yAxis: data.y_bins,
+  zValues: data.z_values,
+  xLabel: data.x_axis_name || 'X',
+  yLabel: data.y_axis_name || 'Y',
+  xOutputChannel: data.x_output_channel ?? undefined,
+  yOutputChannel: data.y_output_channel ?? undefined,
+});
+
+const toCurveData = (data: BackendCurveData): CurveData => ({
+  name: data.name,
+  title: data.title,
+  x_bins: data.x_bins,
+  y_bins: data.y_bins,
+  x_label: data.x_label,
+  y_label: data.y_label,
+  x_axis: data.x_axis,
+  y_axis: data.y_axis,
+  x_output_channel: data.x_output_channel,
+  gauge: data.gauge,
+});
+
 interface BackendMenu {
   name: string;
   title: string;
@@ -136,6 +171,12 @@ interface BackendMenuItem {
   target?: string;
   condition?: string;
   items?: BackendMenuItem[];
+  /** Whether item is visible (evaluated from visibility_condition) */
+  visible?: boolean;
+  /** Whether item is enabled (evaluated from enabled_condition) */
+  enabled?: boolean;
+  /** Original visibility condition expression for tooltip */
+  visibility_condition?: string;
 }
 
 // Protocol defaults fetched from loaded INI
@@ -159,7 +200,10 @@ interface PortEditorConfig {
 // Tab content types
 interface TabContent {
   type: "dashboard" | "table" | "curve" | "dialog" | "portEditor" | "settings" | "project" | "autotune" | "datalog" | "tooth-logger" | "composite-logger";
-  data?: TunerTableData | RendererDialogDef | PortEditorConfig | string;
+  data?: TunerTableData | RendererDialogDef | PortEditorConfig | CurveData | string;
+  gauge?: SimpleGaugeInfo | null; // For curve tabs with associated gauges
+  /** Search term to highlight within the content (e.g., matching field labels in dialogs) */
+  highlightTerm?: string;
 }
 
 function AppContent() {
@@ -240,20 +284,35 @@ function AppContent() {
       } catch (e) {
         console.warn('get_status_bar_defaults failed:', e);
       }
+
+      // Fetch channel metadata from INI for labels/units
+      try {
+        const channels = await invoke<ChannelInfo[]>('get_available_channels');
+        const map: Record<string, ChannelInfo> = {};
+        channels.forEach((ch) => {
+          map[ch.name] = ch;
+        });
+        setChannelInfoMap(map);
+      } catch (e) {
+        console.warn('get_available_channels failed:', e);
+      }
     })();
   }, [status.has_definition]);
 
   // Menu/tree state
   const [backendMenus, setBackendMenus] = useState<BackendMenu[]>([]);
   const [constantValues, setConstantValues] = useState<Record<string, number>>({});
+  const [searchIndex, setSearchIndex] = useState<Record<string, string[]>>({});
 
-  // Realtime data
-  const [realtimeData, setRealtimeData] = useState<Record<string, number>>({});
-  const [isLogging, setIsLogging] = useState(false);
-  const [logDuration, setLogDuration] = useState("");
-  
   // Status bar channel configuration - fetched from INI FrontPage or defaults
   const [statusBarChannels, setStatusBarChannels] = useState<string[]>([]);
+  const [channelInfoMap, setChannelInfoMap] = useState<Record<string, ChannelInfo>>({});
+
+  // Realtime data - now managed by Zustand store for efficient per-channel subscriptions
+  // Components use useChannelValue() or useChannels() hooks to subscribe to specific channels
+  const statusBarData = useChannels(statusBarChannels); // Only subscribe to status bar channels here
+  const [isLogging, setIsLogging] = useState(false);
+  const [logDuration, setLogDuration] = useState("");
 
   // Tabs state - starts empty when no project is loaded
   const [tabs, setTabs] = useState<Tab[]>([]);
@@ -475,6 +534,30 @@ function AppContent() {
     };
   }, [status.state, showLoading, hideLoading]);
   
+  // Listen for definition:loaded event to ensure INI is ready before table operations
+  useEffect(() => {
+    let unlisten: UnlistenFn | null = null;
+    
+    (async () => {
+      try {
+        unlisten = await listen<{ signature: string; tables: number; curves: number; dialogs: number; constants: number }>(
+          'definition:loaded',
+          (event) => {
+            console.log('[App] definition:loaded event:', event.payload);
+            // Force status refresh to update has_definition
+            checkStatus();
+          }
+        );
+      } catch (e) {
+        console.error("Failed to listen for definition:loaded events:", e);
+      }
+    })();
+    
+    return () => {
+      if (unlisten) unlisten();
+    };
+  }, []);
+  
   // Listen for tune mismatch events (after ECU sync)
   useEffect(() => {
     let unlisten: UnlistenFn | null = null;
@@ -533,17 +616,7 @@ function AppContent() {
               ...tablesToRefresh.map(async (tabId) => {
                 try {
                   const data = await invoke<BackendTableData>("get_table_data", { tableName: tabId });
-                  const tableData: TunerTableData = {
-                    name: data.name,
-                    xAxis: data.x_bins,
-                    yAxis: data.y_bins,
-                    zValues: data.z_values,
-                    xLabel: data.x_axis_name || "X",
-                    yLabel: data.y_axis_name || "Y",
-                    xOutputChannel: data.x_output_channel ?? undefined,
-                    yOutputChannel: data.y_output_channel ?? undefined,
-                  };
-                  updatedTabs[tabId] = { type: "table", data: tableData };
+                  updatedTabs[tabId] = { type: "table", data: toTunerTableData(data) };
                   console.log(`[tune:loaded] ✓ Refreshed table '${tabId}': ${data.z_values.length} values`);
                 } catch (e) {
                   console.error(`[tune:loaded] ✗ Failed to refresh table '${tabId}':`, e);
@@ -552,15 +625,7 @@ function AppContent() {
               ...curvesToRefresh.map(async (tabId) => {
                 try {
                   const data = await invoke<BackendCurveData>("get_curve_data", { curveName: tabId });
-                  const tableData: TunerTableData = {
-                    name: data.name,
-                    xAxis: data.x_bins,
-                    yAxis: [0],
-                    zValues: [data.y_bins],
-                    xLabel: data.x_label,
-                    yLabel: data.y_label,
-                  };
-                  updatedTabs[tabId] = { type: "curve", data: tableData };
+                  updatedTabs[tabId] = { type: "curve", data: toCurveData(data) };
                   console.log(`[tune:loaded] ✓ Refreshed curve '${tabId}': ${data.x_bins.length} points`);
                 } catch (e) {
                   console.error(`[tune:loaded] ✗ Failed to refresh curve '${tabId}':`, e);
@@ -595,19 +660,9 @@ function AppContent() {
         // Refresh the active table to ensure it has fresh data
         invoke<BackendTableData>("get_table_data", { tableName: activeTabId })
           .then((data) => {
-            const tableData: TunerTableData = {
-              name: data.name,
-              xAxis: data.x_bins,
-              yAxis: data.y_bins,
-              zValues: data.z_values,
-              xLabel: data.x_axis_name || "X",
-              yLabel: data.y_axis_name || "Y",
-              xOutputChannel: data.x_output_channel ?? undefined,
-              yOutputChannel: data.y_output_channel ?? undefined,
-            };
             setTabContents((prevTabContents) => ({
               ...prevTabContents,
-              [activeTabId]: { type: "table", data: tableData },
+              [activeTabId]: { type: "table", data: toTunerTableData(data) },
             }));
             console.log(`[tab:activated] Refreshed table '${activeTabId}': ${data.z_values.length} values`);
           })
@@ -618,17 +673,9 @@ function AppContent() {
         // Refresh the active curve to ensure it has fresh data
         invoke<BackendCurveData>("get_curve_data", { curveName: activeTabId })
           .then((data) => {
-            const tableData: TunerTableData = {
-              name: data.name,
-              xAxis: data.x_bins,
-              yAxis: [0],
-              zValues: [data.y_bins],
-              xLabel: data.x_label,
-              yLabel: data.y_label,
-            };
             setTabContents((prevTabContents) => ({
               ...prevTabContents,
-              [activeTabId]: { type: "curve", data: tableData },
+              [activeTabId]: { type: "curve", data: toCurveData(data) },
             }));
             console.log(`[tab:activated] Refreshed curve '${activeTabId}': ${data.x_bins.length} points`);
           })
@@ -640,7 +687,7 @@ function AppContent() {
     });
   }, [activeTabId]); // Only depend on activeTabId to avoid infinite loops
 
-  // Realtime streaming
+  // Realtime streaming - updates go directly to Zustand store (no React state change cascade)
   useEffect(() => {
     let unlistenUpdate: UnlistenFn | null = null;
     let unlistenErr: UnlistenFn | null = null;
@@ -657,7 +704,8 @@ function AppContent() {
 
         try {
           unlistenUpdate = await listen("realtime:update", (event) => {
-            setRealtimeData(event.payload as Record<string, number>);
+            // Update Zustand store directly - no React setState, no cascade re-renders
+            useRealtimeStore.getState().updateChannels(event.payload as Record<string, number>);
           });
           unlistenErr = await listen("realtime:error", (event) => {
             console.error("Realtime error:", event.payload);
@@ -671,6 +719,8 @@ function AppContent() {
     return () => {
       if (unlistenUpdate) unlistenUpdate();
       if (unlistenErr) unlistenErr();
+      // Clear realtime data when disconnecting
+      useRealtimeStore.getState().clearChannels();
       try {
         invoke("stop_realtime_stream");
       } catch {
@@ -790,7 +840,8 @@ function AppContent() {
 
   async function fetchRealtimeData() {
     try {
-      setRealtimeData(await invoke<Record<string, number>>("get_realtime_data"));
+      const data = await invoke<Record<string, number>>("get_realtime_data");
+      useRealtimeStore.getState().updateChannels(data);
     } catch (e) {
       console.error(e);
     }
@@ -813,10 +864,21 @@ function AppContent() {
         filterContext: context || constantValues,
       });
       setBackendMenus(tree);
+      
+      // Also fetch searchable index for deep search
+      try {
+        const index = await invoke<Record<string, string[]>>("get_searchable_index");
+        setSearchIndex(index);
+      } catch (e) {
+        console.error("Failed to fetch search index:", e);
+      }
     } catch (e) {
       console.error(e);
     }
   }
+
+  // Note: Curves are accessed via their parent dialogs in the menu tree, not via a catchall folder.
+  // The get_curves backend command still exists for search functionality.
 
   // Sync ECU data with resilient error handling
   // Returns SyncResult and updates syncStatus state
@@ -1112,8 +1174,8 @@ function AppContent() {
 
   // Open a table or dialog in a new tab
   const openTarget = useCallback(
-    async (name: string, title?: string) => {
-      console.log("[openTarget] Opening:", name, "title:", title);
+    async (name: string, title?: string, highlightTerm?: string) => {
+      console.log("[openTarget] Opening:", name, "title:", title, "highlightTerm:", highlightTerm);
       
       // Check if already open
       const existingTab = tabs.find((t) => t.id === name);
@@ -1145,16 +1207,7 @@ function AppContent() {
         console.log("[openTarget] Trying as table:", name);
         // Always fetch fresh data from backend (reads from cache or ECU)
         const data = await invoke<BackendTableData>("get_table_data", { tableName: name });
-        const tableData: TunerTableData = {
-          name: data.name,
-          xAxis: data.x_bins,
-          yAxis: data.y_bins,
-          zValues: data.z_values,
-          xLabel: data.x_axis_name || "X",
-          yLabel: data.y_axis_name || "Y",
-          xOutputChannel: data.x_output_channel ?? undefined,
-          yOutputChannel: data.y_output_channel ?? undefined,
-        };
+        const tableData = toTunerTableData(data);
         
         console.log(`[openTarget] Loaded table '${name}': ${data.z_values.length} values, ${data.x_bins.length}x${data.y_bins.length} size`);
 
@@ -1182,15 +1235,20 @@ function AppContent() {
       try {
         console.log("[openTarget] Trying as curve:", name);
         const data = await invoke<BackendCurveData>("get_curve_data", { curveName: name });
-        // Convert curve to table format for TableEditor (1D mode)
-        const tableData: TunerTableData = {
-          name: data.name,
-          xAxis: data.x_bins,
-          yAxis: [0],  // Single row for 1D curve
-          zValues: [data.y_bins],  // Y values as single row
-          xLabel: data.x_label,
-          yLabel: data.y_label,
-        };
+        
+        // Store raw curve data for CurveEditor (not converted to table format)
+        const curveData = toCurveData(data);
+        
+        // Fetch gauge config if curve has an associated gauge
+        let gaugeInfo: SimpleGaugeInfo | null = null;
+        if (data.gauge) {
+          try {
+            gaugeInfo = await invoke<SimpleGaugeInfo>("get_gauge_config", { gaugeName: data.gauge });
+            console.log(`[openTarget] Loaded gauge '${data.gauge}' for curve:`, gaugeInfo);
+          } catch (gaugeErr) {
+            console.warn(`[openTarget] Failed to load gauge '${data.gauge}':`, gaugeErr);
+          }
+        }
         
         console.log(`[openTarget] Loaded curve '${name}': ${data.x_bins.length} points`);
 
@@ -1205,7 +1263,7 @@ function AppContent() {
           icon: "curve",
         };
         setTabs([...tabs, newTab]);
-        setTabContents({ ...tabContents, [name]: { type: "curve", data: tableData } });
+        setTabContents({ ...tabContents, [name]: { type: "curve", data: curveData, gauge: gaugeInfo } });
         setActiveTabId(name);
         return;
       } catch (err) {
@@ -1231,7 +1289,7 @@ function AppContent() {
           icon: "dialog",
         };
         setTabs([...tabs, newTab]);
-        setTabContents({ ...tabContents, [name]: { type: "dialog", data: def } });
+        setTabContents({ ...tabContents, [name]: { type: "dialog", data: def, highlightTerm } });
         setActiveTabId(name);
         return;
       } catch (err) {
@@ -1260,13 +1318,20 @@ function AppContent() {
         setActiveTabId(name);
         return;
       } catch (portErr) {
-        // All four failed - show user feedback
+        // All four failed - show user feedback with backend error details
+        const tableErrStr = tableErr instanceof Error ? tableErr.message : String(tableErr);
         console.error("[openTarget] Failed to open target:", name, 
           "table error:", tableErr, 
           "curve error:", curveErr, 
           "dialog error:", dialogErr,
           "portEditor error:", portErr);
-        showToast(`Could not open "${title || name}" - not found as table, curve, dialog, or port editor`, "warning");
+        
+        // Show more specific error if it's a definition loading issue
+        if (tableErrStr.includes("Definition not loaded")) {
+          showToast(`Please wait - INI definition is still loading...`, "warning");
+        } else {
+          showToast(`Could not open "${title || name}" - ${tableErrStr}`, "warning");
+        }
       }
     },
     [tabs, tabContents, showToast]
@@ -1752,6 +1817,12 @@ function AppContent() {
     return items
       .filter((item) => item.type !== "Separator")
       .map((item, idx) => {
+        // Determine if item is disabled (visible=false from visibility condition evaluation)
+        const isDisabled = item.visible === false;
+        const disabledReason = isDisabled && item.visibility_condition 
+          ? `Condition not met: ${item.visibility_condition}`
+          : undefined;
+        
         if (item.type === "SubMenu" && item.items && item.items.length > 0) {
           // Recursively build children for SubMenu
           return {
@@ -1759,6 +1830,8 @@ function AppContent() {
             label: item.label || "",
             type: "folder" as const,
             children: buildSidebarItems(item.items, `${prefix}-${idx}`),
+            disabled: isDisabled,
+            disabledReason,
           };
         }
         // Leaf item - Table, Dialog, Std, or Help
@@ -1774,22 +1847,28 @@ function AppContent() {
           label: item.label || "",
           type: nodeType as "table" | "dialog" | "help",
           itemType: item.type, // Store original type for click handling
+          disabled: isDisabled,
+          disabledReason,
         };
       });
   }, []);
 
   const sidebarItems: SidebarNode[] = useMemo(() => {
-    return backendMenus.map((menu) => ({
+    // Build menu-based sidebar items from INI menus
+    // Curves are accessed via their parent dialogs (e.g., Fuel > Injection configuration)
+    const menuItems: SidebarNode[] = backendMenus.map((menu) => ({
       id: menu.name,
       label: menu.title.replace(/^&/, ""),
       type: "folder" as const,
       children: buildSidebarItems(menu.items, menu.name),
     }));
+    
+    return menuItems;
   }, [backendMenus, buildSidebarItems]);
 
   const handleSidebarItemSelect = useCallback(
-    (item: SidebarNode & { itemType?: string }) => {
-      console.log('[App] handleSidebarItemSelect called', { id: item.id, label: item.label, type: item.type, itemType: (item as any).itemType });
+    (item: SidebarNode & { itemType?: string }, highlightTerm?: string) => {
+      console.log('[App] handleSidebarItemSelect called', { id: item.id, label: item.label, type: item.type, itemType: (item as any).itemType, highlightTerm });
       if (item.type === "folder") {
         // Folder clicked - expansion handled by Sidebar component
         console.log('[App] Early return - item.type is folder');
@@ -1803,9 +1882,9 @@ function AppContent() {
         console.log('[App] Calling openHelpTopic');
         openHelpTopic(item.id, item.label);
       } else {
-        // Table or Dialog
+        // Table or Dialog - pass highlightTerm for search result highlighting
         console.log('[App] Calling openTarget for Table/Dialog');
-        openTarget(item.id, item.label);
+        openTarget(item.id, item.label, highlightTerm);
       }
     },
     [openTarget, handleStdTarget, openHelpTopic]
@@ -1839,15 +1918,19 @@ function AppContent() {
 
     if (status.state === "Connected" && statusBarChannels.length > 0) {
       // Add indicators for each configured status bar channel
+      // statusBarData comes from useChannels() selector - only updates when these specific channels change
       for (const channel of statusBarChannels) {
-        const value = realtimeData[channel];
+        const value = statusBarData[channel];
+        const channelInfo = channelInfoMap[channel];
+        const label = channelInfo?.label || channel;
+        const unit = channelInfo?.units || undefined;
         // Format value based on magnitude - integers for large values, 1 decimal for small
         const formatted = value !== undefined 
           ? (Math.abs(value) >= 100 ? value.toFixed(0) : value.toFixed(1))
           : "--";
         items.push({
           id: `status-${channel}`,
-          content: <StatusIndicator label={channel} value={formatted} />,
+          content: <StatusIndicator label={label} value={formatted} unit={unit} />,
         });
       }
     }
@@ -1859,7 +1942,7 @@ function AppContent() {
     });
 
     return items;
-  }, [status.state, realtimeData, statusBarChannels, isLogging, logDuration, syncStatus]);
+  }, [status.state, statusBarData, statusBarChannels, channelInfoMap, isLogging, logDuration, syncStatus]);
 
   // Render tab content
   const renderTabContent = () => {
@@ -1882,7 +1965,6 @@ function AppContent() {
     switch (content.type) {
       case "dashboard":
         return <TsDashboard 
-          realtimeData={realtimeData}
           isConnected={status.state === 'Connected'}
         />;
       case "table":
@@ -1898,23 +1980,36 @@ function AppContent() {
               }
             }}
             onBurn={() => setBurnDialogOpen(true)}
-            realtimeData={realtimeData}
           />
         );
       case "curve":
         return (
-          <TableEditor
-            data={content.data as TunerTableData}
-            onChange={(newData) => {
+          <CurveEditor
+            data={content.data as CurveData}
+            embedded={false}
+            simpleGaugeInfo={content.gauge}
+            onValuesChange={async (yBins) => {
               if (activeTabId) {
+                // Update local state
+                const curveData = content.data as CurveData;
+                const updatedData = { ...curveData, y_bins: yBins };
                 setTabContents({
                   ...tabContents,
-                  [activeTabId]: { type: "curve", data: newData },
+                  [activeTabId]: { type: "curve", data: updatedData, gauge: content.gauge },
                 });
+                // Save to backend
+                try {
+                  await invoke("update_curve_data", { 
+                    curveName: curveData.name, 
+                    yValues: yBins 
+                  });
+                } catch (err) {
+                  console.error("Failed to save curve data:", err);
+                  showToast("Failed to save curve changes", "error");
+                }
               }
             }}
-            onBurn={() => setBurnDialogOpen(true)}
-            realtimeData={realtimeData}
+            onBack={() => activeTabId && handleTabClose(activeTabId)}
           />
         );
       case "dialog":
@@ -1927,6 +2022,7 @@ function AppContent() {
             openTable={(tableName) => openTarget(tableName)}
             context={constantValues}
             displayTitle={activeTab?.title}
+            highlightTerm={content.highlightTerm}
             onOptimisticUpdate={(name, value) => {
               // Immediately update the context so sibling fields re-evaluate their conditions
               setConstantValues(prev => ({ ...prev, [name]: value }));
@@ -1961,7 +2057,7 @@ function AppContent() {
           />
         );
       case "datalog":
-        return <DataLogView realtimeData={realtimeData} />;
+        return <DataLogView />;
       case "tooth-logger":
         return <ToothLoggerView onClose={() => handleTabClose("tooth-logger")} />;
       case "composite-logger":
@@ -1986,13 +2082,15 @@ function AppContent() {
         sidebarVisible={sidebarVisible}
         onSidebarToggle={() => setSidebarVisible(!sidebarVisible)}
         onSidebarItemSelect={handleSidebarItemSelect}
+        searchIndex={searchIndex}
         statusItems={statusItems}
         connected={status.state === "Connected"}
         ecuName={(status.state === "Connected" ? status.signature : (status.ini_name ? status.ini_name : undefined)) as string | undefined}
-        realtimeData={realtimeData}
         unitsSystem={unitsSystem}
       >
-        {renderTabContent()}
+        <ErrorBoundary>
+          {renderTabContent()}
+        </ErrorBoundary>
       </TunerLayout>
 
       {/* Dialogs */}
@@ -2094,7 +2192,6 @@ function AppContent() {
       <PerformanceFieldsDialog
         isOpen={performanceDialogOpen}
         onClose={() => setPerformanceDialogOpen(false)}
-        realtimeData={realtimeData}
       />
       
       {/* Signature Mismatch Dialog */}

@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import './IndicatorRow.css';
+import { useRealtimeStore } from '../../stores/realtimeStore';
 
 export interface FrontPageIndicator {
   expression: string;
@@ -13,7 +14,6 @@ export interface FrontPageIndicator {
 
 interface IndicatorRowProps {
   indicators: FrontPageIndicator[];
-  realtimeData: Record<string, number>;
   constantValues?: Record<string, number>;
   columnCount?: number | 'auto';
   fillEmptyCells?: boolean;
@@ -104,12 +104,14 @@ const MIN_CELL_WIDTH = 110;
 
 export default function IndicatorRow({ 
   indicators, 
-  realtimeData, 
   constantValues = {},
   columnCount = 'auto',
   fillEmptyCells = false,
   textFitMode = 'scale',
 }: IndicatorRowProps) {
+  // Get realtime data from Zustand store
+  const realtimeData = useRealtimeStore((state) => state.channels);
+  
   const containerRef = useRef<HTMLDivElement>(null);
   const [actualCols, setActualCols] = useState(12);
 

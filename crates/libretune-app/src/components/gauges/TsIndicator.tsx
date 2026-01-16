@@ -13,6 +13,33 @@ interface TsIndicatorProps {
 }
 
 export default function TsIndicator({ config, isOn, embeddedImages }: TsIndicatorProps) {
+  const getFontFamily = (fontFamily?: string): string => {
+    const webSafeStacks: Record<string, string> = {
+      Arial: 'Arial, Helvetica, sans-serif',
+      'Arial Black': '"Arial Black", Gadget, sans-serif',
+      Verdana: 'Verdana, Geneva, sans-serif',
+      Tahoma: 'Tahoma, Geneva, sans-serif',
+      'Trebuchet MS': '"Trebuchet MS", Helvetica, sans-serif',
+      Georgia: 'Georgia, serif',
+      'Times New Roman': '"Times New Roman", Times, serif',
+      'Courier New': '"Courier New", Courier, monospace',
+      Consolas: 'Consolas, Monaco, "Lucida Console", monospace',
+      Monaco: 'Monaco, Consolas, monospace',
+    };
+
+    const defaultStack = 'Arial, Helvetica, sans-serif';
+
+    if (!fontFamily) {
+      return defaultStack;
+    }
+
+    if (webSafeStacks[fontFamily]) {
+      return webSafeStacks[fontFamily];
+    }
+
+    return `"${fontFamily}", Arial, Helvetica, sans-serif`;
+  };
+
   const backgroundColor = isOn 
     ? tsColorToRgba(config.on_background_color)
     : tsColorToRgba(config.off_background_color);
@@ -46,7 +73,37 @@ export default function TsIndicator({ config, isOn, embeddedImages }: TsIndicato
             maxWidth: '100%',
             maxHeight: '100%',
             objectFit: 'contain',
+            imageRendering: config.antialiasing_on ? 'auto' : 'pixelated',
           }}
+        />
+      </div>
+    );
+  }
+
+  if (config.indicator_painter === 'BulbIndicator') {
+    const bulbColor = isOn ? backgroundColor : 'rgba(20, 20, 20, 0.9)';
+    const glowColor = isOn ? backgroundColor : 'transparent';
+
+    return (
+      <div
+        style={{
+          width: '100%',
+          height: '100%',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        <div
+          style={{
+            width: '80%',
+            height: '80%',
+            borderRadius: '50%',
+            background: `radial-gradient(circle at 30% 30%, rgba(255, 255, 255, 0.7), ${bulbColor})`,
+            boxShadow: isOn ? `0 0 12px ${glowColor}` : 'inset 0 0 6px rgba(0, 0, 0, 0.6)',
+            border: '1px solid rgba(255, 255, 255, 0.2)',
+          }}
+          aria-label={text}
         />
       </div>
     );
@@ -64,8 +121,10 @@ export default function TsIndicator({ config, isOn, embeddedImages }: TsIndicato
         border: '1px solid rgba(100, 100, 100, 0.5)',
         borderRadius: '2px',
         overflow: 'hidden',
-        fontFamily: config.font_family || 'Arial, sans-serif',
+        fontFamily: getFontFamily(config.font_family),
         fontStyle: config.italic_font ? 'italic' : 'normal',
+        textRendering: config.antialiasing_on ? 'auto' : 'optimizeSpeed',
+        WebkitFontSmoothing: config.antialiasing_on ? 'antialiased' : 'none',
         boxSizing: 'border-box',
       }}
     >

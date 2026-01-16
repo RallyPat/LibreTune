@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useLayoutEffect, useRef, memo, useMemo } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { ArrowLeft, Activity, Grid3X3, HelpCircle } from 'lucide-react';
 import CurveEditor, { SimpleGaugeInfo } from '../curves/CurveEditor';
@@ -407,16 +407,18 @@ function DialogField({
               <option value={0}>No options available</option>
             ) : (
               validBitOptions.map((opt, i) => {
-                // Apply display_offset to the label if it's a numeric option
-                // For [4:7+1], raw 0 should display as "1", raw 1 as "2", etc.
-                const offset = constant.display_offset ?? 0;
-                const originalIdx = filteredToOriginalMap.get(i) ?? i;
-                const displayVal = originalIdx + offset;
-                // If the option is already a descriptive string, use it; 
-                // otherwise show the offset-adjusted value
-                const displayText = opt && opt.trim() !== '' && isNaN(Number(opt)) 
-                  ? opt 
-                  : `${displayVal}`;
+                // Show only the option label (e.g. 'NONE'), not index or '0="NONE"'
+                // If option is a quoted string like 'NONE', show just 'NONE'
+                // If option is empty, show as 'Not Assigned'
+                let displayText = opt?.trim() || '';
+                if (displayText === '') displayText = 'Not Assigned';
+                // Remove any index prefix (e.g. '0="NONE"' -> 'NONE')
+                const eqIdx = displayText.indexOf('=');
+                if (eqIdx !== -1) {
+                  displayText = displayText.substring(eqIdx + 1).replace(/^"|"$/g, '').trim();
+                }
+                // Remove any surrounding quotes
+                displayText = displayText.replace(/^"|"$/g, '');
                 return <option key={i} value={i}>{displayText}</option>;
               })
             )}
@@ -610,17 +612,24 @@ interface PortEditorConfig {
   enable_condition?: string;
 }
 
-function RecursivePanel({
+const RecursivePanel = memo(function RecursivePanel({
   name,
   openTable,
   context,
   onUpdate,
+  onFieldFocus,
+  showAllHelpIcons,
 }: {
   name: string;
   openTable: (name: string) => void;
   context: Record<string, number>;
   onUpdate?: () => void;
+  onFieldFocus?: (info: FieldInfo) => void;
+  showAllHelpIcons?: boolean;
 }) {
+  // Debug log on every render
+  console.log(`[RecursivePanel] 🎯 Component render for '${name}'`);
+  
   const [definition, setDefinition] = useState<DialogDefinition | null>(null);
   const [indicatorPanel, setIndicatorPanel] = useState<IndicatorPanel | null>(null);
   const [tableInfo, setTableInfo] = useState<TableInfo | null>(null);
@@ -630,10 +639,17 @@ function RecursivePanel({
   const [portEditor, setPortEditor] = useState<PortEditorConfig | null>(null);
   const [panelType, setPanelType] = useState<'loading' | 'dialog' | 'indicatorPanel' | 'table' | 'curve' | 'portEditor' | 'unknown'>('loading');
 
-  useEffect(() => {
+  // Log mount ID to track component identity
+  const mountIdRef = useRef(Math.random().toString(36).substring(7));
+  console.log(`[RecursivePanel] 🎯 Component render for '${name}' (mount: ${mountIdRef.current}, panelType: ${panelType}, curveData: ${curveData ? 'SET' : 'NULL'})`);
+
+  // Use useLayoutEffect instead of useEffect to run synchronously
+  // This prevents the effect from being skipped during rapid re-renders
+  useLayoutEffect(() => {
     // Reset state when name changes and track cancellation
     let cancelled = false;
     
+    console.error(`[RecursivePanel] ⚡⚡⚡ LAYOUT EFFECT FIRED for '${name}' (mount: ${mountIdRef.current})`);
     setPanelType('loading');
     setDefinition(null);
     setIndicatorPanel(null);
@@ -647,6 +663,7 @@ function RecursivePanel({
     invoke<IndicatorPanel>('get_indicator_panel', { name })
       .then((panel) => {
         if (cancelled) return;
+        console.debug(`[RecursivePanel] '${name}' resolved as indicatorPanel`);
         setIndicatorPanel(panel);
         setPanelType('indicatorPanel');
       })
@@ -656,6 +673,7 @@ function RecursivePanel({
         invoke<DialogDefinition>('get_dialog_definition', { name })
           .then((def) => {
             if (cancelled) return;
+            console.debug(`[RecursivePanel] '${name}' resolved as dialog`);
             setDefinition(def);
             setPanelType('dialog');
           })
@@ -665,6 +683,7 @@ function RecursivePanel({
             invoke<TableInfo>('get_table_info', { tableName: name })
               .then((info) => {
                 if (cancelled) return;
+                console.debug(`[RecursivePanel] '${name}' resolved as table: ${info.title}`);
                 setTableInfo(info);
                 // Now fetch full table data for embedded rendering
                 invoke<BackendTableData>('get_table_data', { tableName: name })
@@ -684,9 +703,20 @@ function RecursivePanel({
                 if (cancelled) return;
                 console.debug(`Panel '${name}' is not a table:`, err);
                 // Not a table, try as curve
+                console.log(`[RecursivePanel] Trying to resolve '${name}' as curve...`);
                 invoke<CurveData>('get_curve_data', { curveName: name })
                   .then((data) => {
                     if (cancelled) return;
+                    console.log(`[RecursivePanel] ✅ '${name}' resolved as curve:`, {
+                      name: data.name,
+                      title: data.title,
+                      x_bins: data.x_bins,
+                      y_bins: data.y_bins,
+                      x_bins_type: typeof data.x_bins,
+                      y_bins_type: typeof data.y_bins,
+                      x_bins_isArray: Array.isArray(data.x_bins),
+                      rawData: JSON.stringify(data).slice(0, 500),
+                    });
                     setCurveData(data);
                     setPanelType('curve');
                     // Fetch gauge config if curve has a gauge reference
@@ -698,18 +728,26 @@ function RecursivePanel({
                   })
                   .catch((err2) => {
                     if (cancelled) return;
-                    console.debug(`Panel '${name}' is not a curve:`, err2);
+                    console.warn(`[RecursivePanel] ⚠️ Panel '${name}' is not a curve. Error:`, err2);
                     // Not a curve, try as portEditor
                     invoke<PortEditorConfig>('get_port_editor', { name })
                       .then((editor) => {
                         if (cancelled) return;
+                        console.debug(`[RecursivePanel] '${name}' resolved as portEditor`);
                         setPortEditor(editor);
                         setPanelType('portEditor');
                       })
                       .catch((err3) => {
                         if (cancelled) return;
                         console.debug(`Panel '${name}' is not a portEditor:`, err3);
-                        // None of the known types
+                        // None of the known types - log all errors for debugging
+                        console.error(`[RecursivePanel] ❌ Panel '${name}' could not be resolved as any known type:`, {
+                          indicatorPanel: 'not an indicatorPanel',
+                          dialog: 'not a dialog',
+                          table: String(err),
+                          curve: String(err2),
+                          portEditor: String(err3),
+                        });
                         setPanelType('unknown');
                       });
                   });
@@ -738,8 +776,9 @@ function RecursivePanel({
         x_bins={tableData.x_bins}
         y_bins={tableData.y_bins}
         z_values={tableData.z_values}
+        x_output_channel={tableData.x_output_channel}
+        y_output_channel={tableData.y_output_channel}
         embedded={true}
-        realtimeData={context}
         onOpenInTab={() => openTable(name)}
         onValuesChange={(values) => {
           // Save changes to backend
@@ -768,11 +807,23 @@ function RecursivePanel({
 
   // Render as curve editor if it's a curve
   if (panelType === 'curve' && curveData) {
+    const hasValidBins = curveData.x_bins?.length > 0 && curveData.y_bins?.length > 0;
+    console.log(`[RecursivePanel] 📈 RENDERING CurveEditor for '${name}' with data:`, {
+      name: curveData.name,
+      title: curveData.title,
+      x_bins_length: curveData.x_bins?.length ?? 0,
+      y_bins_length: curveData.y_bins?.length ?? 0,
+      hasValidBins,
+      x_bins_sample: curveData.x_bins?.slice(0, 3),
+      y_bins_sample: curveData.y_bins?.slice(0, 3),
+    });
+    if (!hasValidBins) {
+      console.warn(`[RecursivePanel] ⚠️ Curve '${name}' has empty bins - curve may not render correctly. Check get_curve_data backend logs.`);
+    }
     return (
       <CurveEditor
         data={curveData}
         embedded={true}
-        realtimeData={context}
         simpleGaugeInfo={gaugeConfig}
         onValuesChange={(yBins) => {
           console.log('Curve values changed:', yBins);
@@ -794,7 +845,7 @@ function RecursivePanel({
         {definition.title && definition.title !== name && <div className="panel-title">{definition.title}</div>}
         <div className="panel-content">
           {definition.components.map((comp, i) => (
-            <DialogComponentRenderer key={i} comp={comp} openTable={openTable} context={context} onUpdate={onUpdate} />
+            <DialogComponentRenderer key={i} comp={comp} openTable={openTable} context={context} onUpdate={onUpdate} onFieldFocus={onFieldFocus} showAllHelpIcons={showAllHelpIcons} />
           ))}
         </div>
       </div>
@@ -813,9 +864,14 @@ function RecursivePanel({
     );
   }
 
-  // Unknown panel type - show nothing or a placeholder
-  return null;
-}
+  // Unknown panel type - show error feedback so users can report missing panels
+  return (
+    <div className="panel-load-error">
+      <span className="panel-error-icon">⚠</span>
+      <span>Panel "{name}" could not be loaded</span>
+    </div>
+  );
+});
 
 function IndicatorPanelRenderer({
   panel,
@@ -962,33 +1018,87 @@ function PanelVisibilityWrapper({
   openTable,
   context,
   onUpdate,
+  onFieldFocus,
+  showAllHelpIcons,
 }: {
   comp: DialogComponent;
   openTable: (name: string) => void;
   context: Record<string, number>;
   onUpdate?: () => void;
+  onFieldFocus?: (info: FieldInfo) => void;
+  showAllHelpIcons?: boolean;
 }) {
   const [panelVisible, setPanelVisible] = useState<boolean>(true);
   
-  useEffect(() => {
-    if (comp.visibility_condition) {
-      invoke<boolean>('evaluate_expression', { 
-        expression: comp.visibility_condition, 
-        context 
+  // Log on every render to verify component is being rendered
+  console.log(`[PanelVisibilityWrapper] Rendering for panel '${comp.name}', condition: '${comp.visibility_condition}', current visible state: ${panelVisible}`);
+  
+  // Use ref to track context without causing re-renders
+  const contextRef = useRef(context);
+  contextRef.current = context;
+  
+  const normalizedVisibilityExpression = useMemo(() => {
+    if (!comp.visibility_condition) return '';
+    let expression = comp.visibility_condition;
+    if (!expression.includes('{') && !expression.includes('(') && !expression.includes(' ')) {
+      expression = `{${expression}}`;
+    }
+    return expression;
+  }, [comp.visibility_condition]);
+
+  const visibilityContextKey = useMemo(() => {
+    if (!normalizedVisibilityExpression) return '';
+    const varMatches = normalizedVisibilityExpression.match(/\{?(\w+)\}?/g);
+    if (!varMatches) return '';
+    return varMatches
+      .map(v => {
+        const varName = v.replace(/[{}]/g, '');
+        const value = contextRef.current[varName];
+        return `${varName}:${value ?? 0}`;
       })
-        .then(setPanelVisible)
+      .join('|');
+  }, [normalizedVisibilityExpression, context]);
+
+  useEffect(() => {
+    if (normalizedVisibilityExpression) {
+      // Log visibility condition evaluation for debugging
+      console.log(`[PanelVisibilityWrapper] Evaluating visibility for '${comp.name}': original='${comp.visibility_condition}', parsed='${normalizedVisibilityExpression}'`);
+      
+      // Extract variable names from condition and log their values
+      const varMatches = normalizedVisibilityExpression.match(/\{?(\w+)\}?/g);
+      if (varMatches) {
+        const varValues = varMatches.map(v => {
+          const varName = v.replace(/[{}]/g, '');
+          const value = contextRef.current[varName];
+          return `${varName}=${value !== undefined ? value : 'undefined (defaults to 0)'}`;
+        });
+        console.log(`[PanelVisibilityWrapper] Context for '${comp.name}':`, varValues.join(', '));
+      }
+      
+      invoke<boolean>('evaluate_expression', { 
+        expression: normalizedVisibilityExpression, 
+        context: contextRef.current 
+      })
+        .then((result) => {
+          console.log(`[PanelVisibilityWrapper] '${comp.name}' visibility: ${normalizedVisibilityExpression} = ${result}`);
+          setPanelVisible(result);
+        })
         .catch((err) => {
-          console.warn(`[PanelVisibilityWrapper] Failed to evaluate panel visibility condition '${comp.visibility_condition}':`, err);
+          console.warn(`[PanelVisibilityWrapper] Failed to evaluate panel visibility condition '${normalizedVisibilityExpression}':`, err);
           setPanelVisible(true); // Show on error
         });
     } else {
       setPanelVisible(true);
     }
-  }, [comp.visibility_condition, context]);
+  }, [comp.visibility_condition, comp.name, normalizedVisibilityExpression, visibilityContextKey]);
   
-  if (!panelVisible || !comp.name) return null;
+  if (!panelVisible || !comp.name) {
+    console.log(`[PanelVisibilityWrapper] Skipping render for '${comp.name}': panelVisible=${panelVisible}, comp.name=${comp.name}`);
+    return null;
+  }
   
-  return <RecursivePanel name={comp.name} openTable={openTable} context={context} onUpdate={onUpdate} />;
+  console.log(`[PanelVisibilityWrapper] ✅ About to render RecursivePanel for '${comp.name}'`);
+  return <RecursivePanel key={`panel-${comp.name}`} name={comp.name} openTable={openTable} context={context} onUpdate={onUpdate} onFieldFocus={onFieldFocus} showAllHelpIcons={showAllHelpIcons} />;
 }
 
 function DialogComponentRenderer({
@@ -1027,7 +1137,8 @@ function DialogComponentRenderer({
     );
   }
   if (comp.type === 'Panel' && comp.name) {
-    return <PanelVisibilityWrapper comp={comp} openTable={openTable} context={context} onUpdate={onUpdate} />;
+    console.log(`[DialogComponentRenderer] Rendering Panel component: ${comp.name}, visibility_condition: ${comp.visibility_condition || 'none'}`);
+    return <PanelVisibilityWrapper comp={comp} openTable={openTable} context={context} onUpdate={onUpdate} onFieldFocus={onFieldFocus} showAllHelpIcons={showAllHelpIcons} />;
   }
   if (comp.type === 'Indicator') {
     return <Indicator comp={comp} context={context} />;
@@ -1047,9 +1158,11 @@ export interface DialogRendererProps {
   onOptimisticUpdate?: (name: string, value: number) => void;
   /** Override title for display (formatted as "Menu Label (ini_name)") */
   displayTitle?: string;
+  /** Search term to highlight matching fields (scroll into view and flash animation) */
+  highlightTerm?: string;
 }
 
-export default function DialogRenderer({ definition, onBack, openTable, context, onUpdate, onOptimisticUpdate, displayTitle }: DialogRendererProps) {
+export default function DialogRenderer({ definition, onBack, openTable, context, onUpdate, onOptimisticUpdate, displayTitle, highlightTerm }: DialogRendererProps) {
   // The context is already dynamic - it contains the current values of all constants
   // Conditions like {cylindersCount > 5} will automatically evaluate based on the current cylindersCount value
   // This works for any cylinder count: 1, 2, 3, 4, 5, 6, 7, 8, 10, 12, etc.
@@ -1059,6 +1172,9 @@ export default function DialogRenderer({ definition, onBack, openTable, context,
   
   // State for help icon visibility setting (default true = show on all fields)
   const [showAllHelpIcons, setShowAllHelpIcons] = useState(true);
+  
+  // Ref for scrolling to highlighted field
+  const containerRef = useRef<HTMLDivElement>(null);
   
   // Fetch the help icon visibility setting on mount
   useEffect(() => {
@@ -1071,9 +1187,51 @@ export default function DialogRenderer({ definition, onBack, openTable, context,
       .catch(console.error);
   }, []);
   
+  // Scroll to and highlight matching field when highlightTerm is provided
+  useEffect(() => {
+    if (!highlightTerm || !containerRef.current) return;
+    
+    // Wait for DOM to render
+    const timer = setTimeout(() => {
+      const container = containerRef.current;
+      if (!container) return;
+      
+      // Find field labels that match the search term
+      const lowerTerm = highlightTerm.toLowerCase();
+      const labels = container.querySelectorAll('.dialog-field label, .dialog-field-label');
+      
+      for (const label of labels) {
+        if (label.textContent?.toLowerCase().includes(lowerTerm)) {
+          // Found a matching label - scroll to its parent field row
+          const fieldRow = label.closest('.dialog-field') || label.closest('.dialog-row');
+          if (fieldRow) {
+            fieldRow.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            // Add flash animation class
+            fieldRow.classList.add('search-highlight-flash');
+            // Remove class after animation
+            setTimeout(() => {
+              fieldRow.classList.remove('search-highlight-flash');
+            }, 2000);
+            break;
+          }
+        }
+      }
+    }, 100);
+    
+    return () => clearTimeout(timer);
+  }, [highlightTerm, definition.name]);
+  
   const handleFieldFocus = (info: FieldInfo) => {
     setSelectedField(info);
   };
+  
+  // Log all components for debugging
+  useEffect(() => {
+    console.log(`[DialogRenderer] Rendering dialog '${definition.name}' with ${definition.components.length} components:`);
+    definition.components.forEach((comp, i) => {
+      console.log(`  [${i}] type=${comp.type}, name=${comp.name || 'N/A'}, visibility=${comp.visibility_condition || 'none'}`);
+    });
+  }, [definition]);
   
   return (
     <div className="dialog-view view-transition">
@@ -1086,7 +1244,7 @@ export default function DialogRenderer({ definition, onBack, openTable, context,
         </h2>
       </div>
 
-      <div className="glass-card dialog-container">
+      <div className="glass-card dialog-container" ref={containerRef}>
         {definition.components.map((comp, i) => (
           <DialogComponentRenderer key={i} comp={comp} openTable={openTable} context={context} onUpdate={onUpdate} onOptimisticUpdate={onOptimisticUpdate} onFieldFocus={handleFieldFocus} showAllHelpIcons={showAllHelpIcons} />
         ))}
@@ -1099,7 +1257,7 @@ export default function DialogRenderer({ definition, onBack, openTable, context,
             <p>{selectedField.help || 'No description available for this setting.'}</p>
           </>
         ) : (
-          <p className="description-placeholder">Click the ℹ️ icon next to any setting to see its description</p>
+          <p className="description-placeholder">Click the ? icon next to any setting to see its description</p>
         )}
       </div>
     </div>

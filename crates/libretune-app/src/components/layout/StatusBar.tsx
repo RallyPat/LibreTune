@@ -1,10 +1,10 @@
 import './StatusBar.css';
+import { useChannels } from '../../stores/realtimeStore';
 
 interface StatusBarProps {
   ecuStatus: 'connected' | 'connecting' | 'error' | 'disconnected';
   ecuSignature?: string;
   currentPage?: string;
-  realtimeData?: Record<string, number>;
   unitsSystem?: 'metric' | 'imperial';
 }
 
@@ -12,9 +12,11 @@ export function StatusBar({
   ecuStatus,
   ecuSignature,
   currentPage,
-  realtimeData,
   unitsSystem = 'metric',
 }: StatusBarProps) {
+  // Get realtime data from Zustand store
+  const realtimeData = useChannels(['rpm', 'afr', 'map', 'coolant']);
+  
   const getStatusLabel = () => {
     switch (ecuStatus) {
       case 'connected': return 'Connected';

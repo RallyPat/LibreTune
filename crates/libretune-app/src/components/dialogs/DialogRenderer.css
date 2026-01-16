@@ -442,3 +442,42 @@
   color: var(--text-muted);
   font-style: italic;
 }
+
+/* Search result highlight flash animation */
+@keyframes search-highlight-flash {
+  0% {
+    background-color: rgba(59, 130, 246, 0.5);
+    box-shadow: 0 0 8px rgba(59, 130, 246, 0.6);
+  }
+  50% {
+    background-color: rgba(59, 130, 246, 0.3);
+    box-shadow: 0 0 12px rgba(59, 130, 246, 0.4);
+  }
+  100% {
+    background-color: transparent;
+    box-shadow: none;
+  }
+}
+
+.search-highlight-flash {
+  animation: search-highlight-flash 2s ease-out;
+  border-radius: 4px;
+}
+
+/* Panel load error feedback */
+.panel-load-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  margin: 8px 0;
+  background: rgba(251, 146, 60, 0.1);
+  border: 1px dashed #fb923c;
+  border-radius: 6px;
+  color: #fb923c;
+  font-size: 13px;
+}
+
+.panel-load-error .panel-error-icon {
+  font-size: 16px;
+}

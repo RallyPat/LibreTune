@@ -89,11 +89,42 @@
   color: var(--text-primary);
 }
 
+.expand-collapse-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  background: transparent;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all var(--transition-fast);
+}
+
+.expand-collapse-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  border-color: var(--text-muted);
+}
+
 .search-no-results {
   padding: var(--space-4);
   text-align: center;
   color: var(--text-muted);
   font-size: var(--font-size-sm);
+}
+
+.search-results-count {
+  padding: var(--space-1) var(--space-3);
+  font-size: 11px;
+  color: var(--text-muted);
+  background: var(--bg-toolbar);
+  border-bottom: 1px solid var(--border-subtle);
 }
 
 .search-highlight {
@@ -199,4 +230,22 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Disabled items (visibility condition not met) */
+.tree-item-disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.tree-item-disabled:hover {
+  background: transparent;
+}
+
+.tree-item-disabled .tree-item-label {
+  font-style: italic;
+}
+
+.tree-item-disabled .node-icon {
+  color: var(--text-muted);
 }

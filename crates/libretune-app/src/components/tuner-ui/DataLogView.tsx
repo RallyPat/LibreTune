@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { save, open } from '@tauri-apps/plugin-dialog';
+import { useRealtimeStore } from '../../stores/realtimeStore';
 import './DataLogView.css';
 
 interface LoggingStatus {
@@ -17,10 +18,6 @@ interface LogEntry {
 
 type ViewMode = 'live' | 'playback';
 type PlaybackSpeed = 0.25 | 0.5 | 1 | 2 | 4;
-
-interface DataLogViewProps {
-  realtimeData: Record<string, number>;
-}
 
 // Simple line chart component using canvas
 const LineChart: React.FC<{
@@ -183,7 +180,11 @@ const LineChart: React.FC<{
   );
 };
 
-export const DataLogView: React.FC<DataLogViewProps> = ({ realtimeData }) => {
+// DataLogView no longer requires props - uses Zustand store for realtime data
+export const DataLogView: React.FC = () => {
+  // Get realtime data from Zustand store
+  const realtimeData = useRealtimeStore((state) => state.channels);
+
   const [isRecording, setIsRecording] = useState(false);
   const [status, setStatus] = useState<LoggingStatus | null>(null);
   const [logData, setLogData] = useState<{ x: number; values: Record<string, number> }[]>([]);

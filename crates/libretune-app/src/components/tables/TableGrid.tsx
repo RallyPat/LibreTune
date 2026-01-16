@@ -58,37 +58,35 @@ export default function TableGrid({
       return null;
     }
 
-    // Find X position (interpolate between bins)
-    let xPos = 0;
-    for (let i = 0; i < x_bins.length - 1; i++) {
-      if (liveCursorX >= x_bins[i] && liveCursorX <= x_bins[i + 1]) {
-        const ratio = (liveCursorX - x_bins[i]) / (x_bins[i + 1] - x_bins[i]);
-        xPos = i + ratio;
-        break;
-      } else if (liveCursorX < x_bins[0]) {
-        xPos = 0;
-        break;
-      } else if (liveCursorX > x_bins[x_bins.length - 1]) {
-        xPos = x_bins.length - 1;
-        break;
-      }
-    }
+    const computePosition = (value: number, bins: number[]) => {
+      if (bins.length === 0) return 0;
+      const ascending = bins[0] <= bins[bins.length - 1];
 
-    // Find Y position (interpolate between bins) - Y axis is usually reversed (high values at top)
-    let yPos = 0;
-    for (let i = 0; i < y_bins.length - 1; i++) {
-      if (liveCursorY >= y_bins[i] && liveCursorY <= y_bins[i + 1]) {
-        const ratio = (liveCursorY - y_bins[i]) / (y_bins[i + 1] - y_bins[i]);
-        yPos = i + ratio;
-        break;
-      } else if (liveCursorY < y_bins[0]) {
-        yPos = 0;
-        break;
-      } else if (liveCursorY > y_bins[y_bins.length - 1]) {
-        yPos = y_bins.length - 1;
-        break;
+      for (let i = 0; i < bins.length - 1; i++) {
+        const start = bins[i];
+        const end = bins[i + 1];
+        const inRange = ascending
+          ? value >= start && value <= end
+          : value <= start && value >= end;
+        if (inRange) {
+          const denom = end - start;
+          const ratio = denom !== 0 ? (value - start) / denom : 0;
+          return i + ratio;
+        }
       }
-    }
+
+      if ((ascending && value < bins[0]) || (!ascending && value > bins[0])) {
+        return 0;
+      }
+      if ((ascending && value > bins[bins.length - 1]) || (!ascending && value < bins[bins.length - 1])) {
+        return bins.length - 1;
+      }
+
+      return 0;
+    };
+
+    const xPos = computePosition(liveCursorX, x_bins);
+    const yPos = computePosition(liveCursorY, y_bins);
 
     return { x: xPos, y: yPos };
   }, [showLiveCursor, liveCursorX, liveCursorY, x_bins, y_bins]);

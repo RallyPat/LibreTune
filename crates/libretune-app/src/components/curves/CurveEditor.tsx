@@ -11,6 +11,7 @@ import { ArrowLeft, Save, Zap, Undo2, Redo2 } from 'lucide-react';
 import TsGauge from '../gauges/TsGauge';
 import { TsGaugeConfig } from '../dashboards/dashTypes';
 import { valueToHeatmapColor } from '../../utils/heatmapColors';
+import { useChannelValue } from '../../stores/realtimeStore';
 import './CurveEditor.css';
 
 /** Simple gauge info from backend INI [GaugeConfigurations] */
@@ -110,8 +111,6 @@ interface CurveEditorProps {
   data: CurveData;
   /** Whether this is embedded in a dialog (compact mode) */
   embedded?: boolean;
-  /** Realtime data for live cursor and gauge */
-  realtimeData?: Record<string, number>;
   /** Full TsGaugeConfig for embedded display (optional) */
   gaugeConfig?: TsGaugeConfig | null;
   /** Simple gauge info from INI (alternative to gaugeConfig) */
@@ -125,17 +124,49 @@ interface CurveEditorProps {
 }
 
 export default function CurveEditor({
-  data,
+  data: rawData,
   embedded = false,
-  realtimeData,
   gaugeConfig,
   simpleGaugeInfo,
   onValuesChange,
   onBack,
   menuLabel,
 }: CurveEditorProps) {
+  // Normalize data in case curve data is provided in table-shaped format (xAxis/zValues)
+  let data = rawData as CurveData & {
+    xAxis?: number[];
+    yAxis?: number[];
+    zValues?: number[][];
+    xLabel?: string;
+    yLabel?: string;
+  };
+  if (data && (!Array.isArray(data.x_bins) || data.x_bins.length === 0) && Array.isArray(data.xAxis)) {
+    const normalizedYBins = Array.isArray(data.y_bins)
+      ? data.y_bins
+      : (Array.isArray(data.zValues) ? (data.zValues[0] ?? []) : []);
+    data = {
+      ...data,
+      x_bins: data.xAxis,
+      y_bins: normalizedYBins,
+      x_label: data.x_label || data.xLabel || '',
+      y_label: data.y_label || data.yLabel || '',
+    };
+  }
+  // Determine if data is valid - used for conditional rendering after hooks
+  const hasValidData = 
+    data &&
+    data.x_bins && Array.isArray(data.x_bins) && data.x_bins.length > 0 &&
+    data.y_bins && Array.isArray(data.y_bins) && data.y_bins.length > 0;
+
+  // Use safe fallback values for hooks when data is invalid
+  const safeYBins = hasValidData ? data.y_bins : [0];
+  const safeXOutputChannel = hasValidData && data.x_output_channel ? data.x_output_channel : '';
+
+  // Get realtime value for the X output channel from Zustand store
+  const xOutputChannelValue = useChannelValue(safeXOutputChannel, undefined);
+  
   // Local copy of Y values for editing
-  const [localYBins, setLocalYBins] = useState<number[]>([...data.y_bins]);
+  const [localYBins, setLocalYBins] = useState<number[]>([...safeYBins]);
   // Selected point index
   const [selectedPoint, setSelectedPoint] = useState<number | null>(null);
   // Dragging state
@@ -158,8 +189,10 @@ export default function CurveEditor({
 
   // Update local values when data changes
   useEffect(() => {
-    setLocalYBins([...data.y_bins]);
-  }, [data.y_bins]);
+    if (hasValidData) {
+      setLocalYBins([...data.y_bins]);
+    }
+  }, [hasValidData, data?.y_bins]);
 
   // Click-outside handler for context menu
   useEffect(() => {
@@ -190,11 +223,35 @@ export default function CurveEditor({
   const chartHeight = embedded ? 280 : 350;
   const padding = { top: 30, right: 20, bottom: 40, left: 50 };
 
+  const getNiceStep = useCallback((min: number, max: number, targetTicks: number = 5) => {
+    const range = Math.abs(max - min);
+    if (!isFinite(range) || range === 0) return 1;
+    const rough = range / Math.max(1, targetTicks);
+    const pow10 = Math.pow(10, Math.floor(Math.log10(rough)));
+    const frac = rough / pow10;
+    let niceFrac = 1;
+    if (frac >= 5) {
+      niceFrac = 5;
+    } else if (frac >= 2) {
+      niceFrac = 2;
+    }
+    return niceFrac * pow10;
+  }, []);
+
   // Calculate axis bounds (respecting overrides)
   const xAxis = useMemo(() => {
+    // Guard against invalid data - use safe defaults
+    if (!hasValidData || !data.x_bins || data.x_bins.length === 0) {
+      return { min: 0, max: 100, step: 10 };
+    }
+    
     const base = data.x_axis 
       ? { min: data.x_axis[0], max: data.x_axis[1], step: data.x_axis[2] }
-      : { min: Math.min(...data.x_bins), max: Math.max(...data.x_bins), step: 10 };
+      : (() => {
+          const min = Math.min(...data.x_bins);
+          const max = Math.max(...data.x_bins);
+          return { min, max, step: getNiceStep(min, max) };
+        })();
     
     if (!xAxisOverride.auto) {
       return {
@@ -204,16 +261,25 @@ export default function CurveEditor({
       };
     }
     return base;
-  }, [data.x_axis, data.x_bins, xAxisOverride]);
+  }, [hasValidData, data?.x_axis, data?.x_bins, xAxisOverride]);
 
   const yAxis = useMemo(() => {
+    // Guard against invalid data - use safe defaults
+    if (!hasValidData || !localYBins || localYBins.length === 0) {
+      return { min: 0, max: 100, step: 10 };
+    }
+    
     const yMin = Math.min(...localYBins);
     const yMax = Math.max(...localYBins);
     const dataPadding = (yMax - yMin) * 0.1 || 0.5;
     
     const base = data.y_axis 
       ? { min: data.y_axis[0], max: data.y_axis[1], step: data.y_axis[2] }
-      : { min: yMin - dataPadding, max: yMax + dataPadding, step: 10 };
+      : (() => {
+          const min = yMin - dataPadding;
+          const max = yMax + dataPadding;
+          return { min, max, step: getNiceStep(min, max) };
+        })();
     
     if (!yAxisOverride.auto) {
       return {
@@ -223,7 +289,7 @@ export default function CurveEditor({
       };
     }
     return base;
-  }, [data.y_axis, localYBins, yAxisOverride]);
+  }, [hasValidData, data?.y_axis, localYBins, yAxisOverride]);
 
   // Scale functions
   const scaleX = useCallback((x: number) => {
@@ -285,30 +351,38 @@ export default function CurveEditor({
 
   // Polyline points
   const polylinePoints = useMemo(() => {
-    return data.x_bins.map((x, i) => `${scaleX(x)},${scaleY(localYBins[i])}`).join(' ');
-  }, [data.x_bins, localYBins, scaleX, scaleY]);
+    if (!hasValidData || !data?.x_bins || data.x_bins.length === 0) return '';
+    return data.x_bins.map((x, i) => `${scaleX(x)},${scaleY(localYBins[i] ?? 0)}`).join(' ');
+  }, [hasValidData, data?.x_bins, localYBins, scaleX, scaleY]);
 
   // Live cursor position
   const liveCursor = useMemo(() => {
-    if (!realtimeData || !data.x_output_channel) return null;
-    const xValue = realtimeData[data.x_output_channel];
-    if (xValue === undefined) return null;
+    if (!hasValidData || !data?.x_bins || data.x_bins.length === 0) return null;
+    if (xOutputChannelValue === undefined || !data.x_output_channel) return null;
+    const xValue = xOutputChannelValue;
     
-    // Find the interpolated Y value
-    let yValue = localYBins[0];
+    // Find the interpolated Y value (supports ascending or descending bins)
+    let yValue = localYBins[0] ?? 0;
+    const ascending = data.x_bins[0] <= data.x_bins[data.x_bins.length - 1];
     for (let i = 0; i < data.x_bins.length - 1; i++) {
-      if (xValue >= data.x_bins[i] && xValue <= data.x_bins[i + 1]) {
-        const t = (xValue - data.x_bins[i]) / (data.x_bins[i + 1] - data.x_bins[i]);
-        yValue = localYBins[i] + t * (localYBins[i + 1] - localYBins[i]);
+      const start = data.x_bins[i];
+      const end = data.x_bins[i + 1];
+      const inRange = ascending
+        ? xValue >= start && xValue <= end
+        : xValue <= start && xValue >= end;
+      if (inRange) {
+        const denom = end - start;
+        const t = denom !== 0 ? (xValue - start) / denom : 0;
+        yValue = (localYBins[i] ?? 0) + t * ((localYBins[i + 1] ?? 0) - (localYBins[i] ?? 0));
         break;
       }
     }
-    if (xValue > data.x_bins[data.x_bins.length - 1]) {
-      yValue = localYBins[localYBins.length - 1];
+    if ((ascending && xValue > data.x_bins[data.x_bins.length - 1]) || (!ascending && xValue < data.x_bins[data.x_bins.length - 1])) {
+      yValue = localYBins[localYBins.length - 1] ?? 0;
     }
     
     return { x: xValue, y: yValue, screenX: scaleX(xValue), screenY: scaleY(yValue) };
-  }, [realtimeData, data.x_output_channel, data.x_bins, localYBins, scaleX, scaleY]);
+  }, [hasValidData, xOutputChannelValue, data?.x_output_channel, data?.x_bins, localYBins, scaleX, scaleY]);
 
   // Persist changes to backend
   const persistCurveValues = useCallback(async (yBins: number[]) => {
@@ -509,15 +583,70 @@ export default function CurveEditor({
     closeContextMenu();
   };
 
+  // Render error state if data is invalid (after all hooks have been called)
+  if (!hasValidData) {
+    const getErrorMessage = () => {
+      if (!data) {
+        return {
+          summary: 'No curve data available.',
+          details: 'The curve data object is null or undefined. This may indicate a backend loading error.',
+          suggestion: 'Check the browser console for curve loading errors from get_curve_data.',
+        };
+      }
+      if (!data.x_bins || !Array.isArray(data.x_bins) || data.x_bins.length === 0) {
+        const xAxisConstant = data.name.replace(/Curve$/, 'Bins').replace(/Table$/, 'Bins');
+        return {
+          summary: `No X-axis bins available for curve "${data.title || data.name}".`,
+          details: `Curve "${data.name}" has x_bins: ${JSON.stringify(data.x_bins)}`,
+          suggestion: `The X-axis constant (possibly "${xAxisConstant}") may not be loaded from the tune file. Check if a string constant before it is disrupting offset calculation.`,
+        };
+      }
+      if (!data.y_bins || !Array.isArray(data.y_bins) || data.y_bins.length === 0) {
+        return {
+          summary: `No Y-axis bins available for curve "${data.title || data.name}".`,
+          details: `Curve "${data.name}" has y_bins: ${JSON.stringify(data.y_bins)}`,
+          suggestion: 'The Y-axis constant may not be loaded from the tune file or may have zero elements.',
+        };
+      }
+      return {
+        summary: 'Unknown curve data error.',
+        details: `Curve name: "${data.name}", x_bins: ${data.x_bins?.length ?? 0}, y_bins: ${data.y_bins?.length ?? 0}`,
+        suggestion: 'Check browser console for more details.',
+      };
+    };
+
+    const errorInfo = getErrorMessage();
+
+    return (
+      <div className="curve-editor curve-error-state" style={{ padding: '20px', textAlign: 'center' }}>
+        <h3 style={{ color: 'var(--error)', marginBottom: '8px' }}>⚠️ Curve Data Error</h3>
+        <p style={{ color: 'var(--text-muted)', marginBottom: '12px' }}>{errorInfo.summary}</p>
+        <details style={{ textAlign: 'left', background: 'rgba(0,0,0,0.2)', padding: '12px', borderRadius: '6px', marginBottom: '12px' }}>
+          <summary style={{ cursor: 'pointer', color: 'var(--text-muted)' }}>Diagnostic Details</summary>
+          <pre style={{ fontSize: '11px', marginTop: '8px', whiteSpace: 'pre-wrap', color: 'var(--text-secondary)' }}>
+{errorInfo.details}
+
+Suggestion: {errorInfo.suggestion}
+          </pre>
+        </details>
+        {onBack && (
+          <button onClick={onBack} style={{ marginTop: '8px' }} className="btn btn-secondary">
+            ← Go Back
+          </button>
+        )}
+      </div>
+    );
+  }
+
   // Display title
   const displayTitle = menuLabel 
     ? `${menuLabel} (${data.name})` 
     : data.title || data.name;
 
-  // Gauge value
-  const gaugeValue = realtimeData && data.x_output_channel 
-    ? realtimeData[data.x_output_channel] ?? 0 
-    : 0;
+  // Gauge value from store
+  const gaugeValue = xOutputChannelValue ?? 0;
+
+  console.log(`[CurveEditor] Rendering curve '${data.name}' in ${embedded ? 'embedded' : 'standalone'} mode with ${data.x_bins.length} points`);
 
   return (
     <div 

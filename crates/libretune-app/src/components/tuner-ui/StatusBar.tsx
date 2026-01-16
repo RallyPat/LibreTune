@@ -5,7 +5,6 @@ interface StatusBarProps {
   items: StatusItem[];
   connected: boolean;
   ecuName?: string;
-  realtimeData?: Record<string, number>;
   unitsSystem?: 'metric' | 'imperial';
 }
 

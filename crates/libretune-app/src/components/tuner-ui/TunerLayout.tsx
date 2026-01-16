@@ -25,7 +25,10 @@ export interface TunerLayoutProps {
   sidebarItems: SidebarNode[];
   sidebarVisible: boolean;
   onSidebarToggle: () => void;
-  onSidebarItemSelect: (item: SidebarNode) => void;
+  /** Callback when an item is selected. highlightTerm is the search query if user clicked from search results. */
+  onSidebarItemSelect: (item: SidebarNode, highlightTerm?: string) => void;
+  /** Index of searchable content for deep search (target -> terms) */
+  searchIndex?: Record<string, string[]>;
   
   // Status bar
   statusItems: StatusItem[];
@@ -33,9 +36,6 @@ export interface TunerLayoutProps {
   // Connection status
   connected: boolean;
   ecuName?: string;
-
-  // Realtime data for status bar
-  realtimeData?: Record<string, number>;
 
   // Unit system
   unitsSystem?: 'metric' | 'imperial';
@@ -73,6 +73,10 @@ export interface SidebarNode {
   expanded?: boolean;
   type?: 'folder' | 'table' | 'dialog' | 'dashboard' | 'log' | 'help';
   data?: unknown;
+  /** Whether item is disabled (visibility condition evaluated to false) */
+  disabled?: boolean;
+  /** Tooltip explaining why item is disabled */
+  disabledReason?: string;
 }
 
 export interface StatusItem {
@@ -96,10 +100,10 @@ export function TunerLayout({
   sidebarVisible,
   onSidebarToggle: _onSidebarToggle,
   onSidebarItemSelect,
+  searchIndex,
   statusItems,
   connected,
   ecuName,
-  realtimeData,
   unitsSystem,
   children,
 }: TunerLayoutProps) {
@@ -126,6 +130,7 @@ export function TunerLayout({
             width={sidebarWidth}
             onResize={handleSidebarResize}
             onItemSelect={onSidebarItemSelect}
+            searchIndex={searchIndex}
           />
         )}
         
@@ -153,7 +158,6 @@ export function TunerLayout({
         items={statusItems}
         connected={connected}
         ecuName={ecuName}
-        realtimeData={realtimeData}
         unitsSystem={unitsSystem}
       />
     </div>

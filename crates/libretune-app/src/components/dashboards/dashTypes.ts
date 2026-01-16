@@ -70,6 +70,7 @@ export type GaugePainter =
   | 'AsymmetricSweepGauge'
   | 'BasicReadout'
   | 'HorizontalBarGauge'
+  | 'HorizontalDashedBar'
   | 'VerticalBarGauge'
   | 'HorizontalLineGauge'
   | 'VerticalDashedBar'
@@ -83,7 +84,7 @@ export type GaugePainter =
   | 'Tachometer';
 
 /** Indicator painter type */
-export type IndicatorPainter = 'BasicRectangleIndicator';
+export type IndicatorPainter = 'BasicRectangleIndicator' | 'BulbIndicator';
 
 /** Gauge configuration from TS .dash file */
 export interface TsGaugeConfig {

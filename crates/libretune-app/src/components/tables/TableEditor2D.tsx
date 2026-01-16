@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { ArrowLeft, Save, Zap, ExternalLink } from 'lucide-react';
 import TableToolbar from './TableToolbar';
@@ -7,6 +7,7 @@ import TableContextMenu from './TableContextMenu';
 import RebinDialog from '../dialogs/RebinDialog';
 import CellEditDialog from '../dialogs/CellEditDialog';
 import { useHeatmapSettings } from '../../utils/useHeatmapSettings';
+import { useChannels } from '../../stores/realtimeStore';
 import './TableComponents.css';
 import './TableEditor2D.css';
 
@@ -28,10 +29,12 @@ interface TableEditor2DProps {
   y_bins: number[];
   /** 2D array of Z values [row][col] */
   z_values: number[][];
+  /** Output channel name for X-axis (used for live cursor) */
+  x_output_channel?: string | null;
+  /** Output channel name for Y-axis (used for live cursor) */
+  y_output_channel?: string | null;
   /** Callback when back button is clicked (optional for embedded mode) */
   onBack?: () => void;
-  /** Real-time ECU data for live cursor position */
-  realtimeData?: Record<string, number>;
   /** Compact mode for embedding in dialogs */
   embedded?: boolean;
   /** Callback to open this table in a separate tab */
@@ -84,7 +87,6 @@ interface CellEditDialogState {
  *   x_bins={[500, 1000, 1500, ...]}
  *   y_bins={[20, 40, 60, ...]}
  *   z_values={[[50, 52, ...], ...]}
- *   realtimeData={realtimeData}
  *   onBack={() => closeTab()}
  * />
  * ```
@@ -97,13 +99,37 @@ export default function TableEditor2D({
   x_bins,
   y_bins,
   z_values,
+  x_output_channel,
+  y_output_channel,
   onBack,
-  realtimeData,
   embedded = false,
   onOpenInTab,
   onValuesChange,
 }: TableEditor2DProps) {
-  const [localZValues, setLocalZValues] = useState<number[][]>([...z_values]);
+  // Determine if data is valid - used for conditional rendering after hooks
+  const hasValidData = 
+    z_values && Array.isArray(z_values) && z_values.length > 0 &&
+    x_bins && Array.isArray(x_bins) && x_bins.length > 0 &&
+    y_bins && Array.isArray(y_bins) && y_bins.length > 0;
+
+  // Get realtime data from Zustand store for live cursor (ECU-agnostic)
+  const outputChannels = useMemo(() => {
+    const channels: string[] = [];
+    if (x_output_channel) channels.push(x_output_channel);
+    if (y_output_channel) channels.push(y_output_channel);
+    if (channels.length === 0) {
+      channels.push('rpm', 'map');
+    }
+    return channels;
+  }, [x_output_channel, y_output_channel]);
+  const realtimeData = useChannels(outputChannels);
+  
+  // Use safe fallback values for hooks when data is invalid
+  const safeZValues = hasValidData ? z_values : [[0]];
+  const safeXBins = hasValidData ? x_bins : [0];
+  const safeYBins = hasValidData ? y_bins : [0];
+  
+  const [localZValues, setLocalZValues] = useState<number[][]>([...safeZValues]);
   const [selectedCells, setSelectedCells] = useState<Set<string>>(new Set());
   const [lockedCells, setLockedCells] = useState<Set<string>>(new Set());
   const [historyTrail, setHistoryTrail] = useState<[number, number][]>([]);
@@ -113,8 +139,8 @@ export default function TableEditor2D({
   const [canUndo, setCanUndo] = useState(false);
   const [rebinDialog, setRebinDialog] = useState<RebinDialogState>({
     show: false,
-    newXBins: [...x_bins],
-    newYBins: [...y_bins],
+    newXBins: [...safeXBins],
+    newYBins: [...safeYBins],
   });
   const [contextMenu, setContextMenu] = useState<{
     visible: boolean;
@@ -571,6 +597,34 @@ export default function TableEditor2D({
     });
   };
 
+  // Render error state if data is invalid (after all hooks have been called)
+  if (!hasValidData) {
+    const getErrorMessage = () => {
+      if (!z_values || !Array.isArray(z_values) || z_values.length === 0) {
+        return `No Z-values available for table "${title || table_name}". The table data may be missing or improperly formatted in the tune file.`;
+      }
+      if (!x_bins || !Array.isArray(x_bins) || x_bins.length === 0) {
+        return `No X-axis bins available for table "${title || table_name}".`;
+      }
+      if (!y_bins || !Array.isArray(y_bins) || y_bins.length === 0) {
+        return `No Y-axis bins available for table "${title || table_name}".`;
+      }
+      return 'Unknown table data error.';
+    };
+
+    return (
+      <div className="table-editor" style={{ padding: '20px', textAlign: 'center' }}>
+        <h3 style={{ color: 'var(--error)', marginBottom: '8px' }}>⚠️ Table Data Error</h3>
+        <p style={{ color: 'var(--text-muted)' }}>{getErrorMessage()}</p>
+        {onBack && (
+          <button onClick={onBack} style={{ marginTop: '16px' }} className="btn btn-secondary">
+            ← Go Back
+          </button>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className={`table-editor-2d ${embedded ? 'embedded' : 'standalone'}`}>
       {/* Embedded mode: compact title bar with pop-out button */}
@@ -689,8 +743,8 @@ export default function TableEditor2D({
           onCellLock={handleCellLock}
           // Live cursor - maps realtime values to table position
           showLiveCursor={followMode && realtimeData !== undefined}
-          liveCursorX={realtimeData?.rpm}  // Use RPM for X-axis (common for VE tables)
-          liveCursorY={realtimeData?.map}  // Use MAP for Y-axis
+          liveCursorX={x_output_channel ? realtimeData?.[x_output_channel] : realtimeData?.rpm}
+          liveCursorY={y_output_channel ? realtimeData?.[y_output_channel] : realtimeData?.map}
           // Heatmap color settings
           showColorShade={showColorShade}
           heatmapScheme={heatmapSettings.valueScheme}

@@ -719,6 +719,8 @@ export default function TableEditor3DNew({
   const [fullscreen, setFullscreen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
+  const canRender3D = x_bins.length > 1 && y_bins.length > 1 && z_values.length > 0 && z_values[0]?.length > 0;
+
   const handleCellClick = useCallback((x: number, y: number) => {
     onCellSelect?.(x, y);
   }, [onCellSelect]);
@@ -738,6 +740,23 @@ export default function TableEditor3DNew({
   const zFlat = z_values.flat();
   const zMin = Math.min(...zFlat);
   const zMax = Math.max(...zFlat);
+
+  if (!canRender3D) {
+    return (
+      <div ref={containerRef} className={`table-editor-3d ${fullscreen ? 'fullscreen' : ''}`}>
+        <div className="table3d-header">
+          <button className="table3d-back-btn" onClick={onBack}>
+            <ArrowLeft size={16} />
+            Back
+          </button>
+          <div className="table3d-title">{title}</div>
+        </div>
+        <div className="table3d-empty">
+          3D view requires at least 2 bins on both axes.
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div ref={containerRef} className={`table-editor-3d ${fullscreen ? 'fullscreen' : ''}`}>

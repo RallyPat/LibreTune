@@ -383,9 +383,14 @@ fn convert_dashfile_to_layout(dash: &DashFile, name: &str) -> DashboardLayout {
             let gauge_type = match g.gauge_painter {
                 GaugePainter::AnalogGauge
                 | GaugePainter::BasicAnalogGauge
-                | GaugePainter::CircleAnalogGauge => GaugeType::AnalogDial,
+                | GaugePainter::CircleAnalogGauge
+                | GaugePainter::RoundGauge
+                | GaugePainter::RoundDashedGauge
+                | GaugePainter::FuelMeter
+                | GaugePainter::Tachometer => GaugeType::AnalogDial,
                 GaugePainter::BasicReadout => GaugeType::DigitalReadout,
                 GaugePainter::HorizontalBarGauge
+                | GaugePainter::HorizontalDashedBar
                 | GaugePainter::VerticalBarGauge
                 | GaugePainter::HorizontalLineGauge
                 | GaugePainter::VerticalDashedBar
@@ -864,6 +869,17 @@ async fn load_ini(
                 let _ = app.emit("tune:loaded", "ini_changed");
             }
             drop(cache_guard);
+
+            // Emit event to notify UI that definition is fully loaded with stats
+            let _ = app.emit("definition:loaded", serde_json::json!({
+                "signature": def_clone.signature,
+                "tables": def_clone.tables.len(),
+                "curves": def_clone.curves.len(),
+                "dialogs": def_clone.dialogs.len(),
+                "constants": def_clone.constants.len(),
+            }));
+            eprintln!("[INFO] load_ini: Emitted definition:loaded event (tables={}, curves={}, dialogs={})",
+                def_clone.tables.len(), def_clone.curves.len(), def_clone.dialogs.len());
 
             // Save as last INI
             let mut settings = load_settings(&app);
@@ -1524,7 +1540,7 @@ async fn get_table_data(
             return Ok(vec![0.0; element_count]);
         }
 
-        // If offline, always read from TuneFile (MSQ file) - no cache fallback
+        // If offline, read from TuneFile constants first, then fall back to raw page data
         if conn.is_none() {
             if let Some(tune_file) = tune {
                 if let Some(tune_value) = tune_file.constants.get(&constant.name) {
@@ -1544,14 +1560,35 @@ async fn get_table_data(
                             eprintln!("[DEBUG] read_const_from_source: Found '{}' in TuneFile but wrong type, falling through", constant.name);
                         }
                     }
-                } else {
-                    eprintln!("[DEBUG] read_const_from_source: Constant '{}' not found in TuneFile, returning zeros", constant.name);
-                    return Ok(vec![0.0; element_count]);
                 }
-            } else {
-                eprintln!("[DEBUG] read_const_from_source: No TuneFile loaded, returning zeros");
+
+                if let Some(page_data) = tune_file.pages.get(&constant.page) {
+                    let offset = constant.offset as usize;
+                    let total_bytes = (element_count * element_size) as usize;
+                    if offset + total_bytes <= page_data.len() {
+                        eprintln!("[DEBUG] read_const_from_source: '{}' reading from TuneFile.pages[{}] at offset {}", 
+                            constant.name, constant.page, offset);
+                        let mut values = Vec::with_capacity(element_count);
+                        for i in 0..element_count {
+                            let elem_offset = offset + i * element_size;
+                            if let Some(raw_val) = constant.data_type.read_from_bytes(page_data, elem_offset, endianness) {
+                                values.push(constant.raw_to_display(raw_val));
+                            } else {
+                                values.push(0.0);
+                            }
+                        }
+                        return Ok(values);
+                    }
+                    eprintln!("[WARN] read_const_from_source: '{}' offset {} + size {} exceeds page {} length {}", 
+                        constant.name, offset, total_bytes, constant.page, page_data.len());
+                } else {
+                    eprintln!("[DEBUG] read_const_from_source: Page {} not found in TuneFile.pages for '{}'", constant.page, constant.name);
+                }
+                eprintln!("[DEBUG] read_const_from_source: Constant '{}' not found in TuneFile, returning zeros", constant.name);
                 return Ok(vec![0.0; element_count]);
             }
+            eprintln!("[DEBUG] read_const_from_source: No TuneFile loaded, returning zeros");
+            return Ok(vec![0.0; element_count]);
         }
 
         // If connected to ECU, always read from ECU (live data)
@@ -1662,15 +1699,38 @@ async fn get_table_info(
     table_name: String,
 ) -> Result<TableInfo, String> {
     let def_guard = state.definition.lock().await;
-    let def = def_guard.as_ref().ok_or("Definition not loaded")?;
+    let def = def_guard.as_ref().ok_or_else(|| {
+        eprintln!("[WARN] get_table_info: Definition not loaded when looking for '{}'", table_name);
+        "Definition not loaded".to_string()
+    })?;
+
+    // Diagnostic logging
+    eprintln!(
+        "[DEBUG] get_table_info: Looking for '{}' in {} tables ({} map entries)",
+        table_name,
+        def.tables.len(),
+        def.table_map_to_name.len()
+    );
 
     if let Some(table) = def.get_table_by_name_or_map(&table_name) {
+        eprintln!("[DEBUG] get_table_info: Found table '{}' (title: {})", table.name, table.title);
         Ok(TableInfo {
             name: table.name.clone(),
             title: table.title.clone(),
         })
     } else {
-        Err(format!("Table {} not found", table_name))
+        // Log available tables for debugging
+        let available: Vec<_> = def.tables.keys().take(10).cloned().collect();
+        eprintln!(
+            "[WARN] get_table_info: Table '{}' not found. Available tables (first 10): {:?}",
+            table_name, available
+        );
+        Err(format!(
+            "Table '{}' not found (checked {} tables, {} map entries)",
+            table_name,
+            def.tables.len(),
+            def.table_map_to_name.len()
+        ))
     }
 }
 
@@ -1886,13 +1946,38 @@ async fn get_curve_data(
     curve_name: String,
 ) -> Result<CurveData, String> {
     let def_guard = state.definition.lock().await;
-    let def = def_guard.as_ref().ok_or("Definition not loaded")?;
+    let def = def_guard.as_ref().ok_or_else(|| {
+        eprintln!("[WARN] get_curve_data: Definition not loaded when looking for '{}'", curve_name);
+        "Definition not loaded".to_string()
+    })?;
     let endianness = def.endianness;
 
+    // Diagnostic logging
+    eprintln!(
+        "[DEBUG] get_curve_data: Looking for '{}' in {} curves ({} map entries)",
+        curve_name,
+        def.curves.len(),
+        def.curve_map_to_name.len()
+    );
+
     let curve = def
-        .curves
-        .get(&curve_name)
-        .ok_or_else(|| format!("Curve {} not found", curve_name))?;
+        .get_curve_by_name_or_map(&curve_name)
+        .ok_or_else(|| {
+            // Log available curves for debugging
+            let available: Vec<_> = def.curves.keys().take(10).cloned().collect();
+            eprintln!(
+                "[WARN] get_curve_data: Curve '{}' not found. Available curves (first 10): {:?}",
+                curve_name, available
+            );
+            format!(
+                "Curve '{}' not found (checked {} curves, {} map entries)",
+                curve_name,
+                def.curves.len(),
+                def.curve_map_to_name.len()
+            )
+        })?;
+
+    eprintln!("[DEBUG] get_curve_data: Found curve '{}' (title: {})", curve.name, curve.title);
 
     // Clone the constant info we need
     let x_const = def
@@ -1929,17 +2014,21 @@ async fn get_curve_data(
         let element_size = constant.data_type.size_bytes();
         let length = constant.size_bytes() as u16;
 
-        if length == 0 {
-            return Ok(vec![0.0; element_count]);
-        }
+        eprintln!(
+            "[DEBUG] read_const_from_source: '{}' - shape={:?}, element_count={}, element_size={}, total_length={}",
+            constant.name, constant.shape, element_count, element_size, length
+        );
 
         // If offline, read from TuneFile (MSQ file)
         if conn.is_none() {
             if let Some(tune_file) = tune {
+                // First try named constants (parsed from MSQ <constant> tags)
                 if let Some(tune_value) = tune_file.constants.get(&constant.name) {
                     use libretune_core::tune::TuneValue;
+                    eprintln!("[DEBUG] read_const_from_source: '{}' found in TuneFile.constants", constant.name);
                     match tune_value {
                         TuneValue::Array(arr) => {
+                            eprintln!("[DEBUG] read_const_from_source: '{}' returning {} array values from constants", constant.name, arr.len());
                             return Ok(arr.clone());
                         }
                         TuneValue::Scalar(v) => {
@@ -1948,7 +2037,45 @@ async fn get_curve_data(
                         _ => {}
                     }
                 }
+                
+                // Fallback: try to read from raw page data using INI offset
+                // This handles cases where the constant wasn't explicitly in the MSQ file
+                if let Some(page_data) = tune_file.pages.get(&constant.page) {
+                    let offset = constant.offset as usize;
+                    let total_bytes = (element_count * element_size) as usize;
+                    
+                    if offset + total_bytes <= page_data.len() {
+                        eprintln!("[DEBUG] read_const_from_source: '{}' reading from TuneFile.pages[{}] at offset {}", 
+                            constant.name, constant.page, offset);
+                        
+                        let mut values = Vec::with_capacity(element_count);
+                        for i in 0..element_count {
+                            let elem_offset = offset + i * element_size;
+                            if let Some(raw_val) = constant.data_type.read_from_bytes(page_data, elem_offset, endianness) {
+                                values.push(constant.raw_to_display(raw_val));
+                            } else {
+                                values.push(0.0);
+                            }
+                        }
+                        eprintln!("[DEBUG] read_const_from_source: '{}' returning {} values from page data", constant.name, values.len());
+                        return Ok(values);
+                    } else {
+                        eprintln!("[WARN] read_const_from_source: '{}' offset {} + size {} exceeds page {} length {}", 
+                            constant.name, offset, total_bytes, constant.page, page_data.len());
+                    }
+                } else {
+                    eprintln!("[WARN] read_const_from_source: '{}' page {} not found in TuneFile.pages (available: {:?})", 
+                        constant.name, constant.page, tune_file.pages.keys().collect::<Vec<_>>());
+                }
             }
+            // If not found anywhere, return zeros
+            eprintln!("[DEBUG] read_const_from_source: '{}' returning {} zeros (not in TuneFile)", constant.name, element_count);
+            return Ok(vec![0.0; element_count]);
+        }
+
+        // For ECU reads, we need valid length
+        if length == 0 {
+            eprintln!("[WARN] read_const_from_source: '{}' has length=0, cannot read from ECU", constant.name);
             return Ok(vec![0.0; element_count]);
         }
 
@@ -2453,51 +2580,65 @@ async fn start_realtime_stream(
                 // Real ECU mode: read from connection
                 demo_simulator = None; // Clear simulator if we switch modes
 
-                let mut conn_guard = app_state.connection.lock().await;
-                let def_guard = app_state.definition.lock().await;
+                // Phase 1: Get raw data from ECU (hold connection lock only during I/O)
+                let raw_result: Result<Vec<u8>, String>;
+                {
+                    let mut conn_guard = app_state.connection.lock().await;
+                    if let Some(conn) = conn_guard.as_mut() {
+                        raw_result = conn.get_realtime_data().map_err(|e| e.to_string());
+                    } else {
+                        raw_result = Err("No connection".to_string());
+                    }
+                } // conn_guard dropped here - mutex released immediately after I/O
 
-                if let (Some(conn), Some(def)) = (conn_guard.as_mut(), def_guard.as_ref()) {
-                    match conn.get_realtime_data() {
-                        Ok(raw) => {
-                            // Two-pass approach for computed channels:
-                            // Pass 1: Parse all non-computed channels
-                            let mut data: HashMap<String, f64> = HashMap::new();
-                            let mut computed_channels = Vec::new();
+                // Phase 2: Get definition for parsing (quick lock, clone what we need)
+                let def_data: Option<(HashMap<String, libretune_core::ini::OutputChannel>, libretune_core::ini::Endianness)>;
+                {
+                    let def_guard = app_state.definition.lock().await;
+                    def_data = def_guard.as_ref().map(|def| {
+                        (def.output_channels.clone(), def.endianness)
+                    });
+                } // def_guard dropped here
 
-                            for (name, channel) in &def.output_channels {
-                                if channel.is_computed() {
-                                    computed_channels.push((name.clone(), channel.clone()));
-                                } else if let Some(val) = channel.parse(&raw, def.endianness) {
-                                    data.insert(name.clone(), val);
-                                }
-                            }
+                // Phase 3: Process data outside of any mutex locks
+                match (raw_result, def_data) {
+                    (Ok(raw), Some((output_channels, endianness))) => {
+                        // Two-pass approach for computed channels:
+                        // Pass 1: Parse all non-computed channels
+                        let mut data: HashMap<String, f64> = HashMap::new();
+                        let mut computed_channels = Vec::new();
 
-                            // Pass 2: Evaluate computed channels using parsed values as context
-                            for (name, channel) in computed_channels {
-                                if let Some(val) =
-                                    channel.parse_with_context(&raw, def.endianness, &data)
-                                {
-                                    data.insert(name, val);
-                                }
-                            }
-
-                            let _ = app_handle.emit("realtime:update", &data);
-
-                            // Feed data to AutoTune if running
-                            // Note: We need to drop the guards first to avoid deadlock
-                            drop(conn_guard);
-                            drop(def_guard);
-                            feed_autotune_data(&app_state, &data, current_time_ms).await;
-
-                            // Forward realtime data to plugin bridge for TS-compatible plugins
-                            if let Some(ref bridge) = *app_state.controller_bridge.lock().await {
-                                bridge.update_realtime(data);
+                        for (name, channel) in &output_channels {
+                            if channel.is_computed() {
+                                computed_channels.push((name.clone(), channel.clone()));
+                            } else if let Some(val) = channel.parse(&raw, endianness) {
+                                data.insert(name.clone(), val);
                             }
                         }
-                        Err(e) => {
-                            let _ = app_handle.emit("realtime:error", &e.to_string());
+
+                        // Pass 2: Evaluate computed channels using parsed values as context
+                        for (name, channel) in computed_channels {
+                            if let Some(val) =
+                                channel.parse_with_context(&raw, endianness, &data)
+                            {
+                                data.insert(name, val);
+                            }
+                        }
+
+                        let _ = app_handle.emit("realtime:update", &data);
+
+                        // Feed data to AutoTune if running
+                        feed_autotune_data(&app_state, &data, current_time_ms).await;
+
+                        // Forward realtime data to plugin bridge for TS-compatible plugins
+                        if let Some(ref bridge) = *app_state.controller_bridge.lock().await {
+                            bridge.update_realtime(data);
                         }
                     }
+                    (Err(e), _) => {
+                        let _ = app_handle.emit("realtime:error", &e);
+                    }
+                    _ => {}
                 }
             }
         }
@@ -2527,6 +2668,12 @@ struct TableInfo {
     title: String,
 }
 
+#[derive(Serialize)]
+struct CurveInfo {
+    name: String,
+    title: String,
+}
+
 /// Lists all available tables from the loaded INI definition.
 ///
 /// Returns basic info (name and title) for all tables defined in the INI.
@@ -2548,6 +2695,29 @@ async fn get_tables(state: tauri::State<'_, AppState>) -> Result<Vec<TableInfo>,
         .collect();
     tables.sort_by(|a, b| a.title.cmp(&b.title));
     Ok(tables)
+}
+
+/// Lists all available curves from the loaded INI definition.
+///
+/// Returns basic info (name and title) for all curves defined in the INI.
+/// Used to populate sidebar curve list and search UI.
+///
+/// Returns: Sorted vector of CurveInfo with name and title
+#[tauri::command]
+async fn get_curves(state: tauri::State<'_, AppState>) -> Result<Vec<CurveInfo>, String> {
+    let def_guard = state.definition.lock().await;
+    let def = def_guard.as_ref().ok_or("Definition not loaded")?;
+
+    let mut curves: Vec<CurveInfo> = def
+        .curves
+        .values()
+        .map(|c| CurveInfo {
+            name: c.name.clone(),
+            title: c.title.clone(),
+        })
+        .collect();
+    curves.sort_by(|a, b| a.title.cmp(&b.title));
+    Ok(curves)
 }
 
 /// Gauge configuration info returned to frontend
@@ -2778,120 +2948,230 @@ async fn get_menu_tree(
     let def_guard = state.definition.lock().await;
     let def = def_guard.as_ref().ok_or("Definition not loaded")?;
 
+    // Always return all menu items - visibility conditions are evaluated but items are never filtered out
+    // This allows the frontend to show all items (grayed out if disabled) and enables search to find everything
     if let Some(context) = filter_context {
-        let mut filtered_menus = Vec::new();
+        let mut all_menus = Vec::new();
         for menu in &def.menus {
-            let filtered_items = filter_menu_items(&menu.items, &context);
-            if !filtered_items.is_empty() {
-                filtered_menus.push(Menu {
-                    name: menu.name.clone(),
-                    title: menu.title.clone(),
-                    items: filtered_items,
-                });
-            }
+            let items_with_flags = add_visibility_flags(&menu.items, &context);
+            all_menus.push(Menu {
+                name: menu.name.clone(),
+                title: menu.title.clone(),
+                items: items_with_flags,
+            });
         }
-        Ok(filtered_menus)
+        Ok(all_menus)
     } else {
         Ok(def.menus.clone())
     }
 }
 
-fn filter_menu_items(items: &[MenuItem], context: &HashMap<String, f64>) -> Vec<MenuItem> {
-    let mut filtered = Vec::new();
-    for item in items {
-        if should_show_item(item, context) {
-            // If it's a SubMenu, recursively filter its children
-            let filtered_item = match item {
-                MenuItem::SubMenu {
-                    label,
-                    items: sub_items,
-                    visibility_condition,
-                    enabled_condition,
-                } => {
-                    let filtered_children = filter_menu_items(sub_items, context);
-                    if !filtered_children.is_empty() {
-                        MenuItem::SubMenu {
-                            label: label.clone(),
-                            items: filtered_children,
-                            visibility_condition: visibility_condition.clone(),
-                            enabled_condition: enabled_condition.clone(),
-                        }
-                    } else {
-                        continue; // Skip submenu with no visible children
-                    }
+/// Recursively add visibility/enabled flags to menu items without filtering them out
+fn add_visibility_flags(items: &[MenuItem], context: &HashMap<String, f64>) -> Vec<MenuItem> {
+    items.iter().map(|item| {
+        match item {
+            MenuItem::Dialog {
+                label,
+                target,
+                visibility_condition,
+                enabled_condition,
+                ..
+            } => {
+                let visible = evaluate_visibility(visibility_condition, context);
+                let enabled = evaluate_visibility(enabled_condition, context);
+                MenuItem::Dialog {
+                    label: label.clone(),
+                    target: target.clone(),
+                    visibility_condition: visibility_condition.clone(),
+                    enabled_condition: enabled_condition.clone(),
+                    visible,
+                    enabled,
                 }
-                _ => item.clone(),
-            };
-            filtered.push(filtered_item);
+            }
+            MenuItem::Table {
+                label,
+                target,
+                visibility_condition,
+                enabled_condition,
+                ..
+            } => {
+                let visible = evaluate_visibility(visibility_condition, context);
+                let enabled = evaluate_visibility(enabled_condition, context);
+                MenuItem::Table {
+                    label: label.clone(),
+                    target: target.clone(),
+                    visibility_condition: visibility_condition.clone(),
+                    enabled_condition: enabled_condition.clone(),
+                    visible,
+                    enabled,
+                }
+            }
+            MenuItem::SubMenu {
+                label,
+                items: sub_items,
+                visibility_condition,
+                enabled_condition,
+                ..
+            } => {
+                let visible = evaluate_visibility(visibility_condition, context);
+                let enabled = evaluate_visibility(enabled_condition, context);
+                // Recursively process children
+                let children_with_flags = add_visibility_flags(sub_items, context);
+                MenuItem::SubMenu {
+                    label: label.clone(),
+                    items: children_with_flags,
+                    visibility_condition: visibility_condition.clone(),
+                    enabled_condition: enabled_condition.clone(),
+                    visible,
+                    enabled,
+                }
+            }
+            MenuItem::Std {
+                label,
+                target,
+                visibility_condition,
+                enabled_condition,
+                ..
+            } => {
+                let visible = evaluate_visibility(visibility_condition, context);
+                let enabled = evaluate_visibility(enabled_condition, context);
+                MenuItem::Std {
+                    label: label.clone(),
+                    target: target.clone(),
+                    visibility_condition: visibility_condition.clone(),
+                    enabled_condition: enabled_condition.clone(),
+                    visible,
+                    enabled,
+                }
+            }
+            MenuItem::Help {
+                label,
+                target,
+                visibility_condition,
+                enabled_condition,
+                ..
+            } => {
+                let visible = evaluate_visibility(visibility_condition, context);
+                let enabled = evaluate_visibility(enabled_condition, context);
+                MenuItem::Help {
+                    label: label.clone(),
+                    target: target.clone(),
+                    visibility_condition: visibility_condition.clone(),
+                    enabled_condition: enabled_condition.clone(),
+                    visible,
+                    enabled,
+                }
+            }
+            MenuItem::Separator => MenuItem::Separator,
         }
-    }
-    filtered
+    }).collect()
 }
 
-fn should_show_item(item: &MenuItem, context: &HashMap<String, f64>) -> bool {
-    match item {
-        MenuItem::Dialog {
-            visibility_condition,
-            enabled_condition,
-            ..
-        }
-        | MenuItem::Table {
-            visibility_condition,
-            enabled_condition,
-            ..
-        }
-        | MenuItem::SubMenu {
-            visibility_condition,
-            enabled_condition,
-            ..
-        }
-        | MenuItem::Std {
-            visibility_condition,
-            enabled_condition,
-            ..
-        }
-        | MenuItem::Help {
-            visibility_condition,
-            enabled_condition,
-            ..
-        } => {
-            // Evaluate visibility condition first (if present)
-            if let Some(vis_cond) = visibility_condition {
-                let mut parser = libretune_core::ini::expression::Parser::new(vis_cond);
-                if let Ok(expr) = parser.parse() {
-                    if let Ok(val) =
-                        libretune_core::ini::expression::evaluate_simple(&expr, context)
-                    {
-                        if !val.as_bool() {
-                            return false; // Not visible
-                        }
-                    } else {
-                        return true; // Show on error
-                    }
-                } else {
-                    return true; // Show on parse error
-                }
+/// Evaluate visibility condition - returns true if visible (or on error/missing condition)
+fn evaluate_visibility(condition: &Option<String>, context: &HashMap<String, f64>) -> bool {
+    if let Some(cond) = condition {
+        let mut parser = libretune_core::ini::expression::Parser::new(cond);
+        if let Ok(expr) = parser.parse() {
+            if let Ok(val) = libretune_core::ini::expression::evaluate_simple(&expr, context) {
+                return val.as_bool();
             }
-
-            // If no visibility condition or visibility is true, check enabled condition
-            // For now, we use enabled_condition as a fallback visibility check
-            // (items that are disabled but visible can be shown grayed out later)
-            if let Some(en_cond) = enabled_condition {
-                let mut parser = libretune_core::ini::expression::Parser::new(en_cond);
-                if let Ok(expr) = parser.parse() {
-                    if let Ok(val) =
-                        libretune_core::ini::expression::evaluate_simple(&expr, context)
-                    {
-                        return val.as_bool();
-                    }
-                }
-                return true; // Show on error
-            }
-
-            true // No conditions, show by default
         }
-        MenuItem::Separator => true,
     }
+    true // Default to visible
+}
+
+/// Builds a searchable index of all menu targets and their content.
+/// Maps target names to searchable terms (field labels, panel titles, etc.)
+/// This enables deep search - finding dialogs by their field contents.
+#[tauri::command]
+async fn get_searchable_index(
+    state: tauri::State<'_, AppState>,
+) -> Result<HashMap<String, Vec<String>>, String> {
+    let def_guard = state.definition.lock().await;
+    let def = def_guard.as_ref().ok_or("Definition not loaded")?;
+    
+    let mut index: HashMap<String, Vec<String>> = HashMap::new();
+    
+    // Index dialogs - collect field labels, panel titles
+    for (dialog_name, dialog) in &def.dialogs {
+        let mut terms: Vec<String> = Vec::new();
+        
+        // Add dialog title
+        terms.push(dialog.title.clone());
+        
+        // Collect from all components
+        for component in &dialog.components {
+            match component {
+                libretune_core::ini::DialogComponent::Label { text } => {
+                    terms.push(text.clone());
+                }
+                libretune_core::ini::DialogComponent::Field { label, name, .. } => {
+                    terms.push(label.clone());
+                    terms.push(name.clone());
+                }
+                libretune_core::ini::DialogComponent::Panel { name, .. } => {
+                    terms.push(name.clone());
+                }
+                libretune_core::ini::DialogComponent::Table { name } => {
+                    terms.push(name.clone());
+                }
+                libretune_core::ini::DialogComponent::LiveGraph { title, .. } => {
+                    terms.push(title.clone());
+                }
+                libretune_core::ini::DialogComponent::Indicator { label_off, label_on, .. } => {
+                    terms.push(label_off.clone());
+                    terms.push(label_on.clone());
+                }
+                libretune_core::ini::DialogComponent::CommandButton { label, .. } => {
+                    terms.push(label.clone());
+                }
+            }
+        }
+        
+        if !terms.is_empty() {
+            index.insert(dialog_name.clone(), terms);
+        }
+    }
+    
+    // Index tables - collect title, axis labels
+    for (table_name, table) in &def.tables {
+        let mut terms: Vec<String> = Vec::new();
+        
+        terms.push(table.title.clone());
+        terms.push(table.x_bins.clone());
+        
+        if let Some(map_name) = &table.map_name {
+            terms.push(map_name.clone());
+        }
+        if let Some(y_bins) = &table.y_bins {
+            terms.push(y_bins.clone());
+        }
+        // Add the table's map constant name
+        terms.push(table.map.clone());
+        
+        if !terms.is_empty() {
+            index.insert(table_name.clone(), terms);
+        }
+    }
+    
+    // Index curves - collect title, axis labels
+    for (curve_name, curve) in &def.curves {
+        let mut terms: Vec<String> = Vec::new();
+        
+        terms.push(curve.title.clone());
+        terms.push(curve.column_labels.0.clone()); // X label
+        terms.push(curve.column_labels.1.clone()); // Y label
+        
+        // Add constant names
+        terms.push(curve.x_bins.clone());
+        terms.push(curve.y_bins.clone());
+        
+        if !terms.is_empty() {
+            index.insert(curve_name.clone(), terms);
+        }
+    }
+    
+    Ok(index)
 }
 
 /// Evaluates an INI expression (visibility condition) with given context values.
@@ -4453,8 +4733,9 @@ async fn get_table_data_internal(
     // Read from tune file (offline mode)
     let tune_guard = state.current_tune.lock().await;
 
-    fn read_const_values(constant: &Constant, tune: Option<&TuneFile>) -> Vec<f64> {
+    fn read_const_values(constant: &Constant, tune: Option<&TuneFile>, endianness: libretune_core::ini::Endianness) -> Vec<f64> {
         let element_count = constant.shape.element_count();
+        let element_size = constant.data_type.size_bytes();
         if let Some(tune_file) = tune {
             if let Some(tune_value) = tune_file.constants.get(&constant.name) {
                 match tune_value {
@@ -4463,17 +4744,34 @@ async fn get_table_data_internal(
                     _ => {}
                 }
             }
+
+            if let Some(page_data) = tune_file.pages.get(&constant.page) {
+                let offset = constant.offset as usize;
+                let total_bytes = (element_count * element_size) as usize;
+                if offset + total_bytes <= page_data.len() {
+                    let mut values = Vec::with_capacity(element_count);
+                    for i in 0..element_count {
+                        let elem_offset = offset + i * element_size;
+                        if let Some(raw_val) = constant.data_type.read_from_bytes(page_data, elem_offset, endianness) {
+                            values.push(constant.raw_to_display(raw_val));
+                        } else {
+                            values.push(0.0);
+                        }
+                    }
+                    return values;
+                }
+            }
         }
         vec![0.0; element_count]
     }
 
-    let x_bins = read_const_values(&x_const, tune_guard.as_ref());
+    let x_bins = read_const_values(&x_const, tune_guard.as_ref(), endianness);
     let y_bins = if let Some(ref y) = y_const {
-        read_const_values(y, tune_guard.as_ref())
+        read_const_values(y, tune_guard.as_ref(), endianness)
     } else {
         vec![0.0]
     };
-    let z_flat = read_const_values(&z_const, tune_guard.as_ref());
+    let z_flat = read_const_values(&z_const, tune_guard.as_ref(), endianness);
 
     drop(tune_guard);
 
@@ -4589,6 +4887,83 @@ async fn update_table_z_values_internal(
     Ok(())
 }
 
+/// Helper function to update a constant array (used for table axis bins)
+async fn update_constant_array_internal(
+    state: &tauri::State<'_, AppState>,
+    constant_name: &str,
+    values: Vec<f64>,
+) -> Result<(), String> {
+    let mut conn_guard = state.connection.lock().await;
+    let def_guard = state.definition.lock().await;
+    let mut cache_guard = state.tune_cache.lock().await;
+
+    let def = def_guard.as_ref().ok_or("Definition not loaded")?;
+
+    let constant = def
+        .constants
+        .get(constant_name)
+        .ok_or_else(|| format!("Constant {} not found", constant_name))?;
+
+    if values.len() != constant.shape.element_count() {
+        return Err(format!(
+            "Invalid data size for {}: expected {}, got {}",
+            constant_name,
+            constant.shape.element_count(),
+            values.len()
+        ));
+    }
+
+    let element_size = constant.data_type.size_bytes();
+    let mut raw_data = vec![0u8; constant.size_bytes() as usize];
+
+    for (i, val) in values.iter().enumerate() {
+        let raw_val = constant.display_to_raw(*val);
+        let offset = i * element_size;
+        constant
+            .data_type
+            .write_to_bytes(&mut raw_data, offset, raw_val, def.endianness);
+    }
+
+    if let Some(cache) = cache_guard.as_mut() {
+        if cache.write_bytes(constant.page, constant.offset, &raw_data) {
+            let mut tune_guard = state.current_tune.lock().await;
+            if let Some(tune) = tune_guard.as_mut() {
+                let page_data = tune.pages.entry(constant.page).or_insert_with(|| {
+                    vec![
+                        0u8;
+                        def.page_sizes
+                            .get(constant.page as usize)
+                            .copied()
+                            .unwrap_or(256) as usize
+                    ]
+                });
+
+                let start = constant.offset as usize;
+                let end = start + raw_data.len();
+                if end <= page_data.len() {
+                    page_data[start..end].copy_from_slice(&raw_data);
+                }
+            }
+
+            *state.tune_modified.lock().await = true;
+        }
+    }
+
+    if let Some(conn) = conn_guard.as_mut() {
+        let params = libretune_core::protocol::commands::WriteMemoryParams {
+            can_id: 0,
+            page: constant.page,
+            offset: constant.offset,
+            data: raw_data.clone(),
+        };
+        if let Err(e) = conn.write_memory(params) {
+            eprintln!("[WARN] Failed to write axis bins '{}' to ECU: {}", constant_name, e);
+        }
+    }
+
+    Ok(())
+}
+
 /// Re-bins a table with new X and Y axis values.
 ///
 /// Optionally interpolates Z values to fit the new axis bins.
@@ -4624,9 +4999,23 @@ async fn rebin_table(
     // Save the new Z values
     update_table_z_values_internal(&state, &table_name, result.z_values.clone()).await?;
 
-    // TODO: Also update X and Y axis constants (bins)
-    // This requires looking up the x_bins_constant and y_bins_constant names
-    // from the table definition and updating them separately
+    // Save the new X/Y axis bins
+    {
+        let def_guard = state.definition.lock().await;
+        let def = def_guard.as_ref().ok_or("Definition not loaded")?;
+        let table = def
+            .get_table_by_name_or_map(&table_name)
+            .ok_or_else(|| format!("Table {} not found", table_name))?;
+
+        let x_bins_name = table.x_bins.clone();
+        let y_bins_name = table.y_bins.clone();
+        drop(def_guard);
+
+        update_constant_array_internal(&state, &x_bins_name, result.x_bins.clone()).await?;
+        if let Some(y_name) = y_bins_name {
+            update_constant_array_internal(&state, &y_name, result.y_bins.clone()).await?;
+        }
+    }
 
     Ok(TableData {
         x_bins: result.x_bins,
@@ -4916,11 +5305,28 @@ async fn load_tunerstudio_dash(path: String) -> Result<DashboardLayout, String> 
 async fn get_dash_file(path: String) -> Result<DashFile, String> {
     println!("[get_dash_file] Loading from: {}", path);
 
-    let content = std::fs::read_to_string(&path)
-        .map_err(|e| format!("Failed to read dashboard file: {}", e))?;
+    let lower = path.to_lowercase();
 
-    let dash_file = dash::parse_dash_file(&content)
-        .map_err(|e| format!("Failed to parse dashboard XML: {}", e))?;
+    let dash_file = if lower.ends_with(".gauge") {
+        let gauge_file = dash::load_gauge_file(Path::new(&path))
+            .map_err(|e| format!("Failed to parse gauge XML: {}", e))?;
+
+        let mut dash_file = DashFile::default();
+        dash_file.bibliography = gauge_file.bibliography;
+        dash_file.version_info = gauge_file.version_info;
+        dash_file.gauge_cluster.embedded_images = gauge_file.embedded_images;
+        dash_file
+            .gauge_cluster
+            .components
+            .push(DashComponent::Gauge(Box::new(gauge_file.gauge)));
+        dash_file
+    } else {
+        let content = std::fs::read_to_string(&path)
+            .map_err(|e| format!("Failed to read dashboard file: {}", e))?;
+
+        dash::parse_dash_file(&content)
+            .map_err(|e| format!("Failed to parse dashboard XML: {}", e))?
+    };
 
     println!(
         "[get_dash_file] Loaded {} components, {} embedded images",
@@ -4928,6 +5334,182 @@ async fn get_dash_file(path: String) -> Result<DashFile, String> {
         dash_file.gauge_cluster.embedded_images.len()
     );
     Ok(dash_file)
+}
+
+/// Save a TS .dash or .gauge file directly to a path
+#[tauri::command]
+async fn save_dash_file(path: String, dash_file: DashFile) -> Result<(), String> {
+    let lower = path.to_lowercase();
+    let path_buf = PathBuf::from(&path);
+
+    if lower.ends_with(".gauge") {
+        let gauge = dash_file
+            .gauge_cluster
+            .components
+            .iter()
+            .find_map(|comp| match comp {
+                DashComponent::Gauge(g) => Some((**g).clone()),
+                _ => None,
+            })
+            .ok_or_else(|| "Gauge file must contain a gauge component".to_string())?;
+
+        let gauge_file = dash::GaugeFile {
+            bibliography: dash_file.bibliography.clone(),
+            version_info: VersionInfo {
+                file_format: "1.0".to_string(),
+                firmware_signature: dash_file.version_info.firmware_signature.clone(),
+            },
+            embedded_images: dash_file.gauge_cluster.embedded_images.clone(),
+            gauge,
+        };
+
+        dash::save_gauge_file(&gauge_file, &path_buf)
+            .map_err(|e| format!("Failed to write gauge file: {}", e))?;
+    } else {
+        dash::save_dash_file(&dash_file, &path_buf)
+            .map_err(|e| format!("Failed to write dashboard file: {}", e))?;
+    }
+
+    Ok(())
+}
+
+/// Create a new dashboard file from a template in the user dashboards directory.
+#[tauri::command]
+async fn create_new_dashboard(
+    app: tauri::AppHandle,
+    name: String,
+    template: String,
+) -> Result<String, String> {
+    let dash_dir = get_dashboards_dir(&app);
+    if !dash_dir.exists() {
+        std::fs::create_dir_all(&dash_dir)
+            .map_err(|e| format!("Failed to create dashboards directory: {}", e))?;
+    }
+
+    let mut file_name = name.trim().to_string();
+    if file_name.is_empty() {
+        file_name = "Dashboard".to_string();
+    }
+    if !file_name.to_lowercase().ends_with(".ltdash.xml") {
+        file_name = format!("{}.ltdash.xml", file_name);
+    }
+
+    let target_name = if dash_dir.join(&file_name).exists() {
+        generate_unique_filename(&dash_dir, &file_name)
+    } else {
+        file_name
+    };
+
+    let dash_file = match template.as_str() {
+        "basic" => create_basic_dashboard(),
+        "racing" => create_racing_dashboard(),
+        "tuning" => create_tuning_dashboard(),
+        _ => create_basic_dashboard(),
+    };
+
+    let target_path = dash_dir.join(&target_name);
+    dash::save_dash_file(&dash_file, &target_path)
+        .map_err(|e| format!("Failed to write dashboard file: {}", e))?;
+
+    Ok(target_path.to_string_lossy().to_string())
+}
+
+/// Rename an existing dashboard file.
+#[tauri::command]
+async fn rename_dashboard(path: String, new_name: String) -> Result<String, String> {
+    let source = PathBuf::from(&path);
+    let parent = source
+        .parent()
+        .ok_or_else(|| "Invalid dashboard path".to_string())?
+        .to_path_buf();
+
+    let ext = if path.to_lowercase().ends_with(".ltdash.xml") {
+        ".ltdash.xml"
+    } else if path.to_lowercase().ends_with(".dash") {
+        ".dash"
+    } else if path.to_lowercase().ends_with(".gauge") {
+        ".gauge"
+    } else {
+        ""
+    };
+
+    let mut file_name = new_name.trim().to_string();
+    if file_name.is_empty() {
+        file_name = "Dashboard".to_string();
+    }
+    if !ext.is_empty() && !file_name.to_lowercase().ends_with(ext) {
+        file_name = format!("{}{}", file_name, ext);
+    }
+
+    let target_name = if parent.join(&file_name).exists() {
+        generate_unique_filename(&parent, &file_name)
+    } else {
+        file_name
+    };
+
+    let target_path = parent.join(&target_name);
+    std::fs::rename(&source, &target_path)
+        .map_err(|e| format!("Failed to rename dashboard: {}", e))?;
+
+    Ok(target_path.to_string_lossy().to_string())
+}
+
+/// Duplicate a dashboard file.
+#[tauri::command]
+async fn duplicate_dashboard(path: String, new_name: String) -> Result<String, String> {
+    let source = PathBuf::from(&path);
+    let parent = source
+        .parent()
+        .ok_or_else(|| "Invalid dashboard path".to_string())?
+        .to_path_buf();
+
+    let ext = if path.to_lowercase().ends_with(".ltdash.xml") {
+        ".ltdash.xml"
+    } else if path.to_lowercase().ends_with(".dash") {
+        ".dash"
+    } else if path.to_lowercase().ends_with(".gauge") {
+        ".gauge"
+    } else {
+        ""
+    };
+
+    let mut file_name = new_name.trim().to_string();
+    if file_name.is_empty() {
+        file_name = "Dashboard Copy".to_string();
+    }
+    if !ext.is_empty() && !file_name.to_lowercase().ends_with(ext) {
+        file_name = format!("{}{}", file_name, ext);
+    }
+
+    let target_name = if parent.join(&file_name).exists() {
+        generate_unique_filename(&parent, &file_name)
+    } else {
+        file_name
+    };
+
+    let target_path = parent.join(&target_name);
+    std::fs::copy(&source, &target_path)
+        .map_err(|e| format!("Failed to duplicate dashboard: {}", e))?;
+
+    Ok(target_path.to_string_lossy().to_string())
+}
+
+/// Export a dashboard to a specific path.
+#[tauri::command]
+async fn export_dashboard(path: String, dash_file: DashFile) -> Result<(), String> {
+    save_dash_file(path, dash_file).await
+}
+
+/// Delete a dashboard file.
+#[tauri::command]
+async fn delete_dashboard(path: String) -> Result<(), String> {
+    let path_buf = PathBuf::from(&path);
+    if !path_buf.exists() {
+        return Err("Dashboard file not found".to_string());
+    }
+    std::fs::remove_file(&path_buf)
+        .map_err(|e| format!("Failed to delete dashboard: {}", e))?;
+    Ok(())
 }
 
 /// Info about an available dashboard file
@@ -5011,6 +5593,22 @@ async fn list_available_dashes(app: tauri::AppHandle) -> Result<Vec<DashFileInfo
                 bundled_dash
             );
             scan_dash_directory(&bundled_dash, "Bundled", &mut dashes);
+        }
+    }
+
+    // 3. Scan reference dashboards directory for development builds
+    if let Ok(cwd) = std::env::current_dir() {
+        let candidates = [
+            cwd.join("reference").join("TunerStudioMS").join("Dash"),
+            cwd.join("../reference").join("TunerStudioMS").join("Dash"),
+            cwd.join("../../reference").join("TunerStudioMS").join("Dash"),
+        ];
+        if let Some(reference_dash) = candidates.into_iter().find(|path| path.exists()) {
+            println!(
+                "[list_available_dashes] Scanning reference dashboards: {:?}",
+                reference_dash
+            );
+            scan_dash_directory(&reference_dash, "Reference", &mut dashes);
         }
     }
 
@@ -11666,6 +12264,7 @@ pub fn run() {
             get_table_info,
             get_curve_data,
             get_tables,
+            get_curves,
             get_gauge_configs,
             get_gauge_config,
             get_available_channels,
@@ -11674,6 +12273,7 @@ pub fn run() {
             update_table_data,
             update_curve_data,
             get_menu_tree,
+            get_searchable_index,
             get_dialog_definition,
             get_indicator_panel,
             get_port_editor,
@@ -11707,9 +12307,15 @@ pub fn run() {
             get_dashboard_templates,
             load_tunerstudio_dash,
             get_dash_file,
+            save_dash_file,
             list_available_dashes,
             check_dash_conflict,
             import_dash_file,
+            create_new_dashboard,
+            rename_dashboard,
+            duplicate_dashboard,
+            export_dashboard,
+            delete_dashboard,
             // Tune file commands
             get_tune_info,
             new_tune,
