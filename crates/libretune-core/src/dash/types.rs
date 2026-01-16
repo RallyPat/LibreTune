@@ -188,6 +188,8 @@ pub enum GaugePainter {
     VerticalBarGauge,
     /// Thin horizontal line indicator
     HorizontalLineGauge,
+    /// Segmented horizontal bar
+    HorizontalDashedBar,
     /// Segmented vertical bar
     VerticalDashedBar,
     /// Analog-style bar gauge
@@ -198,12 +200,39 @@ pub enum GaugePainter {
     Histogram,
     /// Scrolling line graph (deferred - not yet implemented)
     LineGraph,
+    /// Round analog gauge
+    RoundGauge,
+    /// Round dashed gauge
+    RoundDashedGauge,
+    /// Fuel meter gauge
+    FuelMeter,
+    /// Tachometer gauge
+    Tachometer,
 }
 
 impl GaugePainter {
     /// Parse from TunerStudio's GaugePainter string
     pub fn from_ts_string(s: &str) -> Self {
-        match s.trim() {
+        let trimmed = s.trim();
+        let lower = trimmed.to_lowercase();
+
+        if lower.contains("roundanaloggaugepainter") || trimmed == "Round Analog Gauge" || trimmed == "Round Gauge" {
+            return Self::RoundGauge;
+        }
+        if lower.contains("rounddashed") || trimmed == "Round Dashed Gauge" {
+            return Self::RoundDashedGauge;
+        }
+        if lower.contains("fuelmeter") || trimmed == "Fuel Meter" {
+            return Self::FuelMeter;
+        }
+        if lower.contains("tachometer") || trimmed == "Tachometer" {
+            return Self::Tachometer;
+        }
+        if lower.contains("horizontaldashedbar") || trimmed == "Horizontal Dashed Bar Gauge" {
+            return Self::HorizontalDashedBar;
+        }
+
+        match trimmed {
             "Analog Gauge" | "AnalogGaugePainter" => Self::AnalogGauge,
             "Basic Analog Gauge" => Self::BasicAnalogGauge,
             "Circle Analog Gauge" | "CircleAnalogGaugePainter" => Self::CircleAnalogGauge,
@@ -217,6 +246,16 @@ impl GaugePainter {
             "Analog Moving Bar Gauge" | "AnalogMovingBarGaugePainter" => Self::AnalogMovingBarGauge,
             "Histogram" | "HistogramPainter" => Self::Histogram,
             "Line Graph" | "LineGraphPainter" => Self::LineGraph,
+            _ if lower.contains("analoggaugepainter") => Self::AnalogGauge,
+            _ if lower.contains("basicreadoutgaugepainter") => Self::BasicReadout,
+            _ if lower.contains("horizontalbarpainter") => Self::HorizontalBarGauge,
+            _ if lower.contains("verticalbarpainter") => Self::VerticalBarGauge,
+            _ if lower.contains("horizontallinepainter") => Self::HorizontalLineGauge,
+            _ if lower.contains("verticaldashedbarpainter") => Self::VerticalDashedBar,
+            _ if lower.contains("analogbarpainter") => Self::AnalogBarGauge,
+            _ if lower.contains("analogmovingbargaugepainter") => Self::AnalogMovingBarGauge,
+            _ if lower.contains("histogrampainter") => Self::Histogram,
+            _ if lower.contains("linegraphpainter") => Self::LineGraph,
             _ => Self::BasicReadout, // Default fallback
         }
     }
@@ -232,11 +271,16 @@ impl GaugePainter {
             Self::HorizontalBarGauge => "Horizontal Bar Gauge",
             Self::VerticalBarGauge => "Vertical Bar Gauge",
             Self::HorizontalLineGauge => "Horizontal Line Gauge",
+            Self::HorizontalDashedBar => "Horizontal Dashed Bar Gauge",
             Self::VerticalDashedBar => "Vertical Dashed Bar Gauge",
             Self::AnalogBarGauge => "Analog Bar Gauge",
             Self::AnalogMovingBarGauge => "Analog Moving Bar Gauge",
             Self::Histogram => "Histogram",
             Self::LineGraph => "Line Graph",
+            Self::RoundGauge => "Round Analog Gauge",
+            Self::RoundDashedGauge => "Round Dashed Gauge",
+            Self::FuelMeter => "Fuel Meter",
+            Self::Tachometer => "Tachometer",
         }
     }
 }
@@ -246,19 +290,26 @@ impl GaugePainter {
 pub enum IndicatorPainter {
     #[default]
     BasicRectangleIndicator,
+    BulbIndicator,
 }
 
 impl IndicatorPainter {
     pub fn from_ts_string(s: &str) -> Self {
-        match s.trim() {
-            "Basic Rectangle Indicator" => Self::BasicRectangleIndicator,
-            _ => Self::BasicRectangleIndicator,
+        let trimmed = s.trim();
+        let lower = trimmed.to_lowercase();
+        if trimmed == "Bulb Indicator" || lower.contains("bulbindicatorpainter") {
+            return Self::BulbIndicator;
         }
+        if trimmed == "Basic Rectangle Indicator" || lower.contains("rectangleindicatorpainter") {
+            return Self::BasicRectangleIndicator;
+        }
+        Self::BasicRectangleIndicator
     }
 
     pub fn to_ts_string(&self) -> &'static str {
         match self {
             Self::BasicRectangleIndicator => "Basic Rectangle Indicator",
+            Self::BulbIndicator => "Bulb Indicator",
         }
     }
 }

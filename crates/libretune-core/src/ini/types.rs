@@ -250,6 +250,12 @@ pub enum MenuItem {
         visibility_condition: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         enabled_condition: Option<String>,
+        /// Whether item is visible (evaluated from visibility_condition)
+        #[serde(default = "default_true")]
+        visible: bool,
+        /// Whether item is enabled (evaluated from enabled_condition)  
+        #[serde(default = "default_true")]
+        enabled: bool,
     },
     /// Link to a table editor
     Table {
@@ -259,6 +265,12 @@ pub enum MenuItem {
         visibility_condition: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         enabled_condition: Option<String>,
+        /// Whether item is visible (evaluated from visibility_condition)
+        #[serde(default = "default_true")]
+        visible: bool,
+        /// Whether item is enabled (evaluated from enabled_condition)
+        #[serde(default = "default_true")]
+        enabled: bool,
     },
     /// Submenu (standard or group)
     SubMenu {
@@ -268,6 +280,12 @@ pub enum MenuItem {
         visibility_condition: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         enabled_condition: Option<String>,
+        /// Whether item is visible (evaluated from visibility_condition)
+        #[serde(default = "default_true")]
+        visible: bool,
+        /// Whether item is enabled (evaluated from enabled_condition)
+        #[serde(default = "default_true")]
+        enabled: bool,
     },
     /// Built-in standard feature (std_realtime, std_ms2gentherm, etc.)
     Std {
@@ -277,6 +295,12 @@ pub enum MenuItem {
         visibility_condition: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         enabled_condition: Option<String>,
+        /// Whether item is visible (evaluated from visibility_condition)
+        #[serde(default = "default_true")]
+        visible: bool,
+        /// Whether item is enabled (evaluated from enabled_condition)
+        #[serde(default = "default_true")]
+        enabled: bool,
     },
     /// Link to a help topic
     Help {
@@ -286,9 +310,20 @@ pub enum MenuItem {
         visibility_condition: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         enabled_condition: Option<String>,
+        /// Whether item is visible (evaluated from visibility_condition)
+        #[serde(default = "default_true")]
+        visible: bool,
+        /// Whether item is enabled (evaluated from enabled_condition)
+        #[serde(default = "default_true")]
+        enabled: bool,
     },
     /// Separator between menu items
     Separator,
+}
+
+/// Helper for serde default that returns true
+fn default_true() -> bool {
+    true
 }
 
 /// A help topic definition

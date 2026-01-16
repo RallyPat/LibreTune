@@ -928,7 +928,9 @@ fn parse_output_channel_entry(def: &mut EcuDefinition, key: &str, value: &str) {
         return;
     }
 
-    if let Some(channel) = parse_output_channel_line(key, value) {
+    if let Some(mut channel) = parse_output_channel_line(key, value) {
+        // Cache parsed expression AST for computed channels (avoids reparsing every realtime update)
+        channel.cache_expression();
         def.output_channels.insert(key.to_string(), channel);
     }
 }
@@ -1501,6 +1503,7 @@ fn post_process_items(
                 target,
                 visibility_condition,
                 enabled_condition,
+                ..
             } => {
                 // Check if this should be a different type
                 if help_topics.contains_key(target) {
@@ -1509,6 +1512,8 @@ fn post_process_items(
                         target: target.clone(),
                         visibility_condition: visibility_condition.clone(),
                         enabled_condition: enabled_condition.clone(),
+                        visible: true,
+                        enabled: true,
                     };
                 } else if tables.contains_key(target)
                     || table_map_to_name.contains_key(target)
@@ -1520,6 +1525,8 @@ fn post_process_items(
                         target: target.clone(),
                         visibility_condition: visibility_condition.clone(),
                         enabled_condition: enabled_condition.clone(),
+                        visible: true,
+                        enabled: true,
                     };
                 }
             }
@@ -1711,6 +1718,8 @@ fn parse_menu_entry(def: &mut EcuDefinition, key: &str, value: &str) {
                     target,
                     visibility_condition,
                     enabled_condition,
+                    visible: true,
+                    enabled: true,
                 }
             } else if def.help_topics.contains_key(&target) {
                 // Help topic reference
@@ -1719,6 +1728,8 @@ fn parse_menu_entry(def: &mut EcuDefinition, key: &str, value: &str) {
                     target,
                     visibility_condition,
                     enabled_condition,
+                    visible: true,
+                    enabled: true,
                 }
             } else if def.tables.contains_key(&target) || def.curves.contains_key(&target) {
                 // Table or curve reference
@@ -1727,6 +1738,8 @@ fn parse_menu_entry(def: &mut EcuDefinition, key: &str, value: &str) {
                     target,
                     visibility_condition,
                     enabled_condition,
+                    visible: true,
+                    enabled: true,
                 }
             } else {
                 // Default to dialog
@@ -1735,6 +1748,8 @@ fn parse_menu_entry(def: &mut EcuDefinition, key: &str, value: &str) {
                     target,
                     visibility_condition,
                     enabled_condition,
+                    visible: true,
+                    enabled: true,
                 }
             };
 
@@ -1779,6 +1794,8 @@ fn parse_menu_entry(def: &mut EcuDefinition, key: &str, value: &str) {
                         items: Vec::new(),
                         visibility_condition,
                         enabled_condition,
+                        visible: true,
+                        enabled: true,
                     });
                 }
             }

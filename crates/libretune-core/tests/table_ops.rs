@@ -71,6 +71,34 @@ fn test_rebin_table_smaller() {
 }
 
 #[test]
+fn test_rebin_table_bin_values_persisted() {
+    let old_x_bins = vec![1000.0, 2000.0, 3000.0];
+    let old_y_bins = vec![20.0, 40.0, 60.0];
+    let old_z_values = vec![
+        vec![10.0, 20.0, 30.0],
+        vec![15.0, 25.0, 35.0],
+        vec![20.0, 30.0, 40.0],
+    ];
+
+    let new_x_bins = vec![1200.0, 2400.0, 3600.0, 4800.0];
+    let new_y_bins = vec![25.0, 50.0];
+
+    let result = rebin_table(
+        &old_x_bins,
+        &old_y_bins,
+        &old_z_values,
+        new_x_bins.clone(),
+        new_y_bins.clone(),
+        true,
+    );
+
+    assert_eq!(result.x_bins, new_x_bins);
+    assert_eq!(result.y_bins, new_y_bins);
+    assert_eq!(result.z_values.len(), 2);
+    assert_eq!(result.z_values[0].len(), 4);
+}
+
+#[test]
 fn test_smooth_table() {
     let z_values = vec![
         vec![10.0, 10.0, 10.0],

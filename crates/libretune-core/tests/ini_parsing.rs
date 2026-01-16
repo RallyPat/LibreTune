@@ -1,7 +1,7 @@
 //! Tests for INI parsing, especially edge cases with commas in expressions
 //! and space-separated subMenu formats.
 
-use libretune_core::ini::EcuDefinition;
+use libretune_core::ini::{DataType, EcuDefinition};
 use std::path::Path;
 
 // Note: These tests use the public API. The split_ini_line function is tested
@@ -221,6 +221,39 @@ page = 1
     assert_eq!(load_bins.shape.element_count(), 16);
 
     let _ = std::fs::remove_file(&temp_path);
+}
+
+/// Test parsing OutputChannels with units, scale, translate, and computed channel expressions
+#[test]
+fn test_parse_output_channels_units_scale() {
+    let ini_content = r#"
+[MegaTune]
+signature = "Test ECU"
+queryCommand = "Q"
+
+[OutputChannels]
+   rpm = U16, 0, "RPM", 1.0, 0.0
+   clt = scalar, S16, 2, "C", 0.1, -40.0
+   afr = { ego1 / 10.0 }, "AFR"
+"#;
+
+    let def = EcuDefinition::from_str(ini_content).expect("Failed to parse INI");
+
+    let rpm = def.get_output_channel("rpm").expect("rpm channel missing");
+    assert_eq!(rpm.data_type, DataType::U16);
+    assert_eq!(rpm.units, "RPM");
+    assert_eq!(rpm.scale, 1.0);
+    assert_eq!(rpm.translate, 0.0);
+
+    let clt = def.get_output_channel("clt").expect("clt channel missing");
+    assert_eq!(clt.data_type, DataType::S16);
+    assert_eq!(clt.units, "C");
+    assert!((clt.scale - 0.1).abs() < f64::EPSILON);
+    assert!((clt.translate + 40.0).abs() < f64::EPSILON);
+
+    let afr = def.get_output_channel("afr").expect("afr channel missing");
+    assert!(afr.is_computed());
+    assert_eq!(afr.units, "AFR");
 }
 
 /// Integration test: parse a real Speeduino INI and verify key constants

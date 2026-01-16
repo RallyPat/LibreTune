@@ -34,6 +34,10 @@ pub struct OutputChannel {
 
     /// Expression for computed channels
     pub expression: Option<String>,
+
+    /// Cached parsed expression AST (for performance - avoids reparsing every update)
+    #[serde(skip)]
+    pub cached_expr: Option<super::expression::Expr>,
 }
 
 impl OutputChannel {
@@ -49,6 +53,18 @@ impl OutputChannel {
             scale: 1.0,
             translate: 0.0,
             expression: None,
+            cached_expr: None,
+        }
+    }
+
+    /// Cache the parsed expression AST for computed channels.
+    /// Call this after parsing INI to avoid reparsing on every realtime update.
+    pub fn cache_expression(&mut self) {
+        if let Some(ref expr_str) = self.expression {
+            let mut parser = super::expression::Parser::new(expr_str);
+            if let Ok(expr) = parser.parse() {
+                self.cached_expr = Some(expr);
+            }
         }
     }
 
@@ -103,6 +119,7 @@ impl OutputChannel {
     ///
     /// For non-computed channels, behaves like `parse()`.
     /// For computed channels, evaluates the expression using the provided context.
+    /// Uses cached AST if available for performance.
     pub fn parse_with_context(
         &self,
         data: &[u8],
@@ -110,7 +127,14 @@ impl OutputChannel {
         context: &std::collections::HashMap<String, f64>,
     ) -> Option<f64> {
         if self.is_computed() {
-            // Evaluate expression using context
+            // Use cached expression if available (much faster)
+            if let Some(ref expr) = self.cached_expr {
+                match super::expression::evaluate_simple(expr, context) {
+                    Ok(value) => return Some(value.as_f64()),
+                    Err(_) => return None,
+                }
+            }
+            // Fallback: parse expression on the fly (slower)
             if let Some(ref expr_str) = self.expression {
                 let mut parser = super::expression::Parser::new(expr_str);
                 match parser.parse() {
@@ -141,6 +165,7 @@ impl Default for OutputChannel {
             scale: 1.0,
             translate: 0.0,
             expression: None,
+            cached_expr: None,
         }
     }
 }
@@ -177,6 +202,7 @@ pub fn parse_output_channel_line(name: &str, value: &str) -> Option<OutputChanne
                 scale: 1.0,
                 translate: 0.0,
                 expression: Some(expression),
+                cached_expr: None, // Will be cached after parsing
             });
         }
         return None;

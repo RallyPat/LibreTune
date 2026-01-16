@@ -77,6 +77,10 @@ pub struct EcuDefinition {
     /// Curve editor definitions (2D curves)
     pub curves: HashMap<String, CurveDefinition>,
 
+    /// Lookup map from curve map_name to curve name (if curves have map names)
+    /// Similar to table_map_to_name for consistent lookup patterns
+    pub curve_map_to_name: HashMap<String, String>,
+
     /// Gauge configurations
     pub gauges: HashMap<String, GaugeConfig>,
 
@@ -198,6 +202,20 @@ impl EcuDefinition {
         None
     }
 
+    /// Get a curve definition by name or map_name
+    /// Similar to get_table_by_name_or_map for consistent lookup patterns
+    pub fn get_curve_by_name_or_map(&self, name_or_map: &str) -> Option<&CurveDefinition> {
+        // First try direct lookup by name
+        if let Some(curve) = self.curves.get(name_or_map) {
+            return Some(curve);
+        }
+        // Then try lookup by map_name
+        if let Some(curve_name) = self.curve_map_to_name.get(name_or_map) {
+            return self.curves.get(curve_name);
+        }
+        None
+    }
+
     /// Get the total ECU memory size across all pages
     pub fn total_memory_size(&self) -> usize {
         self.page_sizes.iter().map(|s| *s as usize).sum()
@@ -300,6 +318,7 @@ impl Default for EcuDefinition {
             tables: HashMap::new(),
             table_map_to_name: HashMap::new(),
             curves: HashMap::new(),
+            curve_map_to_name: HashMap::new(),
             gauges: HashMap::new(),
             setting_groups: HashMap::new(),
             menus: Vec::new(),

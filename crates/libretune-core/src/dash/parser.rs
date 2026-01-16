@@ -87,8 +87,7 @@ pub fn parse_gauge_file(xml: &str) -> Result<GaugeFile, DashParseError> {
     let mut state = ParserState::default();
     let mut buf = Vec::new();
     let mut text_buf = String::new();
-    let mut in_outer_gauge = false;
-    let mut in_inner_gauge = false;
+    let mut gauge_depth = 0usize;
 
     loop {
         match reader.read_event_into(&mut buf) {
@@ -96,30 +95,21 @@ pub fn parse_gauge_file(xml: &str) -> Result<GaugeFile, DashParseError> {
                 let name = String::from_utf8_lossy(e.name().as_ref()).to_string();
 
                 if name == "gauge" {
-                    if !in_outer_gauge {
-                        in_outer_gauge = true;
-                    } else {
-                        in_inner_gauge = true;
-                    }
-                } else if in_inner_gauge {
-                    // We're inside the inner gauge element
+                    gauge_depth = gauge_depth.saturating_add(1);
+                } else if gauge_depth > 0 {
                     if name == "dashComp" {
                         state.in_dash_comp = true;
                         state.current_dash_comp_type = Some("Gauge".to_string());
                         state.current_gauge = Some(GaugeConfig::default());
+                    } else if name == "imageFile" {
+                        state.in_image_file = true;
+                        state.current_image = Some(parse_image_file_attributes(e));
                     } else if state.in_dash_comp {
                         state.current_property = Some(name.clone());
-                        // Check for color elements
                         if is_color_property(&name) {
                             state.color_property = Some(name.clone());
                             state.current_color = Some(parse_color_attributes(e));
                         }
-                    }
-                } else if in_outer_gauge {
-                    // Handle bibliography, versionInfo, imageFile in outer gauge
-                    if name == "imageFile" {
-                        state.in_image_file = true;
-                        state.current_image = Some(parse_image_file_attributes(e));
                     }
                 }
                 text_buf.clear();
@@ -128,10 +118,8 @@ pub fn parse_gauge_file(xml: &str) -> Result<GaugeFile, DashParseError> {
                 let name = String::from_utf8_lossy(e.name().as_ref()).to_string();
 
                 if name == "gauge" {
-                    if in_inner_gauge {
-                        in_inner_gauge = false;
-                    } else {
-                        in_outer_gauge = false;
+                    if gauge_depth > 0 {
+                        gauge_depth -= 1;
                     }
                 } else if name == "dashComp" && state.in_dash_comp {
                     if let Some(gauge) = state.current_gauge.take() {
@@ -148,9 +136,12 @@ pub fn parse_gauge_file(xml: &str) -> Result<GaugeFile, DashParseError> {
                 } else if state.in_dash_comp {
                     // Handle color end
                     if is_color_property(&name) {
-                        if let (Some(color), Some(prop)) =
+                        if let (Some(mut color), Some(prop)) =
                             (state.current_color.take(), state.color_property.take())
                         {
+                            if let Ok(int_val) = text_buf.trim().parse::<i32>() {
+                                color = TsColor::from_argb_int(int_val);
+                            }
                             if let Some(ref mut gauge) = state.current_gauge {
                                 set_gauge_color(gauge, &prop, color);
                             }
@@ -171,6 +162,11 @@ pub fn parse_gauge_file(xml: &str) -> Result<GaugeFile, DashParseError> {
                     gauge_file.bibliography = parse_bibliography_attributes(e);
                 } else if name == "versionInfo" {
                     gauge_file.version_info = parse_version_info_attributes(e);
+                } else if state.in_dash_comp && is_color_property(&name) {
+                    let color = parse_color_attributes(e);
+                    if let Some(ref mut gauge) = state.current_gauge {
+                        set_gauge_color(gauge, &name, color);
+                    }
                 }
             }
             Ok(Event::Text(ref e)) => {
@@ -206,18 +202,12 @@ fn handle_start_element<R: BufRead>(
             state.in_dash_comp = true;
             let comp_type = get_attribute(e, "type").unwrap_or_default();
             state.current_dash_comp_type = Some(comp_type.clone());
-
-            match comp_type.as_str() {
-                "Gauge" | "com.efiAnalytics.tunerStudio.Gauge" => {
-                    state.current_gauge = Some(GaugeConfig::default());
-                }
-                "Indicator" | "com.efiAnalytics.tunerStudio.Indicator" => {
-                    state.current_indicator = Some(IndicatorConfig::default());
-                }
-                _ => {
-                    // Unknown type, try to parse as gauge
-                    state.current_gauge = Some(GaugeConfig::default());
-                }
+            let comp_type_lower = comp_type.to_lowercase();
+            if comp_type_lower.contains("indicator") {
+                state.current_indicator = Some(IndicatorConfig::default());
+            } else {
+                // Default to gauge for unknown types
+                state.current_gauge = Some(GaugeConfig::default());
             }
         }
         "imageFile" => {
@@ -275,9 +265,12 @@ fn handle_end_element(
             if state.in_dash_comp {
                 // Handle color end
                 if is_color_property(&name) {
-                    if let (Some(color), Some(prop)) =
+                    if let (Some(mut color), Some(prop)) =
                         (state.current_color.take(), state.color_property.take())
                     {
+                        if let Ok(int_val) = text.trim().parse::<i32>() {
+                            color = TsColor::from_argb_int(int_val);
+                        }
                         if let Some(ref mut gauge) = state.current_gauge {
                             set_gauge_color(gauge, &prop, color);
                         } else if let Some(ref mut indicator) = state.current_indicator {
@@ -302,7 +295,7 @@ fn handle_end_element(
 
 fn handle_empty_element(
     dash: &mut DashFile,
-    _state: &mut ParserState,
+    state: &mut ParserState,
     e: &BytesStart,
 ) -> Result<(), DashParseError> {
     let name = String::from_utf8_lossy(e.name().as_ref()).to_string();
@@ -313,6 +306,14 @@ fn handle_empty_element(
         }
         "versionInfo" => {
             dash.version_info = parse_version_info_attributes(e);
+        }
+        _ if state.in_dash_comp && is_color_property(&name) => {
+            let color = parse_color_attributes(e);
+            if let Some(ref mut gauge) = state.current_gauge {
+                set_gauge_color(gauge, &name, color);
+            } else if let Some(ref mut indicator) = state.current_indicator {
+                set_indicator_color(indicator, &name, color);
+            }
         }
         _ => {}
     }
@@ -719,6 +720,34 @@ mod tests {
         assert_eq!(
             GaugePainter::from_ts_string("Horizontal Bar Gauge"),
             GaugePainter::HorizontalBarGauge
+        );
+        assert_eq!(
+            GaugePainter::from_ts_string(
+                "com.efiAnalytics.tunerStudio.renderers.AnalogGaugePainter"
+            ),
+            GaugePainter::AnalogGauge
+        );
+        assert_eq!(
+            GaugePainter::from_ts_string(
+                "com.efiAnalytics.tunerStudio.renderers.BasicReadoutGaugePainter"
+            ),
+            GaugePainter::BasicReadout
+        );
+        assert_eq!(
+            GaugePainter::from_ts_string(
+                "com.efiAnalytics.tunerStudio.renderers.HorizontalBarPainter"
+            ),
+            GaugePainter::HorizontalBarGauge
+        );
+        assert_eq!(
+            GaugePainter::from_ts_string(
+                "com.efiAnalytics.tunerStudio.renderers.RoundAnalogGaugePainter"
+            ),
+            GaugePainter::RoundGauge
+        );
+        assert_eq!(
+            GaugePainter::from_ts_string("Horizontal Dashed Bar Gauge"),
+            GaugePainter::HorizontalDashedBar
         );
     }
 }

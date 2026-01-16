@@ -209,6 +209,7 @@ fn test_computed_channel_expression_evaluation() {
         scale: 1.0,
         translate: 0.0,
         expression: Some("{rpm} / 1000".to_string()),
+        cached_expr: None,
     };
 
     // Create context with referenced channel values
@@ -247,6 +248,7 @@ fn test_computed_channel_complex_expression() {
         scale: 1.0,
         translate: 0.0,
         expression: Some("{pulseWidth} * {rpm} / 1200".to_string()),
+        cached_expr: None,
     };
 
     let mut context: HashMap<String, f64> = HashMap::new();
@@ -280,6 +282,7 @@ fn test_computed_channel_undefined_variable_defaults_to_zero() {
         scale: 1.0,
         translate: 0.0,
         expression: Some("{undefined_channel} * 2".to_string()),
+        cached_expr: None,
     };
 
     // Context without the required channel
@@ -317,6 +320,7 @@ fn test_non_computed_channel_uses_raw_data() {
         scale: 1.0,
         translate: 0.0,
         expression: None,
+        cached_expr: None,
     };
 
     // Context with a value that should be ignored

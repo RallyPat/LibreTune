@@ -105,6 +105,9 @@ impl Constant {
         if self.data_type == DataType::Bits {
             // Bits don't take extra space, they're packed
             0
+        } else if self.data_type == DataType::String {
+            // Strings have their length stored in shape (1 byte per character)
+            self.shape.element_count()
         } else {
             self.data_type.size_bytes() * self.shape.element_count()
         }
@@ -238,6 +241,12 @@ pub fn parse_constant_line(
         return Some(constant);
     } else if class == "array" && parts.len() > 3 {
         constant.shape = Shape::from_ini_str(parts[3]);
+    } else if class == "string" && parts.len() > 3 {
+        // String constants: name = string, ASCII, offset, length
+        // The 4th field is the length in bytes
+        if let Ok(length) = parts[3].trim().parse::<usize>() {
+            constant.shape = Shape::Array1D(length);
+        }
     }
 
     // Parse units (index 4 for bits/array, 3 for scalar)

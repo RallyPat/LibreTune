@@ -465,7 +465,10 @@ fn write_color_property<W: Write>(
     elem.push_attribute(("red", red.as_str()));
     elem.push_attribute(("green", green.as_str()));
     elem.push_attribute(("blue", blue.as_str()));
-    writer.write_event(Event::Empty(elem))?;
+    writer.write_event(Event::Start(elem))?;
+    let argb = color.to_argb_int().to_string();
+    writer.write_event(Event::Text(BytesText::new(&argb)))?;
+    writer.write_event(Event::End(BytesEnd::new(name)))?;
     Ok(())
 }
 
