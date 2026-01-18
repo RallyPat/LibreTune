@@ -150,6 +150,22 @@ pub enum ConnectionState {
     Error,
 }
 
+/// Connection runtime packet selection override
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimePacketMode {
+    Auto,
+    ForceBurst,
+    ForceOCH,
+    Disabled,
+}
+
+/// Choice of runtime fetch command
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RuntimeFetch {
+    Burst(String),
+    OCH(String),
+}
+
 /// Connection configuration
 #[derive(Debug, Clone)]
 pub struct ConnectionConfig {
@@ -161,6 +177,8 @@ pub struct ConnectionConfig {
     pub use_modern_protocol: bool,
     /// Response timeout in milliseconds
     pub timeout_ms: u64,
+    /// Optional override for runtime packet selection
+    pub runtime_packet_mode: RuntimePacketMode,
 }
 
 impl Default for ConnectionConfig {
@@ -170,6 +188,7 @@ impl Default for ConnectionConfig {
             baud_rate: DEFAULT_BAUD_RATE,
             use_modern_protocol: true,
             timeout_ms: DEFAULT_TIMEOUT_MS,
+            runtime_packet_mode: RuntimePacketMode::Auto,
         }
     }
 }
@@ -194,7 +213,13 @@ pub struct Connection {
     endianness: Endianness,
     /// Adaptive timing state (experimental - dynamically adjusts communication speed)
     adaptive_timing: Option<AdaptiveTiming>,
+    /// Metrics: cumulative bytes/packets sent & received
+    tx_bytes: u64,
+    rx_bytes: u64,
+    tx_packets: u64,
+    rx_packets: u64,
 }
+
 
 impl Connection {
     /// Create a new connection (not yet connected)
@@ -209,6 +234,10 @@ impl Connection {
             command_builder: CommandBuilder::new(true), // Default little-endian for rusEFI
             endianness: Endianness::Little,
             adaptive_timing: None,
+            tx_bytes: 0,
+            rx_bytes: 0,
+            tx_packets: 0,
+            rx_packets: 0,
         }
     }
 
@@ -230,6 +259,10 @@ impl Connection {
             command_builder: CommandBuilder::new(use_little_endian),
             endianness,
             adaptive_timing: None,
+            tx_bytes: 0,
+            rx_bytes: 0,
+            tx_packets: 0,
+            rx_packets: 0,
         }
     }
 
@@ -239,6 +272,11 @@ impl Connection {
         self.command_builder = CommandBuilder::new(endianness == Endianness::Little);
         self.endianness = endianness;
         self.protocol_settings = Some(protocol);
+    }
+
+    /// Get cumulative tx/rx bytes and packet counters
+    pub fn get_counters(&self) -> (u64, u64, u64, u64) {
+        (self.tx_bytes, self.rx_bytes, self.tx_packets, self.rx_packets)
     }
 
     /// Enable adaptive timing with optional custom config
@@ -663,6 +701,10 @@ impl Connection {
             return Err(ProtocolError::Timeout);
         }
 
+        // Record rx bytes/packets for metrics
+        self.rx_bytes = self.rx_bytes.saturating_add(response.len() as u64);
+        self.rx_packets = self.rx_packets.saturating_add(1);
+
         // Record response time for adaptive timing
         self.record_response_time(elapsed);
 
@@ -702,6 +744,8 @@ impl Connection {
             bytes.len()
         );
 
+        self.tx_bytes = self.tx_bytes.saturating_add(bytes.len() as u64);
+        self.tx_packets = self.tx_packets.saturating_add(1);
         port.write_all(&bytes)
             .map_err(|e| ProtocolError::SerialError(e.to_string()))?;
         port.flush()
@@ -718,7 +762,10 @@ impl Connection {
         let port = self.port.as_mut().ok_or(ProtocolError::NotConnected)?;
 
         // Send single command byte
-        port.write_all(&[cmd.legacy_byte()])
+        let legacy_bytes = [cmd.legacy_byte()];
+        self.tx_bytes = self.tx_bytes.saturating_add(legacy_bytes.len() as u64);
+        self.tx_packets = self.tx_packets.saturating_add(1);
+        port.write_all(&legacy_bytes)
             .map_err(|e| ProtocolError::SerialError(e.to_string()))?;
         port.flush()
             .map_err(|e| ProtocolError::SerialError(e.to_string()))?;
@@ -755,6 +802,12 @@ impl Connection {
             return Err(ProtocolError::Timeout);
         }
 
+        // Record rx metrics
+        self.rx_bytes = self.rx_bytes.saturating_add(response.len() as u64);
+        if !response.is_empty() {
+            self.rx_packets = self.rx_packets.saturating_add(1);
+        }
+
         Ok(response)
     }
 
@@ -787,6 +840,8 @@ impl Connection {
             bytes
         );
         // Use write_and_wait which avoids the blocking tcdrain issue
+        self.tx_bytes = self.tx_bytes.saturating_add(bytes.len() as u64);
+        self.tx_packets = self.tx_packets.saturating_add(1);
         write_and_wait(port, &bytes, baud_rate, min_wait)
             .map_err(|e| ProtocolError::SerialError(e.to_string()))?;
 
@@ -899,25 +954,105 @@ impl Connection {
         Packet::from_bytes(&full_packet)
     }
 
-    /// Get real-time data from ECU
-    pub fn get_realtime_data(&mut self) -> Result<Vec<u8>, ProtocolError> {
-        // Use burst command from INI if available
+    /// Decide which runtime fetch command to use (Burst vs OCH)
+    pub(crate) fn choose_runtime_command(&self) -> (RuntimeFetch, String) {
+        // Respect explicit overrides
+        let forced = self.config.runtime_packet_mode;
         let burst_cmd = self
             .protocol_settings
             .as_ref()
-            .and_then(|p| p.burst_get_command.as_deref())
-            .unwrap_or("A");
+            .and_then(|p| p.burst_get_command.clone())
+            .unwrap_or_else(|| "A".to_string());
+        let och_cmd_opt = self
+            .protocol_settings
+            .as_ref()
+            .and_then(|p| p.och_get_command.clone());
 
-        if self.use_modern_protocol {
-            // Modern protocol: wrap command in CRC packet
-            let cmd_bytes = burst_cmd.as_bytes().to_vec();
-            let packet = Packet::new(cmd_bytes);
-            let response = self.send_packet(packet)?;
-            Ok(response.payload)
-        } else {
-            // Legacy protocol: send raw command byte
-            let cmd_byte = burst_cmd.as_bytes().first().copied().unwrap_or(b'A');
-            self.send_raw_command(&[cmd_byte])
+        if forced == RuntimePacketMode::ForceBurst {
+            return (RuntimeFetch::Burst(burst_cmd), "force: ForceBurst".to_string());
+        }
+        if forced == RuntimePacketMode::ForceOCH {
+            if let Some(och) = och_cmd_opt.clone() {
+                return (RuntimeFetch::OCH(och), "force: ForceOCH".to_string());
+            } else {
+                return (RuntimeFetch::Burst(burst_cmd), "force: ForceOCH (no OCH cmd, fallback to burst)".to_string());
+            }
+        }
+        if forced == RuntimePacketMode::Disabled {
+            return (RuntimeFetch::Burst(burst_cmd), "override: Disabled".to_string());
+        }
+
+        // Auto heuristics
+        // 1) INI hint: maxUnusedRuntimeRange > 0 => prefer OCH if available
+        if let Some(p) = &self.protocol_settings {
+            if p.max_unused_runtime_range > 0 && och_cmd_opt.is_some() {
+                return (RuntimeFetch::OCH(och_cmd_opt.unwrap()), "ini hint: maxUnusedRuntimeRange".to_string());
+            }
+        }
+
+        // 2) Port name heuristic
+        if self.is_slow_link() {
+            if let Some(och) = och_cmd_opt.clone() {
+                return (RuntimeFetch::OCH(och), "heuristic: slow link".to_string());
+            }
+        }
+
+        // 3) Adaptive timing heuristic
+        if let Some((avg, _count)) = self.adaptive_timing_stats() {
+            let avg_ms = avg.as_millis() as u64;
+            if avg_ms > 50 {
+                if let Some(och) = och_cmd_opt.clone() {
+                    return (RuntimeFetch::OCH(och), format!("adaptive: avg={}ms", avg_ms));
+                }
+            }
+        }
+
+        // Default: use burst
+        (RuntimeFetch::Burst(burst_cmd), "default: burst".to_string())
+    }
+
+    /// Determine if the configured port looks like a slow link (bluetooth, tcp, rfcomm)
+    pub(crate) fn is_slow_link(&self) -> bool {
+        let pn = self.config.port_name.to_lowercase();
+        if pn.contains("rfcomm") || pn.contains("bluetooth") || pn.contains("tcp") || pn.contains("telnet") || pn.contains("wifi") {
+            return true;
+        }
+        // Baud-rate heuristic: low baud suggests slow link
+        if self.config.baud_rate < 57600 {
+            return true;
+        }
+        false
+    }
+
+    /// Get real-time data from ECU
+    pub fn get_realtime_data(&mut self) -> Result<Vec<u8>, ProtocolError> {
+        let (choice, reason) = self.choose_runtime_command();
+        eprintln!("[INFO] get_realtime_data: mode selected: {}", reason);
+
+        match choice {
+            RuntimeFetch::Burst(cmd) => {
+                if self.use_modern_protocol {
+                    let cmd_bytes = cmd.as_bytes().to_vec();
+                    let packet = Packet::new(cmd_bytes);
+                    let response = self.send_packet(packet)?;
+                    Ok(response.payload)
+                } else {
+                    let cmd_byte = cmd.as_bytes().first().copied().unwrap_or(b'A');
+                    self.send_raw_command(&[cmd_byte])
+                }
+            }
+            RuntimeFetch::OCH(cmd) => {
+                // OCH: expect block response of och_block_size; send command accordingly
+                if self.use_modern_protocol {
+                    let cmd_bytes = cmd.as_bytes().to_vec();
+                    let packet = Packet::new(cmd_bytes);
+                    let response = self.send_packet(packet)?;
+                    Ok(response.payload)
+                } else {
+                    let cmd_byte = cmd.as_bytes().first().copied().unwrap_or(b'A');
+                    self.send_raw_command(&[cmd_byte])
+                }
+            }
         }
     }
 
@@ -1221,5 +1356,68 @@ mod tests {
         assert_eq!(parse_command_string("Q"), vec![b'Q']);
         assert_eq!(parse_command_string("S"), vec![b'S']);
         assert_eq!(parse_command_string("Hello"), b"Hello".to_vec());
+    }
+
+    #[test]
+    fn test_choose_runtime_command_rfcomm() {
+        let mut cfg = ConnectionConfig::default();
+        cfg.port_name = "rfcomm0".to_string();
+        let mut conn = Connection::new(cfg);
+        let mut proto = ProtocolSettings::default();
+        proto.och_get_command = Some("O".to_string());
+        proto.burst_get_command = Some("A".to_string());
+        conn.set_protocol(proto, Endianness::Little);
+        let (choice, reason) = conn.choose_runtime_command();
+        match choice {
+            RuntimeFetch::OCH(cmd) => assert_eq!(cmd, "O"),
+            _ => panic!("Expected OCH choice, got {:?}", choice),
+        }
+        assert!(reason.contains("heuristic") || reason.contains("ini hint") || reason.contains("slow") || reason.contains("adaptive") );
+    }
+
+    #[test]
+    fn test_force_modes() {
+        let mut cfg = ConnectionConfig::default();
+        cfg.runtime_packet_mode = RuntimePacketMode::ForceOCH;
+        let mut conn = Connection::new(cfg.clone());
+        let mut proto = ProtocolSettings::default();
+        proto.och_get_command = Some("O".to_string());
+        proto.burst_get_command = Some("A".to_string());
+        conn.set_protocol(proto, Endianness::Little);
+        let (choice, _) = conn.choose_runtime_command();
+        match choice {
+            RuntimeFetch::OCH(cmd) => assert_eq!(cmd, "O"),
+            _ => panic!("Expected OCH due to ForceOCH"),
+        }
+
+        let mut cfg2 = ConnectionConfig::default();
+        cfg2.runtime_packet_mode = RuntimePacketMode::ForceBurst;
+        let conn2 = Connection::new(cfg2);
+        let (choice2, _) = conn2.choose_runtime_command();
+        match choice2 {
+            RuntimeFetch::Burst(cmd) => assert_eq!(cmd, "A".to_string()),
+            _ => panic!("Expected Burst due to ForceBurst"),
+        }
+    }
+
+    #[test]
+    fn test_adaptive_switch_to_och() {
+        let mut cfg = ConnectionConfig::default();
+        let mut conn = Connection::new(cfg);
+        let mut proto = ProtocolSettings::default();
+        proto.och_get_command = Some("O".to_string());
+        proto.burst_get_command = Some("A".to_string());
+        conn.set_protocol(proto, Endianness::Little);
+
+        // enable adaptive timing, record slow responses
+        conn.enable_adaptive_timing(None);
+        conn.record_response_time(std::time::Duration::from_millis(200));
+        conn.record_response_time(std::time::Duration::from_millis(180));
+        let (choice, reason) = conn.choose_runtime_command();
+        match choice {
+            RuntimeFetch::OCH(cmd) => assert_eq!(cmd, "O"),
+            _ => panic!("Expected OCH due to adaptive timing, got {:?}", choice),
+        }
+        assert!(reason.starts_with("adaptive") || reason.contains("avg"));
     }
 }

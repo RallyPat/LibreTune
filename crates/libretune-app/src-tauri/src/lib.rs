@@ -3,10 +3,11 @@ use libretune_core::autotune::{
     AutoTuneState, VEDataPoint,
 };
 use libretune_core::dash::{
-    self, Bibliography, DashComponent, DashFile, GaugePainter, TsColor, VersionInfo,
+    self, Bibliography, DashComponent, DashFile, GaugeCluster, GaugePainter, TsColor, VersionInfo,
+    create_basic_dashboard, create_racing_dashboard, create_tuning_dashboard,
 };
 use libretune_core::dashboard::{
-    get_dashboard_file, get_dashboard_file_path, DashboardLayout, GaugeConfig,
+    get_dashboard_file, get_dashboard_file_path, DashboardLayout, GaugeConfig as DashboardGaugeConfig,
 };
 use libretune_core::datalog::{DataLogger, LogEntry};
 use libretune_core::demo::DemoSimulator;
@@ -39,6 +40,17 @@ use tauri::Manager;
 use tauri_plugin_window_state::{AppHandleExt, StateFlags};
 use tokio::sync::Mutex;
 
+/// Parse a runtime packet mode string into enum
+fn parse_runtime_packet_mode(mode: &str) -> libretune_core::protocol::RuntimePacketMode {
+    use libretune_core::protocol::RuntimePacketMode as Rpm;
+    match mode {
+        "ForceBurst" => Rpm::ForceBurst,
+        "ForceOCH" => Rpm::ForceOCH,
+        "Disabled" => Rpm::Disabled,
+        _ => Rpm::Auto,
+    }
+}
+
 /// Get the LibreTune app data directory (cross-platform)
 fn get_app_data_dir(app: &tauri::AppHandle) -> PathBuf {
     app.path().app_data_dir().unwrap_or_else(|_| {
@@ -68,6 +80,168 @@ fn get_dashboards_dir(app: &tauri::AppHandle) -> PathBuf {
     get_app_data_dir(app).join("dashboards")
 }
 
+/// Start periodic connection metrics emission task (1s interval)
+async fn start_metrics_task(app: tauri::AppHandle, state: tauri::State<'_, AppState>) {
+    let mut guard = state.metrics_task.lock().await;
+    // If already running, do nothing
+    if guard.is_some() {
+        return;
+    }
+
+    let app_handle = app.clone();
+
+    let handle = tokio::spawn(async move {
+        use tokio::time::{sleep, Duration};
+        // Obtain AppState inside the spawned task via AppHandle to ensure 'static lifetime
+        let state = app_handle.state::<AppState>();
+        let mut prev_tx: u64 = 0;
+        let mut prev_rx: u64 = 0;
+        let mut prev_tx_pkts: u64 = 0;
+        let mut prev_rx_pkts: u64 = 0;
+        let mut prev_ts = std::time::Instant::now();
+
+        loop {
+            sleep(Duration::from_millis(1000)).await;
+
+            // Sample connection counters
+            let (tx, rx, tx_pkts, rx_pkts, connected) = {
+                let conn_guard = state.connection.lock().await;
+                if let Some(conn) = conn_guard.as_ref() {
+                    // get counters
+                    let (tx_b, rx_b, tx_p, rx_p) = conn.get_counters();
+                    (tx_b, rx_b, tx_p, rx_p, true)
+                } else {
+                    (0u64, 0u64, 0u64, 0u64, false)
+                }
+            };
+
+            let now = std::time::Instant::now();
+            let dt = now.duration_since(prev_ts).as_secs_f64();
+            prev_ts = now;
+
+            if connected {
+                // Deltas
+                let dtx = tx.saturating_sub(prev_tx) as f64;
+                let drx = rx.saturating_sub(prev_rx) as f64;
+                let dtxp = tx_pkts.saturating_sub(prev_tx_pkts) as f64;
+                let drxp = rx_pkts.saturating_sub(prev_rx_pkts) as f64;
+
+                prev_tx = tx;
+                prev_rx = rx;
+                prev_tx_pkts = tx_pkts;
+                prev_rx_pkts = rx_pkts;
+
+                // Rates
+                let tx_bps = if dt > 0.0 { dtx / dt } else { 0.0 };
+                let rx_bps = if dt > 0.0 { drx / dt } else { 0.0 };
+                let tx_pkts_s = if dt > 0.0 { dtxp / dt } else { 0.0 };
+                let rx_pkts_s = if dt > 0.0 { drxp / dt } else { 0.0 };
+
+                let payload = serde_json::json!({
+                    "tx_bps": tx_bps,
+                    "rx_bps": rx_bps,
+                    "tx_pkts_s": tx_pkts_s,
+                    "rx_pkts_s": rx_pkts_s,
+                    "tx_total": tx,
+                    "rx_total": rx,
+                    "timestamp_ms": chrono::Utc::now().timestamp_millis()
+                });
+
+                let _ = app_handle.emit("connection:metrics", payload);
+            } else {
+                // Not connected - emit zero metrics to update UI
+                let payload = serde_json::json!({
+                    "tx_bps": 0.0,
+                    "rx_bps": 0.0,
+                    "tx_pkts_s": 0.0,
+                    "rx_pkts_s": 0.0,
+                    "tx_total": tx,
+                    "rx_total": rx,
+                    "timestamp_ms": chrono::Utc::now().timestamp_millis()
+                });
+                let _ = app_handle.emit("connection:metrics", payload);
+            }
+        }
+    });
+
+    *guard = Some(handle);
+}
+
+/// Stop metrics task if running
+async fn stop_metrics_task(state: tauri::State<'_, AppState>) {
+    let mut guard = state.metrics_task.lock().await;
+    if let Some(handle) = guard.take() {
+        handle.abort();
+    }
+}
+
+#[cfg(test)]
+mod runtime_mode_tests {
+    use super::*;
+    use libretune_core::protocol::RuntimePacketMode as Rpm;
+
+    #[test]
+    fn test_parse_runtime_packet_mode() {
+        assert_eq!(parse_runtime_packet_mode("ForceBurst"), Rpm::ForceBurst);
+        assert_eq!(parse_runtime_packet_mode("ForceOCH"), Rpm::ForceOCH);
+        assert_eq!(parse_runtime_packet_mode("Disabled"), Rpm::Disabled);
+        assert_eq!(parse_runtime_packet_mode("unknown"), Rpm::Auto);
+    }
+
+    #[test]
+    fn test_default_runtime_packet_mode() {
+        assert_eq!(default_runtime_packet_mode(), "Auto");
+    }
+
+    // Test helpers that operate on explicit settings path so we don't need a full tauri::App
+    #[cfg(test)]
+    fn update_setting_with_path(settings_path: &std::path::Path, key: &str, value: &str) -> Result<(), String> {
+        // Load existing or default
+        let mut settings: Settings = if let Ok(content) = std::fs::read_to_string(settings_path) {
+            serde_json::from_str(&content).unwrap_or_default()
+        } else {
+            Settings::default()
+        };
+
+        match key {
+            "runtime_packet_mode" => settings.runtime_packet_mode = value.to_string(),
+            _ => return Err(format!("Unknown setting: {}", key)),
+        }
+
+        if let Ok(json) = serde_json::to_string_pretty(&settings) {
+            std::fs::create_dir_all(settings_path.parent().unwrap()).map_err(|e| e.to_string())?;
+            std::fs::write(settings_path, json).map_err(|e| e.to_string())?;
+            Ok(())
+        } else {
+            Err("Failed to serialize settings".to_string())
+        }
+    }
+
+    #[test]
+    fn test_update_setting_persistence_runtime_packet_mode_file_api() {
+        use tempfile::tempdir;
+        let dir = tempdir().expect("tempdir");
+        let settings_path = dir.path().join("settings.json");
+
+        // Ensure no file to start
+        let _ = std::fs::remove_file(&settings_path);
+
+        // Update using helper
+        update_setting_with_path(&settings_path, "runtime_packet_mode", "ForceOCH").expect("update should succeed");
+
+        // Read file back and assert
+        let content = std::fs::read_to_string(&settings_path).expect("settings file should exist");
+        assert!(content.contains("\"runtime_packet_mode\": \"ForceOCH\""));
+
+        // Also simulate load_settings behavior by deserializing
+        let settings: Settings = serde_json::from_str(&content).expect("valid json");
+        assert_eq!(settings.runtime_packet_mode, "ForceOCH");
+
+        // Clean up
+        let _ = std::fs::remove_file(&settings_path);
+    }
+}
+
 /// Create a bitmask for the given number of bits, safe from overflow.
 /// Returns 0xFF if bits >= 8, otherwise (1u8 << bits) - 1.
 #[inline]
@@ -88,6 +262,8 @@ struct AppState {
     streaming_task: Mutex<Option<tokio::task::JoinHandle<()>>>,
     // Background task for AutoTune auto-send
     autotune_send_task: Mutex<Option<tokio::task::JoinHandle<()>>>,
+    // Background task for connection metrics emission
+    metrics_task: Mutex<Option<tokio::task::JoinHandle<()>>>,
     current_tune: Mutex<Option<TuneFile>>,
     current_tune_path: Mutex<Option<PathBuf>>,
     tune_modified: Mutex<bool>,
@@ -250,6 +426,14 @@ struct Settings {
     auto_commit_on_save: String, // "always", "never", "ask"
     #[serde(default = "default_commit_message_format")]
     commit_message_format: String, // Format string with {date}, {time} placeholders
+
+    /// Global override for runtime packet mode (Auto|ForceBurst|ForceOCH|Disabled)
+    #[serde(default = "default_runtime_packet_mode")]
+    runtime_packet_mode: String,
+}
+
+fn default_runtime_packet_mode() -> String {
+    "Auto".to_string()
 }
 
 fn default_heatmap_scheme() -> String {
@@ -282,11 +466,19 @@ fn save_settings(app: &tauri::AppHandle, settings: &Settings) {
 fn load_settings(app: &tauri::AppHandle) -> Settings {
     let settings_path = get_settings_path(app);
     if let Ok(content) = std::fs::read_to_string(&settings_path) {
-        if let Ok(settings) = serde_json::from_str(&content) {
+        if let Ok(mut settings) = serde_json::from_str::<Settings>(&content) {
+            if settings.runtime_packet_mode.trim().is_empty() {
+                settings.runtime_packet_mode = default_runtime_packet_mode();
+            }
             return settings;
         }
     }
-    Settings::default()
+    // Ensure default runtime mode is set when no file exists
+    let mut s = Settings::default();
+    if s.runtime_packet_mode.trim().is_empty() {
+        s.runtime_packet_mode = default_runtime_packet_mode();
+    }
+    s
 }
 
 // =============================================================================
@@ -401,7 +593,7 @@ fn convert_dashfile_to_layout(dash: &DashFile, name: &str) -> DashboardLayout {
                 GaugePainter::LineGraph => GaugeType::DigitalReadout, // Deferred
             };
 
-            let config = GaugeConfig {
+            let config = DashboardGaugeConfig {
                 id: if g.id.is_empty() {
                     format!("gauge_{}", idx)
                 } else {
@@ -915,9 +1107,15 @@ async fn connect_to_ecu(
     port_name: String,
     baud_rate: u32,
     timeout_ms: Option<u64>,
+    runtime_packet_mode: Option<String>,
 ) -> Result<ConnectResult, String> {
     let mut config = ConnectionConfig::default();
     config.port_name = port_name.clone();
+
+    // Apply runtime_packet_mode override if provided
+    if let Some(mode) = runtime_packet_mode {
+        config.runtime_packet_mode = parse_runtime_packet_mode(&mode);
+    }
 
     // Validate baud rate passed from UI: guard against 0.
     if baud_rate == 0 {
@@ -1056,6 +1254,9 @@ async fn connect_to_ecu(
 
             let mut guard = state.connection.lock().await;
             *guard = Some(conn);
+
+            // Start periodic metrics emission task
+            start_metrics_task(app.clone(), state.clone()).await;
 
             Ok(ConnectResult {
                 signature,
@@ -1277,6 +1478,9 @@ async fn sync_ecu_data(
 /// Returns: Nothing on success
 #[tauri::command]
 async fn disconnect_ecu(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    // Stop metrics task first
+    stop_metrics_task(state.clone()).await;
+
     let mut guard = state.connection.lock().await;
     *guard = None;
     Ok(())
@@ -2347,33 +2551,43 @@ async fn update_curve_data(
 async fn get_realtime_data(
     state: tauri::State<'_, AppState>,
 ) -> Result<HashMap<String, f64>, String> {
-    let mut conn_guard = state.connection.lock().await;
-    let def_guard = state.definition.lock().await;
-
-    let (conn, def) = match (&mut *conn_guard, &*def_guard) {
-        (Some(c), Some(d)) => (c, d),
-        _ => return Err("Connection or definition missing".to_string()),
+    // Snapshot definition first to avoid holding both `definition` and `connection` locks at the same time.
+    // This prevents deadlocks when other tasks may take the locks in the opposite order.
+    let (channels_snapshot, endianness) = {
+        let def_guard = state.definition.lock().await;
+        if let Some(def) = &*def_guard {
+            (def.output_channels.clone(), def.endianness)
+        } else {
+            return Err("Connection or definition missing".to_string());
+        }
     };
 
-    // Get raw data from ECU
-    let raw_data = conn.get_realtime_data().map_err(|e| e.to_string())?;
+    // Now lock connection only for I/O
+    let raw_data = {
+        let mut conn_guard = state.connection.lock().await;
+        let conn = match conn_guard.as_mut() {
+            Some(c) => c,
+            None => return Err("Connection or definition missing".to_string()),
+        };
+        conn.get_realtime_data().map_err(|e| e.to_string())?
+    };
 
-    // Two-pass approach for computed channels:
+    // Two-pass approach for computed channels using the cloned snapshot:
     // Pass 1: Parse all non-computed channels
     let mut data = HashMap::new();
     let mut computed_channels = Vec::new();
 
-    for (name, channel) in &def.output_channels {
+    for (name, channel) in &channels_snapshot {
         if channel.is_computed() {
             computed_channels.push((name.clone(), channel.clone()));
-        } else if let Some(val) = channel.parse(&raw_data, def.endianness) {
+        } else if let Some(val) = channel.parse(&raw_data, endianness) {
             data.insert(name.clone(), val);
         }
     }
 
     // Pass 2: Evaluate computed channels using parsed values as context
     for (name, channel) in computed_channels {
-        if let Some(val) = channel.parse_with_context(&raw_data, def.endianness, &data) {
+        if let Some(val) = channel.parse_with_context(&raw_data, endianness, &data) {
             data.insert(name, val);
         }
     }
@@ -2521,12 +2735,21 @@ async fn start_realtime_stream(
     let is_demo = *state.demo_mode.lock().await;
 
     // In demo mode, we only need the definition
-    // In real mode, we need both connection and definition
+    // In real mode, we need both connection and definition. Avoid holding both locks at
+    // the same time to prevent potential deadlocks with other commands that lock in the
+    // opposite order.
     if !is_demo {
-        let conn_guard = state.connection.lock().await;
-        let def_guard = state.definition.lock().await;
-        if conn_guard.is_none() || def_guard.is_none() {
-            return Err("Connection or definition missing".to_string());
+        {
+            let def_guard = state.definition.lock().await;
+            if def_guard.is_none() {
+                return Err("Connection or definition missing".to_string());
+            }
+        }
+        {
+            let conn_guard = state.connection.lock().await;
+            if conn_guard.is_none() {
+                return Err("Connection or definition missing".to_string());
+            }
         }
     } else {
         let def_guard = state.definition.lock().await;
@@ -4567,13 +4790,17 @@ async fn start_autotune_autosend(
                 continue;
             }
 
-            // Acquire connection and definition
-            let mut conn_guard = app_state.connection.lock().await;
-            let def_guard = app_state.definition.lock().await;
-            let def = match def_guard.as_ref() {
-                Some(d) => d.clone(),
-                None => continue,
+            // Acquire definition snapshot first, then connection. Do not hold both locks
+            // simultaneously to avoid deadlocks with other code paths.
+            let def = {
+                let def_guard = app_state.definition.lock().await;
+                match def_guard.as_ref() {
+                    Some(d) => d.clone(),
+                    None => continue,
+                }
             };
+
+            let mut conn_guard = app_state.connection.lock().await;
             let conn = match conn_guard.as_mut() {
                 Some(c) => c,
                 None => continue,
@@ -5841,1522 +6068,6 @@ struct DashboardTemplateInfo {
     id: String,
     name: String,
     description: String,
-}
-
-/// Create a basic dashboard layout - LibreTune default
-fn create_basic_dashboard() -> DashFile {
-    use libretune_core::dash::{BackgroundStyle, GaugeCluster};
-
-    let mut dash = DashFile {
-        bibliography: Bibliography {
-            author: "LibreTune".to_string(),
-            company: "LibreTune Project".to_string(),
-            write_date: chrono::Utc::now().format("%Y-%m-%d").to_string(),
-        },
-        version_info: VersionInfo {
-            file_format: "3.0".to_string(),
-            firmware_signature: None,
-        },
-        gauge_cluster: GaugeCluster {
-            anti_aliasing: true,
-            cluster_background_color: TsColor {
-                alpha: 255,
-                red: 25,
-                green: 25,
-                blue: 30,
-            },
-            background_dither_color: None,
-            cluster_background_image_file_name: None,
-            cluster_background_image_style: BackgroundStyle::Stretch,
-            embedded_images: Vec::new(),
-            components: Vec::new(),
-        },
-    };
-
-    // Row 1: Large RPM gauge
-    dash.gauge_cluster
-        .components
-        .push(DashComponent::Gauge(Box::new(dash::GaugeConfig {
-            id: "rpm".to_string(),
-            title: "RPM".to_string(),
-            units: "".to_string(),
-            output_channel: "rpm".to_string(),
-            min: 0.0,
-            max: 8000.0,
-            high_warning: Some(6500.0),
-            high_critical: Some(7200.0),
-            gauge_painter: GaugePainter::AnalogGauge,
-            relative_x: 0.02,
-            relative_y: 0.02,
-            relative_width: 0.46,
-            relative_height: 0.48,
-            back_color: TsColor {
-                alpha: 255,
-                red: 40,
-                green: 40,
-                blue: 45,
-            },
-            font_color: TsColor {
-                alpha: 255,
-                red: 255,
-                green: 255,
-                blue: 255,
-            },
-            needle_color: TsColor {
-                alpha: 255,
-                red: 255,
-                green: 80,
-                blue: 0,
-            },
-            trim_color: TsColor {
-                alpha: 255,
-                red: 100,
-                green: 100,
-                blue: 110,
-            },
-            warn_color: TsColor {
-                alpha: 255,
-                red: 255,
-                green: 200,
-                blue: 0,
-            },
-            critical_color: TsColor {
-                alpha: 255,
-                red: 255,
-                green: 50,
-                blue: 50,
-            },
-            ..Default::default()
-        })));
-
-    // Row 1: AFR gauge (digital readout)
-    dash.gauge_cluster
-        .components
-        .push(DashComponent::Gauge(Box::new(dash::GaugeConfig {
-            id: "afr".to_string(),
-            title: "AFR".to_string(),
-            units: "".to_string(),
-            output_channel: "afr".to_string(),
-            min: 10.0,
-            max: 20.0,
-            low_warning: Some(11.5),
-            high_warning: Some(15.0),
-            low_critical: Some(10.5),
-            high_critical: Some(16.5),
-            value_digits: 2,
-            gauge_painter: GaugePainter::BasicReadout,
-            relative_x: 0.52,
-            relative_y: 0.02,
-            relative_width: 0.22,
-            relative_height: 0.23,
-            back_color: TsColor {
-                alpha: 255,
-                red: 35,
-                green: 35,
-                blue: 40,
-            },
-            font_color: TsColor {
-                alpha: 255,
-                red: 0,
-                green: 255,
-                blue: 128,
-            },
-            ..Default::default()
-        })));
-
-    // Row 1: Coolant temp (bar gauge)
-    dash.gauge_cluster
-        .components
-        .push(DashComponent::Gauge(Box::new(dash::GaugeConfig {
-            id: "coolant".to_string(),
-            title: "COOLANT".to_string(),
-            units: "°C".to_string(),
-            output_channel: "coolant".to_string(),
-            min: -40.0,
-            max: 120.0,
-            high_warning: Some(100.0),
-            high_critical: Some(110.0),
-            value_digits: 0,
-            gauge_painter: GaugePainter::VerticalBarGauge,
-            relative_x: 0.76,
-            relative_y: 0.02,
-            relative_width: 0.10,
-            relative_height: 0.48,
-            back_color: TsColor {
-                alpha: 255,
-                red: 30,
-                green: 30,
-                blue: 35,
-            },
-            font_color: TsColor {
-                alpha: 255,
-                red: 100,
-                green: 200,
-                blue: 255,
-            },
-            trim_color: TsColor {
-                alpha: 255,
-                red: 0,
-                green: 150,
-                blue: 255,
-            },
-            warn_color: TsColor {
-                alpha: 255,
-                red: 255,
-                green: 200,
-                blue: 0,
-            },
-            critical_color: TsColor {
-                alpha: 255,
-                red: 255,
-                green: 50,
-                blue: 50,
-            },
-            ..Default::default()
-        })));
-
-    // Row 1: IAT temp (bar gauge)
-    dash.gauge_cluster
-        .components
-        .push(DashComponent::Gauge(Box::new(dash::GaugeConfig {
-            id: "iat".to_string(),
-            title: "IAT".to_string(),
-            units: "°C".to_string(),
-            output_channel: "iat".to_string(),
-            min: -40.0,
-            max: 80.0,
-            high_warning: Some(50.0),
-            high_critical: Some(65.0),
-            value_digits: 0,
-            gauge_painter: GaugePainter::VerticalBarGauge,
-            relative_x: 0.88,
-            relative_y: 0.02,
-            relative_width: 0.10,
-            relative_height: 0.48,
-            back_color: TsColor {
-                alpha: 255,
-                red: 30,
-                green: 30,
-                blue: 35,
-            },
-            font_color: TsColor {
-                alpha: 255,
-                red: 255,
-                green: 200,
-                blue: 100,
-            },
-            trim_color: TsColor {
-                alpha: 255,
-                red: 255,
-                green: 180,
-                blue: 0,
-            },
-            warn_color: TsColor {
-                alpha: 255,
-                red: 255,
-                green: 200,
-                blue: 0,
-            },
-            critical_color: TsColor {
-                alpha: 255,
-                red: 255,
-                green: 50,
-                blue: 50,
-            },
-            ..Default::default()
-        })));
-
-    // Row 1: TPS (digital, below AFR)
-    dash.gauge_cluster
-        .components
-        .push(DashComponent::Gauge(Box::new(dash::GaugeConfig {
-            id: "tps".to_string(),
-            title: "TPS".to_string(),
-            units: "%".to_string(),
-            output_channel: "tps".to_string(),
-            min: 0.0,
-            max: 100.0,
-            value_digits: 1,
-            gauge_painter: GaugePainter::BasicReadout,
-            relative_x: 0.52,
-            relative_y: 0.27,
-            relative_width: 0.22,
-            relative_height: 0.23,
-            back_color: TsColor {
-                alpha: 255,
-                red: 35,
-                green: 35,
-                blue: 40,
-            },
-            font_color: TsColor {
-                alpha: 255,
-                red: 255,
-                green: 255,
-                blue: 255,
-            },
-            ..Default::default()
-        })));
-
-    // Row 2: MAP gauge
-    dash.gauge_cluster
-        .components
-        .push(DashComponent::Gauge(Box::new(dash::GaugeConfig {
-            id: "map".to_string(),
-            title: "MAP".to_string(),
-            units: "kPa".to_string(),
-            output_channel: "map".to_string(),
-            min: 0.0,
-            max: 250.0,
-            value_digits: 0,
-            gauge_painter: GaugePainter::HorizontalBarGauge,
-            relative_x: 0.02,
-            relative_y: 0.52,
-            relative_width: 0.30,
-            relative_height: 0.12,
-            back_color: TsColor {
-                alpha: 255,
-                red: 30,
-                green: 30,
-                blue: 35,
-            },
-            font_color: TsColor {
-                alpha: 255,
-                red: 200,
-                green: 200,
-                blue: 255,
-            },
-            trim_color: TsColor {
-                alpha: 255,
-                red: 100,
-                green: 100,
-                blue: 200,
-            },
-            ..Default::default()
-        })));
-
-    // Row 2: Battery Voltage
-    dash.gauge_cluster
-        .components
-        .push(DashComponent::Gauge(Box::new(dash::GaugeConfig {
-            id: "battery".to_string(),
-            title: "BATTERY".to_string(),
-            units: "V".to_string(),
-            output_channel: "battery".to_string(),
-            min: 10.0,
-            max: 16.0,
-            low_warning: Some(11.5),
-            high_warning: Some(15.0),
-            low_critical: Some(10.5),
-            value_digits: 1,
-            gauge_painter: GaugePainter::BasicReadout,
-            relative_x: 0.34,
-            relative_y: 0.52,
-            relative_width: 0.15,
-            relative_height: 0.12,
-            back_color: TsColor {
-                alpha: 255,
-                red: 35,
-                green: 35,
-                blue: 40,
-            },
-            font_color: TsColor {
-                alpha: 255,
-                red: 255,
-                green: 220,
-                blue: 100,
-            },
-            ..Default::default()
-        })));
-
-    // Row 2: Advance
-    dash.gauge_cluster
-        .components
-        .push(DashComponent::Gauge(Box::new(dash::GaugeConfig {
-            id: "advance".to_string(),
-            title: "ADVANCE".to_string(),
-            units: "°".to_string(),
-            output_channel: "advance".to_string(),
-            min: -10.0,
-            max: 50.0,
-            value_digits: 1,
-            gauge_painter: GaugePainter::BasicReadout,
-            relative_x: 0.51,
-            relative_y: 0.52,
-            relative_width: 0.15,
-            relative_height: 0.12,
-            back_color: TsColor {
-                alpha: 255,
-                red: 35,
-                green: 35,
-                blue: 40,
-            },
-            font_color: TsColor {
-                alpha: 255,
-                red: 255,
-                green: 150,
-                blue: 50,
-            },
-            ..Default::default()
-        })));
-
-    // Row 2: VE
-    dash.gauge_cluster
-        .components
-        .push(DashComponent::Gauge(Box::new(dash::GaugeConfig {
-            id: "ve".to_string(),
-            title: "VE".to_string(),
-            units: "%".to_string(),
-            output_channel: "ve".to_string(),
-            min: 0.0,
-            max: 150.0,
-            value_digits: 1,
-            gauge_painter: GaugePainter::BasicReadout,
-            relative_x: 0.68,
-            relative_y: 0.52,
-            relative_width: 0.15,
-            relative_height: 0.12,
-            back_color: TsColor {
-                alpha: 255,
-                red: 35,
-                green: 35,
-                blue: 40,
-            },
-            font_color: TsColor {
-                alpha: 255,
-                red: 100,
-                green: 255,
-                blue: 100,
-            },
-            ..Default::default()
-        })));
-
-    // Row 2: PW
-    dash.gauge_cluster
-        .components
-        .push(DashComponent::Gauge(Box::new(dash::GaugeConfig {
-            id: "pw".to_string(),
-            title: "PW".to_string(),
-            units: "ms".to_string(),
-            output_channel: "pulseWidth1".to_string(),
-            min: 0.0,
-            max: 20.0,
-            value_digits: 2,
-            gauge_painter: GaugePainter::BasicReadout,
-            relative_x: 0.85,
-            relative_y: 0.52,
-            relative_width: 0.13,
-            relative_height: 0.12,
-            back_color: TsColor {
-                alpha: 255,
-                red: 35,
-                green: 35,
-                blue: 40,
-            },
-            font_color: TsColor {
-                alpha: 255,
-                red: 200,
-                green: 200,
-                blue: 200,
-            },
-            ..Default::default()
-        })));
-
-    dash
-}
-
-/// Create a racing-focused dashboard
-fn create_racing_dashboard() -> DashFile {
-    use libretune_core::dash::{BackgroundStyle, GaugeCluster};
-
-    let mut dash = DashFile {
-        bibliography: Bibliography {
-            author: "LibreTune".to_string(),
-            company: "LibreTune Project".to_string(),
-            write_date: chrono::Utc::now().format("%Y-%m-%d").to_string(),
-        },
-        version_info: VersionInfo {
-            file_format: "3.0".to_string(),
-            firmware_signature: None,
-        },
-        gauge_cluster: GaugeCluster {
-            anti_aliasing: true,
-            cluster_background_color: TsColor {
-                alpha: 255,
-                red: 15,
-                green: 15,
-                blue: 20,
-            },
-            background_dither_color: None,
-            cluster_background_image_file_name: None,
-            cluster_background_image_style: BackgroundStyle::Stretch,
-            embedded_images: Vec::new(),
-            components: Vec::new(),
-        },
-    };
-
-    // Giant center RPM
-    dash.gauge_cluster
-        .components
-        .push(DashComponent::Gauge(Box::new(dash::GaugeConfig {
-            id: "rpm".to_string(),
-            title: "RPM".to_string(),
-            units: "".to_string(),
-            output_channel: "rpm".to_string(),
-            min: 0.0,
-            max: 10000.0,
-            high_warning: Some(8000.0),
-            high_critical: Some(9000.0),
-            gauge_painter: GaugePainter::AnalogGauge,
-            relative_x: 0.15,
-            relative_y: 0.05,
-            relative_width: 0.70,
-            relative_height: 0.70,
-            back_color: TsColor {
-                alpha: 255,
-                red: 25,
-                green: 25,
-                blue: 30,
-            },
-            font_color: TsColor {
-                alpha: 255,
-                red: 255,
-                green: 255,
-                blue: 255,
-            },
-            needle_color: TsColor {
-                alpha: 255,
-                red: 255,
-                green: 0,
-                blue: 0,
-            },
-            trim_color: TsColor {
-                alpha: 255,
-                red: 80,
-                green: 80,
-                blue: 90,
-            },
-            warn_color: TsColor {
-                alpha: 255,
-                red: 255,
-                green: 255,
-                blue: 0,
-            },
-            critical_color: TsColor {
-                alpha: 255,
-                red: 255,
-                green: 0,
-                blue: 0,
-            },
-            ..Default::default()
-        })));
-
-    // Oil pressure (left)
-    dash.gauge_cluster
-        .components
-        .push(DashComponent::Gauge(Box::new(dash::GaugeConfig {
-            id: "oilpres".to_string(),
-            title: "OIL".to_string(),
-            units: "psi".to_string(),
-            output_channel: "oilPressure".to_string(),
-            min: 0.0,
-            max: 100.0,
-            low_warning: Some(20.0),
-            low_critical: Some(10.0),
-            value_digits: 0,
-            gauge_painter: GaugePainter::VerticalBarGauge,
-            relative_x: 0.02,
-            relative_y: 0.05,
-            relative_width: 0.10,
-            relative_height: 0.55,
-            back_color: TsColor {
-                alpha: 255,
-                red: 30,
-                green: 30,
-                blue: 35,
-            },
-            font_color: TsColor {
-                alpha: 255,
-                red: 255,
-                green: 200,
-                blue: 100,
-            },
-            ..Default::default()
-        })));
-
-    // Water temp (right)
-    dash.gauge_cluster
-        .components
-        .push(DashComponent::Gauge(Box::new(dash::GaugeConfig {
-            id: "coolant".to_string(),
-            title: "H2O".to_string(),
-            units: "°C".to_string(),
-            output_channel: "coolant".to_string(),
-            min: 0.0,
-            max: 130.0,
-            high_warning: Some(105.0),
-            high_critical: Some(115.0),
-            value_digits: 0,
-            gauge_painter: GaugePainter::VerticalBarGauge,
-            relative_x: 0.88,
-            relative_y: 0.05,
-            relative_width: 0.10,
-            relative_height: 0.55,
-            back_color: TsColor {
-                alpha: 255,
-                red: 30,
-                green: 30,
-                blue: 35,
-            },
-            font_color: TsColor {
-                alpha: 255,
-                red: 100,
-                green: 200,
-                blue: 255,
-            },
-            ..Default::default()
-        })));
-
-    // Speed (bottom left)
-    dash.gauge_cluster
-        .components
-        .push(DashComponent::Gauge(Box::new(dash::GaugeConfig {
-            id: "speed".to_string(),
-            title: "SPEED".to_string(),
-            units: "km/h".to_string(),
-            output_channel: "speed".to_string(),
-            min: 0.0,
-            max: 300.0,
-            value_digits: 0,
-            gauge_painter: GaugePainter::BasicReadout,
-            relative_x: 0.02,
-            relative_y: 0.78,
-            relative_width: 0.23,
-            relative_height: 0.20,
-            back_color: TsColor {
-                alpha: 255,
-                red: 25,
-                green: 25,
-                blue: 30,
-            },
-            font_color: TsColor {
-                alpha: 255,
-                red: 255,
-                green: 255,
-                blue: 255,
-            },
-            font_size_adjustment: 4,
-            ..Default::default()
-        })));
-
-    // AFR (bottom center-left)
-    dash.gauge_cluster
-        .components
-        .push(DashComponent::Gauge(Box::new(dash::GaugeConfig {
-            id: "afr".to_string(),
-            title: "AFR".to_string(),
-            units: "".to_string(),
-            output_channel: "afr".to_string(),
-            min: 10.0,
-            max: 18.0,
-            low_warning: Some(11.0),
-            high_warning: Some(15.0),
-            value_digits: 1,
-            gauge_painter: GaugePainter::BasicReadout,
-            relative_x: 0.27,
-            relative_y: 0.78,
-            relative_width: 0.22,
-            relative_height: 0.20,
-            back_color: TsColor {
-                alpha: 255,
-                red: 25,
-                green: 25,
-                blue: 30,
-            },
-            font_color: TsColor {
-                alpha: 255,
-                red: 0,
-                green: 255,
-                blue: 128,
-            },
-            font_size_adjustment: 4,
-            ..Default::default()
-        })));
-
-    // Boost (bottom center-right)
-    dash.gauge_cluster
-        .components
-        .push(DashComponent::Gauge(Box::new(dash::GaugeConfig {
-            id: "boost".to_string(),
-            title: "BOOST".to_string(),
-            units: "psi".to_string(),
-            output_channel: "boost".to_string(),
-            min: -15.0,
-            max: 30.0,
-            high_warning: Some(22.0),
-            high_critical: Some(26.0),
-            value_digits: 1,
-            gauge_painter: GaugePainter::BasicReadout,
-            relative_x: 0.51,
-            relative_y: 0.78,
-            relative_width: 0.22,
-            relative_height: 0.20,
-            back_color: TsColor {
-                alpha: 255,
-                red: 25,
-                green: 25,
-                blue: 30,
-            },
-            font_color: TsColor {
-                alpha: 255,
-                red: 100,
-                green: 200,
-                blue: 255,
-            },
-            font_size_adjustment: 4,
-            ..Default::default()
-        })));
-
-    // Fuel level (bottom right)
-    dash.gauge_cluster
-        .components
-        .push(DashComponent::Gauge(Box::new(dash::GaugeConfig {
-            id: "fuel".to_string(),
-            title: "FUEL".to_string(),
-            units: "%".to_string(),
-            output_channel: "fuelLevel".to_string(),
-            min: 0.0,
-            max: 100.0,
-            low_warning: Some(20.0),
-            low_critical: Some(10.0),
-            value_digits: 0,
-            gauge_painter: GaugePainter::HorizontalBarGauge,
-            relative_x: 0.75,
-            relative_y: 0.78,
-            relative_width: 0.23,
-            relative_height: 0.20,
-            back_color: TsColor {
-                alpha: 255,
-                red: 25,
-                green: 25,
-                blue: 30,
-            },
-            font_color: TsColor {
-                alpha: 255,
-                red: 255,
-                green: 200,
-                blue: 0,
-            },
-            ..Default::default()
-        })));
-
-    dash
-}
-
-/// Create a tuning-focused dashboard
-fn create_tuning_dashboard() -> DashFile {
-    use libretune_core::dash::{BackgroundStyle, GaugeCluster};
-
-    let mut dash = DashFile {
-        bibliography: Bibliography {
-            author: "LibreTune".to_string(),
-            company: "LibreTune Project".to_string(),
-            write_date: chrono::Utc::now().format("%Y-%m-%d").to_string(),
-        },
-        version_info: VersionInfo {
-            file_format: "3.0".to_string(),
-            firmware_signature: None,
-        },
-        gauge_cluster: GaugeCluster {
-            anti_aliasing: true,
-            cluster_background_color: TsColor {
-                alpha: 255,
-                red: 20,
-                green: 22,
-                blue: 28,
-            },
-            background_dither_color: None,
-            cluster_background_image_file_name: None,
-            cluster_background_image_style: BackgroundStyle::Stretch,
-            embedded_images: Vec::new(),
-            components: Vec::new(),
-        },
-    };
-
-    // Top row: RPM sweep gauge + AFR analog + Coolant bar
-
-    // RPM - large sweep gauge
-    dash.gauge_cluster
-        .components
-        .push(DashComponent::Gauge(Box::new(dash::GaugeConfig {
-            id: "rpm".to_string(),
-            title: "RPM".to_string(),
-            units: "".to_string(),
-            output_channel: "rpm".to_string(),
-            min: 0.0,
-            max: 8000.0,
-            high_warning: Some(6500.0),
-            high_critical: Some(7200.0),
-            gauge_painter: GaugePainter::AsymmetricSweepGauge,
-            start_angle: 200,
-            sweep_angle: 140,
-            relative_x: 0.02,
-            relative_y: 0.02,
-            relative_width: 0.38,
-            relative_height: 0.32,
-            back_color: TsColor {
-                alpha: 255,
-                red: 25,
-                green: 28,
-                blue: 35,
-            },
-            font_color: TsColor {
-                alpha: 255,
-                red: 255,
-                green: 255,
-                blue: 255,
-            },
-            needle_color: TsColor {
-                alpha: 255,
-                red: 0,
-                green: 200,
-                blue: 100,
-            },
-            trim_color: TsColor {
-                alpha: 255,
-                red: 80,
-                green: 90,
-                blue: 100,
-            },
-            warn_color: TsColor {
-                alpha: 255,
-                red: 255,
-                green: 180,
-                blue: 0,
-            },
-            critical_color: TsColor {
-                alpha: 255,
-                red: 255,
-                green: 50,
-                blue: 50,
-            },
-            ..Default::default()
-        })));
-
-    // AFR - analog gauge
-    dash.gauge_cluster
-        .components
-        .push(DashComponent::Gauge(Box::new(dash::GaugeConfig {
-            id: "afr".to_string(),
-            title: "AFR".to_string(),
-            units: "".to_string(),
-            output_channel: "afr".to_string(),
-            min: 10.0,
-            max: 18.0,
-            low_warning: Some(11.5),
-            low_critical: Some(10.5),
-            high_warning: Some(15.5),
-            high_critical: Some(16.5),
-            value_digits: 2,
-            gauge_painter: GaugePainter::AnalogGauge,
-            relative_x: 0.42,
-            relative_y: 0.02,
-            relative_width: 0.32,
-            relative_height: 0.32,
-            back_color: TsColor {
-                alpha: 255,
-                red: 30,
-                green: 35,
-                blue: 40,
-            },
-            font_color: TsColor {
-                alpha: 255,
-                red: 0,
-                green: 255,
-                blue: 128,
-            },
-            needle_color: TsColor {
-                alpha: 255,
-                red: 0,
-                green: 255,
-                blue: 100,
-            },
-            trim_color: TsColor {
-                alpha: 255,
-                red: 60,
-                green: 80,
-                blue: 60,
-            },
-            warn_color: TsColor {
-                alpha: 255,
-                red: 255,
-                green: 200,
-                blue: 0,
-            },
-            critical_color: TsColor {
-                alpha: 255,
-                red: 255,
-                green: 50,
-                blue: 50,
-            },
-            ..Default::default()
-        })));
-
-    // Coolant - vertical bar
-    dash.gauge_cluster
-        .components
-        .push(DashComponent::Gauge(Box::new(dash::GaugeConfig {
-            id: "coolant".to_string(),
-            title: "CLT".to_string(),
-            units: "°C".to_string(),
-            output_channel: "coolant".to_string(),
-            min: -40.0,
-            max: 120.0,
-            high_warning: Some(100.0),
-            high_critical: Some(110.0),
-            value_digits: 0,
-            gauge_painter: GaugePainter::VerticalBarGauge,
-            relative_x: 0.76,
-            relative_y: 0.02,
-            relative_width: 0.10,
-            relative_height: 0.32,
-            back_color: TsColor {
-                alpha: 255,
-                red: 28,
-                green: 30,
-                blue: 35,
-            },
-            font_color: TsColor {
-                alpha: 255,
-                red: 100,
-                green: 200,
-                blue: 255,
-            },
-            needle_color: TsColor {
-                alpha: 255,
-                red: 0,
-                green: 150,
-                blue: 255,
-            },
-            trim_color: TsColor {
-                alpha: 255,
-                red: 60,
-                green: 80,
-                blue: 100,
-            },
-            warn_color: TsColor {
-                alpha: 255,
-                red: 255,
-                green: 200,
-                blue: 0,
-            },
-            critical_color: TsColor {
-                alpha: 255,
-                red: 255,
-                green: 50,
-                blue: 50,
-            },
-            ..Default::default()
-        })));
-
-    // IAT - vertical bar
-    dash.gauge_cluster
-        .components
-        .push(DashComponent::Gauge(Box::new(dash::GaugeConfig {
-            id: "iat".to_string(),
-            title: "IAT".to_string(),
-            units: "°C".to_string(),
-            output_channel: "iat".to_string(),
-            min: -40.0,
-            max: 80.0,
-            high_warning: Some(50.0),
-            high_critical: Some(65.0),
-            value_digits: 0,
-            gauge_painter: GaugePainter::VerticalBarGauge,
-            relative_x: 0.88,
-            relative_y: 0.02,
-            relative_width: 0.10,
-            relative_height: 0.32,
-            back_color: TsColor {
-                alpha: 255,
-                red: 28,
-                green: 30,
-                blue: 35,
-            },
-            font_color: TsColor {
-                alpha: 255,
-                red: 255,
-                green: 180,
-                blue: 80,
-            },
-            needle_color: TsColor {
-                alpha: 255,
-                red: 255,
-                green: 150,
-                blue: 0,
-            },
-            trim_color: TsColor {
-                alpha: 255,
-                red: 100,
-                green: 80,
-                blue: 50,
-            },
-            warn_color: TsColor {
-                alpha: 255,
-                red: 255,
-                green: 200,
-                blue: 0,
-            },
-            critical_color: TsColor {
-                alpha: 255,
-                red: 255,
-                green: 50,
-                blue: 50,
-            },
-            ..Default::default()
-        })));
-
-    // Middle row: MAP bar + VE digital + Advance digital + TPS bar + Duty bar
-
-    // MAP - horizontal bar
-    dash.gauge_cluster
-        .components
-        .push(DashComponent::Gauge(Box::new(dash::GaugeConfig {
-            id: "map".to_string(),
-            title: "MAP".to_string(),
-            units: "kPa".to_string(),
-            output_channel: "map".to_string(),
-            min: 0.0,
-            max: 250.0,
-            value_digits: 0,
-            gauge_painter: GaugePainter::HorizontalBarGauge,
-            relative_x: 0.02,
-            relative_y: 0.36,
-            relative_width: 0.30,
-            relative_height: 0.14,
-            back_color: TsColor {
-                alpha: 255,
-                red: 25,
-                green: 28,
-                blue: 35,
-            },
-            font_color: TsColor {
-                alpha: 255,
-                red: 180,
-                green: 180,
-                blue: 255,
-            },
-            needle_color: TsColor {
-                alpha: 255,
-                red: 100,
-                green: 100,
-                blue: 255,
-            },
-            trim_color: TsColor {
-                alpha: 255,
-                red: 70,
-                green: 70,
-                blue: 120,
-            },
-            ..Default::default()
-        })));
-
-    // VE - digital readout
-    dash.gauge_cluster
-        .components
-        .push(DashComponent::Gauge(Box::new(dash::GaugeConfig {
-            id: "ve".to_string(),
-            title: "VE".to_string(),
-            units: "%".to_string(),
-            output_channel: "ve".to_string(),
-            min: 0.0,
-            max: 150.0,
-            value_digits: 1,
-            gauge_painter: GaugePainter::BasicReadout,
-            relative_x: 0.34,
-            relative_y: 0.36,
-            relative_width: 0.20,
-            relative_height: 0.14,
-            back_color: TsColor {
-                alpha: 255,
-                red: 25,
-                green: 30,
-                blue: 25,
-            },
-            font_color: TsColor {
-                alpha: 255,
-                red: 100,
-                green: 255,
-                blue: 100,
-            },
-            trim_color: TsColor {
-                alpha: 255,
-                red: 60,
-                green: 100,
-                blue: 60,
-            },
-            ..Default::default()
-        })));
-
-    // Advance - digital readout
-    dash.gauge_cluster
-        .components
-        .push(DashComponent::Gauge(Box::new(dash::GaugeConfig {
-            id: "advance".to_string(),
-            title: "ADV".to_string(),
-            units: "°".to_string(),
-            output_channel: "advance".to_string(),
-            min: -10.0,
-            max: 50.0,
-            value_digits: 1,
-            gauge_painter: GaugePainter::BasicReadout,
-            relative_x: 0.56,
-            relative_y: 0.36,
-            relative_width: 0.20,
-            relative_height: 0.14,
-            back_color: TsColor {
-                alpha: 255,
-                red: 30,
-                green: 25,
-                blue: 20,
-            },
-            font_color: TsColor {
-                alpha: 255,
-                red: 255,
-                green: 180,
-                blue: 80,
-            },
-            trim_color: TsColor {
-                alpha: 255,
-                red: 100,
-                green: 80,
-                blue: 50,
-            },
-            ..Default::default()
-        })));
-
-    // TPS - horizontal line gauge
-    dash.gauge_cluster
-        .components
-        .push(DashComponent::Gauge(Box::new(dash::GaugeConfig {
-            id: "tps".to_string(),
-            title: "TPS".to_string(),
-            units: "%".to_string(),
-            output_channel: "tps".to_string(),
-            min: 0.0,
-            max: 100.0,
-            value_digits: 1,
-            gauge_painter: GaugePainter::HorizontalLineGauge,
-            relative_x: 0.78,
-            relative_y: 0.36,
-            relative_width: 0.20,
-            relative_height: 0.14,
-            back_color: TsColor {
-                alpha: 255,
-                red: 25,
-                green: 28,
-                blue: 35,
-            },
-            font_color: TsColor {
-                alpha: 255,
-                red: 200,
-                green: 200,
-                blue: 200,
-            },
-            needle_color: TsColor {
-                alpha: 255,
-                red: 200,
-                green: 200,
-                blue: 200,
-            },
-            trim_color: TsColor {
-                alpha: 255,
-                red: 80,
-                green: 80,
-                blue: 90,
-            },
-            ..Default::default()
-        })));
-
-    // Bottom row: PW bar + Lambda histogram + EGT dashed bar + Duty dashed bar
-
-    // Pulse Width - horizontal bar
-    dash.gauge_cluster
-        .components
-        .push(DashComponent::Gauge(Box::new(dash::GaugeConfig {
-            id: "pw".to_string(),
-            title: "PW".to_string(),
-            units: "ms".to_string(),
-            output_channel: "pulseWidth1".to_string(),
-            min: 0.0,
-            max: 25.0,
-            value_digits: 2,
-            gauge_painter: GaugePainter::HorizontalBarGauge,
-            relative_x: 0.02,
-            relative_y: 0.52,
-            relative_width: 0.30,
-            relative_height: 0.14,
-            back_color: TsColor {
-                alpha: 255,
-                red: 25,
-                green: 25,
-                blue: 30,
-            },
-            font_color: TsColor {
-                alpha: 255,
-                red: 200,
-                green: 200,
-                blue: 200,
-            },
-            needle_color: TsColor {
-                alpha: 255,
-                red: 150,
-                green: 150,
-                blue: 180,
-            },
-            trim_color: TsColor {
-                alpha: 255,
-                red: 80,
-                green: 80,
-                blue: 100,
-            },
-            ..Default::default()
-        })));
-
-    // Lambda correction - line graph (simulates historical view)
-    dash.gauge_cluster
-        .components
-        .push(DashComponent::Gauge(Box::new(dash::GaugeConfig {
-            id: "lambda_hist".to_string(),
-            title: "λ HISTORY".to_string(),
-            units: "".to_string(),
-            output_channel: "lambda".to_string(),
-            min: 0.7,
-            max: 1.3,
-            low_warning: Some(0.8),
-            high_warning: Some(1.15),
-            value_digits: 3,
-            gauge_painter: GaugePainter::LineGraph,
-            relative_x: 0.34,
-            relative_y: 0.52,
-            relative_width: 0.30,
-            relative_height: 0.46,
-            back_color: TsColor {
-                alpha: 255,
-                red: 20,
-                green: 25,
-                blue: 30,
-            },
-            font_color: TsColor {
-                alpha: 255,
-                red: 0,
-                green: 200,
-                blue: 100,
-            },
-            needle_color: TsColor {
-                alpha: 255,
-                red: 0,
-                green: 255,
-                blue: 128,
-            },
-            trim_color: TsColor {
-                alpha: 255,
-                red: 60,
-                green: 80,
-                blue: 70,
-            },
-            warn_color: TsColor {
-                alpha: 255,
-                red: 255,
-                green: 200,
-                blue: 0,
-            },
-            critical_color: TsColor {
-                alpha: 255,
-                red: 255,
-                green: 50,
-                blue: 50,
-            },
-            ..Default::default()
-        })));
-
-    // EGT - vertical dashed bar
-    dash.gauge_cluster
-        .components
-        .push(DashComponent::Gauge(Box::new(dash::GaugeConfig {
-            id: "egt".to_string(),
-            title: "EGT".to_string(),
-            units: "°C".to_string(),
-            output_channel: "egt".to_string(),
-            min: 0.0,
-            max: 1000.0,
-            high_warning: Some(800.0),
-            high_critical: Some(900.0),
-            value_digits: 0,
-            gauge_painter: GaugePainter::VerticalDashedBar,
-            relative_x: 0.66,
-            relative_y: 0.52,
-            relative_width: 0.15,
-            relative_height: 0.46,
-            back_color: TsColor {
-                alpha: 255,
-                red: 28,
-                green: 25,
-                blue: 25,
-            },
-            font_color: TsColor {
-                alpha: 255,
-                red: 255,
-                green: 150,
-                blue: 80,
-            },
-            needle_color: TsColor {
-                alpha: 255,
-                red: 255,
-                green: 100,
-                blue: 50,
-            },
-            trim_color: TsColor {
-                alpha: 255,
-                red: 100,
-                green: 70,
-                blue: 50,
-            },
-            warn_color: TsColor {
-                alpha: 255,
-                red: 255,
-                green: 200,
-                blue: 0,
-            },
-            critical_color: TsColor {
-                alpha: 255,
-                red: 255,
-                green: 50,
-                blue: 50,
-            },
-            ..Default::default()
-        })));
-
-    // Injector Duty - vertical dashed bar
-    dash.gauge_cluster
-        .components
-        .push(DashComponent::Gauge(Box::new(dash::GaugeConfig {
-            id: "duty".to_string(),
-            title: "DUTY".to_string(),
-            units: "%".to_string(),
-            output_channel: "injDuty".to_string(),
-            min: 0.0,
-            max: 100.0,
-            high_warning: Some(85.0),
-            high_critical: Some(95.0),
-            value_digits: 0,
-            gauge_painter: GaugePainter::VerticalDashedBar,
-            relative_x: 0.83,
-            relative_y: 0.52,
-            relative_width: 0.15,
-            relative_height: 0.46,
-            back_color: TsColor {
-                alpha: 255,
-                red: 25,
-                green: 25,
-                blue: 30,
-            },
-            font_color: TsColor {
-                alpha: 255,
-                red: 150,
-                green: 200,
-                blue: 255,
-            },
-            needle_color: TsColor {
-                alpha: 255,
-                red: 100,
-                green: 180,
-                blue: 255,
-            },
-            trim_color: TsColor {
-                alpha: 255,
-                red: 60,
-                green: 80,
-                blue: 100,
-            },
-            warn_color: TsColor {
-                alpha: 255,
-                red: 255,
-                green: 200,
-                blue: 0,
-            },
-            critical_color: TsColor {
-                alpha: 255,
-                red: 255,
-                green: 50,
-                blue: 50,
-            },
-            ..Default::default()
-        })));
-
-    // Battery - small readout at bottom
-    dash.gauge_cluster
-        .components
-        .push(DashComponent::Gauge(Box::new(dash::GaugeConfig {
-            id: "battery".to_string(),
-            title: "BATT".to_string(),
-            units: "V".to_string(),
-            output_channel: "battery".to_string(),
-            min: 10.0,
-            max: 16.0,
-            low_warning: Some(11.5),
-            low_critical: Some(10.5),
-            high_warning: Some(15.0),
-            value_digits: 1,
-            gauge_painter: GaugePainter::BasicReadout,
-            relative_x: 0.02,
-            relative_y: 0.68,
-            relative_width: 0.15,
-            relative_height: 0.14,
-            back_color: TsColor {
-                alpha: 255,
-                red: 28,
-                green: 28,
-                blue: 25,
-            },
-            font_color: TsColor {
-                alpha: 255,
-                red: 255,
-                green: 220,
-                blue: 100,
-            },
-            trim_color: TsColor {
-                alpha: 255,
-                red: 100,
-                green: 90,
-                blue: 50,
-            },
-            warn_color: TsColor {
-                alpha: 255,
-                red: 255,
-                green: 200,
-                blue: 0,
-            },
-            critical_color: TsColor {
-                alpha: 255,
-                red: 255,
-                green: 50,
-                blue: 50,
-            },
-            ..Default::default()
-        })));
-
-    // Fuel Correction - small readout at bottom
-    dash.gauge_cluster
-        .components
-        .push(DashComponent::Gauge(Box::new(dash::GaugeConfig {
-            id: "fuelcorr".to_string(),
-            title: "FUEL%".to_string(),
-            units: "%".to_string(),
-            output_channel: "fuelCorrection".to_string(),
-            min: -25.0,
-            max: 25.0,
-            value_digits: 1,
-            gauge_painter: GaugePainter::BasicReadout,
-            relative_x: 0.19,
-            relative_y: 0.68,
-            relative_width: 0.13,
-            relative_height: 0.14,
-            back_color: TsColor {
-                alpha: 255,
-                red: 25,
-                green: 28,
-                blue: 25,
-            },
-            font_color: TsColor {
-                alpha: 255,
-                red: 150,
-                green: 255,
-                blue: 150,
-            },
-            trim_color: TsColor {
-                alpha: 255,
-                red: 70,
-                green: 100,
-                blue: 70,
-            },
-            ..Default::default()
-        })));
-
-    // CLT Correction - small readout at bottom
-    dash.gauge_cluster
-        .components
-        .push(DashComponent::Gauge(Box::new(dash::GaugeConfig {
-            id: "cltcorr".to_string(),
-            title: "CLT%".to_string(),
-            units: "%".to_string(),
-            output_channel: "cltCorrection".to_string(),
-            min: 0.0,
-            max: 200.0,
-            value_digits: 0,
-            gauge_painter: GaugePainter::BasicReadout,
-            relative_x: 0.02,
-            relative_y: 0.84,
-            relative_width: 0.15,
-            relative_height: 0.14,
-            back_color: TsColor {
-                alpha: 255,
-                red: 25,
-                green: 28,
-                blue: 30,
-            },
-            font_color: TsColor {
-                alpha: 255,
-                red: 100,
-                green: 200,
-                blue: 255,
-            },
-            trim_color: TsColor {
-                alpha: 255,
-                red: 60,
-                green: 90,
-                blue: 120,
-            },
-            ..Default::default()
-        })));
-
-    // IAT Correction - small readout at bottom
-    dash.gauge_cluster
-        .components
-        .push(DashComponent::Gauge(Box::new(dash::GaugeConfig {
-            id: "iatcorr".to_string(),
-            title: "IAT%".to_string(),
-            units: "%".to_string(),
-            output_channel: "iatCorrection".to_string(),
-            min: 0.0,
-            max: 200.0,
-            value_digits: 0,
-            gauge_painter: GaugePainter::BasicReadout,
-            relative_x: 0.19,
-            relative_y: 0.84,
-            relative_width: 0.13,
-            relative_height: 0.14,
-            back_color: TsColor {
-                alpha: 255,
-                red: 30,
-                green: 28,
-                blue: 25,
-            },
-            font_color: TsColor {
-                alpha: 255,
-                red: 255,
-                green: 200,
-                blue: 120,
-            },
-            trim_color: TsColor {
-                alpha: 255,
-                red: 120,
-                green: 90,
-                blue: 60,
-            },
-            ..Default::default()
-        })));
-
-    dash
 }
 
 // =============================================================================
@@ -11775,6 +10486,8 @@ mod demo_mode_tests {
             online_ini_repository: Mutex::new(OnlineIniRepository::new()),
             tune_cache: Mutex::new(None),
             demo_mode: Mutex::new(false),
+            // Background task for connection metrics emission (added recently)
+            metrics_task: Mutex::new(None),
             plugin_manager: Mutex::new(None),
             controller_bridge: Mutex::new(None),
             migration_report: Mutex::new(None),
@@ -11802,6 +10515,77 @@ mod demo_mode_tests {
 
         apply_demo_disable(&state).await.expect("apply disable");
         assert!(!*state.demo_mode.lock().await);
+    }
+}
+
+#[cfg(test)]
+mod concurrency_tests {
+    use super::*;
+    use libretune_core::protocol::{Connection, ConnectionConfig};
+    use std::time::Duration;
+    use std::sync::Arc;
+
+    #[tokio::test]
+    async fn test_no_deadlock_between_execute_controller_and_realtime_snapshot() {
+        // Build a minimal AppState with both locks present
+        let dev_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources").join("demo.ini");
+        assert!(dev_path.exists(), "Demo INI not found at {:?}", dev_path);
+        let def = EcuDefinition::from_file(dev_path.to_string_lossy().as_ref()).expect("Load demo INI");
+
+        let state = Arc::new(AppState {
+            connection: Mutex::new(Some(Connection::new(ConnectionConfig::default()))),
+            definition: Mutex::new(Some(def)),
+            autotune_state: Mutex::new(AutoTuneState::new()),
+            autotune_config: Mutex::new(None),
+            streaming_task: Mutex::new(None),
+            autotune_send_task: Mutex::new(None),
+            metrics_task: Mutex::new(None),
+            current_tune: Mutex::new(None),
+            current_tune_path: Mutex::new(None),
+            tune_modified: Mutex::new(false),
+            data_logger: Mutex::new(DataLogger::default()),
+            current_project: Mutex::new(None),
+            ini_repository: Mutex::new(None),
+            online_ini_repository: Mutex::new(OnlineIniRepository::new()),
+            tune_cache: Mutex::new(None),
+            demo_mode: Mutex::new(false),
+            plugin_manager: Mutex::new(None),
+            controller_bridge: Mutex::new(None),
+            migration_report: Mutex::new(None),
+        });
+
+        // Simulate execute_controller_command pattern: lock def -> sleep -> lock conn
+        let s1 = state.clone();
+        let task1 = tokio::spawn(async move {
+            let _def = s1.definition.lock().await;
+            // hold definition lock for some time
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            let _conn = s1.connection.lock().await;
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        });
+
+        // Simulate refactored get_realtime_data: snapshot def -> release -> lock conn
+        let s2 = state.clone();
+        let task2 = tokio::spawn(async move {
+            let _snapshot = {
+                let def_guard = s2.definition.lock().await;
+                def_guard.is_some()
+            };
+
+            // Now only lock connection for a short time
+            let _conn = s2.connection.lock().await;
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        });
+
+        // Ensure both complete within timeout (detect deadlock)
+        let joined = tokio::time::timeout(Duration::from_secs(2), async {
+            let r1 = task1.await;
+            let r2 = task2.await;
+            (r1, r2)
+        })
+        .await;
+
+        assert!(joined.is_ok(), "Tasks deadlocked or timed out");
     }
 }
 
@@ -11845,6 +10629,10 @@ async fn update_setting(app: tauri::AppHandle, key: String, value: String) -> Re
         // Help icon visibility
         "show_all_help_icons" => {
             settings.show_all_help_icons = value.parse().map_err(|_| "Invalid boolean value")?
+        }
+        "runtime_packet_mode" => {
+            // Accept any string; UI should validate. Store as-is.
+            settings.runtime_packet_mode = value;
         }
         _ => return Err(format!("Unknown setting: {}", key)),
     }
@@ -12233,6 +11021,8 @@ pub fn run() {
             autotune_config: Mutex::new(None),
             streaming_task: Mutex::new(None),
             autotune_send_task: Mutex::new(None),
+            // Background task for connection metrics emission
+            metrics_task: Mutex::new(None),
             current_tune: Mutex::new(None),
             current_tune_path: Mutex::new(None),
             tune_modified: Mutex::new(false),

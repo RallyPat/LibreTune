@@ -84,6 +84,32 @@ npm run build
 npx tsc --noEmit
 ```
 
+### Testing (Frontend)
+
+We use Vitest + @testing-library/react for unit and integration tests in the frontend.
+
+- Run the full test suite:
+```bash
+cd crates/libretune-app
+npm test
+```
+
+- Run a single test file (watch-mode):
+```bash
+npm test -- <path/to/test-file>
+```
+
+- Test helpers:
+  - The project provides `src/test-utils/setupTauriMocks.ts` to stub Tauri `core.invoke` and `event.listen` during tests. See `src/test-utils/README.md` for details and examples.
+  - Use `setupTauriMocks()` in tests to provide deterministic `invoke` responses and deterministic event emission via `emit()` / `listen()` helpers.
+
+- Test-writing tips:
+  - Use `await waitFor(...)` or `findBy*` queries when asserting asynchronous DOM updates.
+  - Wrap direct state updates in `act()` when manipulating stores in tests to avoid React warnings.
+  - Add stubs for canvas drawing (already configured in `src/setupTests.ts`) if your component uses Canvas APIs.
+
+Please update or extend the test utilities if you find repeated patterns that can be abstracted.
+
 ## Code Style
 
 ### Rust

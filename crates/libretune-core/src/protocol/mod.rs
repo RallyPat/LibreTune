@@ -13,7 +13,7 @@ pub mod serial;
 
 pub use command_builder::CommandBuilder;
 pub use commands::Command;
-pub use connection::{Connection, ConnectionConfig, ConnectionState};
+pub use connection::{Connection, ConnectionConfig, ConnectionState, RuntimePacketMode};
 pub use error::ProtocolError;
 pub use packet::{Packet, PacketBuilder};
 pub use serial::{clear_buffers, configure_port, list_ports, open_port, PortInfo};

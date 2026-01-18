@@ -519,10 +519,15 @@ function CommandButton({ comp, context }: { comp: DialogComponent; context: Reco
 
   const executeCommand = async () => {
     if (!comp.command || isExecuting) return;
-    
+
     setIsExecuting(true);
     try {
-      await invoke('execute_controller_command', { commandName: comp.command });
+      // Add a client-side timeout so UI doesn't stay stuck on "Executing..." forever
+      const timeoutMs = 20000; // 20 seconds
+      await Promise.race([
+        invoke('execute_controller_command', { commandName: comp.command }),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Command timed out')), timeoutMs)),
+      ]);
     } catch (err) {
       console.error('Command execution failed:', err);
       alert(`Command failed: ${err}`);

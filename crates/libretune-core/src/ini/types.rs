@@ -731,6 +731,9 @@ pub struct ProtocolSettings {
     /// Size of output channel block in bytes
     pub och_block_size: u32,
 
+    /// Max unused runtime range threshold (channel-count hint; 0 = disabled)
+    pub max_unused_runtime_range: u32,
+
     /// Burst mode get command (usually "A")
     pub burst_get_command: Option<String>,
 
@@ -779,6 +782,7 @@ impl Default for ProtocolSettings {
             crc32_check_commands: Vec::new(),
             och_get_command: None,
             och_block_size: 0,
+            max_unused_runtime_range: 0,
             burst_get_command: Some("A".to_string()),
             retrieve_config_error: None,
             page_activation_delay: 500,

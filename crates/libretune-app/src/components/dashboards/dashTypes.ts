@@ -162,6 +162,13 @@ export interface TsGaugeConfig {
   background_image_file_name: string | null;
   needle_image_file_name: string | null;
 
+  // Needle configuration (optional)
+  needle_length?: number; // fraction of radius (0.0-1.5) or absolute pixels if >1.5
+  needle_image_offset_x?: number;
+  needle_image_offset_y?: number;
+  needle_pivot_offset_x?: number;
+  needle_pivot_offset_y?: number;
+
   // History/tracking
   show_history: boolean;
   history_value: number;

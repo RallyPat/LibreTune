@@ -712,6 +712,13 @@ fn parse_tunerstudio(def: &mut EcuDefinition, key: &str, value: &str) {
                 def.protocol.message_envelope_format
             );
         }
+        "maxunusedruntimerange" => {
+            def.protocol.max_unused_runtime_range = value.parse().unwrap_or(0);
+            eprintln!(
+                "[DEBUG] parse_ts: maxUnusedRuntimeRange = {}",
+                def.protocol.max_unused_runtime_range
+            );
+        }
         _ => {}
     }
 }
@@ -740,6 +747,14 @@ fn parse_constants_entry(
     match key_lower.as_str() {
         "messageenvelopeformat" => {
             def.protocol.message_envelope_format = Some(value.trim_matches('"').to_string());
+            return;
+        }
+        "maxunusedruntimerange" => {
+            def.protocol.max_unused_runtime_range = value.parse().unwrap_or(0);
+            eprintln!(
+                "[DEBUG] parse_constants: maxUnusedRuntimeRange = {}",
+                def.protocol.max_unused_runtime_range
+            );
             return;
         }
         "endianness" => {
@@ -2644,6 +2659,16 @@ rpm = U16, 0, "RPM", 1.0, 0.0
 
         assert!(def.constants.contains_key("reqFuel"));
         assert!(def.output_channels.contains_key("rpm"));
+    }
+
+    #[test]
+    fn test_parse_max_unused_runtime_range() {
+        let content = r#"
+[TunerStudio]
+maxUnusedRuntimeRange = 42
+"#;
+        let def = parse_ini(content).expect("Should parse successfully");
+        assert_eq!(def.protocol.max_unused_runtime_range, 42);
     }
 
     #[test]

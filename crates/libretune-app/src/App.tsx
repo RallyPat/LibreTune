@@ -26,6 +26,7 @@ import {
   AutoTuneLive,
   DataLogView,
 } from "./components/tuner-ui";
+import ConnectionMetrics from './components/layout/ConnectionMetrics';
 import TsDashboard from "./components/dashboards/TsDashboard";
 import { ToothLoggerView, CompositeLoggerView } from "./components/diagnostics";
 import DialogRenderer, { DialogDefinition as RendererDialogDef } from "./components/dialogs/DialogRenderer";
@@ -234,6 +235,10 @@ function AppContent() {
   const [iniDefaults, setIniDefaults] = useState<ProtocolDefaults | null>(null);
   const [baudUserSet, setBaudUserSet] = useState(false);
   const [timeoutUserSet, setTimeoutUserSet] = useState(false);
+
+  // Runtime packet mode defaults
+  const [defaultRuntimePacketMode, setDefaultRuntimePacketMode] = useState<'Auto'|'ForceBurst'|'ForceOCH'|'Disabled'>('Auto');
+  const [connectionRuntimePacketMode, setConnectionRuntimePacketMode] = useState<'Auto'|'ForceBurst'|'ForceOCH'|'Disabled'>('Auto');
 
   // Wrappers that mark user-changed state
   const handleBaudChange = (b: number) => { setBaudRate(b); setBaudUserSet(true); };
@@ -963,7 +968,8 @@ function AppContent() {
       }
 
       // Connect and get mismatch info directly (no async race)
-      const result = await invoke<ConnectResult>("connect_to_ecu", { portName: selectedPort, baudRate, timeoutMs });
+      const runtimeMode = connectionRuntimePacketMode || defaultRuntimePacketMode;
+      const result = await invoke<ConnectResult>("connect_to_ecu", { portName: selectedPort, baudRate, timeoutMs, runtimePacketMode: runtimeMode });
       await checkStatus();
       
       // If there's a signature mismatch, show dialog and DON'T auto-sync
@@ -1785,6 +1791,18 @@ function AppContent() {
         active: status.state === "Connected",
         onClick: () => setConnectionDialogOpen(true),
       },
+      // Inline connection info (metrics + packet mode)
+      {
+        id: 'connection-info',
+        icon: 'connection-info',
+        tooltip: 'Connection status and packet mode',
+        content: (
+          <div className="toolbar-connection-info">
+            <ConnectionMetrics compact />
+            <span className="packet-mode">{status.state === 'Connected' ? (connectionRuntimePacketMode || defaultRuntimePacketMode) : '—'}</span>
+          </div>
+        )
+      },
       { id: "realtime", icon: "realtime", tooltip: "Realtime Dashboard", onClick: () => setActiveTabId("dashboard") },
       { id: "sep2", icon: "", tooltip: "", separator: true },
       {
@@ -2123,6 +2141,7 @@ function AppContent() {
           if (settings.autoBurnOnClose !== undefined) setAutoBurnOnClose(settings.autoBurnOnClose);
           if (settings.demoMode !== undefined) setStatus(s => ({ ...s, demo_mode: settings.demoMode }));
           if (settings.statusBarChannels !== undefined) setStatusBarChannels(settings.statusBarChannels);
+          if (settings.runtimePacketMode) setDefaultRuntimePacketMode(settings.runtimePacketMode as any);
           // Legacy dashboard settings (removed with TabbedDashboard)
           // if (settings.indicatorColumnCount !== undefined) { ... }
           // if (settings.indicatorFillEmpty !== undefined) { ... }
@@ -2151,6 +2170,8 @@ function AppContent() {
         statusMessage={syncing && syncProgress ? `Syncing ECU data... ${syncProgress.percent}%` : undefined}
         iniDefaults={iniDefaults ?? undefined}
         onApplyIniDefaults={applyIniDefaults}
+        runtimePacketMode={connectionRuntimePacketMode}
+        onRuntimePacketModeChange={setConnectionRuntimePacketMode}
       />
       
       {/* Project Dialogs */}

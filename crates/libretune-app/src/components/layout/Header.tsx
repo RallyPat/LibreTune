@@ -1,4 +1,5 @@
 import { Activity, Database, Plus, Save, Settings, Zap } from 'lucide-react';
+import ConnectionMetrics from './ConnectionMetrics';
 
 interface ConnectionStatus {
   state: 'Disconnected' | 'Connecting' | 'Connected' | string;
@@ -39,9 +40,15 @@ export default function Header({
         )}
         <div className="ecu-badge">{status.signature || 'NO ECU'}</div>
         {status.ini_name && <div className="ini-badge">{status.ini_name}</div>}
-        <div className="connection-status">
-          <div className={`status-indicator ${status.demo_mode ? 'demo' : status.state === 'Connected' ? 'connected' : ''}`} />
-          {status.demo_mode ? 'Demo Mode' : status.state}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+          <div className="connection-status">
+            <div className={`status-indicator ${status.demo_mode ? 'demo' : status.state === 'Connected' ? 'connected' : ''}`} />
+            {status.demo_mode ? 'Demo Mode' : status.state}
+          </div>
+          {/* Inline connection metrics near the connection tools */}
+          <div style={{ marginLeft: '0.6rem' }}>
+            <ConnectionMetrics />
+          </div>
         </div>
       </div>
 

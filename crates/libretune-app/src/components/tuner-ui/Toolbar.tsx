@@ -50,6 +50,15 @@ export function Toolbar({ items }: ToolbarProps) {
           return <div key={`sep-${index}`} className="toolbar-separator" />;
         }
 
+        // If a toolbar item supplies custom content, render it inline
+        if (item.content) {
+          return (
+            <div key={item.id} className="toolbar-content" title={item.tooltip} onClick={item.onClick}>
+              {item.content}
+            </div>
+          );
+        }
+
         const IconComponent = iconMap[item.icon] || iconMap['default'];
         const isRecording = item.icon === 'log-start' && item.active;
 
