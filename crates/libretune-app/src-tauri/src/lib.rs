@@ -654,56 +654,80 @@ fn parse_hex_color(hex: &str) -> TsColor {
 // Signature Comparison Helpers
 // =============================================================================
 
-/// Compare two signatures and determine match type
-fn compare_signatures(ecu_sig: &str, ini_sig: &str) -> SignatureMatchType {
-    let ecu_normalized = ecu_sig.trim().to_lowercase();
-    let ini_normalized = ini_sig.trim().to_lowercase();
+/// Normalize a signature string for robust comparison:
+/// - Lowercase
+/// - Replace non-alphanumeric characters with spaces
+/// - Collapse multiple spaces
+fn normalize_signature(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut last_was_space = false;
 
-    if ecu_normalized == ini_normalized {
-        SignatureMatchType::Exact
-    } else if ecu_normalized.contains(&ini_normalized) || ini_normalized.contains(&ecu_normalized) {
-        // One contains the other - partial match (version differences)
-        SignatureMatchType::Partial
-    } else {
-        // Check for common base signature (e.g., "speeduino 202305" vs "speeduino 202307")
-        // Split on spaces and compare first word(s)
-        let ecu_parts: Vec<&str> = ecu_normalized.split_whitespace().collect();
-        let ini_parts: Vec<&str> = ini_normalized.split_whitespace().collect();
-
-        if !ecu_parts.is_empty() && !ini_parts.is_empty() && ecu_parts[0] == ini_parts[0] {
-            // Same base ECU type, different version
-            SignatureMatchType::Partial
+    for ch in s.chars() {
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch.to_ascii_lowercase());
+            last_was_space = false;
+        } else if ch.is_whitespace() {
+            if !last_was_space && !out.is_empty() {
+                out.push(' ');
+                last_was_space = true;
+            }
         } else {
-            // Check for common firmware family keywords (e.g., "uaefi", "speeduino", etc.)
-            // This helps recognize similar projects like "rusEFI ... uaefi ..." variants
-            let common_keywords = ["uaefi", "speeduino", "rusefi", "epicefi", "megasquirt"];
-            let ecu_has_keyword = common_keywords.iter().any(|kw| ecu_normalized.contains(kw));
-            let ini_has_keyword = common_keywords.iter().any(|kw| ini_normalized.contains(kw));
-
-            if ecu_has_keyword && ini_has_keyword {
-                // Both have common firmware keywords - check if they share at least one
-                let ecu_keywords: Vec<&str> = common_keywords
-                    .iter()
-                    .filter(|kw| ecu_normalized.contains(**kw))
-                    .copied()
-                    .collect();
-                let ini_keywords: Vec<&str> = common_keywords
-                    .iter()
-                    .filter(|kw| ini_normalized.contains(**kw))
-                    .copied()
-                    .collect();
-
-                // If they share a keyword, it's a partial match (same firmware family)
-                if ecu_keywords.iter().any(|kw| ini_keywords.contains(kw)) {
-                    SignatureMatchType::Partial
-                } else {
-                    SignatureMatchType::Mismatch
-                }
-            } else {
-                SignatureMatchType::Mismatch
+            // Punctuation or other characters -> treat as separator
+            if !last_was_space && !out.is_empty() {
+                out.push(' ');
+                last_was_space = true;
             }
         }
     }
+
+    out.trim().to_string()
+}
+
+/// Compare two signatures and determine match type using normalized strings
+fn compare_signatures(ecu_sig: &str, ini_sig: &str) -> SignatureMatchType {
+    let ecu_normalized = normalize_signature(ecu_sig);
+    let ini_normalized = normalize_signature(ini_sig);
+
+    if ecu_normalized == ini_normalized {
+        return SignatureMatchType::Exact;
+    }
+
+    if ecu_normalized.contains(&ini_normalized) || ini_normalized.contains(&ecu_normalized) {
+        return SignatureMatchType::Partial;
+    }
+
+    // Compare first token (base type) e.g., "speeduino" and "rusEFI"
+    let ecu_first = ecu_normalized.split_whitespace().next();
+    let ini_first = ini_normalized.split_whitespace().next();
+    if let (Some(ecu_first), Some(ini_first)) = (ecu_first, ini_first) {
+        if ecu_first == ini_first {
+            return SignatureMatchType::Partial;
+        }
+    }
+
+    // Check for common firmware family keywords
+    let common_keywords = ["uaefi", "speeduino", "rusefi", "epicefi", "megasquirt"];
+    let ecu_has_keyword = common_keywords.iter().any(|kw| ecu_normalized.contains(kw));
+    let ini_has_keyword = common_keywords.iter().any(|kw| ini_normalized.contains(kw));
+
+    if ecu_has_keyword && ini_has_keyword {
+        let ecu_keywords: Vec<&str> = common_keywords
+            .iter()
+            .filter(|kw| ecu_normalized.contains(**kw))
+            .copied()
+            .collect();
+        let ini_keywords: Vec<&str> = common_keywords
+            .iter()
+            .filter(|kw| ini_normalized.contains(**kw))
+            .copied()
+            .collect();
+
+        if ecu_keywords.iter().any(|kw| ini_keywords.contains(kw)) {
+            return SignatureMatchType::Partial;
+        }
+    }
+
+    SignatureMatchType::Mismatch
 }
 
 /// Find INI files that match the given ECU signature
@@ -7074,14 +7098,16 @@ async fn execute_controller_command(
     state: tauri::State<'_, AppState>,
     command_name: String,
 ) -> Result<(), String> {
-    let def_guard = state.definition.lock().await;
-    let def = def_guard.as_ref().ok_or("No INI definition loaded")?;
+    // Resolve command bytes while holding definition lock, then release definition before acquiring connection
+    let bytes = {
+        let def_guard = state.definition.lock().await;
+        let def = def_guard.as_ref().ok_or("No INI definition loaded")?;
+        resolve_command_bytes(def, &command_name, &mut std::collections::HashSet::new())?
+    };
 
+    // Now acquire connection lock only for the I/O
     let mut conn_guard = state.connection.lock().await;
     let conn = conn_guard.as_mut().ok_or("Not connected to ECU")?;
-
-    // Resolve the command and get raw bytes
-    let bytes = resolve_command_bytes(def, &command_name, &mut std::collections::HashSet::new())?;
 
     // Send bytes to ECU
     conn.send_raw_bytes(&bytes)
@@ -10556,6 +10582,7 @@ mod concurrency_tests {
 
         // Simulate execute_controller_command pattern: lock def -> sleep -> lock conn
         let s1 = state.clone();
+
         let task1 = tokio::spawn(async move {
             let _def = s1.definition.lock().await;
             // hold definition lock for some time
@@ -10586,6 +10613,35 @@ mod concurrency_tests {
         .await;
 
         assert!(joined.is_ok(), "Tasks deadlocked or timed out");
+    }
+}
+
+
+// New tests for signature comparison and normalization (unit tests)
+#[cfg(test)]
+mod signature_tests {
+    use super::*;
+
+    #[test]
+    fn test_normalize_signature_basic() {
+        assert_eq!(normalize_signature("Speeduino 2023-05"), "speeduino 2023 05");
+        assert_eq!(normalize_signature("  RusEFI_v1.2.3 (build#42) "), "rusefi v1 2 3 build 42");
+        assert_eq!(normalize_signature("MegaSquirt"), "megasquirt");
+    }
+
+    #[test]
+    fn test_compare_signatures_exact_and_partial() {
+        // Exact after normalization
+        assert_eq!(compare_signatures("Speeduino 2023.05", "speeduino 2023-05"), SignatureMatchType::Exact);
+
+        // Partial when base matches but versions differ
+        assert_eq!(compare_signatures("rusEFI v1.2.3", "rusEFI v1.2.4"), SignatureMatchType::Partial);
+
+        // Partial when one contains the other
+        assert_eq!(compare_signatures("Speeduino build 202305 extra", "speeduino 202305"), SignatureMatchType::Partial);
+
+        // Mismatch for different families
+        assert_eq!(compare_signatures("unrelated device", "another device"), SignatureMatchType::Mismatch);
     }
 }
 
