@@ -5,6 +5,9 @@
 [![Release](https://img.shields.io/github/v/release/RallyPat/LibreTune?label=stable)](https://github.com/RallyPat/LibreTune/releases/latest)
 [![Nightly](https://img.shields.io/github/v/release/RallyPat/LibreTune?include_prereleases&label=nightly)](https://github.com/RallyPat/LibreTune/releases/tag/nightly)
 
+[![](https://dcbadge.limes.pink/api/server/5X7tFUfqCr)](https://discord.gg/5X7tFUfqCr)
+
+
 Modern, open-source ECU tuning software for EpicEFI, Speeduino, rusEFI, and other TS format INI compatible aftermarket engine control units.
 
 ## Downloads
