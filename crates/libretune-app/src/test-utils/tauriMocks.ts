@@ -5,12 +5,19 @@ import * as eventModule from '@tauri-apps/api/event';
 /**
  * Test helper: setupTauriMocks(defaultResponses?)
  *
+ * Lightweight Tauri mock harness intended for frontend unit/integration tests.
+ * Features and guarantees:
+ * - Emits events to registered listeners (listeners receive an object shaped like { payload })
+ * - Queues events that arrive before a listener is registered and drains them when listeners register
+ * - Maintains a global `__TAURI_LISTENERS__` registry so multiple test modules can observe the same events
+ * - Provides a predictable `core.invoke` mock (overrideable with `setInvokeResponse`) so tests can simulate Tauri command responses (e.g., connection/connect tests)
+ *
  * Returns a handle with these helpers usable from tests:
- * - emit(eventName, payload): emit an event to registered listeners (queued if none yet registered)
- * - listen(eventName, handler): async helper that registers a handler and immediately drains queued events; returns an unlisten function
+ * - emit(eventName, payload): emits (or queues) an event
+ * - listen(eventName, handler): registers a handler and immediately drains queued events; returns an unlisten function
  * - getQueued(eventName): returns queued payloads for inspection
  * - drainQueued(eventName): delivers queued payloads to registered listeners and clears the queue
- * - setInvokeResponse(cmd, resp): set/override the response for `core.invoke` calls
+ * - setInvokeResponse(cmd, resp): set/override the response for `core.invoke` calls (exact command match)
  *
  * Example usage:
  * const h = setupTauriMocks({ get_settings: { runtime_packet_mode: 'Auto' } });
@@ -33,11 +40,9 @@ export function setupTauriMocks(defaultResponses: Record<string, any> = {}): Tau
 
   // Create a local listeners registry so tests can emit events
   const listeners: Record<string, Array<(e: any) => void>> = {};
-  // Also expose a global registry so any listen mock (from other test modules) can
-  // push handlers into a shared place that tests can emit against.
-  (window as any).__TAURI_LISTENERS__ = (window as any).__TAURI_LISTENERS__ || {};
-  (window as any).__TAURI_LISTENERS__ = (window as any).__TAURI_LISTENERS__ || {};
-  (window as any).__TAURI_LISTENERS__ = Object.assign((window as any).__TAURI_LISTENERS__, listeners);
+  // Expose a global registry so multiple test modules can add listeners and
+  // events emitted from any module will be observable across the test harness.
+  (window as any).__TAURI_LISTENERS__ = Object.assign((window as any).__TAURI_LISTENERS__ || {}, listeners);
 
   // Ensure core.invoke is a predictable mock (prefer modifying existing mock implementation)
   try {
@@ -87,23 +92,25 @@ export function setupTauriMocks(defaultResponses: Record<string, any> = {}): Tau
 
     const isListenMock = event && event.listen && typeof (event.listen as any).mockImplementation === 'function';
     const listenImpl = async (eventName: string, handler: any) => {
+      // Register handler locally
       console.debug('[tauriMocks] listen registered', eventName);
       listeners[eventName] = listeners[eventName] || [];
       listeners[eventName].push(handler);
 
       // Drain any queued events for this eventName so late listeners still get recent events
+      // This mirrors real-world behavior where listeners registering late still see recent updates
       (queued[eventName] || []).forEach((payload) => {
         console.debug('[tauriMocks] delivering queued event', eventName, payload);
         try { handler({ payload }); } catch (_err) { /* ignore */ }
       });
       queued[eventName] = [];
 
-      // Also mirror into global registry for other test code
+      // Mirror into global registry so other test modules that read __TAURI_LISTENERS__ see the handler
       (window as any).__TAURI_LISTENERS__ = (window as any).__TAURI_LISTENERS__ || {};
       (window as any).__TAURI_LISTENERS__[eventName] = (window as any).__TAURI_LISTENERS__[eventName] || [];
       (window as any).__TAURI_LISTENERS__[eventName].push(handler);
 
-      // Return an unlisten function
+      // Return an unlisten function that removes handler both locally and from the global registry
       return () => {
         listeners[eventName] = listeners[eventName].filter((h) => h !== handler);
         (window as any).__TAURI_LISTENERS__[eventName] = (window as any).__TAURI_LISTENERS__[eventName].filter((h: any) => h !== handler);
@@ -172,6 +179,9 @@ export function setupTauriMocks(defaultResponses: Record<string, any> = {}): Tau
       queued[eventName] = [];
     },
     setInvokeResponse: (cmd: string, resp: any) => {
+      // Replace the `core.invoke` mock such that calls with the exact command string
+      // return the provided response. This is useful to simulate backend Tauri
+      // command responses (e.g., `connect_to_ecu`, `get_settings`).
       try {
         (core as any).invoke = vi.fn((c: string) => (c === cmd ? Promise.resolve(resp) : Promise.resolve()));
       } catch (_e) { /* ignore */ }

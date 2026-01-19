@@ -38,6 +38,15 @@ If you don't see your ECU's port:
 | **Baud Rate** | Communication speed | 115200 |
 | **Timeout** | Connection timeout (ms) | 5000 |
 
+### Auto-sync & Reconnect After Controller Commands
+
+Some controller commands (for example, commands that apply base maps or change ECU configuration) modify settings directly on the ECU. These changes may not be visible to LibreTune until the app performs a fresh sync and, in some cases, reconnects the serial port.
+
+You can enable the **Auto-sync & reconnect after controller commands** option in the Settings dialog (look for **Auto-sync & reconnect after controller commands**). When enabled, LibreTune will automatically perform a sync after a controller command completes and will reconnect if necessary so that newly applied ECU settings are reflected in the app.
+
+> ⚠️ This option may cause the serial port to be temporarily re-opened. Enable it only if you expect to run controller commands that alter ECU configuration and you want those changes picked up automatically.
+
+
 ### Common Baud Rates
 
 | ECU | Baud Rate |

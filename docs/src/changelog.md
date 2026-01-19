@@ -10,6 +10,7 @@ All notable changes to LibreTune will be documented in this file.
 - Comprehensive documentation system (API docs + user manual)
 - TuneHistoryPanel for viewing and managing tune history
 - Version Control settings in Settings dialog
+- Auto-sync & reconnect after controller commands (Settings option) and dev-only telemetry for reconnect events
 
 ### Changed
 - Improved AutoTune with transient filtering and lambda delay compensation

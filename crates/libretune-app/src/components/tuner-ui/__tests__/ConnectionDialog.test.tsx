@@ -40,4 +40,28 @@ describe('ConnectionDialog', () => {
 
     expect(onChange).toHaveBeenCalledWith('ForceOCH');
   });
+
+  it('shows a short explanation of OCH in the connection dialog', () => {
+    render(
+      <ConnectionDialog
+        isOpen={true}
+        onClose={() => {}}
+        ports={[]}
+        selectedPort={''}
+        baudRate={115200}
+        timeoutMs={2000}
+        connected={false}
+        connecting={false}
+        onPortChange={() => {}}
+        onBaudChange={() => {}}
+        onTimeoutChange={() => {}}
+        onConnect={() => {}}
+        onDisconnect={() => {}}
+        onRefreshPorts={() => {}}
+      />
+    );
+
+    expect(screen.getByText(/On-Controller Block Read/)).toBeInTheDocument();
+    expect(screen.getByText(/ochGetCommand/)).toBeInTheDocument();
+  });
 });

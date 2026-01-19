@@ -18,7 +18,7 @@ describe('SettingsDialog', () => {
   it('loads runtime_packet_mode from settings and applies updates on Apply', async () => {
     (invoke as unknown as vi.Mock).mockImplementation((cmd: string) => {
       if (cmd === 'get_settings') {
-        return Promise.resolve({ runtime_packet_mode: 'ForceOCH' });
+        return Promise.resolve({ runtime_packet_mode: 'ForceOCH', auto_reconnect_after_controller_command: false });
       }
       return Promise.resolve();
     });
@@ -51,6 +51,11 @@ describe('SettingsDialog', () => {
     const expectedMode = runtimeSelect.value;
     await waitFor(() => {
       expect(invoke).toHaveBeenCalledWith('update_setting', { key: 'runtime_packet_mode', value: expectedMode });
+    });
+
+    // Also ensure auto_reconnect setting is saved
+    await waitFor(() => {
+      expect(invoke).toHaveBeenCalledWith('update_setting', { key: 'auto_reconnect_after_controller_command', value: 'false' });
     });
 
     // No unexpected console errors (React warnings)

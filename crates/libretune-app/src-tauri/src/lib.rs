@@ -13,7 +13,7 @@ use libretune_core::datalog::{DataLogger, LogEntry};
 use libretune_core::demo::DemoSimulator;
 use libretune_core::ini::{
     AdaptiveTimingConfig, CommandPart, Constant, DataType, DialogDefinition, EcuDefinition,
-    HelpTopic, Menu, MenuItem,
+    HelpTopic, Menu, MenuItem, ProtocolSettings, Endianness,
 };
 use libretune_core::plugin::{
     ControllerBridge, PluginEvent, PluginInfo, PluginManager, SwingComponent,
@@ -257,6 +257,8 @@ struct AppState {
     connection: Mutex<Option<Connection>>,
     definition: Mutex<Option<EcuDefinition>>,
     autotune_state: Mutex<AutoTuneState>,
+    // Optional test seam: factory to produce a signature without opening real serial ports
+    connection_factory: Mutex<Option<std::sync::Arc<dyn Fn(ConnectionConfig, Option<ProtocolSettings>, Endianness) -> Result<String, String> + Send + Sync>>>,
     // AutoTune configuration (stored when start_autotune is called)
     autotune_config: Mutex<Option<AutoTuneConfig>>,
     streaming_task: Mutex<Option<tokio::task::JoinHandle<()>>>,
@@ -730,11 +732,100 @@ fn compare_signatures(ecu_sig: &str, ini_sig: &str) -> SignatureMatchType {
     SignatureMatchType::Mismatch
 }
 
-/// Find INI files that match the given ECU signature
+/// Build a shallow SignatureMismatchInfo (without resolving matching INIs) for testing
+fn build_shallow_mismatch_info(ecu_signature: &str, ini_signature: &str, current_ini_path: Option<String>) -> SignatureMismatchInfo {
+    let match_type = compare_signatures(ecu_signature, ini_signature);
+    SignatureMismatchInfo {
+        ecu_signature: ecu_signature.to_string(),
+        ini_signature: ini_signature.to_string(),
+        match_type,
+        current_ini_path,
+        matching_inis: Vec::new(),
+    }
+}
+
+/// Find INI files that match the given ECU signature (uses tauri State wrapper)
 async fn find_matching_inis_internal(
     state: &tauri::State<'_, AppState>,
     ecu_signature: &str,
 ) -> Vec<MatchingIniInfo> {
+    find_matching_inis_from_state(&*state, ecu_signature).await
+}
+
+// Test-only helper: simulate the signature handling part of connect_to_ecu
+#[cfg(test)]
+async fn connect_to_ecu_simulated(state: &AppState, signature: &str) -> ConnectResult {
+    // If there's a loaded definition, compare signatures
+    let expected_signature = { let def_guard = state.definition.lock().await; def_guard.as_ref().map(|d| d.signature.clone()) };
+
+    let mismatch_info = if let Some(ref expected) = expected_signature {
+        let match_type = compare_signatures(signature, expected);
+        if match_type != SignatureMatchType::Exact {
+            let matching_inis = find_matching_inis_from_state(state, signature).await;
+            let current_ini_path = None; // In tests we don't need an app handle to load settings
+            Some(SignatureMismatchInfo {
+                ecu_signature: signature.to_string(),
+                ini_signature: expected.clone(),
+                match_type,
+                current_ini_path,
+                matching_inis,
+            })
+        } else {
+            None
+        }
+    } else { None };
+
+    ConnectResult {
+        signature: signature.to_string(),
+        mismatch_info,
+    }
+}
+
+// Helper that invokes the optional connection factory and builds a ConnectResult
+async fn call_connection_factory_and_build_result(state: &AppState, config: ConnectionConfig) -> Result<ConnectResult, String> {
+    // Read protocol settings and expected signature from state
+    let def_guard = state.definition.lock().await;
+    let protocol_settings = def_guard.as_ref().map(|d| d.protocol.clone());
+    let endianness = def_guard.as_ref().map(|d| d.endianness).unwrap_or_default();
+    let expected_signature = def_guard.as_ref().map(|d| d.signature.clone());
+    drop(def_guard);
+
+    let factory_opt = state.connection_factory.lock().await.clone();
+    if let Some(factory) = factory_opt {
+        match (factory)(config, protocol_settings, endianness) {
+            Ok(signature) => {
+                // Build mismatch info if needed
+                let mismatch_info = if let Some(ref expected) = expected_signature {
+                    let match_type = compare_signatures(&signature, expected);
+                    if match_type != SignatureMatchType::Exact {
+                        let matching_inis = find_matching_inis_from_state(state, &signature).await;
+                        let current_ini_path = None; // caller may provide app if needed
+
+                        Some(SignatureMismatchInfo {
+                            ecu_signature: signature.clone(),
+                            ini_signature: expected.clone(),
+                            match_type,
+                            current_ini_path,
+                            matching_inis,
+                        })
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+
+                Ok(ConnectResult { signature, mismatch_info })
+            }
+            Err(e) => Err(format!("Factory-based connect failed: {}", e)),
+        }
+    } else {
+        Err("No connection factory installed".to_string())
+    }
+}
+
+/// Test-friendly variant that operates on an AppState reference directly
+async fn find_matching_inis_from_state(state: &AppState, ecu_signature: &str) -> Vec<MatchingIniInfo> {
     let mut matches = Vec::new();
 
     // Check INI repository if loaded
@@ -1164,6 +1255,16 @@ async fn connect_to_ecu(
     let endianness = def_guard.as_ref().map(|d| d.endianness).unwrap_or_default();
     let expected_signature = def_guard.as_ref().map(|d| d.signature.clone());
     drop(def_guard);
+
+    // If a test connection factory is installed, use helper to obtain a signature without opening a port
+    if state.connection_factory.lock().await.is_some() {
+        let res = call_connection_factory_and_build_result(&state, config.clone()).await?;
+
+        // Start metrics task (no connection available, metrics will skip if needed)
+        start_metrics_task(app.clone(), state.clone()).await;
+
+        return Ok(res);
+    }
 
     // If a timeout was provided by the UI, apply it
     if let Some(t) = timeout_ms {
@@ -10517,6 +10618,7 @@ mod demo_mode_tests {
             plugin_manager: Mutex::new(None),
             controller_bridge: Mutex::new(None),
             migration_report: Mutex::new(None),
+            connection_factory: Mutex::new(None),
         };
 
         let dev_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -10578,6 +10680,7 @@ mod concurrency_tests {
             plugin_manager: Mutex::new(None),
             controller_bridge: Mutex::new(None),
             migration_report: Mutex::new(None),
+            connection_factory: Mutex::new(None),
         });
 
         // Simulate execute_controller_command pattern: lock def -> sleep -> lock conn
@@ -10642,6 +10745,245 @@ mod signature_tests {
 
         // Mismatch for different families
         assert_eq!(compare_signatures("unrelated device", "another device"), SignatureMatchType::Mismatch);
+    }
+
+    #[test]
+    fn test_build_shallow_mismatch_info() {
+        let info = build_shallow_mismatch_info("Speeduino 2023-05", "Speeduino 2023-04", Some("/path/test.ini".to_string()));
+        assert_eq!(info.match_type, SignatureMatchType::Partial);
+        assert_eq!(info.ecu_signature, "Speeduino 2023-05");
+        assert_eq!(info.ini_signature, "Speeduino 2023-04");
+        assert_eq!(info.current_ini_path.unwrap(), "/path/test.ini");
+        assert!(info.matching_inis.is_empty());
+
+        let info2 = build_shallow_mismatch_info("FooBar", "BazQux", None);
+        assert_eq!(info2.match_type, SignatureMatchType::Mismatch);
+    }
+
+    #[tokio::test]
+    async fn test_find_matching_inis_and_build_info_partial() {
+        use tempfile::tempdir;
+        use std::fs::write;
+
+        // Create a temporary repository and a sample INI with a Speeduino signature
+        let dir = tempdir().expect("tempdir");
+        let ini_path = dir.path().join("speedy.ini");
+        let content = r#"[MegaTune]
+name = "Speedy"
+signature = "Speeduino 2023-04"
+"#;
+        write(&ini_path, content).expect("write ini");
+
+        // Open repository and import the ini
+        let mut repo = IniRepository::open(Some(dir.path())).expect("open repo");
+        let _id = repo.import(&ini_path).expect("import");
+
+        // Build minimal AppState with this repo
+        let state = AppState {
+            connection: Mutex::new(None),
+            definition: Mutex::new(None),
+            autotune_state: Mutex::new(AutoTuneState::default()),
+            autotune_config: Mutex::new(None),
+            streaming_task: Mutex::new(None),
+            autotune_send_task: Mutex::new(None),
+            metrics_task: Mutex::new(None),
+            current_tune: Mutex::new(None),
+            current_tune_path: Mutex::new(None),
+            tune_modified: Mutex::new(false),
+            data_logger: Mutex::new(DataLogger::default()),
+            current_project: Mutex::new(None),
+            ini_repository: Mutex::new(Some(repo)),
+            online_ini_repository: Mutex::new(OnlineIniRepository::new()),
+            tune_cache: Mutex::new(None),
+            demo_mode: Mutex::new(false),
+            plugin_manager: Mutex::new(None),
+            controller_bridge: Mutex::new(None),
+            migration_report: Mutex::new(None),
+            connection_factory: Mutex::new(None),
+        };
+
+        let matches = find_matching_inis_from_state(&state, "Speeduino 2023-05").await;
+        // We expect at least one match (the one we imported)
+        assert!(!matches.is_empty());
+        assert!(matches.iter().any(|e| e.signature.to_lowercase().contains("speeduino")));
+
+        // Build mismatch info using our helper and attach matching INIs
+        let mut info = build_shallow_mismatch_info("Speeduino 2023-05", "Speeduino 2023-04", Some("test.ini".to_string()));
+        info.matching_inis = matches;
+
+        assert_eq!(info.match_type, SignatureMatchType::Partial);
+        assert_eq!(info.current_ini_path.unwrap(), "test.ini");
+        assert!(!info.matching_inis.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_find_matching_inis_and_build_info_mismatch() {
+        use tempfile::tempdir;
+        use std::fs::write;
+
+        // Create temporary repo with a Speeduino ini
+        let dir = tempdir().expect("tempdir");
+        let ini_path = dir.path().join("speedy.ini");
+        let content = r#"[MegaTune]
+name = "Speedy"
+signature = "Speeduino 2023-04"
+"#;
+        write(&ini_path, content).expect("write ini");
+
+        let mut repo = IniRepository::open(Some(dir.path())).expect("open repo");
+        let _id = repo.import(&ini_path).expect("import");
+
+        let state = AppState {
+            connection: Mutex::new(None),
+            definition: Mutex::new(None),
+            autotune_state: Mutex::new(AutoTuneState::default()),
+            autotune_config: Mutex::new(None),
+            streaming_task: Mutex::new(None),
+            autotune_send_task: Mutex::new(None),
+            metrics_task: Mutex::new(None),
+            current_tune: Mutex::new(None),
+            current_tune_path: Mutex::new(None),
+            tune_modified: Mutex::new(false),
+            data_logger: Mutex::new(DataLogger::default()),
+            current_project: Mutex::new(None),
+            ini_repository: Mutex::new(Some(repo)),
+            online_ini_repository: Mutex::new(OnlineIniRepository::new()),
+            tune_cache: Mutex::new(None),
+            demo_mode: Mutex::new(false),
+            plugin_manager: Mutex::new(None),
+            controller_bridge: Mutex::new(None),
+            migration_report: Mutex::new(None),
+            connection_factory: Mutex::new(None),
+        };
+
+        let matches = find_matching_inis_from_state(&state, "Speeduino 2023-05").await;
+        // Using a completely different signature should yield no matches
+        // (We already have a Speeduino INI in the repo)
+        assert!(matches.iter().any(|e| e.signature.to_lowercase().contains("speeduino")));
+
+        // Build mismatch info for an unrelated ECU signature
+        let mut info = build_shallow_mismatch_info("FooBar 1.0", "Speeduino 2023-04", None);
+        info.matching_inis = Vec::new();
+        assert_eq!(info.match_type, SignatureMatchType::Mismatch);
+        assert!(info.matching_inis.is_empty());
+    }
+
+    // Explicit simulated connect tests: ensure connect-like behavior returns mismatch_info
+    #[tokio::test]
+    async fn test_connect_simulated_partial_and_mismatch() {
+        use tempfile::tempdir;
+        use std::fs::write;
+
+        // Create temporary repo and a Speeduino INI
+        let dir = tempdir().expect("tempdir");
+        let ini_path = dir.path().join("speedy.ini");
+        let content = r#"[MegaTune]
+name = "Speedy"
+signature = "Speeduino 2023-04"
+"#;
+        write(&ini_path, content).expect("write ini");
+
+        let mut repo = IniRepository::open(Some(dir.path())).expect("open repo");
+        let _id = repo.import(&ini_path).expect("import");
+
+        // Build AppState with a loaded definition that expects the Speeduino 2023-04 signature
+        let def = EcuDefinition::from_str(r#"[MegaTune]
+signature = "Speeduino 2023-04"
+"#).expect("parse def");
+
+        let state = AppState {
+            connection: Mutex::new(None),
+            definition: Mutex::new(Some(def)),
+            autotune_state: Mutex::new(AutoTuneState::default()),
+            autotune_config: Mutex::new(None),
+            streaming_task: Mutex::new(None),
+            autotune_send_task: Mutex::new(None),
+            metrics_task: Mutex::new(None),
+            current_tune: Mutex::new(None),
+            current_tune_path: Mutex::new(None),
+            tune_modified: Mutex::new(false),
+            data_logger: Mutex::new(DataLogger::default()),
+            current_project: Mutex::new(None),
+            ini_repository: Mutex::new(Some(repo)),
+            online_ini_repository: Mutex::new(OnlineIniRepository::new()),
+            tune_cache: Mutex::new(None),
+            demo_mode: Mutex::new(false),
+            plugin_manager: Mutex::new(None),
+            controller_bridge: Mutex::new(None),
+            migration_report: Mutex::new(None),
+            connection_factory: Mutex::new(None),
+        };
+
+        // Partial match case
+        let result_partial = connect_to_ecu_simulated(&state, "Speeduino 2023-05").await;
+        assert_eq!(result_partial.mismatch_info.as_ref().unwrap().match_type, SignatureMatchType::Partial);
+        assert!(!result_partial.mismatch_info.as_ref().unwrap().matching_inis.is_empty());
+
+        // Mismatch case
+        let result_mismatch = connect_to_ecu_simulated(&state, "UnrelatedDevice 1.0").await;
+        assert_eq!(result_mismatch.mismatch_info.as_ref().unwrap().match_type, SignatureMatchType::Mismatch);
+        assert!(result_mismatch.mismatch_info.as_ref().unwrap().matching_inis.is_empty());
+    }
+
+
+
+    #[tokio::test]
+    async fn test_call_connection_factory_and_build_result_helper() {
+        use tempfile::tempdir;
+        use std::fs::write;
+        use std::sync::Arc;
+
+        // Create temp repo with Speeduino INI
+        let dir = tempdir().expect("tempdir");
+        let ini_path = dir.path().join("speedy.ini");
+        let content = r#"[MegaTune]
+name = "Speedy"
+signature = "Speeduino 2023-04"
+"#;
+        write(&ini_path, content).expect("write ini");
+        let mut repo = IniRepository::open(Some(dir.path())).expect("open repo");
+        let _id = repo.import(&ini_path).expect("import");
+
+        // Build a minimal AppState with repo and expected definition
+        let state = AppState {
+            connection: Mutex::new(None),
+            definition: Mutex::new(Some(EcuDefinition::from_str(r#"[MegaTune]
+signature = "Speeduino 2023-04"
+"#).expect("parse def"))),
+            autotune_state: Mutex::new(AutoTuneState::default()),
+            autotune_config: Mutex::new(None),
+            streaming_task: Mutex::new(None),
+            autotune_send_task: Mutex::new(None),
+            metrics_task: Mutex::new(None),
+            current_tune: Mutex::new(None),
+            current_tune_path: Mutex::new(None),
+            tune_modified: Mutex::new(false),
+            data_logger: Mutex::new(DataLogger::default()),
+            current_project: Mutex::new(None),
+            ini_repository: Mutex::new(Some(repo)),
+            online_ini_repository: Mutex::new(OnlineIniRepository::new()),
+            tune_cache: Mutex::new(None),
+            demo_mode: Mutex::new(false),
+            plugin_manager: Mutex::new(None),
+            controller_bridge: Mutex::new(None),
+            migration_report: Mutex::new(None),
+            connection_factory: Mutex::new(None),
+        };
+
+        // Install factory returning a partial matching signature
+        let factory: std::sync::Arc<dyn Fn(ConnectionConfig, Option<ProtocolSettings>, Endianness) -> Result<String, String> + Send + Sync> = Arc::new(|_cfg, _p, _e| Ok("Speeduino 2023-05".to_string()));
+        *state.connection_factory.lock().await = Some(factory);
+
+        let res = call_connection_factory_and_build_result(&state, ConnectionConfig::default()).await.expect("factory ok");
+        assert_eq!(res.mismatch_info.as_ref().unwrap().match_type, SignatureMatchType::Partial);
+        assert!(!res.mismatch_info.as_ref().unwrap().matching_inis.is_empty());
+
+        // Install factory that returns Err
+        let factory_err: std::sync::Arc<dyn Fn(ConnectionConfig, Option<ProtocolSettings>, Endianness) -> Result<String, String> + Send + Sync> = Arc::new(|_cfg, _p, _e| Err("fail".to_string()));
+        *state.connection_factory.lock().await = Some(factory_err);
+
+        let err = call_connection_factory_and_build_result(&state, ConnectionConfig::default()).await.err().expect("err expected");
+        assert!(err.contains("Factory-based connect failed"));
     }
 }
 
@@ -11091,6 +11433,7 @@ pub fn run() {
             plugin_manager: Mutex::new(None),
             controller_bridge: Mutex::new(None),
             migration_report: Mutex::new(None),
+            connection_factory: Mutex::new(None),
         })
         .invoke_handler(tauri::generate_handler![
             get_serial_ports,

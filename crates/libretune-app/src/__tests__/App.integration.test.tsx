@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { vi } from 'vitest';
 
@@ -148,5 +148,83 @@ describe('App integration (toolbar connection-info)', () => {
 
     // Packet mode should show placeholder '—'
     await waitFor(() => expect(container.querySelector('.packet-mode')?.textContent).toBe('—'));
+  });
+
+  it('proceeds to sync on partial signature mismatch (advisory)', async () => {
+    let syncCalled = false;
+
+    (invoke as unknown as vi.Mock).mockImplementation((cmd: string) => {
+      switch (cmd) {
+        case 'get_settings':
+          return Promise.resolve({ runtime_packet_mode: 'Auto', units_system: 'metric' });
+        case 'get_current_project':
+          return Promise.resolve(null);
+        case 'get_serial_ports':
+          return Promise.resolve(['/dev/ttyUSB0']);
+        case 'connect_to_ecu':
+          return Promise.resolve({
+            signature: 'Speeduino 2023-05',
+            mismatch_info: {
+              ecu_signature: 'Speeduino 2023-05',
+              ini_signature: 'Speeduino 2023-04',
+              match_type: 'partial',
+              current_ini_path: 'test.ini',
+              matching_inis: [],
+            },
+          });
+        case 'get_connection_status':
+          return Promise.resolve({ state: 'Connected', has_definition: true, signature: 'Speeduino 2023-05', ini_name: 'test.ini' });
+        case 'sync_ecu_data':
+          syncCalled = true;
+          return Promise.resolve({ success: true, pages_synced: 1, pages_failed: 0, total_pages: 1, errors: [] });
+        default:
+          return Promise.resolve();
+      }
+    });
+
+    const { default: App } = await import('../App');
+
+    const { container } = render(
+      <LoadingProvider>
+        <ToastProvider>
+          <UnitPreferencesProvider>
+            <App />
+          </UnitPreferencesProvider>
+        </ToastProvider>
+      </LoadingProvider>
+    );
+
+    // Open connection dialog via toolbar connect button
+    const connectBtn = await screen.findByTitle('Connect to ECU');
+    expect(connectBtn).toBeTruthy();
+    connectBtn.click();
+
+    // Select port in dialog and click Connect
+    // Refresh ports first (dialog shows 'No ports found' initially from global setup)
+    const refreshBtn = await screen.findByText('🔄 Refresh');
+    refreshBtn.click();
+
+    // Wait for the select to contain the refreshed port and choose it
+    await waitFor(() => {
+      const selects = container.querySelectorAll('select');
+      const select = Array.from(selects).find(s => Array.from(s.options).some(opt => opt.value === '/dev/ttyUSB0')) as HTMLSelectElement | undefined;
+      expect(select).toBeTruthy();
+      fireEvent.change(select!, { target: { value: '/dev/ttyUSB0' } });
+    });
+
+    const dialogConnect = await screen.findByText('Connect');
+    dialogConnect.click();
+
+    // Wait for sync to be called due to advisory partial mismatch
+    await waitFor(() => expect(syncCalled).toBe(true));
+
+    // A warning toast should have been shown informing the user about the partial match
+    await waitFor(() => {
+      const toastMsg = container.querySelector('.toast-message')?.textContent || '';
+      if (!toastMsg.toLowerCase().includes('partially matches')) throw new Error('warning toast not found');
+    });
+
+    // Ensure the signature mismatch dialog did NOT open (partial is advisory)
+    expect(screen.queryByText('INI Signature Mismatch')).toBeNull();
   });
 });

@@ -480,6 +480,8 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
   const [autoCommitOnSave, setAutoCommitOnSave] = useState('never');
   const [commitMessageFormat, setCommitMessageFormat] = useState('Tune saved on {date} at {time}');
   const [runtimePacketMode, setRuntimePacketMode] = useState<'Auto'|'ForceBurst'|'ForceOCH'|'Disabled'>('Auto');
+  // Auto-reconnect setting: whether to automatically sync & reconnect after controller commands
+  const [autoReconnectAfterControllerCommand, setAutoReconnectAfterControllerCommand] = useState<boolean>(false);
   
   // Unit preferences from context
   const unitPrefs = useUnitPreferences();
@@ -512,6 +514,7 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
         if (settings.auto_commit_on_save !== undefined) setAutoCommitOnSave(settings.auto_commit_on_save);
         if (settings.commit_message_format !== undefined) setCommitMessageFormat(settings.commit_message_format);
         if (settings.runtime_packet_mode !== undefined) setRuntimePacketMode(settings.runtime_packet_mode);
+        if (settings.auto_reconnect_after_controller_command !== undefined) setAutoReconnectAfterControllerCommand(!!settings.auto_reconnect_after_controller_command);
       }).catch(console.error);
 
       // Load available output channels from ECU definition
@@ -621,6 +624,7 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
     await invoke('update_setting', { key: 'commit_message_format', value: commitMessageFormat });
     // Update runtime packet mode
     await invoke('update_setting', { key: 'runtime_packet_mode', value: runtimePacketMode });
+    await invoke('update_setting', { key: 'auto_reconnect_after_controller_command', value: autoReconnectAfterControllerCommand.toString() });
     onSettingsChange?.({ units: localUnits, autoBurnOnClose, indicatorColumnCount, indicatorFillEmpty, indicatorTextFit, statusBarChannels, runtimePacketMode });
     onClose();
   }, [localTheme, localUnits, autoBurnOnClose, statusBarChannels, indicatorColumnCount, indicatorFillEmpty, indicatorTextFit, heatmapValueScheme, heatmapChangeScheme, heatmapCoverageScheme, gaugeSnapToGrid, gaugeFreeMove, gaugeLock, autoCommitOnSave, commitMessageFormat, runtimePacketMode, onThemeChange, onSettingsChange, onClose]);
@@ -780,6 +784,20 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
               <option value={'Disabled'}>Disabled (use Burst)</option>
             </select>
             <span className="dialog-form-note">Default runtime packet mode for new connections</span>
+            <span className="dialog-form-note">OCH (On-Controller Block Read): use INI-defined block reads when supported by the ECU (configured via <code>ochGetCommand</code> / <code>ochBlockSize</code>).</span>
+
+            {/* Auto-reconnect after controller commands */}
+            <div className="dialog-form-group" style={{ marginTop: '0.5rem' }}>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={autoReconnectAfterControllerCommand}
+                  onChange={(e) => setAutoReconnectAfterControllerCommand(e.target.checked)}
+                />
+                Auto-sync & reconnect after controller commands
+              </label>
+              <span className="dialog-form-note">When enabled, the app will automatically sync and reconnect to the ECU after executing controller commands that modify ECU settings (e.g., applying base maps).</span>
+            </div>
 
             {/* Show small live metrics in connection dialog too */}
             <div style={{ marginTop: '0.6rem' }}>
@@ -1218,6 +1236,7 @@ export function ConnectionDialog({
               <option value={'Disabled'}>Disabled (use Burst)</option>
             </select>
             <div className="field-help">Per-connection override for runtime packet selection</div>
+            <div className="field-help">OCH (On-Controller Block Read): use INI-defined block reads when supported by the ECU (configured via <code>ochGetCommand</code> / <code>ochBlockSize</code>).</div>
           </div>
 
 

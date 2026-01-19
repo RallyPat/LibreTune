@@ -510,6 +510,41 @@ function AppContent() {
       if (unlisten) unlisten();
     };
   }, []);
+
+  // Listen for frontend reconnect requests (dispatched by e.g., controller command flow)
+  useEffect(() => {
+    let unlisten: UnlistenFn | null = null;
+
+    (async () => {
+      try {
+        unlisten = await listen<any>("reconnect:request", async (event) => {
+          console.log('Reconnect requested from:', event.payload);
+
+          // Dev-only debug & telemetry hook
+          try {
+            if (typeof import.meta !== 'undefined' && (import.meta as any).env && (import.meta as any).env.MODE !== 'production') {
+              console.debug('reconnect:request received', event.payload);
+              try { (window as any).__libretuneTelemetry?.trackEvent?.('reconnect_request_received', { source: event.payload?.source ?? 'unknown' }); } catch (_e) { /* ignore */ }
+            }
+          } catch (dbgErr) {
+            console.error('Failed to log reconnect telemetry:', dbgErr);
+          }
+
+          if (!connecting) {
+            await connect();
+          } else {
+            showToast('Reconnect requested but connection is already in progress', 'info');
+          }
+        });
+      } catch (e) {
+        console.error('Failed to listen for reconnect:request events:', e);
+      }
+    })();
+
+    return () => {
+      if (unlisten) unlisten();
+    };
+  }, [connecting, selectedPort, baudRate, timeoutMs, connectionRuntimePacketMode, defaultRuntimePacketMode]);
   
   // Listen for INI change events (requires re-sync)
   useEffect(() => {
@@ -972,14 +1007,23 @@ function AppContent() {
       const result = await invoke<ConnectResult>("connect_to_ecu", { portName: selectedPort, baudRate, timeoutMs, runtimePacketMode: runtimeMode });
       await checkStatus();
       
-      // If there's a signature mismatch, show dialog and DON'T auto-sync
-      // User must choose to continue or select a different INI first
+      // If there's a signature mismatch, behave based on severity
       if (result.mismatch_info) {
-        console.log("Signature mismatch detected:", result.mismatch_info);
-        setSignatureMismatchInfo(result.mismatch_info);
-        setSignatureMismatchOpen(true);
-        // Don't sync yet - wait for user decision
-        return;
+        const mi = result.mismatch_info;
+        setSignatureMismatchInfo(mi);
+        if (mi.match_type === 'mismatch') {
+          // Block automatic sync for full mismatches and require explicit user decision
+          console.log("Signature mismatch detected:", mi);
+          setSignatureMismatchOpen(true);
+          return;
+        } else {
+          // Partial match: advisory only — warn user but continue to sync
+          showToast(
+            `Connected: ECU signature partially matches the loaded INI (ECU: ${mi.ecu_signature}). Proceeding with sync.`,
+            "warning"
+          );
+          // continue with sync
+        }
       }
       
       // If connected and has definition (and no mismatch), sync ECU data

@@ -4,6 +4,7 @@ import { ArrowLeft, Activity, Grid3X3, HelpCircle } from 'lucide-react';
 import CurveEditor, { SimpleGaugeInfo } from '../curves/CurveEditor';
 import TableEditor2D from '../tables/TableEditor2D';
 import './DialogRenderer.css';
+import { useToast } from '../ToastContext';
 
 interface DialogComponent {
   type: 'Panel' | 'Field' | 'LiveGraph' | 'Table' | 'Label' | 'Indicator' | 'CommandButton';
@@ -496,6 +497,11 @@ function CommandButton({ comp, context }: { comp: DialogComponent; context: Reco
   const [isExecuting, setIsExecuting] = useState(false);
   const [showWarning, setShowWarning] = useState(false);
   const [warningsDisabled, setWarningsDisabled] = useState(false);
+  const [autoReconnectEnabled, setAutoReconnectEnabled] = useState<boolean>(false);
+  const { showToast } = useToast();
+
+  // Result type from sync_ecu_data
+  interface SyncResult { pages_synced: number; pages_failed: number; total_pages: number; errors: string[]; }
 
   // Load warning preference from localStorage
   useEffect(() => {
@@ -503,6 +509,17 @@ function CommandButton({ comp, context }: { comp: DialogComponent; context: Reco
     if (saved === 'true') {
       setWarningsDisabled(true);
     }
+  }, []);
+
+  // Load auto-reconnect preference from settings (persisted)
+  useEffect(() => {
+    invoke<any>('get_settings')
+      .then((settings) => {
+        if (settings.auto_reconnect_after_controller_command !== undefined) {
+          setAutoReconnectEnabled(!!settings.auto_reconnect_after_controller_command);
+        }
+      })
+      .catch(console.error);
   }, []);
 
   // Evaluate enable condition
@@ -528,6 +545,52 @@ function CommandButton({ comp, context }: { comp: DialogComponent; context: Reco
         invoke('execute_controller_command', { commandName: comp.command }),
         new Promise((_, reject) => setTimeout(() => reject(new Error('Command timed out')), timeoutMs)),
       ]);
+
+      // On success, trigger a sync so ECU-applied presets (base maps) are read back into app
+      try {
+        showToast('Controller command executed — syncing ECU...', 'info');
+        const syncResult = await invoke<SyncResult>('sync_ecu_data');
+        if (syncResult && syncResult.pages_synced > 0) {
+          showToast(`Sync complete: ${syncResult.pages_synced} pages`, 'success');
+        } else {
+          showToast('Sync completed — no pages changed', 'info');
+        }
+
+        // If auto-reconnect is enabled, request reconnect (App will handle it)
+        let shouldReconnect = autoReconnectEnabled;
+        if (!shouldReconnect) {
+          // If the local state isn't set yet (race in tests), fetch current setting directly
+          try {
+            const settings = await invoke<any>('get_settings');
+            shouldReconnect = !!settings.auto_reconnect_after_controller_command;
+          } catch (e) {
+            console.error('Failed to read settings for reconnect:', e);
+          }
+        }
+
+        if (shouldReconnect) {
+          try {
+            window.dispatchEvent(new CustomEvent('reconnect:request', { detail: { source: 'controller-command' } }));
+
+            // Dev-only debug & telemetry hook: log reconnect requests and optionally forward to a telemetry sink
+            // This is intentionally guarded by NODE_ENV so it doesn't run in production builds.
+            try {
+              if (typeof import.meta !== 'undefined' && (import.meta as any).env && (import.meta as any).env.MODE !== 'production') {
+                console.debug('reconnect:request dispatched', { source: 'controller-command', timestamp: Date.now() });
+                // Optional telemetry sink if provided by embedding environment (safe no-op otherwise)
+                try { (window as any).__libretuneTelemetry?.trackEvent?.('reconnect_request', { source: 'controller-command' }); } catch (_e) { /* ignore errors */ }
+              }
+            } catch (dbgErr) {
+              console.error('Failed to log reconnect telemetry:', dbgErr);
+            }
+          } catch (evtErr) {
+            console.error('Failed to dispatch reconnect request:', evtErr);
+          }
+        }
+      } catch (syncErr) {
+        console.error('Sync after command failed:', syncErr);
+        showToast(`Sync failed: ${syncErr}`, 'error');
+      }
     } catch (err) {
       console.error('Command execution failed:', err);
       alert(`Command failed: ${err}`);
@@ -582,6 +645,24 @@ function CommandButton({ comp, context }: { comp: DialogComponent; context: Reco
               <li>Alter ECU behavior unexpectedly</li>
             </ul>
             <p>Only proceed if you understand what this command does.</p>
+            <div style={{ marginTop: 8 }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <input
+                  type="checkbox"
+                  checked={autoReconnectEnabled}
+                  onChange={(e) => {
+                    const val = e.target.checked;
+                    setAutoReconnectEnabled(val);
+                    // Persist user preference
+                    invoke('update_setting', { key: 'auto_reconnect_after_controller_command', value: val }).catch(console.error);
+                  }}
+                />
+                <span style={{ fontSize: '0.9em' }}>
+                  Auto-sync and reconnect after executing (may reconnect the ECU)
+                </span>
+              </label>
+            </div>
+
             <div className="command-warning-buttons">
               <button onClick={() => setShowWarning(false)}>Cancel</button>
               <button onClick={() => handleWarningConfirm(false)}>Execute Once</button>
@@ -1191,6 +1272,7 @@ export default function DialogRenderer({ definition, onBack, openTable, context,
       })
       .catch(console.error);
   }, []);
+
   
   // Scroll to and highlight matching field when highlightTerm is provided
   useEffect(() => {
