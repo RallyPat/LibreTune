@@ -1003,7 +1003,21 @@ function AppContent() {
       }
 
       // Connect and get mismatch info directly (no async race)
-      const runtimeMode = connectionRuntimePacketMode || defaultRuntimePacketMode;
+      let runtimeMode = connectionRuntimePacketMode || defaultRuntimePacketMode;
+
+      // If runtime mode is Auto, try to detect best mode from INI capabilities
+      if (runtimeMode === 'Auto') {
+        try {
+          // Attempt to query backend capabilities directly. If a definition isn't loaded
+          // the command will error and we'll fall back to a safe default.
+          const caps = await invoke<{ supports_och: boolean }>('get_protocol_capabilities');
+          runtimeMode = caps && caps.supports_och ? 'ForceOCH' : 'ForceBurst';
+        } catch (e) {
+          console.warn('Runtime mode auto-detect failed, defaulting to ForceBurst:', e);
+          runtimeMode = 'ForceBurst';
+        }
+      }
+
       const result = await invoke<ConnectResult>("connect_to_ecu", { portName: selectedPort, baudRate, timeoutMs, runtimePacketMode: runtimeMode });
       await checkStatus();
       

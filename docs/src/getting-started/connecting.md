@@ -38,6 +38,16 @@ If you don't see your ECU's port:
 | **Baud Rate** | Communication speed | 115200 |
 | **Timeout** | Connection timeout (ms) | 5000 |
 
+### Runtime Packet Mode (Auto behavior)
+
+If your **Runtime Packet Mode** setting is set to **Auto**, LibreTune will choose the best fetch mode for the current INI on connect:
+
+- If the loaded INI defines an OCH block read (`ochGetCommand` / `ochBlockSize`), LibreTune will prefer **Force OCH** for read efficiency.
+- Otherwise, the app will fall back to **Force Burst** for compatibility.
+
+You can override the automatic choice in the Settings dialog by selecting a specific runtime packet mode (Auto / Force Burst / Force OCH / Disabled).
+
+
 ### Auto-sync & Reconnect After Controller Commands
 
 Some controller commands (for example, commands that apply base maps or change ECU configuration) modify settings directly on the ECU. These changes may not be visible to LibreTune until the app performs a fresh sync and, in some cases, reconnects the serial port.

@@ -227,4 +227,64 @@ describe('App integration (toolbar connection-info)', () => {
     // Ensure the signature mismatch dialog did NOT open (partial is advisory)
     expect(screen.queryByText('INI Signature Mismatch')).toBeNull();
   });
+
+  it('auto-selects runtime packet mode (Auto → ForceOCH when INI supports OCH)', async () => {
+    let connectArgs: any = null;
+
+    (invoke as unknown as vi.Mock).mockImplementation((cmd: string, args?: any) => {
+      switch (cmd) {
+        case 'get_settings':
+          return Promise.resolve({ runtime_packet_mode: 'Auto', units_system: 'metric' });
+        case 'get_serial_ports':
+          return Promise.resolve(['/dev/ttyUSB0']);
+        case 'get_protocol_defaults':
+          return Promise.resolve({ default_baud_rate: 115200, timeout_ms: 2000 });
+        case 'get_protocol_capabilities':
+          // Simulate INI that supports OCH
+          return Promise.resolve({ supports_och: true });
+        case 'connect_to_ecu':
+          connectArgs = args;
+          return Promise.resolve({ signature: 'rusEFI v1.2.3', mismatch_info: null });
+        case 'get_connection_status':
+          return Promise.resolve({ state: 'Connected', has_definition: true, signature: 'rusEFI v1.2.3', ini_name: 'test.ini' });
+        default:
+          return Promise.resolve();
+      }
+    });
+
+    const { default: App } = await import('../App');
+
+    const { container } = render(
+      <LoadingProvider>
+        <ToastProvider>
+          <UnitPreferencesProvider>
+            <App />
+          </UnitPreferencesProvider>
+        </ToastProvider>
+      </LoadingProvider>
+    );
+
+    // Open connection dialog and connect with the refreshed port
+    const connectBtn = await screen.findByTitle('Connect to ECU');
+    expect(connectBtn).toBeTruthy();
+    connectBtn.click();
+
+    const refreshBtn = await screen.findByText('🔄 Refresh');
+    refreshBtn.click();
+
+    await waitFor(() => {
+      const selects = container.querySelectorAll('select');
+      const select = Array.from(selects).find(s => Array.from(s.options).some(opt => opt.value === '/dev/ttyUSB0')) as HTMLSelectElement | undefined;
+      expect(select).toBeTruthy();
+      fireEvent.change(select!, { target: { value: '/dev/ttyUSB0' } });
+    });
+
+    const dialogConnect = await screen.findByText('Connect');
+    dialogConnect.click();
+
+    // Wait for connect_to_ecu to be called and assert runtimePacketMode chosen
+    await waitFor(() => expect(connectArgs).not.toBeNull());
+    expect(connectArgs.runtimePacketMode).toBe('ForceOCH');
+
+  });
 });

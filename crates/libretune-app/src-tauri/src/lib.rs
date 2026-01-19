@@ -2097,6 +2097,23 @@ async fn get_protocol_defaults(
     })
 }
 
+#[derive(Serialize)]
+struct ProtocolCapabilities {
+    supports_och: bool,
+}
+
+/// Return derived protocol capabilities from the loaded INI definition.
+/// Useful for frontend heuristics (e.g., choosing OCH vs Burst for runtime reads).
+#[tauri::command]
+async fn get_protocol_capabilities(state: tauri::State<'_, AppState>) -> Result<ProtocolCapabilities, String> {
+    let def_guard = state.definition.lock().await;
+    let def = def_guard.as_ref().ok_or("Definition not loaded")?;
+    let proto = &def.protocol;
+    Ok(ProtocolCapabilities {
+        supports_och: proto.och_get_command.is_some() && proto.och_block_size > 0,
+    })
+}
+
 /// Status of the tune cache for UI display
 #[derive(Serialize)]
 struct TuneCacheStatus {
@@ -11468,6 +11485,7 @@ pub fn run() {
             get_port_editor,
             // INI / protocol defaults
             get_protocol_defaults,
+            get_protocol_capabilities,
             get_help_topic,
             get_constant,
             get_constant_value,
