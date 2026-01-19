@@ -611,16 +611,25 @@ function TsGaugeInner({ config, value, embeddedImages }: TsGaugeProps) {
     needleImage?: HTMLImageElement | null,
     bgImage?: HTMLImageElement | null
   ) => {
-    const centerX = width / 2;
-    const centerY = height / 2;
-    const radius = Math.min(width, height) / 2 - 8;
+    // Enforce perfect circle: use the smaller of width/height, center in canvas
+    const size = Math.min(width, height);
+    // const pivotOffsetX = config.needle_pivot_offset_x ?? 0;
+    // const pivotOffsetY = config.needle_pivot_offset_y ?? 0;
+    const pivotOffsetX = 0;
+    const pivotOffsetY = 0;
+    const centerX = width / 2 + pivotOffsetX;
+    const centerY = height / 2 + pivotOffsetY;
+    const radius = size / 2 - 8;
 
     // Background - use image if available, otherwise use color
     if (bgImage) {
-      ctx.drawImage(bgImage, 0, 0, width, height);
+      // Center the image in the square area
+      ctx.drawImage(bgImage, centerX - size / 2, centerY - size / 2, size, size);
     } else {
       ctx.fillStyle = tsColorToRgba(config.back_color);
-      ctx.fillRect(0, 0, width, height);
+      ctx.beginPath();
+      ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+      ctx.fill();
     }
 
     // Outer shadow
@@ -774,7 +783,18 @@ function TsGaugeInner({ config, value, embeddedImages }: TsGaugeProps) {
     // Draw needle with shadow
     const valuePercent = (clampedValue - config.min) / (config.max - config.min);
     const needleAngle = angleAt(valuePercent);
-    const needleLength = faceRadius - Math.max(20, faceRadius * 0.25);
+    // Use config.needle_length if present, otherwise use a visually correct default
+    let needleLength: number;
+    if (typeof config.needle_length === 'number' && config.needle_length > 0 && config.needle_length <= 1.5) {
+      // If needle_length is a fraction (<=1.5), treat as percent of faceRadius
+      needleLength = faceRadius * config.needle_length;
+    } else if (typeof config.needle_length === 'number' && config.needle_length > 1.5) {
+      // If needle_length is a pixel value
+      needleLength = Math.min(faceRadius, config.needle_length);
+    } else {
+      // Default: 35% of faceRadius (shrink by 50%)
+      needleLength = faceRadius * 0.35;
+    }
     const needleWidth = Math.max(3, faceRadius * 0.04);
 
     ctx.save();
@@ -788,17 +808,22 @@ function TsGaugeInner({ config, value, embeddedImages }: TsGaugeProps) {
     ctx.shadowOffsetY = 2;
 
     if (needleImage) {
-      // Draw custom needle image - centered on rotation point, pointing right
+      // Draw custom needle image - center image at pivot, allow for config offset
       const imgWidth = needleImage.width;
       const imgHeight = needleImage.height;
       const scale = needleLength / imgWidth;
+      // Optionally allow config offsets for image alignment
+      const imgOffsetX = config.needle_image_offset_x ?? 0;
+      const imgOffsetY = config.needle_image_offset_y ?? 0;
       ctx.drawImage(
         needleImage,
-        0, -imgHeight * scale / 2,
-        imgWidth * scale, imgHeight * scale
+        -imgWidth * scale / 2 + imgOffsetX,
+        -imgHeight * scale / 2 + imgOffsetY,
+        imgWidth * scale,
+        imgHeight * scale
       );
     } else {
-      // Needle body with gradient
+      // Needle body with gradient, symmetric about pivot
       const needleGradient = ctx.createLinearGradient(0, -needleWidth, 0, needleWidth);
       const needleHex = tsColorToHex(config.needle_color);
       needleGradient.addColorStop(0, lightenColor(needleHex, 30));
@@ -806,10 +831,10 @@ function TsGaugeInner({ config, value, embeddedImages }: TsGaugeProps) {
       needleGradient.addColorStop(1, darkenColor(needleHex, 20));
 
       ctx.beginPath();
-      ctx.moveTo(-faceRadius * 0.12, 0);
-      ctx.lineTo(needleLength * 0.7, -needleWidth);
+      // Needle base at pivot (0,0), symmetric left/right
+      ctx.moveTo(-needleLength * 0.08, -needleWidth);
       ctx.lineTo(needleLength, 0);
-      ctx.lineTo(needleLength * 0.7, needleWidth);
+      ctx.lineTo(-needleLength * 0.08, needleWidth);
       ctx.closePath();
       ctx.fillStyle = needleGradient;
       ctx.fill();
@@ -832,30 +857,25 @@ function TsGaugeInner({ config, value, embeddedImages }: TsGaugeProps) {
 
     ctx.restore();
 
-    // Title with shadow
+    // Title with shadow (move up to avoid overlap)
     ctx.shadowColor = 'rgba(0, 0, 0, 0.4)';
     ctx.shadowBlur = 2;
     ctx.fillStyle = fontHex;
     ctx.font = getFontSpec(Math.max(9, faceRadius * 0.13), { bold: true });
     ctx.textAlign = 'center';
-    ctx.fillText(config.title, centerX, centerY + faceRadius * 0.35);
+    ctx.textBaseline = 'top';
+    ctx.fillText(config.title, centerX, centerY + faceRadius * 0.25);
     ctx.shadowColor = 'transparent';
 
-    // Value display with background
+    // Value display with background (move down to avoid overlap)
     const valueFontSize = Math.max(11, faceRadius * 0.16);
     const valueText = `${clampedValue.toFixed(config.value_digits)} ${config.units}`;
     ctx.font = getFontSpec(valueFontSize, { bold: true, monospace: true });
     const valueWidth = ctx.measureText(valueText).width;
-    
-    // Value background
-    const valueY = config.display_value_at_180
-      ? centerY + faceRadius * 0.7
-      : centerY + faceRadius * 0.55;
+    const valueY = centerY + faceRadius * 0.55;
     ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
     roundRect(ctx, centerX - valueWidth / 2 - 4, valueY - valueFontSize / 2 - 2, valueWidth + 8, valueFontSize + 4, 3);
     ctx.fill();
-    
-    // Value text
     ctx.fillStyle = fontHex;
     ctx.textBaseline = 'middle';
     ctx.fillText(valueText, centerX, valueY);
@@ -863,8 +883,11 @@ function TsGaugeInner({ config, value, embeddedImages }: TsGaugeProps) {
 
   /** Draw sweep gauge (tachometer style) with improved visuals */
   const drawSweepGauge = (ctx: CanvasRenderingContext2D, width: number, height: number) => {
-    const centerX = width / 2;
-    const centerY = height * 0.58;
+    // Allow configurable pivot offset (for TunerStudio compatibility), default to center
+    const pivotOffsetX = config.needle_pivot_offset_x ?? 0;
+    const pivotOffsetY = config.needle_pivot_offset_y ?? 0;
+    const centerX = width / 2 + pivotOffsetX;
+    const centerY = height * 0.58 + pivotOffsetY;
     const radius = Math.min(width, height * 1.15) / 2 - 8;
     const arcWidth = Math.max(16, radius * 0.18);
 

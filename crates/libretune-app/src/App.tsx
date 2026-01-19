@@ -26,6 +26,7 @@ import {
   AutoTuneLive,
   DataLogView,
 } from "./components/tuner-ui";
+import ConnectionMetrics from './components/layout/ConnectionMetrics';
 import TsDashboard from "./components/dashboards/TsDashboard";
 import { ToothLoggerView, CompositeLoggerView } from "./components/diagnostics";
 import DialogRenderer, { DialogDefinition as RendererDialogDef } from "./components/dialogs/DialogRenderer";
@@ -234,6 +235,10 @@ function AppContent() {
   const [iniDefaults, setIniDefaults] = useState<ProtocolDefaults | null>(null);
   const [baudUserSet, setBaudUserSet] = useState(false);
   const [timeoutUserSet, setTimeoutUserSet] = useState(false);
+
+  // Runtime packet mode defaults
+  const [defaultRuntimePacketMode, setDefaultRuntimePacketMode] = useState<'Auto'|'ForceBurst'|'ForceOCH'|'Disabled'>('Auto');
+  const [connectionRuntimePacketMode, setConnectionRuntimePacketMode] = useState<'Auto'|'ForceBurst'|'ForceOCH'|'Disabled'>('Auto');
 
   // Wrappers that mark user-changed state
   const handleBaudChange = (b: number) => { setBaudRate(b); setBaudUserSet(true); };
@@ -505,6 +510,41 @@ function AppContent() {
       if (unlisten) unlisten();
     };
   }, []);
+
+  // Listen for frontend reconnect requests (dispatched by e.g., controller command flow)
+  useEffect(() => {
+    let unlisten: UnlistenFn | null = null;
+
+    (async () => {
+      try {
+        unlisten = await listen<any>("reconnect:request", async (event) => {
+          console.log('Reconnect requested from:', event.payload);
+
+          // Dev-only debug & telemetry hook
+          try {
+            if (typeof import.meta !== 'undefined' && (import.meta as any).env && (import.meta as any).env.MODE !== 'production') {
+              console.debug('reconnect:request received', event.payload);
+              try { (window as any).__libretuneTelemetry?.trackEvent?.('reconnect_request_received', { source: event.payload?.source ?? 'unknown' }); } catch (_e) { /* ignore */ }
+            }
+          } catch (dbgErr) {
+            console.error('Failed to log reconnect telemetry:', dbgErr);
+          }
+
+          if (!connecting) {
+            await connect();
+          } else {
+            showToast('Reconnect requested but connection is already in progress', 'info');
+          }
+        });
+      } catch (e) {
+        console.error('Failed to listen for reconnect:request events:', e);
+      }
+    })();
+
+    return () => {
+      if (unlisten) unlisten();
+    };
+  }, [connecting, selectedPort, baudRate, timeoutMs, connectionRuntimePacketMode, defaultRuntimePacketMode]);
   
   // Listen for INI change events (requires re-sync)
   useEffect(() => {
@@ -963,17 +1003,41 @@ function AppContent() {
       }
 
       // Connect and get mismatch info directly (no async race)
-      const result = await invoke<ConnectResult>("connect_to_ecu", { portName: selectedPort, baudRate, timeoutMs });
+      let runtimeMode = connectionRuntimePacketMode || defaultRuntimePacketMode;
+
+      // If runtime mode is Auto, try to detect best mode from INI capabilities
+      if (runtimeMode === 'Auto') {
+        try {
+          // Attempt to query backend capabilities directly. If a definition isn't loaded
+          // the command will error and we'll fall back to a safe default.
+          const caps = await invoke<{ supports_och: boolean }>('get_protocol_capabilities');
+          runtimeMode = caps && caps.supports_och ? 'ForceOCH' : 'ForceBurst';
+        } catch (e) {
+          console.warn('Runtime mode auto-detect failed, defaulting to ForceBurst:', e);
+          runtimeMode = 'ForceBurst';
+        }
+      }
+
+      const result = await invoke<ConnectResult>("connect_to_ecu", { portName: selectedPort, baudRate, timeoutMs, runtimePacketMode: runtimeMode });
       await checkStatus();
       
-      // If there's a signature mismatch, show dialog and DON'T auto-sync
-      // User must choose to continue or select a different INI first
+      // If there's a signature mismatch, behave based on severity
       if (result.mismatch_info) {
-        console.log("Signature mismatch detected:", result.mismatch_info);
-        setSignatureMismatchInfo(result.mismatch_info);
-        setSignatureMismatchOpen(true);
-        // Don't sync yet - wait for user decision
-        return;
+        const mi = result.mismatch_info;
+        setSignatureMismatchInfo(mi);
+        if (mi.match_type === 'mismatch') {
+          // Block automatic sync for full mismatches and require explicit user decision
+          console.log("Signature mismatch detected:", mi);
+          setSignatureMismatchOpen(true);
+          return;
+        } else {
+          // Partial match: advisory only — warn user but continue to sync
+          showToast(
+            `Connected: ECU signature partially matches the loaded INI (ECU: ${mi.ecu_signature}). Proceeding with sync.`,
+            "warning"
+          );
+          // continue with sync
+        }
       }
       
       // If connected and has definition (and no mismatch), sync ECU data
@@ -1785,6 +1849,18 @@ function AppContent() {
         active: status.state === "Connected",
         onClick: () => setConnectionDialogOpen(true),
       },
+      // Inline connection info (metrics + packet mode)
+      {
+        id: 'connection-info',
+        icon: 'connection-info',
+        tooltip: 'Connection status and packet mode',
+        content: (
+          <div className="toolbar-connection-info">
+            <ConnectionMetrics compact />
+            <span className="packet-mode">{status.state === 'Connected' ? (connectionRuntimePacketMode || defaultRuntimePacketMode) : '—'}</span>
+          </div>
+        )
+      },
       { id: "realtime", icon: "realtime", tooltip: "Realtime Dashboard", onClick: () => setActiveTabId("dashboard") },
       { id: "sep2", icon: "", tooltip: "", separator: true },
       {
@@ -2123,6 +2199,7 @@ function AppContent() {
           if (settings.autoBurnOnClose !== undefined) setAutoBurnOnClose(settings.autoBurnOnClose);
           if (settings.demoMode !== undefined) setStatus(s => ({ ...s, demo_mode: settings.demoMode }));
           if (settings.statusBarChannels !== undefined) setStatusBarChannels(settings.statusBarChannels);
+          if (settings.runtimePacketMode) setDefaultRuntimePacketMode(settings.runtimePacketMode as any);
           // Legacy dashboard settings (removed with TabbedDashboard)
           // if (settings.indicatorColumnCount !== undefined) { ... }
           // if (settings.indicatorFillEmpty !== undefined) { ... }
@@ -2151,6 +2228,8 @@ function AppContent() {
         statusMessage={syncing && syncProgress ? `Syncing ECU data... ${syncProgress.percent}%` : undefined}
         iniDefaults={iniDefaults ?? undefined}
         onApplyIniDefaults={applyIniDefaults}
+        runtimePacketMode={connectionRuntimePacketMode}
+        onRuntimePacketModeChange={setConnectionRuntimePacketMode}
       />
       
       {/* Project Dialogs */}

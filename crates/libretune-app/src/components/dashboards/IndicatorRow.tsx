@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import './IndicatorRow.css';
 import { useRealtimeStore } from '../../stores/realtimeStore';
 
@@ -109,8 +109,29 @@ export default function IndicatorRow({
   fillEmptyCells = false,
   textFitMode = 'scale',
 }: IndicatorRowProps) {
-  // Get realtime data from Zustand store
-  const realtimeData = useRealtimeStore((state) => state.channels);
+  // Determine which variables are referenced in indicator expressions and subscribe only to those channels
+  const usedVars = useMemo(() => {
+    const vars = new Set<string>();
+    indicators.forEach((ind) => {
+      const matches = ind.expression.match(/[a-zA-Z_][a-zA-Z0-9_]*/g);
+      if (!matches) return;
+      matches.forEach((tok) => {
+        // Skip JS reserved words/numeric tokens
+        if (/^(true|false|and|or)$/i.test(tok)) return;
+        vars.add(tok);
+      });
+    });
+    return Array.from(vars);
+  }, [indicators]);
+
+  // Subscribe to only the used channels to avoid re-rendering when unrelated channels change
+  const realtimeData = useRealtimeStore((state) => {
+    const data: Record<string, number> = {};
+    for (const v of usedVars) {
+      data[v] = state.channels[v];
+    }
+    return data;
+  });
   
   const containerRef = useRef<HTMLDivElement>(null);
   const [actualCols, setActualCols] = useState(12);

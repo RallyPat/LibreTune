@@ -63,6 +63,8 @@ export interface ToolbarItem {
   active?: boolean;
   separator?: boolean;
   onClick?: () => void;
+  /** Optional custom content to render instead of a standard icon button */
+  content?: React.ReactNode;
 }
 
 export interface SidebarNode {

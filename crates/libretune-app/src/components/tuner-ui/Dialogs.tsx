@@ -6,6 +6,7 @@ import { HeatmapScheme, getAvailableSchemes } from '../../utils/heatmapColors';
 import { useUnitPreferences } from '../../utils/useUnitPreferences';
 import { TemperatureUnit, PressureUnit, AfrUnit, SpeedUnit, FuelType, STOICH_AFR } from '../../utils/unitConversions';
 import './Dialogs.css';
+import ConnectionMetrics from '../../components/layout/ConnectionMetrics';
 
 // =============================================================================
 // Dialog Types
@@ -445,7 +446,7 @@ interface CurrentProject {
 interface SettingsDialogProps extends DialogProps {
   theme: string;
   onThemeChange: (theme: string) => void;
-  onSettingsChange?: (settings: { units?: string; autoBurnOnClose?: boolean; demoMode?: boolean; indicatorColumnCount?: string; indicatorFillEmpty?: boolean; indicatorTextFit?: string; statusBarChannels?: string[] }) => void;
+  onSettingsChange?: (settings: { units?: string; autoBurnOnClose?: boolean; demoMode?: boolean; indicatorColumnCount?: string; indicatorFillEmpty?: boolean; indicatorTextFit?: string; statusBarChannels?: string[]; runtimePacketMode?: string }) => void;
   currentProject?: CurrentProject | null;
 }
 
@@ -478,6 +479,9 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
   // Version control settings
   const [autoCommitOnSave, setAutoCommitOnSave] = useState('never');
   const [commitMessageFormat, setCommitMessageFormat] = useState('Tune saved on {date} at {time}');
+  const [runtimePacketMode, setRuntimePacketMode] = useState<'Auto'|'ForceBurst'|'ForceOCH'|'Disabled'>('Auto');
+  // Auto-reconnect setting: whether to automatically sync & reconnect after controller commands
+  const [autoReconnectAfterControllerCommand, setAutoReconnectAfterControllerCommand] = useState<boolean>(false);
   
   // Unit preferences from context
   const unitPrefs = useUnitPreferences();
@@ -490,34 +494,48 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
     // Load settings from backend
     if (isOpen) {
       invoke('get_settings').then((settings: any) => {
-        setLocalUnits(settings.units_system || 'metric');
-        setAutoBurnOnClose(settings.auto_burn_on_close || false);
-        setIndicatorColumnCount(settings.indicator_column_count || 'auto');
-        setIndicatorFillEmpty(settings.indicator_fill_empty || false);
-        setIndicatorTextFit(settings.indicator_text_fit || 'scale');
-        setCurrentIniPath(settings.last_ini_path || null);
+        if (settings.units_system !== undefined) setLocalUnits(settings.units_system);
+        if (settings.auto_burn_on_close !== undefined) setAutoBurnOnClose(!!settings.auto_burn_on_close);
+        if (settings.indicator_column_count !== undefined) setIndicatorColumnCount(settings.indicator_column_count);
+        if (settings.indicator_fill_empty !== undefined) setIndicatorFillEmpty(!!settings.indicator_fill_empty);
+        if (settings.indicator_text_fit !== undefined) setIndicatorTextFit(settings.indicator_text_fit);
+        if (settings.last_ini_path !== undefined) setCurrentIniPath(settings.last_ini_path);
         // Status bar channels
-        setStatusBarChannels(settings.status_bar_channels || []);
+        if (settings.status_bar_channels !== undefined) setStatusBarChannels(settings.status_bar_channels);
         // Heatmap settings
-        setHeatmapValueScheme(settings.heatmap_value_scheme || 'tunerstudio');
-        setHeatmapChangeScheme(settings.heatmap_change_scheme || 'tunerstudio');
-        setHeatmapCoverageScheme(settings.heatmap_coverage_scheme || 'tunerstudio');
+        if (settings.heatmap_value_scheme !== undefined) setHeatmapValueScheme(settings.heatmap_value_scheme);
+        if (settings.heatmap_change_scheme !== undefined) setHeatmapChangeScheme(settings.heatmap_change_scheme);
+        if (settings.heatmap_coverage_scheme !== undefined) setHeatmapCoverageScheme(settings.heatmap_coverage_scheme);
         // Gauge settings
-        setGaugeSnapToGrid(settings.gauge_snap_to_grid ?? true);
-        setGaugeFreeMove(settings.gauge_free_move ?? false);
-        setGaugeLock(settings.gauge_lock ?? false);
+        if (settings.gauge_snap_to_grid !== undefined) setGaugeSnapToGrid(!!settings.gauge_snap_to_grid);
+        if (settings.gauge_free_move !== undefined) setGaugeFreeMove(!!settings.gauge_free_move);
+        if (settings.gauge_lock !== undefined) setGaugeLock(!!settings.gauge_lock);
         // Version control settings
-        setAutoCommitOnSave(settings.auto_commit_on_save ?? 'never');
-        setCommitMessageFormat(settings.commit_message_format ?? 'Tune saved on {date} at {time}');
+        if (settings.auto_commit_on_save !== undefined) setAutoCommitOnSave(settings.auto_commit_on_save);
+        if (settings.commit_message_format !== undefined) setCommitMessageFormat(settings.commit_message_format);
+        if (settings.runtime_packet_mode !== undefined) setRuntimePacketMode(settings.runtime_packet_mode);
+        if (settings.auto_reconnect_after_controller_command !== undefined) setAutoReconnectAfterControllerCommand(!!settings.auto_reconnect_after_controller_command);
       }).catch(console.error);
 
       // Load available output channels from ECU definition
-      invoke<string[]>('get_available_channels').then((channels) => {
-        setAvailableChannels(channels || []);
-      }).catch(() => setAvailableChannels([]));
+      // Backend returns ChannelInfo[]; normalize to string[] (channel names) to avoid render errors
+      invoke<any[]>('get_available_channels').then((channels) => {
+        try {
+          const names = (channels || []).map((c) => (typeof c === 'string' ? c : c?.name ?? String(c)));
+          setAvailableChannels(names);
+        } catch (e) {
+          console.error('[SettingsDialog] Failed to normalize channels:', e);
+          setAvailableChannels([]);
+        }
+      }).catch((e) => {
+        console.error('[SettingsDialog] get_available_channels failed:', e);
+        setAvailableChannels([]);
+      });
 
       // Load demo mode state (runtime flag)
-      invoke<boolean>('get_demo_mode').then(setDemoMode).catch(console.error);
+      invoke<boolean>('get_demo_mode')
+        .then((v) => setDemoMode(!!v))
+        .catch(console.error);
     }
   }, [theme, isOpen]);
 
@@ -604,9 +622,12 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
     // Update version control settings
     await invoke('update_setting', { key: 'auto_commit_on_save', value: autoCommitOnSave });
     await invoke('update_setting', { key: 'commit_message_format', value: commitMessageFormat });
-    onSettingsChange?.({ units: localUnits, autoBurnOnClose, indicatorColumnCount, indicatorFillEmpty, indicatorTextFit, statusBarChannels });
+    // Update runtime packet mode
+    await invoke('update_setting', { key: 'runtime_packet_mode', value: runtimePacketMode });
+    await invoke('update_setting', { key: 'auto_reconnect_after_controller_command', value: autoReconnectAfterControllerCommand.toString() });
+    onSettingsChange?.({ units: localUnits, autoBurnOnClose, indicatorColumnCount, indicatorFillEmpty, indicatorTextFit, statusBarChannels, runtimePacketMode });
     onClose();
-  }, [localTheme, localUnits, autoBurnOnClose, statusBarChannels, indicatorColumnCount, indicatorFillEmpty, indicatorTextFit, heatmapValueScheme, heatmapChangeScheme, heatmapCoverageScheme, gaugeSnapToGrid, gaugeFreeMove, gaugeLock, autoCommitOnSave, commitMessageFormat, onThemeChange, onSettingsChange, onClose]);
+  }, [localTheme, localUnits, autoBurnOnClose, statusBarChannels, indicatorColumnCount, indicatorFillEmpty, indicatorTextFit, heatmapValueScheme, heatmapChangeScheme, heatmapCoverageScheme, gaugeSnapToGrid, gaugeFreeMove, gaugeLock, autoCommitOnSave, commitMessageFormat, runtimePacketMode, onThemeChange, onSettingsChange, onClose]);
 
   if (!isOpen) return null;
 
@@ -751,6 +772,39 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
             <span className="dialog-form-note">Simulate ECU data for testing (runtime-only)</span>
           </div>
 
+          <div className="dialog-form-group">
+            <label>Default Runtime Packet Mode</label>
+            <select
+              value={runtimePacketMode}
+              onChange={(e) => setRuntimePacketMode(e.target.value as any)}
+            >
+              <option value={'Auto'}>Auto (recommended)</option>
+              <option value={'ForceBurst'}>Force Burst</option>
+              <option value={'ForceOCH'}>Force OCH</option>
+              <option value={'Disabled'}>Disabled (use Burst)</option>
+            </select>
+            <span className="dialog-form-note">Default runtime packet mode for new connections</span>
+            <span className="dialog-form-note">OCH (On-Controller Block Read): use INI-defined block reads when supported by the ECU (configured via <code>ochGetCommand</code> / <code>ochBlockSize</code>).</span>
+
+            {/* Auto-reconnect after controller commands */}
+            <div className="dialog-form-group" style={{ marginTop: '0.5rem' }}>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={autoReconnectAfterControllerCommand}
+                  onChange={(e) => setAutoReconnectAfterControllerCommand(e.target.checked)}
+                />
+                Auto-sync & reconnect after controller commands
+              </label>
+              <span className="dialog-form-note">When enabled, the app will automatically sync and reconnect to the ECU after executing controller commands that modify ECU settings (e.g., applying base maps).</span>
+            </div>
+
+            {/* Show small live metrics in connection dialog too */}
+            <div style={{ marginTop: '0.6rem' }}>
+              <ConnectionMetrics compact />
+            </div>
+          </div>
+
           <h3 style={{ marginTop: '1.5rem', marginBottom: '0.5rem' }}>Status Bar</h3>
           
           <div className="dialog-form-group">
@@ -829,19 +883,16 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
               <div className="dialog-form-group">
                 <label>ECU Definition (INI File)</label>
                 <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                  <input
-                    type="text"
-                    value={currentIniPath ? currentIniPath.split(/[\\/]/).pop() || currentIniPath : 'Not set'}
-                    readOnly
-                    style={{ flex: 1, padding: '0.5rem', fontSize: '0.9rem', backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border-color)', borderRadius: '4px' }}
-                  />
-                  <button
+                  <button type="button"
+                    title={currentIniPath || 'Not set'}
+                    className="ini-select-btn"
                     onClick={handleSwitchIni}
-                    disabled={switchingIni}
-                    style={{ padding: '0.5rem 1rem', fontSize: '0.9rem', whiteSpace: 'nowrap' }}
+                    style={{ flex: 1, padding: '0.5rem', fontSize: '0.9rem', backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border-color)', borderRadius: '4px' }}
                   >
-                    {switchingIni ? 'Switching...' : 'Switch INI...'}
+                    {currentIniPath ? currentIniPath.split(/[\\\/]/).pop() || currentIniPath : 'Not set'}
+                    <span style={{ float: 'right', opacity: 0.85 }}>{switchingIni ? 'Switching...' : 'Change'}</span>
                   </button>
+
                 </div>
                 <span className="dialog-form-note">
                   Switch to a different ECU definition file. The project tune will be re-applied automatically.
@@ -1085,6 +1136,8 @@ interface ConnectionDialogProps extends DialogProps {
     page_activation_delay: number;
   };
   onApplyIniDefaults?: () => void;
+  runtimePacketMode?: 'Auto'|'ForceBurst'|'ForceOCH'|'Disabled';
+  onRuntimePacketModeChange?: (mode: 'Auto'|'ForceBurst'|'ForceOCH'|'Disabled') => void;
 }
 
 export function ConnectionDialog({ 
@@ -1105,6 +1158,8 @@ export function ConnectionDialog({
   statusMessage,
   iniDefaults,
   onApplyIniDefaults,
+  runtimePacketMode,
+  onRuntimePacketModeChange,
 }: ConnectionDialogProps) {
   if (!isOpen) return null;
 
@@ -1167,6 +1222,24 @@ export function ConnectionDialog({
               <option value={5000}>5000 ms</option>
             </select>
           </div>
+
+          <div className="dialog-form-group">
+            <label>Runtime Packet Mode</label>
+            <select
+              value={runtimePacketMode}
+              onChange={(e) => onRuntimePacketModeChange && onRuntimePacketModeChange(e.target.value as any)}
+              disabled={connected}
+            >
+              <option value={'Auto'}>Auto (recommended)</option>
+              <option value={'ForceBurst'}>Force Burst</option>
+              <option value={'ForceOCH'}>Force OCH</option>
+              <option value={'Disabled'}>Disabled (use Burst)</option>
+            </select>
+            <div className="field-help">Per-connection override for runtime packet selection</div>
+            <div className="field-help">OCH (On-Controller Block Read): use INI-defined block reads when supported by the ECU (configured via <code>ochGetCommand</code> / <code>ochBlockSize</code>).</div>
+          </div>
+
+
 
           {/* INI defaults display */}
           {iniDefaults && (

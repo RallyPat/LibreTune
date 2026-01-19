@@ -393,6 +393,13 @@ pub struct GaugeConfig {
     pub background_image_file_name: Option<String>,
     pub needle_image_file_name: Option<String>,
 
+    // Needle customization
+    pub needle_length: Option<f64>,
+    pub needle_pivot_offset_x: Option<f64>,
+    pub needle_pivot_offset_y: Option<f64>,
+    pub needle_image_offset_x: Option<f64>,
+    pub needle_image_offset_y: Option<f64>,
+
     // History/tracking
     pub show_history: bool,
     pub history_value: f64,
@@ -480,6 +487,11 @@ impl Default for GaugeConfig {
             antialiasing_on: true,
             background_image_file_name: None,
             needle_image_file_name: None,
+            needle_length: None,
+            needle_pivot_offset_x: None,
+            needle_pivot_offset_y: None,
+            needle_image_offset_x: None,
+            needle_image_offset_y: None,
             show_history: false,
             history_value: 0.0,
             history_delay: 15000,

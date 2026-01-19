@@ -24,6 +24,7 @@
  */
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useChannels } from '../../stores/realtimeStore';
 import { invoke } from '@tauri-apps/api/core';
 import { save } from '@tauri-apps/plugin-dialog';
 import { useRealtimeStore } from '../../stores/realtimeStore';
@@ -35,6 +36,7 @@ import {
   buildEmbeddedImageMap,
   tsColorToRgba,
 } from './dashTypes';
+import { createLibreTuneDefaultDashboard } from './LibreTuneDefaultDashboard';
 import TsGauge from '../gauges/TsGauge';
 import TsIndicator from '../gauges/TsIndicator';
 import GaugeContextMenu, { ContextMenuState } from './GaugeContextMenu';
@@ -61,9 +63,6 @@ interface ChannelInfo {
 }
 
 export default function TsDashboard({ initialDashPath, isConnected = false }: TsDashboardProps) {
-  // Get realtime data from Zustand store - subscribes to all channel updates
-  const realtimeData = useRealtimeStore((state) => state.channels);
-
   const [dashFile, setDashFile] = useState<DashFile | null>(null);
   const [availableDashes, setAvailableDashes] = useState<DashFileInfo[]>([]);
   const [selectedPath, setSelectedPath] = useState<string>(initialDashPath || '');
@@ -72,6 +71,11 @@ export default function TsDashboard({ initialDashPath, isConnected = false }: Ts
   const [showSelector, setShowSelector] = useState(false);
   const [rpmChannel, setRpmChannel] = useState<string | null>(null);
   const [channelInfoMap, setChannelInfoMap] = useState<Record<string, ChannelInfo>>({});
+
+  // Subscribe only to RPM channel value to avoid re-rendering on unrelated channel updates
+  const rpmValue = useRealtimeStore((state) => (rpmChannel ? state.channels[rpmChannel] : undefined));
+  // For cases where we need an instant snapshot (on dashboard load), use the store getter
+  const realtimeStoreGet = useRealtimeStore.getState;
   
   // Gauge sweep animation state (sportscar-style min→max→min on load)
   const [sweepActive, setSweepActive] = useState(false);
@@ -114,6 +118,21 @@ export default function TsDashboard({ initialDashPath, isConnected = false }: Ts
   const embeddedImages = dashFile 
     ? buildEmbeddedImageMap(dashFile.gauge_cluster.embedded_images)
     : new Map<string, string>();
+
+  // Determine which channels this dashboard uses (subscribe only to these)
+  const usedChannels = useMemo(() => {
+    if (!dashFile) return [] as string[];
+    const set = new Set<string>();
+    dashFile.gauge_cluster.components.forEach((comp) => {
+      if (isGauge(comp)) {
+        const g = comp.Gauge;
+        if (g.output_channel) set.add(g.output_channel);
+      }
+    });
+    return Array.from(set);
+  }, [dashFile]);
+
+  const channelValues = useChannels(usedChannels);
 
   // Resolve RPM channel from INI output channels (INI-driven, no hardcoded names)
   useEffect(() => {
@@ -288,27 +307,39 @@ export default function TsDashboard({ initialDashPath, isConnected = false }: Ts
   }, [gaugeDemoActive, dashFile]);
 
   // Sportscar-style gauge sweep animation (min → max → min)
+  const sweepActiveRef = useRef(false);
+  const sweepAnimRef = useRef<number | null>(null);
+
   const startGaugeSweep = useCallback((file: DashFile) => {
+    // Guard against overlapping sweeps
+    if (sweepActiveRef.current) return;
+    sweepActiveRef.current = true;
     setSweepActive(true);
-    
+
+    // Cancel any previous animation frame (cleanup)
+    if (sweepAnimRef.current !== null) {
+      cancelAnimationFrame(sweepAnimRef.current);
+      sweepAnimRef.current = null;
+    }
+
     const duration = 1500; // 1.5 seconds total
     const startTime = performance.now();
-    
+
     // Easing function: ease-in-out for smooth acceleration/deceleration
     const easeInOut = (t: number) => t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
-    
+
     const animate = (currentTime: number) => {
       const elapsed = currentTime - startTime;
       const rawProgress = Math.min(elapsed / duration, 1);
-      
+
       // Convert to sweep position: 0→1 (rising) then 1→0 (falling)
       // 0-0.5 progress = sweep up (0→1), 0.5-1 progress = sweep down (1→0)
       const sweepPosition = rawProgress < 0.5 
         ? easeInOut(rawProgress * 2) // 0→1 with easing
         : easeInOut(1 - (rawProgress - 0.5) * 2); // 1→0 with easing
-      
+
       const newValues: Record<string, number> = {};
-      
+
       file.gauge_cluster.components.forEach((comp) => {
         if (isGauge(comp)) {
           const gauge = comp.Gauge;
@@ -318,19 +349,32 @@ export default function TsDashboard({ initialDashPath, isConnected = false }: Ts
           newValues[gauge.output_channel] = value;
         }
       });
-      
+
       setSweepValues(newValues);
-      
+
       if (rawProgress < 1) {
-        requestAnimationFrame(animate);
+        sweepAnimRef.current = requestAnimationFrame(animate);
       } else {
         // Animation complete
+        sweepAnimRef.current = null;
+        sweepActiveRef.current = false;
         setSweepActive(false);
         setSweepValues({});
       }
     };
-    
-    requestAnimationFrame(animate);
+
+    sweepAnimRef.current = requestAnimationFrame(animate);
+  }, []);
+
+  // Cleanup any running animation on unmount
+  useEffect(() => {
+    return () => {
+      if (sweepAnimRef.current !== null) {
+        cancelAnimationFrame(sweepAnimRef.current);
+        sweepAnimRef.current = null;
+      }
+      sweepActiveRef.current = false;
+    };
   }, []);
 
   // Handle right-click context menu
@@ -387,12 +431,31 @@ export default function TsDashboard({ initialDashPath, isConnected = false }: Ts
   // Load/refresh available dashboards list
   const refreshDashboardList = useCallback(async () => {
     try {
-      const dashes = await invoke<DashFileInfo[]>('list_available_dashes');
+      let dashes = await invoke<DashFileInfo[]>('list_available_dashes');
+      if (!dashes || dashes.length === 0) {
+        dashes = [{
+          name: 'LibreTune Default',
+          path: '__libretune_default__',
+          category: 'Bundled',
+        }];
+      }
       setAvailableDashes(dashes);
       return dashes;
     } catch (e) {
-      console.error('Failed to load available dashes:', e);
-      return [];
+      setAvailableDashes([
+        {
+          name: 'LibreTune Default',
+          path: '__libretune_default__',
+          category: 'Bundled',
+        },
+      ]);
+      return [
+        {
+          name: 'LibreTune Default',
+          path: '__libretune_default__',
+          category: 'Bundled',
+        },
+      ];
     }
   }, []);
 
@@ -548,7 +611,7 @@ export default function TsDashboard({ initialDashPath, isConnected = false }: Ts
     loadInitial();
   }, []);
 
-  // Load selected dashboard
+  // Load selected dashboard (only when the selected path changes)
   useEffect(() => {
     const loadDashboard = async () => {
       if (!selectedPath) {
@@ -560,21 +623,16 @@ export default function TsDashboard({ initialDashPath, isConnected = false }: Ts
       setError(null);
 
       try {
-        console.log('[TsDashboard] Loading:', selectedPath);
-        const file = await invoke<DashFile>('get_dash_file', { path: selectedPath });
-        console.log('[TsDashboard] Loaded:', file.gauge_cluster.components.length, 'components');
-        setDashFile(file);
-        
-        // Determine if engine is running (INI-driven RPM channel)
-        const rpmValue = rpmChannel ? realtimeData[rpmChannel] : 0;
-        const isEngineRunning = typeof rpmValue === 'number' && rpmValue > 50;
-        
-        // Trigger gauge sweep animation if not connected or engine not running
-        if (!isConnected || !isEngineRunning) {
-          startGaugeSweep(file);
+        let file: DashFile;
+        if (selectedPath === '__libretune_default__') {
+          file = createLibreTuneDefaultDashboard();
+        } else {
+          file = await invoke<DashFile>('get_dash_file', { path: selectedPath });
         }
+        setDashFile(file);
+
+        // Note: Do not start sweep here based on realtime updates — we will decide sweep in a separate effect using an instantaneous snapshot
       } catch (e) {
-        console.error('Failed to load dashboard:', e);
         setError(String(e));
       } finally {
         setLoading(false);
@@ -582,7 +640,20 @@ export default function TsDashboard({ initialDashPath, isConnected = false }: Ts
     };
 
     loadDashboard();
-  }, [selectedPath, rpmChannel, realtimeData, isConnected]);
+  }, [selectedPath]);
+
+  // On dashboard file load, decide whether to run the initial sweep using a snapshot of realtime data
+  useEffect(() => {
+    if (!dashFile) return;
+
+    // Snapshot current RPM value (no subscription) to avoid re-triggering on rapid realtime updates
+    const rpmSnapshot = rpmChannel ? realtimeStoreGet().channels[rpmChannel] : undefined;
+    const isEngineRunning = typeof rpmSnapshot === 'number' && rpmSnapshot > 50;
+
+    if (!isConnected || !isEngineRunning) {
+      startGaugeSweep(dashFile);
+    }
+  }, [dashFile, rpmChannel, isConnected]);
 
   const handleDashSelect = (path: string) => {
     setSelectedPath(path);
@@ -648,6 +719,8 @@ export default function TsDashboard({ initialDashPath, isConnected = false }: Ts
     : ditherPattern
       ? 'repeat'
       : (cluster.cluster_background_image_style === 'Tile' ? 'repeat' : 'no-repeat');
+
+
 
   return (
     <div className="ts-dashboard-container">
@@ -952,7 +1025,7 @@ export default function TsDashboard({ initialDashPath, isConnected = false }: Ts
               ? (sweepValues[gauge.output_channel] ?? gauge.min)
               : gaugeDemoActive 
                 ? (demoValues[gauge.output_channel] ?? gauge.value)
-                : (hasChannel ? (realtimeData[gauge.output_channel] ?? gauge.value) : gauge.value);
+                : (hasChannel ? (channelValues[gauge.output_channel] ?? gauge.value) : gauge.value);
             
             // Build gauge style with shape_locked_to_aspect and shortest_size support
             const gaugeStyle: React.CSSProperties = {
@@ -986,7 +1059,8 @@ export default function TsDashboard({ initialDashPath, isConnected = false }: Ts
           if (isIndicator(component)) {
             const indicator = component.Indicator;
             const hasChannel = !!channelInfoMap[indicator.output_channel];
-            const value = hasChannel ? (realtimeData[indicator.output_channel] ?? indicator.value) : indicator.value;
+            // Use the subscribed channel values map instead of an undefined variable
+            const value = hasChannel ? (channelValues[indicator.output_channel] ?? indicator.value) : indicator.value;
             const isOn = value !== 0;
             
             return (

@@ -67,7 +67,13 @@ export default function MigrationReportDialog({
     });
 
     return () => {
-      unlisten.then((fn) => fn());
+      // Listen may return either a Promise<UnlistenFn> or an UnlistenFn directly depending
+      // on the test/mock environment; support both to avoid unhandled TypeErrors.
+      if (unlisten && typeof (unlisten as any).then === 'function') {
+        (unlisten as any).then((fn: any) => fn && fn());
+      } else if (typeof unlisten === 'function') {
+        (unlisten as any)();
+      }
     };
   }, []);
 

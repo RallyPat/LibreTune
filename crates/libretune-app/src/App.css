@@ -351,6 +351,18 @@ body {
   z-index: 9;
 }
 
+/* Connection metrics */
+.conn-metrics {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+}
+.conn-metrics.compact { font-size: 0.8rem; opacity: 0.9; }
+.conn-metrics .rx { color: var(--accent-color); }
+.conn-metrics .tx { color: var(--text); }
+
 .topbar-left {
   display: flex;
   align-items: center;

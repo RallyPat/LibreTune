@@ -69,3 +69,25 @@
   background: var(--border-default);
   margin: 0 var(--space-2);
 }
+
+/* Inline content container (for connection metrics + packet mode) */
+.toolbar-content {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.2rem 0.6rem;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+.toolbar-connection-info .packet-mode {
+  margin-left: 0.4rem;
+  color: var(--text-bright);
+  font-weight: 600;
+}
+
+.toolbar-content .conn-metrics {
+  margin: 0;
+}

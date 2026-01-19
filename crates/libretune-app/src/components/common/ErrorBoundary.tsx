@@ -53,7 +53,6 @@ class ErrorBoundary extends Component<Props, State> {
       if (this.props.fallback) {
         return this.props.fallback;
       }
-
       return (
         <div style={{
           padding: '20px',
@@ -69,29 +68,27 @@ class ErrorBoundary extends Component<Props, State> {
           <p style={{ color: '#b0b0b0' }}>
             An error occurred while rendering this component.
           </p>
-          {this.state.error && (
-            <details style={{ marginBottom: '16px' }}>
-              <summary style={{ cursor: 'pointer', color: '#888' }}>
-                Error details
-              </summary>
-              <pre style={{
-                backgroundColor: 'rgba(0, 0, 0, 0.3)',
-                padding: '12px',
-                borderRadius: '4px',
-                overflow: 'auto',
-                fontSize: '12px',
-                color: '#ff8888',
-              }}>
-                {this.state.error.toString()}
-                {this.state.errorInfo?.componentStack && (
-                  <>
-                    {'\n\nComponent Stack:'}
-                    {this.state.errorInfo.componentStack}
-                  </>
-                )}
-              </pre>
-            </details>
-          )}
+          <details style={{ marginBottom: '16px' }}>
+            <summary style={{ cursor: 'pointer', color: '#888' }}>
+              Error details
+            </summary>
+            <pre style={{
+              backgroundColor: 'rgba(0, 0, 0, 0.3)',
+              padding: '12px',
+              borderRadius: '4px',
+              overflow: 'auto',
+              fontSize: '12px',
+              color: '#ff8888',
+            }}>
+              {this.state.error ? this.state.error.toString() : 'Unknown error'}
+              {this.state.errorInfo?.componentStack && (
+                <>
+                  {'\n\nComponent Stack:'}
+                  {this.state.errorInfo.componentStack}
+                </>
+              )}
+            </pre>
+          </details>
           <div style={{ display: 'flex', gap: '12px' }}>
             <button
               onClick={this.handleReset}
@@ -123,7 +120,6 @@ class ErrorBoundary extends Component<Props, State> {
         </div>
       );
     }
-
     return this.props.children;
   }
 }

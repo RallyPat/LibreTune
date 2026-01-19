@@ -30,3 +30,6 @@ tauri-plugin-dialog = "2"
 chrono = { workspace = true }
 byteorder = "1"
 
+[dev-dependencies]
+tempfile = "3"
+
