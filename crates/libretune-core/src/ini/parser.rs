@@ -490,31 +490,31 @@ fn extract_help_text(name_with_help: &str) -> (&str, Option<String>) {
     if let Some(semicolon_pos) = name_with_help.find(';') {
         let name = name_with_help[..semicolon_pos].trim();
         let help_part = name_with_help[semicolon_pos + 1..].trim();
-        
+
         // TunerStudio requires '+' after semicolon for tooltip to appear
         if help_part.starts_with('+') {
             // Extract help text (everything after '+' up to optional quoted units)
             let help_text = help_part[1..].trim();
-            
+
             // Remove quoted units suffix if present (e.g., ;"Ohm" at the end)
             let help_clean = if let Some(quote_pos) = help_text.find(';') {
                 help_text[..quote_pos].trim()
             } else {
                 help_text
             };
-            
+
             // Remove surrounding quotes if present
             let help_final = help_clean.trim_matches('"').to_string();
-            
+
             if !help_final.is_empty() {
                 return (name, Some(help_final));
             }
         }
-        
+
         // If semicolon exists but no '+' prefix, return just the name (no help text)
         return (name, None);
     }
-    
+
     (name_with_help.trim(), None)
 }
 
@@ -836,8 +836,10 @@ fn parse_constants_entry(
     // Parse constant definition, passing defines for bits options resolution
     // Extract help text from the key (fieldname;+help text)
     let (clean_key, help_text) = extract_help_text(key);
-    
-    if let Some(mut constant) = parse_constant_line(clean_key, value, *current_page, *last_offset, help_text) {
+
+    if let Some(mut constant) =
+        parse_constant_line(clean_key, value, *current_page, *last_offset, help_text)
+    {
         // Update last_offset for next constant (offset + size in bytes)
         let size = constant.data_type.size_bytes() as u16 * constant.shape.element_count() as u16;
         *last_offset = constant.offset + size;
@@ -1005,7 +1007,7 @@ fn parse_setting_group_entry(def: &mut EcuDefinition, key: &str, value: &str) {
 fn parse_pc_variable_entry(def: &mut EcuDefinition, key: &str, value: &str) {
     // Extract help text from the key (fieldname;+help text)
     let (clean_key, help_text) = extract_help_text(key);
-    
+
     // Parse as a full constant for UI display
     if let Some(constant) = parse_pc_variable_line(clean_key, value, help_text) {
         // Store as a constant so dialogs can look it up
@@ -2591,23 +2593,23 @@ mod tests {
     fn test_strip_comment() {
         // Comments after equals sign
         assert_eq!(strip_comment("key = value ; comment"), "key = value ");
-        
+
         // Semicolons in quotes are preserved
         assert_eq!(
             strip_comment("key = \"value ; with semi\""),
             "key = \"value ; with semi\""
         );
-        
+
         // Note: # is now handled at the line level for preprocessor directives,
         // so strip_comment doesn't remove # comment lines anymore
         assert_eq!(strip_comment("# comment line"), "# comment line");
-        
+
         // NEW: Semicolons in field names (before =) are preserved for help text
         assert_eq!(
             strip_comment("fieldname;+help text = value"),
             "fieldname;+help text = value"
         );
-        
+
         // But comments after = are still stripped
         assert_eq!(
             strip_comment("fieldname;+help = value ; comment"),
@@ -3018,28 +3020,39 @@ indicator = { (tps > tpsflood) && (rpm < crankRPM) }, "FLOOD OFF", "FLOOD CLEAR"
         // Test with help text (TunerStudio format with + prefix)
         let (name, help) = extract_help_text("bias_resistor;+Pull-up resistor value on your board");
         assert_eq!(name, "bias_resistor");
-        assert_eq!(help, Some("Pull-up resistor value on your board".to_string()));
-        
+        assert_eq!(
+            help,
+            Some("Pull-up resistor value on your board".to_string())
+        );
+
         // Test with help text and quoted units suffix
-        let (name, help) = extract_help_text("bias_resistor;+Pull-up resistor value on your board;\"Ohm\"");
+        let (name, help) =
+            extract_help_text("bias_resistor;+Pull-up resistor value on your board;\"Ohm\"");
         assert_eq!(name, "bias_resistor");
-        assert_eq!(help, Some("Pull-up resistor value on your board".to_string()));
-        
+        assert_eq!(
+            help,
+            Some("Pull-up resistor value on your board".to_string())
+        );
+
         // Test with help text in quotes
-        let (name, help) = extract_help_text("baseFuelMass;+\"Base mass of the per-cylinder fuel injected\"");
+        let (name, help) =
+            extract_help_text("baseFuelMass;+\"Base mass of the per-cylinder fuel injected\"");
         assert_eq!(name, "baseFuelMass");
-        assert_eq!(help, Some("Base mass of the per-cylinder fuel injected".to_string()));
-        
+        assert_eq!(
+            help,
+            Some("Base mass of the per-cylinder fuel injected".to_string())
+        );
+
         // Test without + prefix (no tooltip should be shown per TunerStudio spec)
         let (name, help) = extract_help_text("field_name;This text should not appear");
         assert_eq!(name, "field_name");
         assert_eq!(help, None);
-        
+
         // Test with no semicolon (no help text)
         let (name, help) = extract_help_text("simple_field");
         assert_eq!(name, "simple_field");
         assert_eq!(help, None);
-        
+
         // Test with whitespace
         let (name, help) = extract_help_text("  field_name  ;  +  Help text with spaces  ");
         assert_eq!(name, "field_name");
@@ -3047,9 +3060,9 @@ indicator = { (tps > tpsflood) && (rpm < crankRPM) }, "FLOOD OFF", "FLOOD CLEAR"
     }
 }
 
-    #[test]
-    fn test_parse_ini_with_help_text() {
-        let content = r#"
+#[test]
+fn test_parse_ini_with_help_text() {
+    let content = r#"
 [MegaTune]
 signature = "test 1.0"
 queryCommand = "Q"
@@ -3073,40 +3086,72 @@ bias_resistor;+Pull-up resistor value on your board;"Ohm" = scalar, F32, 10, "Oh
 rpm = U16, 0, "RPM", 1.0, 0.0
 "#;
 
-        let def = parse_ini(content).expect("Should parse successfully");
-        
-        // Check that constants with help text have it extracted
-        let c = def.constants.get("crankingRpm").expect("crankingRpm should exist");
-        assert!(c.help.is_some());
-        assert_eq!(c.help.as_ref().unwrap(), "Maximum RPM below which engine is considered to be cranking");
-        
-        let c = def.constants.get("baseFuelMass").expect("baseFuelMass should exist");
-        assert!(c.help.is_some());
-        assert!(c.help.as_ref().unwrap().contains("Base mass of the per-cylinder fuel injected"));
-        
-        // Check that field without + prefix has no help
-        let c = def.constants.get("fieldWithoutPlus").expect("fieldWithoutPlus should exist");
-        assert!(c.help.is_none());
-        
-        // Check that field without help text has none
-        let c = def.constants.get("normalField").expect("normalField should exist");
-        assert!(c.help.is_none());
-        
-        // Check bits field with help text
-        let c = def.constants.get("injectionMode").expect("injectionMode should exist");
-        assert!(c.help.is_some());
-        assert!(c.help.as_ref().unwrap().contains("Select whether fuel is injected"));
-        
-        // Check field with units suffix
-        let c = def.constants.get("bias_resistor").expect("bias_resistor should exist");
-        assert!(c.help.is_some());
-        assert_eq!(c.help.as_ref().unwrap(), "Pull-up resistor value on your board");
-    }
+    let def = parse_ini(content).expect("Should parse successfully");
 
-    #[test]
-    fn test_page_number_normalization() {
-        // Test that INI 1-based page numbers are normalized to 0-based internally
-        let content = r#"
+    // Check that constants with help text have it extracted
+    let c = def
+        .constants
+        .get("crankingRpm")
+        .expect("crankingRpm should exist");
+    assert!(c.help.is_some());
+    assert_eq!(
+        c.help.as_ref().unwrap(),
+        "Maximum RPM below which engine is considered to be cranking"
+    );
+
+    let c = def
+        .constants
+        .get("baseFuelMass")
+        .expect("baseFuelMass should exist");
+    assert!(c.help.is_some());
+    assert!(c
+        .help
+        .as_ref()
+        .unwrap()
+        .contains("Base mass of the per-cylinder fuel injected"));
+
+    // Check that field without + prefix has no help
+    let c = def
+        .constants
+        .get("fieldWithoutPlus")
+        .expect("fieldWithoutPlus should exist");
+    assert!(c.help.is_none());
+
+    // Check that field without help text has none
+    let c = def
+        .constants
+        .get("normalField")
+        .expect("normalField should exist");
+    assert!(c.help.is_none());
+
+    // Check bits field with help text
+    let c = def
+        .constants
+        .get("injectionMode")
+        .expect("injectionMode should exist");
+    assert!(c.help.is_some());
+    assert!(c
+        .help
+        .as_ref()
+        .unwrap()
+        .contains("Select whether fuel is injected"));
+
+    // Check field with units suffix
+    let c = def
+        .constants
+        .get("bias_resistor")
+        .expect("bias_resistor should exist");
+    assert!(c.help.is_some());
+    assert_eq!(
+        c.help.as_ref().unwrap(),
+        "Pull-up resistor value on your board"
+    );
+}
+
+#[test]
+fn test_page_number_normalization() {
+    // Test that INI 1-based page numbers are normalized to 0-based internally
+    let content = r#"
 [MegaTune]
 signature = "test 1.0"
 queryCommand = "Q"
@@ -3127,27 +3172,33 @@ constOnPage2 = scalar, U16, 0, "ms", 1, 0, 0, 100, 1
 rpm = U16, 0, "RPM", 1.0, 0.0
 "#;
 
-        let def = parse_ini(content).expect("Should parse successfully");
+    let def = parse_ini(content).expect("Should parse successfully");
 
-        // INI page = 1 should be normalized to internal page 0
-        let c1 = def.constants.get("constOnPage1").expect("constOnPage1 should exist");
-        assert_eq!(
-            c1.page, 0,
-            "INI 'page = 1' should be normalized to internal page 0"
-        );
+    // INI page = 1 should be normalized to internal page 0
+    let c1 = def
+        .constants
+        .get("constOnPage1")
+        .expect("constOnPage1 should exist");
+    assert_eq!(
+        c1.page, 0,
+        "INI 'page = 1' should be normalized to internal page 0"
+    );
 
-        // INI page = 2 should be normalized to internal page 1
-        let c2 = def.constants.get("constOnPage2").expect("constOnPage2 should exist");
-        assert_eq!(
-            c2.page, 1,
-            "INI 'page = 2' should be normalized to internal page 1"
-        );
-    }
+    // INI page = 2 should be normalized to internal page 1
+    let c2 = def
+        .constants
+        .get("constOnPage2")
+        .expect("constOnPage2 should exist");
+    assert_eq!(
+        c2.page, 1,
+        "INI 'page = 2' should be normalized to internal page 1"
+    );
+}
 
-    #[test]
-    fn test_page_zero_in_ini() {
-        // Test edge case: some INIs might use page = 0 (should stay as 0, with saturating_sub)
-        let content = r#"
+#[test]
+fn test_page_zero_in_ini() {
+    // Test edge case: some INIs might use page = 0 (should stay as 0, with saturating_sub)
+    let content = r#"
 [MegaTune]
 signature = "test 1.0"
 queryCommand = "Q"
@@ -3161,12 +3212,15 @@ page = 0
 constOnPage0 = scalar, U16, 0, "ms", 1, 0, 0, 100, 1
 "#;
 
-        let def = parse_ini(content).expect("Should parse successfully");
+    let def = parse_ini(content).expect("Should parse successfully");
 
-        // page = 0 with saturating_sub(1) should stay as 0 (not underflow)
-        let c = def.constants.get("constOnPage0").expect("constOnPage0 should exist");
-        assert_eq!(
-            c.page, 0,
-            "INI 'page = 0' should remain as internal page 0 (saturating_sub prevents underflow)"
-        );
-    }
+    // page = 0 with saturating_sub(1) should stay as 0 (not underflow)
+    let c = def
+        .constants
+        .get("constOnPage0")
+        .expect("constOnPage0 should exist");
+    assert_eq!(
+        c.page, 0,
+        "INI 'page = 0' should remain as internal page 0 (saturating_sub prevents underflow)"
+    );
+}

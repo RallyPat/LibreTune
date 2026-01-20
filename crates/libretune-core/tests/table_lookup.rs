@@ -9,5 +9,8 @@
 fn test_table_lookup_tests_removed() {
     // Placeholder test: real tests were removed because they relied on local
     // INI sample files which can be missing in CI environments.
-    assert!(true, "Table lookup tests that depended on local INI files were removed");
+    assert!(
+        true,
+        "Table lookup tests that depended on local INI files were removed"
+    );
 }

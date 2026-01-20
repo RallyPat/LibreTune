@@ -3,17 +3,18 @@ use libretune_core::autotune::{
     AutoTuneState, VEDataPoint,
 };
 use libretune_core::dash::{
-    self, Bibliography, DashComponent, DashFile, GaugeCluster, GaugePainter, TsColor, VersionInfo,
-    create_basic_dashboard, create_racing_dashboard, create_tuning_dashboard,
+    self, create_basic_dashboard, create_racing_dashboard, create_tuning_dashboard, Bibliography,
+    DashComponent, DashFile, GaugeCluster, GaugePainter, TsColor, VersionInfo,
 };
 use libretune_core::dashboard::{
-    get_dashboard_file, get_dashboard_file_path, DashboardLayout, GaugeConfig as DashboardGaugeConfig,
+    get_dashboard_file, get_dashboard_file_path, DashboardLayout,
+    GaugeConfig as DashboardGaugeConfig,
 };
 use libretune_core::datalog::{DataLogger, LogEntry};
 use libretune_core::demo::DemoSimulator;
 use libretune_core::ini::{
     AdaptiveTimingConfig, CommandPart, Constant, DataType, DialogDefinition, EcuDefinition,
-    HelpTopic, Menu, MenuItem, ProtocolSettings, Endianness,
+    Endianness, HelpTopic, Menu, MenuItem, ProtocolSettings,
 };
 use libretune_core::plugin::{
     ControllerBridge, PluginEvent, PluginInfo, PluginManager, SwingComponent,
@@ -195,7 +196,11 @@ mod runtime_mode_tests {
 
     // Test helpers that operate on explicit settings path so we don't need a full tauri::App
     #[cfg(test)]
-    fn update_setting_with_path(settings_path: &std::path::Path, key: &str, value: &str) -> Result<(), String> {
+    fn update_setting_with_path(
+        settings_path: &std::path::Path,
+        key: &str,
+        value: &str,
+    ) -> Result<(), String> {
         // Load existing or default
         let mut settings: Settings = if let Ok(content) = std::fs::read_to_string(settings_path) {
             serde_json::from_str(&content).unwrap_or_default()
@@ -227,7 +232,8 @@ mod runtime_mode_tests {
         let _ = std::fs::remove_file(&settings_path);
 
         // Update using helper
-        update_setting_with_path(&settings_path, "runtime_packet_mode", "ForceOCH").expect("update should succeed");
+        update_setting_with_path(&settings_path, "runtime_packet_mode", "ForceOCH")
+            .expect("update should succeed");
 
         // Read file back and assert
         let content = std::fs::read_to_string(&settings_path).expect("settings file should exist");
@@ -258,7 +264,19 @@ struct AppState {
     definition: Mutex<Option<EcuDefinition>>,
     autotune_state: Mutex<AutoTuneState>,
     // Optional test seam: factory to produce a signature without opening real serial ports
-    connection_factory: Mutex<Option<std::sync::Arc<dyn Fn(ConnectionConfig, Option<ProtocolSettings>, Endianness) -> Result<String, String> + Send + Sync>>>,
+    connection_factory: Mutex<
+        Option<
+            std::sync::Arc<
+                dyn Fn(
+                        ConnectionConfig,
+                        Option<ProtocolSettings>,
+                        Endianness,
+                    ) -> Result<String, String>
+                    + Send
+                    + Sync,
+            >,
+        >,
+    >,
     // AutoTune configuration (stored when start_autotune is called)
     autotune_config: Mutex<Option<AutoTuneConfig>>,
     streaming_task: Mutex<Option<tokio::task::JoinHandle<()>>>,
@@ -733,7 +751,11 @@ fn compare_signatures(ecu_sig: &str, ini_sig: &str) -> SignatureMatchType {
 }
 
 /// Build a shallow SignatureMismatchInfo (without resolving matching INIs) for testing
-fn build_shallow_mismatch_info(ecu_signature: &str, ini_signature: &str, current_ini_path: Option<String>) -> SignatureMismatchInfo {
+fn build_shallow_mismatch_info(
+    ecu_signature: &str,
+    ini_signature: &str,
+    current_ini_path: Option<String>,
+) -> SignatureMismatchInfo {
     let match_type = compare_signatures(ecu_signature, ini_signature);
     SignatureMismatchInfo {
         ecu_signature: ecu_signature.to_string(),
@@ -756,7 +778,10 @@ async fn find_matching_inis_internal(
 #[cfg(test)]
 async fn connect_to_ecu_simulated(state: &AppState, signature: &str) -> ConnectResult {
     // If there's a loaded definition, compare signatures
-    let expected_signature = { let def_guard = state.definition.lock().await; def_guard.as_ref().map(|d| d.signature.clone()) };
+    let expected_signature = {
+        let def_guard = state.definition.lock().await;
+        def_guard.as_ref().map(|d| d.signature.clone())
+    };
 
     let mismatch_info = if let Some(ref expected) = expected_signature {
         let match_type = compare_signatures(signature, expected);
@@ -773,7 +798,9 @@ async fn connect_to_ecu_simulated(state: &AppState, signature: &str) -> ConnectR
         } else {
             None
         }
-    } else { None };
+    } else {
+        None
+    };
 
     ConnectResult {
         signature: signature.to_string(),
@@ -782,7 +809,10 @@ async fn connect_to_ecu_simulated(state: &AppState, signature: &str) -> ConnectR
 }
 
 // Helper that invokes the optional connection factory and builds a ConnectResult
-async fn call_connection_factory_and_build_result(state: &AppState, config: ConnectionConfig) -> Result<ConnectResult, String> {
+async fn call_connection_factory_and_build_result(
+    state: &AppState,
+    config: ConnectionConfig,
+) -> Result<ConnectResult, String> {
     // Read protocol settings and expected signature from state
     let def_guard = state.definition.lock().await;
     let protocol_settings = def_guard.as_ref().map(|d| d.protocol.clone());
@@ -815,7 +845,10 @@ async fn call_connection_factory_and_build_result(state: &AppState, config: Conn
                     None
                 };
 
-                Ok(ConnectResult { signature, mismatch_info })
+                Ok(ConnectResult {
+                    signature,
+                    mismatch_info,
+                })
             }
             Err(e) => Err(format!("Factory-based connect failed: {}", e)),
         }
@@ -825,7 +858,10 @@ async fn call_connection_factory_and_build_result(state: &AppState, config: Conn
 }
 
 /// Test-friendly variant that operates on an AppState reference directly
-async fn find_matching_inis_from_state(state: &AppState, ecu_signature: &str) -> Vec<MatchingIniInfo> {
+async fn find_matching_inis_from_state(
+    state: &AppState,
+    ecu_signature: &str,
+) -> Vec<MatchingIniInfo> {
     let mut matches = Vec::new();
 
     // Check INI repository if loaded
@@ -1178,13 +1214,16 @@ async fn load_ini(
             drop(cache_guard);
 
             // Emit event to notify UI that definition is fully loaded with stats
-            let _ = app.emit("definition:loaded", serde_json::json!({
-                "signature": def_clone.signature,
-                "tables": def_clone.tables.len(),
-                "curves": def_clone.curves.len(),
-                "dialogs": def_clone.dialogs.len(),
-                "constants": def_clone.constants.len(),
-            }));
+            let _ = app.emit(
+                "definition:loaded",
+                serde_json::json!({
+                    "signature": def_clone.signature,
+                    "tables": def_clone.tables.len(),
+                    "curves": def_clone.curves.len(),
+                    "dialogs": def_clone.dialogs.len(),
+                    "constants": def_clone.constants.len(),
+                }),
+            );
             eprintln!("[INFO] load_ini: Emitted definition:loaded event (tables={}, curves={}, dialogs={})",
                 def_clone.tables.len(), def_clone.curves.len(), def_clone.dialogs.len());
 
@@ -1900,7 +1939,11 @@ async fn get_table_data(
                         let mut values = Vec::with_capacity(element_count);
                         for i in 0..element_count {
                             let elem_offset = offset + i * element_size;
-                            if let Some(raw_val) = constant.data_type.read_from_bytes(page_data, elem_offset, endianness) {
+                            if let Some(raw_val) = constant.data_type.read_from_bytes(
+                                page_data,
+                                elem_offset,
+                                endianness,
+                            ) {
                                 values.push(constant.raw_to_display(raw_val));
                             } else {
                                 values.push(0.0);
@@ -2029,7 +2072,10 @@ async fn get_table_info(
 ) -> Result<TableInfo, String> {
     let def_guard = state.definition.lock().await;
     let def = def_guard.as_ref().ok_or_else(|| {
-        eprintln!("[WARN] get_table_info: Definition not loaded when looking for '{}'", table_name);
+        eprintln!(
+            "[WARN] get_table_info: Definition not loaded when looking for '{}'",
+            table_name
+        );
         "Definition not loaded".to_string()
     })?;
 
@@ -2042,7 +2088,10 @@ async fn get_table_info(
     );
 
     if let Some(table) = def.get_table_by_name_or_map(&table_name) {
-        eprintln!("[DEBUG] get_table_info: Found table '{}' (title: {})", table.name, table.title);
+        eprintln!(
+            "[DEBUG] get_table_info: Found table '{}' (title: {})",
+            table.name, table.title
+        );
         Ok(TableInfo {
             name: table.name.clone(),
             title: table.title.clone(),
@@ -2105,7 +2154,9 @@ struct ProtocolCapabilities {
 /// Return derived protocol capabilities from the loaded INI definition.
 /// Useful for frontend heuristics (e.g., choosing OCH vs Burst for runtime reads).
 #[tauri::command]
-async fn get_protocol_capabilities(state: tauri::State<'_, AppState>) -> Result<ProtocolCapabilities, String> {
+async fn get_protocol_capabilities(
+    state: tauri::State<'_, AppState>,
+) -> Result<ProtocolCapabilities, String> {
     let def_guard = state.definition.lock().await;
     let def = def_guard.as_ref().ok_or("Definition not loaded")?;
     let proto = &def.protocol;
@@ -2293,7 +2344,10 @@ async fn get_curve_data(
 ) -> Result<CurveData, String> {
     let def_guard = state.definition.lock().await;
     let def = def_guard.as_ref().ok_or_else(|| {
-        eprintln!("[WARN] get_curve_data: Definition not loaded when looking for '{}'", curve_name);
+        eprintln!(
+            "[WARN] get_curve_data: Definition not loaded when looking for '{}'",
+            curve_name
+        );
         "Definition not loaded".to_string()
     })?;
     let endianness = def.endianness;
@@ -2306,24 +2360,25 @@ async fn get_curve_data(
         def.curve_map_to_name.len()
     );
 
-    let curve = def
-        .get_curve_by_name_or_map(&curve_name)
-        .ok_or_else(|| {
-            // Log available curves for debugging
-            let available: Vec<_> = def.curves.keys().take(10).cloned().collect();
-            eprintln!(
-                "[WARN] get_curve_data: Curve '{}' not found. Available curves (first 10): {:?}",
-                curve_name, available
-            );
-            format!(
-                "Curve '{}' not found (checked {} curves, {} map entries)",
-                curve_name,
-                def.curves.len(),
-                def.curve_map_to_name.len()
-            )
-        })?;
+    let curve = def.get_curve_by_name_or_map(&curve_name).ok_or_else(|| {
+        // Log available curves for debugging
+        let available: Vec<_> = def.curves.keys().take(10).cloned().collect();
+        eprintln!(
+            "[WARN] get_curve_data: Curve '{}' not found. Available curves (first 10): {:?}",
+            curve_name, available
+        );
+        format!(
+            "Curve '{}' not found (checked {} curves, {} map entries)",
+            curve_name,
+            def.curves.len(),
+            def.curve_map_to_name.len()
+        )
+    })?;
 
-    eprintln!("[DEBUG] get_curve_data: Found curve '{}' (title: {})", curve.name, curve.title);
+    eprintln!(
+        "[DEBUG] get_curve_data: Found curve '{}' (title: {})",
+        curve.name, curve.title
+    );
 
     // Clone the constant info we need
     let x_const = def
@@ -2371,7 +2426,10 @@ async fn get_curve_data(
                 // First try named constants (parsed from MSQ <constant> tags)
                 if let Some(tune_value) = tune_file.constants.get(&constant.name) {
                     use libretune_core::tune::TuneValue;
-                    eprintln!("[DEBUG] read_const_from_source: '{}' found in TuneFile.constants", constant.name);
+                    eprintln!(
+                        "[DEBUG] read_const_from_source: '{}' found in TuneFile.constants",
+                        constant.name
+                    );
                     match tune_value {
                         TuneValue::Array(arr) => {
                             eprintln!("[DEBUG] read_const_from_source: '{}' returning {} array values from constants", constant.name, arr.len());
@@ -2383,21 +2441,25 @@ async fn get_curve_data(
                         _ => {}
                     }
                 }
-                
+
                 // Fallback: try to read from raw page data using INI offset
                 // This handles cases where the constant wasn't explicitly in the MSQ file
                 if let Some(page_data) = tune_file.pages.get(&constant.page) {
                     let offset = constant.offset as usize;
                     let total_bytes = (element_count * element_size) as usize;
-                    
+
                     if offset + total_bytes <= page_data.len() {
                         eprintln!("[DEBUG] read_const_from_source: '{}' reading from TuneFile.pages[{}] at offset {}", 
                             constant.name, constant.page, offset);
-                        
+
                         let mut values = Vec::with_capacity(element_count);
                         for i in 0..element_count {
                             let elem_offset = offset + i * element_size;
-                            if let Some(raw_val) = constant.data_type.read_from_bytes(page_data, elem_offset, endianness) {
+                            if let Some(raw_val) = constant.data_type.read_from_bytes(
+                                page_data,
+                                elem_offset,
+                                endianness,
+                            ) {
                                 values.push(constant.raw_to_display(raw_val));
                             } else {
                                 values.push(0.0);
@@ -2415,13 +2477,19 @@ async fn get_curve_data(
                 }
             }
             // If not found anywhere, return zeros
-            eprintln!("[DEBUG] read_const_from_source: '{}' returning {} zeros (not in TuneFile)", constant.name, element_count);
+            eprintln!(
+                "[DEBUG] read_const_from_source: '{}' returning {} zeros (not in TuneFile)",
+                constant.name, element_count
+            );
             return Ok(vec![0.0; element_count]);
         }
 
         // For ECU reads, we need valid length
         if length == 0 {
-            eprintln!("[WARN] read_const_from_source: '{}' has length=0, cannot read from ECU", constant.name);
+            eprintln!(
+                "[WARN] read_const_from_source: '{}' has length=0, cannot read from ECU",
+                constant.name
+            );
             return Ok(vec![0.0; element_count]);
         }
 
@@ -2957,12 +3025,15 @@ async fn start_realtime_stream(
                 } // conn_guard dropped here - mutex released immediately after I/O
 
                 // Phase 2: Get definition for parsing (quick lock, clone what we need)
-                let def_data: Option<(HashMap<String, libretune_core::ini::OutputChannel>, libretune_core::ini::Endianness)>;
+                let def_data: Option<(
+                    HashMap<String, libretune_core::ini::OutputChannel>,
+                    libretune_core::ini::Endianness,
+                )>;
                 {
                     let def_guard = app_state.definition.lock().await;
-                    def_data = def_guard.as_ref().map(|def| {
-                        (def.output_channels.clone(), def.endianness)
-                    });
+                    def_data = def_guard
+                        .as_ref()
+                        .map(|def| (def.output_channels.clone(), def.endianness));
                 } // def_guard dropped here
 
                 // Phase 3: Process data outside of any mutex locks
@@ -2983,9 +3054,7 @@ async fn start_realtime_stream(
 
                         // Pass 2: Evaluate computed channels using parsed values as context
                         for (name, channel) in computed_channels {
-                            if let Some(val) =
-                                channel.parse_with_context(&raw, endianness, &data)
-                            {
+                            if let Some(val) = channel.parse_with_context(&raw, endianness, &data) {
                                 data.insert(name, val);
                             }
                         }
@@ -3333,103 +3402,106 @@ async fn get_menu_tree(
 
 /// Recursively add visibility/enabled flags to menu items without filtering them out
 fn add_visibility_flags(items: &[MenuItem], context: &HashMap<String, f64>) -> Vec<MenuItem> {
-    items.iter().map(|item| {
-        match item {
-            MenuItem::Dialog {
-                label,
-                target,
-                visibility_condition,
-                enabled_condition,
-                ..
-            } => {
-                let visible = evaluate_visibility(visibility_condition, context);
-                let enabled = evaluate_visibility(enabled_condition, context);
+    items
+        .iter()
+        .map(|item| {
+            match item {
                 MenuItem::Dialog {
-                    label: label.clone(),
-                    target: target.clone(),
-                    visibility_condition: visibility_condition.clone(),
-                    enabled_condition: enabled_condition.clone(),
-                    visible,
-                    enabled,
+                    label,
+                    target,
+                    visibility_condition,
+                    enabled_condition,
+                    ..
+                } => {
+                    let visible = evaluate_visibility(visibility_condition, context);
+                    let enabled = evaluate_visibility(enabled_condition, context);
+                    MenuItem::Dialog {
+                        label: label.clone(),
+                        target: target.clone(),
+                        visibility_condition: visibility_condition.clone(),
+                        enabled_condition: enabled_condition.clone(),
+                        visible,
+                        enabled,
+                    }
                 }
-            }
-            MenuItem::Table {
-                label,
-                target,
-                visibility_condition,
-                enabled_condition,
-                ..
-            } => {
-                let visible = evaluate_visibility(visibility_condition, context);
-                let enabled = evaluate_visibility(enabled_condition, context);
                 MenuItem::Table {
-                    label: label.clone(),
-                    target: target.clone(),
-                    visibility_condition: visibility_condition.clone(),
-                    enabled_condition: enabled_condition.clone(),
-                    visible,
-                    enabled,
+                    label,
+                    target,
+                    visibility_condition,
+                    enabled_condition,
+                    ..
+                } => {
+                    let visible = evaluate_visibility(visibility_condition, context);
+                    let enabled = evaluate_visibility(enabled_condition, context);
+                    MenuItem::Table {
+                        label: label.clone(),
+                        target: target.clone(),
+                        visibility_condition: visibility_condition.clone(),
+                        enabled_condition: enabled_condition.clone(),
+                        visible,
+                        enabled,
+                    }
                 }
-            }
-            MenuItem::SubMenu {
-                label,
-                items: sub_items,
-                visibility_condition,
-                enabled_condition,
-                ..
-            } => {
-                let visible = evaluate_visibility(visibility_condition, context);
-                let enabled = evaluate_visibility(enabled_condition, context);
-                // Recursively process children
-                let children_with_flags = add_visibility_flags(sub_items, context);
                 MenuItem::SubMenu {
-                    label: label.clone(),
-                    items: children_with_flags,
-                    visibility_condition: visibility_condition.clone(),
-                    enabled_condition: enabled_condition.clone(),
-                    visible,
-                    enabled,
+                    label,
+                    items: sub_items,
+                    visibility_condition,
+                    enabled_condition,
+                    ..
+                } => {
+                    let visible = evaluate_visibility(visibility_condition, context);
+                    let enabled = evaluate_visibility(enabled_condition, context);
+                    // Recursively process children
+                    let children_with_flags = add_visibility_flags(sub_items, context);
+                    MenuItem::SubMenu {
+                        label: label.clone(),
+                        items: children_with_flags,
+                        visibility_condition: visibility_condition.clone(),
+                        enabled_condition: enabled_condition.clone(),
+                        visible,
+                        enabled,
+                    }
                 }
-            }
-            MenuItem::Std {
-                label,
-                target,
-                visibility_condition,
-                enabled_condition,
-                ..
-            } => {
-                let visible = evaluate_visibility(visibility_condition, context);
-                let enabled = evaluate_visibility(enabled_condition, context);
                 MenuItem::Std {
-                    label: label.clone(),
-                    target: target.clone(),
-                    visibility_condition: visibility_condition.clone(),
-                    enabled_condition: enabled_condition.clone(),
-                    visible,
-                    enabled,
+                    label,
+                    target,
+                    visibility_condition,
+                    enabled_condition,
+                    ..
+                } => {
+                    let visible = evaluate_visibility(visibility_condition, context);
+                    let enabled = evaluate_visibility(enabled_condition, context);
+                    MenuItem::Std {
+                        label: label.clone(),
+                        target: target.clone(),
+                        visibility_condition: visibility_condition.clone(),
+                        enabled_condition: enabled_condition.clone(),
+                        visible,
+                        enabled,
+                    }
                 }
-            }
-            MenuItem::Help {
-                label,
-                target,
-                visibility_condition,
-                enabled_condition,
-                ..
-            } => {
-                let visible = evaluate_visibility(visibility_condition, context);
-                let enabled = evaluate_visibility(enabled_condition, context);
                 MenuItem::Help {
-                    label: label.clone(),
-                    target: target.clone(),
-                    visibility_condition: visibility_condition.clone(),
-                    enabled_condition: enabled_condition.clone(),
-                    visible,
-                    enabled,
+                    label,
+                    target,
+                    visibility_condition,
+                    enabled_condition,
+                    ..
+                } => {
+                    let visible = evaluate_visibility(visibility_condition, context);
+                    let enabled = evaluate_visibility(enabled_condition, context);
+                    MenuItem::Help {
+                        label: label.clone(),
+                        target: target.clone(),
+                        visibility_condition: visibility_condition.clone(),
+                        enabled_condition: enabled_condition.clone(),
+                        visible,
+                        enabled,
+                    }
                 }
+                MenuItem::Separator => MenuItem::Separator,
             }
-            MenuItem::Separator => MenuItem::Separator,
-        }
-    }).collect()
+        })
+        .collect()
 }
 
 /// Evaluate visibility condition - returns true if visible (or on error/missing condition)
@@ -3454,16 +3526,16 @@ async fn get_searchable_index(
 ) -> Result<HashMap<String, Vec<String>>, String> {
     let def_guard = state.definition.lock().await;
     let def = def_guard.as_ref().ok_or("Definition not loaded")?;
-    
+
     let mut index: HashMap<String, Vec<String>> = HashMap::new();
-    
+
     // Index dialogs - collect field labels, panel titles
     for (dialog_name, dialog) in &def.dialogs {
         let mut terms: Vec<String> = Vec::new();
-        
+
         // Add dialog title
         terms.push(dialog.title.clone());
-        
+
         // Collect from all components
         for component in &dialog.components {
             match component {
@@ -3483,7 +3555,11 @@ async fn get_searchable_index(
                 libretune_core::ini::DialogComponent::LiveGraph { title, .. } => {
                     terms.push(title.clone());
                 }
-                libretune_core::ini::DialogComponent::Indicator { label_off, label_on, .. } => {
+                libretune_core::ini::DialogComponent::Indicator {
+                    label_off,
+                    label_on,
+                    ..
+                } => {
                     terms.push(label_off.clone());
                     terms.push(label_on.clone());
                 }
@@ -3492,19 +3568,19 @@ async fn get_searchable_index(
                 }
             }
         }
-        
+
         if !terms.is_empty() {
             index.insert(dialog_name.clone(), terms);
         }
     }
-    
+
     // Index tables - collect title, axis labels
     for (table_name, table) in &def.tables {
         let mut terms: Vec<String> = Vec::new();
-        
+
         terms.push(table.title.clone());
         terms.push(table.x_bins.clone());
-        
+
         if let Some(map_name) = &table.map_name {
             terms.push(map_name.clone());
         }
@@ -3513,29 +3589,29 @@ async fn get_searchable_index(
         }
         // Add the table's map constant name
         terms.push(table.map.clone());
-        
+
         if !terms.is_empty() {
             index.insert(table_name.clone(), terms);
         }
     }
-    
+
     // Index curves - collect title, axis labels
     for (curve_name, curve) in &def.curves {
         let mut terms: Vec<String> = Vec::new();
-        
+
         terms.push(curve.title.clone());
         terms.push(curve.column_labels.0.clone()); // X label
         terms.push(curve.column_labels.1.clone()); // Y label
-        
+
         // Add constant names
         terms.push(curve.x_bins.clone());
         terms.push(curve.y_bins.clone());
-        
+
         if !terms.is_empty() {
             index.insert(curve_name.clone(), terms);
         }
     }
-    
+
     Ok(index)
 }
 
@@ -5102,7 +5178,11 @@ async fn get_table_data_internal(
     // Read from tune file (offline mode)
     let tune_guard = state.current_tune.lock().await;
 
-    fn read_const_values(constant: &Constant, tune: Option<&TuneFile>, endianness: libretune_core::ini::Endianness) -> Vec<f64> {
+    fn read_const_values(
+        constant: &Constant,
+        tune: Option<&TuneFile>,
+        endianness: libretune_core::ini::Endianness,
+    ) -> Vec<f64> {
         let element_count = constant.shape.element_count();
         let element_size = constant.data_type.size_bytes();
         if let Some(tune_file) = tune {
@@ -5121,7 +5201,11 @@ async fn get_table_data_internal(
                     let mut values = Vec::with_capacity(element_count);
                     for i in 0..element_count {
                         let elem_offset = offset + i * element_size;
-                        if let Some(raw_val) = constant.data_type.read_from_bytes(page_data, elem_offset, endianness) {
+                        if let Some(raw_val) =
+                            constant
+                                .data_type
+                                .read_from_bytes(page_data, elem_offset, endianness)
+                        {
                             values.push(constant.raw_to_display(raw_val));
                         } else {
                             values.push(0.0);
@@ -5326,7 +5410,10 @@ async fn update_constant_array_internal(
             data: raw_data.clone(),
         };
         if let Err(e) = conn.write_memory(params) {
-            eprintln!("[WARN] Failed to write axis bins '{}' to ECU: {}", constant_name, e);
+            eprintln!(
+                "[WARN] Failed to write axis bins '{}' to ECU: {}",
+                constant_name, e
+            );
         }
     }
 
@@ -5876,8 +5963,7 @@ async fn delete_dashboard(path: String) -> Result<(), String> {
     if !path_buf.exists() {
         return Err("Dashboard file not found".to_string());
     }
-    std::fs::remove_file(&path_buf)
-        .map_err(|e| format!("Failed to delete dashboard: {}", e))?;
+    std::fs::remove_file(&path_buf).map_err(|e| format!("Failed to delete dashboard: {}", e))?;
     Ok(())
 }
 
@@ -5970,7 +6056,9 @@ async fn list_available_dashes(app: tauri::AppHandle) -> Result<Vec<DashFileInfo
         let candidates = [
             cwd.join("reference").join("TunerStudioMS").join("Dash"),
             cwd.join("../reference").join("TunerStudioMS").join("Dash"),
-            cwd.join("../../reference").join("TunerStudioMS").join("Dash"),
+            cwd.join("../../reference")
+                .join("TunerStudioMS")
+                .join("Dash"),
         ];
         if let Some(reference_dash) = candidates.into_iter().find(|path| path.exists()) {
             println!(
@@ -10667,15 +10755,18 @@ mod demo_mode_tests {
 mod concurrency_tests {
     use super::*;
     use libretune_core::protocol::{Connection, ConnectionConfig};
-    use std::time::Duration;
     use std::sync::Arc;
+    use std::time::Duration;
 
     #[tokio::test]
     async fn test_no_deadlock_between_execute_controller_and_realtime_snapshot() {
         // Build a minimal AppState with both locks present
-        let dev_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources").join("demo.ini");
+        let dev_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("resources")
+            .join("demo.ini");
         assert!(dev_path.exists(), "Demo INI not found at {:?}", dev_path);
-        let def = EcuDefinition::from_file(dev_path.to_string_lossy().as_ref()).expect("Load demo INI");
+        let def =
+            EcuDefinition::from_file(dev_path.to_string_lossy().as_ref()).expect("Load demo INI");
 
         let state = Arc::new(AppState {
             connection: Mutex::new(Some(Connection::new(ConnectionConfig::default()))),
@@ -10736,7 +10827,6 @@ mod concurrency_tests {
     }
 }
 
-
 // New tests for signature comparison and normalization (unit tests)
 #[cfg(test)]
 mod signature_tests {
@@ -10744,29 +10834,51 @@ mod signature_tests {
 
     #[test]
     fn test_normalize_signature_basic() {
-        assert_eq!(normalize_signature("Speeduino 2023-05"), "speeduino 2023 05");
-        assert_eq!(normalize_signature("  RusEFI_v1.2.3 (build#42) "), "rusefi v1 2 3 build 42");
+        assert_eq!(
+            normalize_signature("Speeduino 2023-05"),
+            "speeduino 2023 05"
+        );
+        assert_eq!(
+            normalize_signature("  RusEFI_v1.2.3 (build#42) "),
+            "rusefi v1 2 3 build 42"
+        );
         assert_eq!(normalize_signature("MegaSquirt"), "megasquirt");
     }
 
     #[test]
     fn test_compare_signatures_exact_and_partial() {
         // Exact after normalization
-        assert_eq!(compare_signatures("Speeduino 2023.05", "speeduino 2023-05"), SignatureMatchType::Exact);
+        assert_eq!(
+            compare_signatures("Speeduino 2023.05", "speeduino 2023-05"),
+            SignatureMatchType::Exact
+        );
 
         // Partial when base matches but versions differ
-        assert_eq!(compare_signatures("rusEFI v1.2.3", "rusEFI v1.2.4"), SignatureMatchType::Partial);
+        assert_eq!(
+            compare_signatures("rusEFI v1.2.3", "rusEFI v1.2.4"),
+            SignatureMatchType::Partial
+        );
 
         // Partial when one contains the other
-        assert_eq!(compare_signatures("Speeduino build 202305 extra", "speeduino 202305"), SignatureMatchType::Partial);
+        assert_eq!(
+            compare_signatures("Speeduino build 202305 extra", "speeduino 202305"),
+            SignatureMatchType::Partial
+        );
 
         // Mismatch for different families
-        assert_eq!(compare_signatures("unrelated device", "another device"), SignatureMatchType::Mismatch);
+        assert_eq!(
+            compare_signatures("unrelated device", "another device"),
+            SignatureMatchType::Mismatch
+        );
     }
 
     #[test]
     fn test_build_shallow_mismatch_info() {
-        let info = build_shallow_mismatch_info("Speeduino 2023-05", "Speeduino 2023-04", Some("/path/test.ini".to_string()));
+        let info = build_shallow_mismatch_info(
+            "Speeduino 2023-05",
+            "Speeduino 2023-04",
+            Some("/path/test.ini".to_string()),
+        );
         assert_eq!(info.match_type, SignatureMatchType::Partial);
         assert_eq!(info.ecu_signature, "Speeduino 2023-05");
         assert_eq!(info.ini_signature, "Speeduino 2023-04");
@@ -10779,8 +10891,8 @@ mod signature_tests {
 
     #[tokio::test]
     async fn test_find_matching_inis_and_build_info_partial() {
-        use tempfile::tempdir;
         use std::fs::write;
+        use tempfile::tempdir;
 
         // Create a temporary repository and a sample INI with a Speeduino signature
         let dir = tempdir().expect("tempdir");
@@ -10822,10 +10934,16 @@ signature = "Speeduino 2023-04"
         let matches = find_matching_inis_from_state(&state, "Speeduino 2023-05").await;
         // We expect at least one match (the one we imported)
         assert!(!matches.is_empty());
-        assert!(matches.iter().any(|e| e.signature.to_lowercase().contains("speeduino")));
+        assert!(matches
+            .iter()
+            .any(|e| e.signature.to_lowercase().contains("speeduino")));
 
         // Build mismatch info using our helper and attach matching INIs
-        let mut info = build_shallow_mismatch_info("Speeduino 2023-05", "Speeduino 2023-04", Some("test.ini".to_string()));
+        let mut info = build_shallow_mismatch_info(
+            "Speeduino 2023-05",
+            "Speeduino 2023-04",
+            Some("test.ini".to_string()),
+        );
         info.matching_inis = matches;
 
         assert_eq!(info.match_type, SignatureMatchType::Partial);
@@ -10835,8 +10953,8 @@ signature = "Speeduino 2023-04"
 
     #[tokio::test]
     async fn test_find_matching_inis_and_build_info_mismatch() {
-        use tempfile::tempdir;
         use std::fs::write;
+        use tempfile::tempdir;
 
         // Create temporary repo with a Speeduino ini
         let dir = tempdir().expect("tempdir");
@@ -10876,7 +10994,9 @@ signature = "Speeduino 2023-04"
         let matches = find_matching_inis_from_state(&state, "Speeduino 2023-05").await;
         // Using a completely different signature should yield no matches
         // (We already have a Speeduino INI in the repo)
-        assert!(matches.iter().any(|e| e.signature.to_lowercase().contains("speeduino")));
+        assert!(matches
+            .iter()
+            .any(|e| e.signature.to_lowercase().contains("speeduino")));
 
         // Build mismatch info for an unrelated ECU signature
         let mut info = build_shallow_mismatch_info("FooBar 1.0", "Speeduino 2023-04", None);
@@ -10888,8 +11008,8 @@ signature = "Speeduino 2023-04"
     // Explicit simulated connect tests: ensure connect-like behavior returns mismatch_info
     #[tokio::test]
     async fn test_connect_simulated_partial_and_mismatch() {
-        use tempfile::tempdir;
         use std::fs::write;
+        use tempfile::tempdir;
 
         // Create temporary repo and a Speeduino INI
         let dir = tempdir().expect("tempdir");
@@ -10904,9 +11024,12 @@ signature = "Speeduino 2023-04"
         let _id = repo.import(&ini_path).expect("import");
 
         // Build AppState with a loaded definition that expects the Speeduino 2023-04 signature
-        let def = EcuDefinition::from_str(r#"[MegaTune]
+        let def = EcuDefinition::from_str(
+            r#"[MegaTune]
 signature = "Speeduino 2023-04"
-"#).expect("parse def");
+"#,
+        )
+        .expect("parse def");
 
         let state = AppState {
             connection: Mutex::new(None),
@@ -10933,22 +11056,36 @@ signature = "Speeduino 2023-04"
 
         // Partial match case
         let result_partial = connect_to_ecu_simulated(&state, "Speeduino 2023-05").await;
-        assert_eq!(result_partial.mismatch_info.as_ref().unwrap().match_type, SignatureMatchType::Partial);
-        assert!(!result_partial.mismatch_info.as_ref().unwrap().matching_inis.is_empty());
+        assert_eq!(
+            result_partial.mismatch_info.as_ref().unwrap().match_type,
+            SignatureMatchType::Partial
+        );
+        assert!(!result_partial
+            .mismatch_info
+            .as_ref()
+            .unwrap()
+            .matching_inis
+            .is_empty());
 
         // Mismatch case
         let result_mismatch = connect_to_ecu_simulated(&state, "UnrelatedDevice 1.0").await;
-        assert_eq!(result_mismatch.mismatch_info.as_ref().unwrap().match_type, SignatureMatchType::Mismatch);
-        assert!(result_mismatch.mismatch_info.as_ref().unwrap().matching_inis.is_empty());
+        assert_eq!(
+            result_mismatch.mismatch_info.as_ref().unwrap().match_type,
+            SignatureMatchType::Mismatch
+        );
+        assert!(result_mismatch
+            .mismatch_info
+            .as_ref()
+            .unwrap()
+            .matching_inis
+            .is_empty());
     }
-
-
 
     #[tokio::test]
     async fn test_call_connection_factory_and_build_result_helper() {
-        use tempfile::tempdir;
         use std::fs::write;
         use std::sync::Arc;
+        use tempfile::tempdir;
 
         // Create temp repo with Speeduino INI
         let dir = tempdir().expect("tempdir");
@@ -10964,9 +11101,14 @@ signature = "Speeduino 2023-04"
         // Build a minimal AppState with repo and expected definition
         let state = AppState {
             connection: Mutex::new(None),
-            definition: Mutex::new(Some(EcuDefinition::from_str(r#"[MegaTune]
+            definition: Mutex::new(Some(
+                EcuDefinition::from_str(
+                    r#"[MegaTune]
 signature = "Speeduino 2023-04"
-"#).expect("parse def"))),
+"#,
+                )
+                .expect("parse def"),
+            )),
             autotune_state: Mutex::new(AutoTuneState::default()),
             autotune_config: Mutex::new(None),
             streaming_task: Mutex::new(None),
@@ -10988,18 +11130,34 @@ signature = "Speeduino 2023-04"
         };
 
         // Install factory returning a partial matching signature
-        let factory: std::sync::Arc<dyn Fn(ConnectionConfig, Option<ProtocolSettings>, Endianness) -> Result<String, String> + Send + Sync> = Arc::new(|_cfg, _p, _e| Ok("Speeduino 2023-05".to_string()));
+        let factory: std::sync::Arc<
+            dyn Fn(ConnectionConfig, Option<ProtocolSettings>, Endianness) -> Result<String, String>
+                + Send
+                + Sync,
+        > = Arc::new(|_cfg, _p, _e| Ok("Speeduino 2023-05".to_string()));
         *state.connection_factory.lock().await = Some(factory);
 
-        let res = call_connection_factory_and_build_result(&state, ConnectionConfig::default()).await.expect("factory ok");
-        assert_eq!(res.mismatch_info.as_ref().unwrap().match_type, SignatureMatchType::Partial);
+        let res = call_connection_factory_and_build_result(&state, ConnectionConfig::default())
+            .await
+            .expect("factory ok");
+        assert_eq!(
+            res.mismatch_info.as_ref().unwrap().match_type,
+            SignatureMatchType::Partial
+        );
         assert!(!res.mismatch_info.as_ref().unwrap().matching_inis.is_empty());
 
         // Install factory that returns Err
-        let factory_err: std::sync::Arc<dyn Fn(ConnectionConfig, Option<ProtocolSettings>, Endianness) -> Result<String, String> + Send + Sync> = Arc::new(|_cfg, _p, _e| Err("fail".to_string()));
+        let factory_err: std::sync::Arc<
+            dyn Fn(ConnectionConfig, Option<ProtocolSettings>, Endianness) -> Result<String, String>
+                + Send
+                + Sync,
+        > = Arc::new(|_cfg, _p, _e| Err("fail".to_string()));
         *state.connection_factory.lock().await = Some(factory_err);
 
-        let err = call_connection_factory_and_build_result(&state, ConnectionConfig::default()).await.err().expect("err expected");
+        let err = call_connection_factory_and_build_result(&state, ConnectionConfig::default())
+            .await
+            .err()
+            .expect("err expected");
         assert!(err.contains("Factory-based connect failed"));
     }
 }

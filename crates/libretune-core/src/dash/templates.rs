@@ -3,11 +3,11 @@
 //! This module provides pre-configured dashboard layouts that match
 //! common ECU tuning workflows and TunerStudio-style layouts.
 
-use chrono;
 use super::{
     BackgroundStyle, Bibliography, DashComponent, DashFile, GaugeCluster, GaugeConfig,
     GaugePainter, TsColor, VersionInfo,
 };
+use chrono;
 
 /// Create a basic dashboard layout - LibreTune default
 /// 2x4 grid of analog gauges: RPM/Coolant/TPS/Map top row, AFR/Battery/Dwell/Advance bottom row
@@ -39,7 +39,15 @@ pub fn create_basic_dashboard() -> DashFile {
     };
 
     // Helper function to create analog gauge config
-    let create_analog_gauge = |id: &str, title: &str, units: &str, channel: &str, min: f64, max: f64, x: f64, y: f64| -> GaugeConfig {
+    let create_analog_gauge = |id: &str,
+                               title: &str,
+                               units: &str,
+                               channel: &str,
+                               min: f64,
+                               max: f64,
+                               x: f64,
+                               y: f64|
+     -> GaugeConfig {
         GaugeConfig {
             id: id.to_string(),
             title: title.to_string(),
@@ -98,32 +106,48 @@ pub fn create_basic_dashboard() -> DashFile {
     };
 
     // Top row: RPM, Coolant Temp, Throttle Position, Map
-    dash.gauge_cluster.components.push(DashComponent::Gauge(Box::new(create_analog_gauge(
-        "rpm", "RPM", "", "rpm", 0.0, 8000.0, 0.01, 0.01
-    ))));
-    dash.gauge_cluster.components.push(DashComponent::Gauge(Box::new(create_analog_gauge(
-        "coolant", "COOLANT", "°C", "coolant", -40.0, 120.0, 0.26, 0.01
-    ))));
-    dash.gauge_cluster.components.push(DashComponent::Gauge(Box::new(create_analog_gauge(
-        "tps", "TPS", "%", "tps", 0.0, 100.0, 0.51, 0.01
-    ))));
-    dash.gauge_cluster.components.push(DashComponent::Gauge(Box::new(create_analog_gauge(
-        "map", "MAP", "kPa", "map", 0.0, 250.0, 0.76, 0.01
-    ))));
+    dash.gauge_cluster
+        .components
+        .push(DashComponent::Gauge(Box::new(create_analog_gauge(
+            "rpm", "RPM", "", "rpm", 0.0, 8000.0, 0.01, 0.01,
+        ))));
+    dash.gauge_cluster
+        .components
+        .push(DashComponent::Gauge(Box::new(create_analog_gauge(
+            "coolant", "COOLANT", "°C", "coolant", -40.0, 120.0, 0.26, 0.01,
+        ))));
+    dash.gauge_cluster
+        .components
+        .push(DashComponent::Gauge(Box::new(create_analog_gauge(
+            "tps", "TPS", "%", "tps", 0.0, 100.0, 0.51, 0.01,
+        ))));
+    dash.gauge_cluster
+        .components
+        .push(DashComponent::Gauge(Box::new(create_analog_gauge(
+            "map", "MAP", "kPa", "map", 0.0, 250.0, 0.76, 0.01,
+        ))));
 
     // Bottom row: Air/Fuel Ratio, Battery, Dwell, Ignition Timing
-    dash.gauge_cluster.components.push(DashComponent::Gauge(Box::new(create_analog_gauge(
-        "afr", "AFR", "", "afr", 10.0, 20.0, 0.01, 0.51
-    ))));
-    dash.gauge_cluster.components.push(DashComponent::Gauge(Box::new(create_analog_gauge(
-        "battery", "BATTERY", "V", "battery", 10.0, 16.0, 0.26, 0.51
-    ))));
-    dash.gauge_cluster.components.push(DashComponent::Gauge(Box::new(create_analog_gauge(
-        "dwell", "DWELL", "°", "dwell", 0.0, 10.0, 0.51, 0.51
-    ))));
-    dash.gauge_cluster.components.push(DashComponent::Gauge(Box::new(create_analog_gauge(
-        "advance", "ADVANCE", "°", "advance", -10.0, 50.0, 0.76, 0.51
-    ))));
+    dash.gauge_cluster
+        .components
+        .push(DashComponent::Gauge(Box::new(create_analog_gauge(
+            "afr", "AFR", "", "afr", 10.0, 20.0, 0.01, 0.51,
+        ))));
+    dash.gauge_cluster
+        .components
+        .push(DashComponent::Gauge(Box::new(create_analog_gauge(
+            "battery", "BATTERY", "V", "battery", 10.0, 16.0, 0.26, 0.51,
+        ))));
+    dash.gauge_cluster
+        .components
+        .push(DashComponent::Gauge(Box::new(create_analog_gauge(
+            "dwell", "DWELL", "°", "dwell", 0.0, 10.0, 0.51, 0.51,
+        ))));
+    dash.gauge_cluster
+        .components
+        .push(DashComponent::Gauge(Box::new(create_analog_gauge(
+            "advance", "ADVANCE", "°", "advance", -10.0, 50.0, 0.76, 0.51,
+        ))));
 
     dash
 }

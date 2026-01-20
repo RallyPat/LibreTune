@@ -216,7 +216,10 @@ impl GaugePainter {
         let trimmed = s.trim();
         let lower = trimmed.to_lowercase();
 
-        if lower.contains("roundanaloggaugepainter") || trimmed == "Round Analog Gauge" || trimmed == "Round Gauge" {
+        if lower.contains("roundanaloggaugepainter")
+            || trimmed == "Round Analog Gauge"
+            || trimmed == "Round Gauge"
+        {
             return Self::RoundGauge;
         }
         if lower.contains("rounddashed") || trimmed == "Round Dashed Gauge" {

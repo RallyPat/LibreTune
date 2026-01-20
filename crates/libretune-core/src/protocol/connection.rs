@@ -220,7 +220,6 @@ pub struct Connection {
     rx_packets: u64,
 }
 
-
 impl Connection {
     /// Create a new connection (not yet connected)
     pub fn new(config: ConnectionConfig) -> Self {
@@ -276,7 +275,12 @@ impl Connection {
 
     /// Get cumulative tx/rx bytes and packet counters
     pub fn get_counters(&self) -> (u64, u64, u64, u64) {
-        (self.tx_bytes, self.rx_bytes, self.tx_packets, self.rx_packets)
+        (
+            self.tx_bytes,
+            self.rx_bytes,
+            self.tx_packets,
+            self.rx_packets,
+        )
     }
 
     /// Enable adaptive timing with optional custom config
@@ -969,24 +973,36 @@ impl Connection {
             .and_then(|p| p.och_get_command.clone());
 
         if forced == RuntimePacketMode::ForceBurst {
-            return (RuntimeFetch::Burst(burst_cmd), "force: ForceBurst".to_string());
+            return (
+                RuntimeFetch::Burst(burst_cmd),
+                "force: ForceBurst".to_string(),
+            );
         }
         if forced == RuntimePacketMode::ForceOCH {
             if let Some(och) = och_cmd_opt.clone() {
                 return (RuntimeFetch::OCH(och), "force: ForceOCH".to_string());
             } else {
-                return (RuntimeFetch::Burst(burst_cmd), "force: ForceOCH (no OCH cmd, fallback to burst)".to_string());
+                return (
+                    RuntimeFetch::Burst(burst_cmd),
+                    "force: ForceOCH (no OCH cmd, fallback to burst)".to_string(),
+                );
             }
         }
         if forced == RuntimePacketMode::Disabled {
-            return (RuntimeFetch::Burst(burst_cmd), "override: Disabled".to_string());
+            return (
+                RuntimeFetch::Burst(burst_cmd),
+                "override: Disabled".to_string(),
+            );
         }
 
         // Auto heuristics
         // 1) INI hint: maxUnusedRuntimeRange > 0 => prefer OCH if available
         if let Some(p) = &self.protocol_settings {
             if p.max_unused_runtime_range > 0 && och_cmd_opt.is_some() {
-                return (RuntimeFetch::OCH(och_cmd_opt.unwrap()), "ini hint: maxUnusedRuntimeRange".to_string());
+                return (
+                    RuntimeFetch::OCH(och_cmd_opt.unwrap()),
+                    "ini hint: maxUnusedRuntimeRange".to_string(),
+                );
             }
         }
 
@@ -1002,7 +1018,10 @@ impl Connection {
             let avg_ms = avg.as_millis() as u64;
             if avg_ms > 50 {
                 if let Some(och) = och_cmd_opt.clone() {
-                    return (RuntimeFetch::OCH(och), format!("adaptive: avg={}ms", avg_ms));
+                    return (
+                        RuntimeFetch::OCH(och),
+                        format!("adaptive: avg={}ms", avg_ms),
+                    );
                 }
             }
         }
@@ -1014,7 +1033,12 @@ impl Connection {
     /// Determine if the configured port looks like a slow link (bluetooth, tcp, rfcomm)
     pub(crate) fn is_slow_link(&self) -> bool {
         let pn = self.config.port_name.to_lowercase();
-        if pn.contains("rfcomm") || pn.contains("bluetooth") || pn.contains("tcp") || pn.contains("telnet") || pn.contains("wifi") {
+        if pn.contains("rfcomm")
+            || pn.contains("bluetooth")
+            || pn.contains("tcp")
+            || pn.contains("telnet")
+            || pn.contains("wifi")
+        {
             return true;
         }
         // Baud-rate heuristic: low baud suggests slow link
@@ -1372,7 +1396,12 @@ mod tests {
             RuntimeFetch::OCH(cmd) => assert_eq!(cmd, "O"),
             _ => panic!("Expected OCH choice, got {:?}", choice),
         }
-        assert!(reason.contains("heuristic") || reason.contains("ini hint") || reason.contains("slow") || reason.contains("adaptive") );
+        assert!(
+            reason.contains("heuristic")
+                || reason.contains("ini hint")
+                || reason.contains("slow")
+                || reason.contains("adaptive")
+        );
     }
 
     #[test]

@@ -148,7 +148,10 @@ impl TuneCache {
 
         // Get page size from definition before mutable borrow
         let default_page_size = self.page_size(page).unwrap_or_else(|| {
-            eprintln!("[WARN] write_bytes: page {} not in page_sizes (n_pages={}), creating dynamically", page, self.n_pages);
+            eprintln!(
+                "[WARN] write_bytes: page {} not in page_sizes (n_pages={}), creating dynamically",
+                page, self.n_pages
+            );
             0
         }) as usize;
 

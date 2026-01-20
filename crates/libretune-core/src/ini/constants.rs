@@ -518,7 +518,13 @@ mod tests {
     #[test]
     fn test_parse_bits_without_display_offset() {
         // Test [0:7] notation - no display offset
-        let c = parse_constant_line("normalBits", "bits, U08, 50, [0:7], \"Off\", \"On\"", 0, 0, None);
+        let c = parse_constant_line(
+            "normalBits",
+            "bits, U08, 50, [0:7], \"Off\", \"On\"",
+            0,
+            0,
+            None,
+        );
         assert!(c.is_some());
         let c = c.unwrap();
         assert_eq!(c.bit_position, Some(0));

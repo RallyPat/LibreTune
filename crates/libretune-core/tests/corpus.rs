@@ -99,8 +99,8 @@ fn test_rusefi_ini_fields() {
         .filter_map(|e| e.ok())
         .find(|e| {
             let name = e.file_name().to_string_lossy().to_string();
-            name.starts_with("rusEFI") 
-                && !name.contains("FOME") 
+            name.starts_with("rusEFI")
+                && !name.contains("FOME")
                 && !name.contains("epicECU")
                 && !name.contains("epicEFI")
         })
@@ -205,17 +205,14 @@ fn test_fome_ini_fields() {
         .map(|e| e.path())
         .collect();
 
-    assert!(
-        !fome_files.is_empty(),
-        "No FOME INI files found in corpus"
-    );
+    assert!(!fome_files.is_empty(), "No FOME INI files found in corpus");
 
     println!("Testing {} FOME INI files...", fome_files.len());
 
     for path in &fome_files {
         let filename = path.file_name().unwrap().to_string_lossy();
-        let def = EcuDefinition::from_file(path)
-            .expect(&format!("Should parse FOME INI: {}", filename));
+        let def =
+            EcuDefinition::from_file(path).expect(&format!("Should parse FOME INI: {}", filename));
 
         // FOME files should have VeAnalyze section
         assert!(
@@ -260,7 +257,10 @@ fn test_fome_ini_fields() {
         println!("  Tables: {}", def.tables.len());
     }
 
-    println!("\nAll {} FOME INI files passed validation", fome_files.len());
+    println!(
+        "\nAll {} FOME INI files passed validation",
+        fome_files.len()
+    );
 }
 
 /// Test that epicEFI INI files parse correctly and have expected fields
@@ -403,4 +403,3 @@ fn test_megasquirt_ini_fields() {
 // referenced a local sample INI in `reference/sampleUserProjects/...` which may be
 // excluded from CI via .gitignore or .git/info/exclude. Tests must not depend on
 // files that can be missing in CI environments.
-
