@@ -68,6 +68,9 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Run unit tests
+        run: npm run test:run
+
   format:
     name: Format Check
     runs-on: ubuntu-latest
