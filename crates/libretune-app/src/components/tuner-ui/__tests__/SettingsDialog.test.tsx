@@ -16,7 +16,7 @@ describe('SettingsDialog', () => {
   });
 
   it('loads runtime_packet_mode from settings and applies updates on Apply', async () => {
-    (invoke as unknown as vi.Mock).mockImplementation((cmd: string) => {
+    (invoke as unknown as any).mockImplementation((cmd: string) => {
       if (cmd === 'get_settings') {
         return Promise.resolve({ runtime_packet_mode: 'ForceOCH', auto_reconnect_after_controller_command: false });
       }

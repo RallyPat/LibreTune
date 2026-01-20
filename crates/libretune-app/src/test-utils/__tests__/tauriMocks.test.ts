@@ -1,6 +1,5 @@
 import { vi, expect } from 'vitest';
 import { setupTauriMocks, tearDownTauriMocks } from '../tauriMocks';
-import * as ev from '@tauri-apps/api/event';
 import { waitFor } from '@testing-library/react';
 
 describe('setupTauriMocks', () => {

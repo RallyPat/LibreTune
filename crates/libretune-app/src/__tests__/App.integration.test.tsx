@@ -1,6 +1,4 @@
-import React from 'react';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import { vi } from 'vitest';
 
 // Mock Tauri APIs before importing App
@@ -20,11 +18,10 @@ import { invoke } from '@tauri-apps/api/core';
 import { setupTauriMocks, tearDownTauriMocks } from '../test-utils/tauriMocks';
 
 describe('App integration (toolbar connection-info)', () => {
-  let tauriHandle: ReturnType<typeof setupTauriMocks> | null = null;
 
   beforeEach(() => {
     vi.resetAllMocks();
-    tauriHandle = setupTauriMocks({
+    setupTauriMocks({
       // sensible defaults for App.initializeApp
       init_ini_repository: undefined,
       list_repository_inis: [],
@@ -43,7 +40,6 @@ describe('App integration (toolbar connection-info)', () => {
 
   afterEach(() => {
     tearDownTauriMocks();
-    tauriHandle = null;
   });
 
   it('shows packet mode and receives metrics when connected', async () => {
@@ -91,7 +87,7 @@ describe('App integration (toolbar connection-info)', () => {
     const ev = await import('@tauri-apps/api/event');
     const listenMock = vi.spyOn(ev, 'listen').mockImplementation(async (name, handler) => {
       if (name === 'connection:metrics') {
-        handler({ payload });
+        handler({ event: name, id: '1', payload } as any);
       }
       return () => {};
     });

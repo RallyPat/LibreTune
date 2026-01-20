@@ -73,7 +73,7 @@ export default function TsDashboard({ initialDashPath, isConnected = false }: Ts
   const [channelInfoMap, setChannelInfoMap] = useState<Record<string, ChannelInfo>>({});
 
   // Subscribe only to RPM channel value to avoid re-rendering on unrelated channel updates
-  const rpmValue = useRealtimeStore((state) => (rpmChannel ? state.channels[rpmChannel] : undefined));
+  useRealtimeStore((state) => (rpmChannel ? state.channels[rpmChannel] : undefined));
   // For cases where we need an instant snapshot (on dashboard load), use the store getter
   const realtimeStoreGet = useRealtimeStore.getState;
   

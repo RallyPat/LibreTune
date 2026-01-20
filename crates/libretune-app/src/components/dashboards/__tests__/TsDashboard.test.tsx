@@ -1,5 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { render, waitFor } from '@testing-library/react';
 import { vi } from 'vitest';
 import { invoke } from '@tauri-apps/api/core';
 import { useRealtimeStore } from '../../../stores/realtimeStore';
@@ -31,7 +30,7 @@ describe('TsDashboard', () => {
     const listSpy = vi.fn().mockResolvedValue([{ name: 'Basic', path: 'basic', default: true }]);
     const getSpy = vi.fn().mockResolvedValue(mockDashFile);
 
-    (invoke as unknown as vi.Mock).mockImplementation((cmd: string) => {
+    (invoke as unknown as any).mockImplementation((cmd: string) => {
       if (cmd === 'list_available_dashes') return listSpy();
       if (cmd === 'get_dash_file') return getSpy();
       if (cmd === 'get_available_channels') return Promise.resolve([{ name: 'RPM', units: 'rpm', label: 'RPM', scale: 1.0, translate: 0 }]);
@@ -70,7 +69,7 @@ describe('TsDashboard', () => {
     const listSpy = vi.fn().mockResolvedValue([{ name: 'Basic', path: 'basic', default: true }]);
     const getSpy = vi.fn().mockResolvedValue(mockDashFile);
 
-    (invoke as unknown as vi.Mock).mockImplementation((cmd: string) => {
+    (invoke as unknown as any).mockImplementation((cmd: string) => {
       if (cmd === 'list_available_dashes') return listSpy();
       if (cmd === 'get_dash_file') return getSpy();
       if (cmd === 'get_available_channels') return Promise.resolve([{ name: 'RPM', units: 'rpm', label: 'RPM', scale: 1.0, translate: 0 }]);

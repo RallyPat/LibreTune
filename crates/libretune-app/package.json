@@ -36,25 +36,25 @@
     "@types/three": "^0.182.0",
     "framer-motion": "^12.23.26",
     "lucide-react": "^0.562.0",
-    "react": "^19.1.0",
-    "react-dom": "^19.1.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
     "three": "^0.182.0",
     "zustand": "^5.0.10"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",
-    "@types/react": "^19.1.8",
-    "@types/react-dom": "^19.1.6",
+    "@testing-library/jest-dom": "^6.0.0",
+    "@testing-library/react": "^14.0.0",
+    "@testing-library/user-event": "^14.4.3",
+    "@types/jsdom": "^21.1.1",
+    "@types/react": "^18.2.8",
+    "@types/react-dom": "^18.2.4",
     "@vitejs/plugin-react": "^4.6.0",
+    "jsdom": "^22.1.0",
     "typedoc": "^0.27.0",
     "typedoc-plugin-missing-exports": "^3.0.0",
     "typescript": "~5.8.3",
     "vite": "^7.0.4",
-    "vitest": "^1.0.0",
-    "jsdom": "^22.1.0",
-    "@testing-library/react": "^14.0.0",
-    "@testing-library/user-event": "^14.4.3",
-    "@testing-library/jest-dom": "^6.0.0",
-    "@types/jsdom": "^21.1.1"
+    "vitest": "^1.0.0"
   }
 }

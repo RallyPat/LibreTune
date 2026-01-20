@@ -49,9 +49,19 @@ vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn(),
 }));
 
+// Stub heavy 3D libs to avoid React version mismatches and jsdom issues during tests
+vi.mock('@react-three/fiber', () => ({
+  Canvas: (props: any) => (props.children ? props.children : null),
+  useFrame: () => {},
+  useThree: () => ({}),
+}));
+vi.mock('@react-three/drei', () => ({
+  OrbitControls: () => null,
+}));
+
 // Provide a default mock for event.listen
 vi.mock('@tauri-apps/api/event', () => ({
-  listen: vi.fn(async (_event: string, handler: any) => {
+  listen: vi.fn(async (_event: string, _handler: any) => {
     // Return a no-op unlisten function
     return () => {};
   }),
