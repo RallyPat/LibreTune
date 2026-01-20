@@ -47,7 +47,7 @@ describe('App integration (toolbar connection-info)', () => {
   });
 
   it('shows packet mode and receives metrics when connected', async () => {
-    (invoke as unknown as vi.Mock).mockImplementation((cmd: string) => {
+    (invoke as unknown as any).mockImplementation((cmd: string) => {
       // Provide reasonable defaults for initialization & common commands
       switch (cmd) {
         case 'init_ini_repository':
@@ -129,7 +129,7 @@ describe('App integration (toolbar connection-info)', () => {
   });
 
   it('shows placeholder packet mode when disconnected', async () => {
-    (invoke as unknown as vi.Mock).mockImplementation((cmd: string) => {
+    (invoke as unknown as any).mockImplementation((cmd: string) => {
       if (cmd === 'get_connection_status') return Promise.resolve({ state: 'Disconnected', has_definition: false });
       return Promise.resolve();
     });
@@ -153,7 +153,7 @@ describe('App integration (toolbar connection-info)', () => {
   it('proceeds to sync on partial signature mismatch (advisory)', async () => {
     let syncCalled = false;
 
-    (invoke as unknown as vi.Mock).mockImplementation((cmd: string) => {
+    (invoke as unknown as any).mockImplementation((cmd: string) => {
       switch (cmd) {
         case 'get_settings':
           return Promise.resolve({ runtime_packet_mode: 'Auto', units_system: 'metric' });
@@ -231,7 +231,7 @@ describe('App integration (toolbar connection-info)', () => {
   it('auto-selects runtime packet mode (Auto → ForceOCH when INI supports OCH)', async () => {
     let connectArgs: any = null;
 
-    (invoke as unknown as vi.Mock).mockImplementation((cmd: string, args?: any) => {
+    (invoke as unknown as any).mockImplementation((cmd: string, args?: any) => {
       switch (cmd) {
         case 'get_settings':
           return Promise.resolve({ runtime_packet_mode: 'Auto', units_system: 'metric' });

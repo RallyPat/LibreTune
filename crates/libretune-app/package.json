@@ -20,7 +20,12 @@
     "docs:frontend": "typedoc",
     "docs:rust": "cd ../libretune-core && cargo doc --no-deps --open",
     "docs:user": "mdbook build ../../docs && mdbook serve ../../docs --open",
-    "docs:all": "bash ../../scripts/build-docs.sh"
+    "docs:all": "bash ../../scripts/build-docs.sh",
+    "test": "vitest",
+    "test:watch": "vitest --watch",
+    "test:run": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
     "@react-three/drei": "^10.7.7",
@@ -44,6 +49,12 @@
     "typedoc": "^0.27.0",
     "typedoc-plugin-missing-exports": "^3.0.0",
     "typescript": "~5.8.3",
-    "vite": "^7.0.4"
+    "vite": "^7.0.4",
+    "vitest": "^1.0.0",
+    "jsdom": "^22.1.0",
+    "@testing-library/react": "^14.0.0",
+    "@testing-library/user-event": "^14.4.3",
+    "@testing-library/jest-dom": "^6.0.0",
+    "@types/jsdom": "^21.1.1"
   }
 }

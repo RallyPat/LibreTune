@@ -27,7 +27,7 @@ describe('SettingsDialog', () => {
 
     render(
       <UnitPreferencesProvider>
-        <SettingsDialog isOpen={true} onClose={() => {}} onSettingsChange={() => {}} onThemeChange={() => {}} />
+        <SettingsDialog theme={'dark'} isOpen={true} onClose={() => {}} onSettingsChange={() => {}} onThemeChange={() => {}} />
       </UnitPreferencesProvider>
     );
 
@@ -66,9 +66,9 @@ describe('SettingsDialog', () => {
   it('clicking INI Change button opens file picker and updates filename', async () => {
     // Mock the plugin-dialog open function to return our chosen INI path
     const dialogModule = await import('@tauri-apps/plugin-dialog');
-    (dialogModule.open as unknown as vi.Mock).mockResolvedValue('/home/pat/definitions/new_def.ini');
+    (dialogModule.open as unknown as any).mockResolvedValue('/home/pat/definitions/new_def.ini');
 
-    (invoke as unknown as vi.Mock).mockImplementation((cmd: string) => {
+    (invoke as unknown as any).mockImplementation((cmd: string) => {
       if (cmd === 'get_settings') return Promise.resolve({ last_ini_path: '/home/pat/definitions/old_def.ini' });
       if (cmd === 'get_available_channels') return Promise.resolve([]);
       if (cmd === 'get_demo_mode') return Promise.resolve(false);
@@ -81,7 +81,7 @@ describe('SettingsDialog', () => {
 
     render(
       <UnitPreferencesProvider>
-        <SettingsDialog isOpen={true} onClose={() => {}} onSettingsChange={() => {}} onThemeChange={() => {}} currentProject={{ name: 'Test', path: '/proj', signature: 'sig', has_tune: true, tune_modified: false, connection: { port: null, baud_rate: 115200 } }} />
+        <SettingsDialog theme={'dark'} isOpen={true} onClose={() => {}} onSettingsChange={() => {}} onThemeChange={() => {}} currentProject={{ name: 'Test', path: '/proj', signature: 'sig', has_tune: true, tune_modified: false, connection: { port: null, baud_rate: 115200 } }} />
       </UnitPreferencesProvider>
     );
 
