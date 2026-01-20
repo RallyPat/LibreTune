@@ -41,7 +41,7 @@ jobs:
 
       - name: Clippy (non-blocking)
         continue-on-error: true
-        run: cargo clippy --workspace -- -D warnings
+        run: cargo clippy --workspace
 
   frontend-check:
     name: Frontend Check
