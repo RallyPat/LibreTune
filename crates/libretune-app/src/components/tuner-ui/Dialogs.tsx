@@ -6,7 +6,7 @@ import { HeatmapScheme, getAvailableSchemes } from '../../utils/heatmapColors';
 import { useUnitPreferences } from '../../utils/useUnitPreferences';
 import { TemperatureUnit, PressureUnit, AfrUnit, SpeedUnit, FuelType, STOICH_AFR } from '../../utils/unitConversions';
 import './Dialogs.css';
-import ConnectionMetrics from '../../components/layout/ConnectionMetrics';
+import ConnectionMetrics from '../layout/ConnectionMetrics';
 
 // =============================================================================
 // Dialog Types
