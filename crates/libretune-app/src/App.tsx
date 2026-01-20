@@ -1757,7 +1757,7 @@ function AppContent() {
         });
     };
 
-    const tuningMenus: TunerMenuItem[] = backendMenus.map((menu) => ({
+    const tuningMenus: TunerMenuItem[] = (backendMenus ?? []).map((menu) => ({
       id: menu.name,
       label: menu.title.replace(/^&/, ""),
       items: convertMenuItems(menu.items, menu.name),
@@ -1932,7 +1932,7 @@ function AppContent() {
   const sidebarItems: SidebarNode[] = useMemo(() => {
     // Build menu-based sidebar items from INI menus
     // Curves are accessed via their parent dialogs (e.g., Fuel > Injection configuration)
-    const menuItems: SidebarNode[] = backendMenus.map((menu) => ({
+    const menuItems: SidebarNode[] = (backendMenus ?? []).map((menu) => ({
       id: menu.name,
       label: menu.title.replace(/^&/, ""),
       type: "folder" as const,
