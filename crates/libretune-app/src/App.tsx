@@ -86,6 +86,7 @@ interface CurrentProject {
   connection: {
     port: string | null;
     baud_rate: number;
+    auto_connect: boolean;
   };
 }
 
@@ -1044,6 +1045,20 @@ function AppContent() {
       const newStatus = await invoke<ConnectionStatus>("get_connection_status");
       if (newStatus.state === "Connected" && newStatus.has_definition) {
         await doSync();
+        
+        // Save the successful connection port to project config
+        if (currentProject) {
+          try {
+            await invoke("update_project_connection", {
+              port: selectedPort,
+              baudRate: baudRate,
+            });
+            console.log("Saved connection settings to project");
+          } catch (saveError) {
+            console.error("Failed to save connection settings:", saveError);
+            // Don't show error to user as connection was successful
+          }
+        }
       }
     } catch (e) {
       // IMPORTANT: Always check status after connection attempt, even on error
@@ -1183,6 +1198,21 @@ function AppContent() {
       } catch (menuError) {
         console.error("Failed to load menus:", menuError);
         showToast("Project opened but menu loading failed. Some features may be unavailable.", "warning");
+      }
+      
+      // Auto-connect if enabled and port is set
+      if (project.connection.auto_connect && project.connection.port) {
+        hideLoading(); // Hide the project loading first
+        showToast("Auto-connecting to ECU...", "info");
+        // Small delay to let the UI update
+        setTimeout(async () => {
+          try {
+            await connect();
+          } catch (e) {
+            console.error("Auto-connect failed:", e);
+            // Don't show error toast as connect() already does that
+          }
+        }, 500);
       }
     } catch (e) {
       const { message, details } = formatError(e);

@@ -81,7 +81,7 @@ describe('SettingsDialog', () => {
 
     render(
       <UnitPreferencesProvider>
-        <SettingsDialog theme={'dark'} isOpen={true} onClose={() => {}} onSettingsChange={() => {}} onThemeChange={() => {}} currentProject={{ name: 'Test', path: '/proj', signature: 'sig', has_tune: true, tune_modified: false, connection: { port: null, baud_rate: 115200 } }} />
+        <SettingsDialog theme={'dark'} isOpen={true} onClose={() => {}} onSettingsChange={() => {}} onThemeChange={() => {}} currentProject={{ name: 'Test', path: '/proj', signature: 'sig', has_tune: true, tune_modified: false, connection: { port: null, baud_rate: 115200, auto_connect: false } }} />
       </UnitPreferencesProvider>
     );
 
