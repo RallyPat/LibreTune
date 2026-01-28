@@ -5,7 +5,7 @@
 
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { AlertTriangle, Check, X, Download, RefreshCw, Globe, Wifi, WifiOff } from "lucide-react";
+import { AlertTriangle, Check, X, Download, RefreshCw, Globe, Wifi, WifiOff, Save, HelpCircle } from "lucide-react";
 import "./SignatureMismatchDialog.css";
 
 export interface MatchingIniInfo {
@@ -49,6 +49,7 @@ export default function SignatureMismatchDialog({
 }: Props) {
   const [selectedIni, setSelectedIni] = useState<string | null>(null);
   const [switching, setSwitching] = useState(false);
+  const [savingTune, setSavingTune] = useState(false);
   
   // Online search state
   const [showOnlineSearch, setShowOnlineSearch] = useState(false);
@@ -122,6 +123,31 @@ export default function SignatureMismatchDialog({
     }
   };
 
+  const handleSaveEcuTune = async () => {
+    setSavingTune(true);
+    
+    try {
+      // Sync ECU data first
+      await invoke("sync_ecu_data");
+      
+      // Save the current tune with a timestamp
+      const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, -5);
+      const filename = `ecu_backup_${timestamp}.msq`;
+      
+      await invoke("save_tune", {
+        filename,
+        includeMetadata: true,
+      });
+      
+      alert(`ECU tune saved successfully as ${filename}`);
+    } catch (e) {
+      console.error("Failed to save ECU tune:", e);
+      alert(`Failed to save ECU tune: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setSavingTune(false);
+    }
+  };
+
   if (!isOpen || !mismatchInfo) return null;
 
   const handleSelectIni = async () => {
@@ -173,9 +199,34 @@ export default function SignatureMismatchDialog({
 
           <p className="warning-text">
             {mismatchInfo.match_type === "partial"
-              ? "The ECU signature partially matches the loaded INI file. This may indicate a version difference."
+              ? "The ECU signature partially matches the loaded INI file. This usually means the ECU firmware and INI file are from different versions of the same platform (e.g., different release dates). Using a partial match may work, but some features might not display correctly."
               : "The ECU signature does not match the loaded INI file. Using the wrong INI may cause read/write errors or incorrect data display."}
           </p>
+
+          {/* Save ECU Tune First Option */}
+          <div className="save-ecu-option">
+            <button 
+              className="save-ecu-btn" 
+              onClick={handleSaveEcuTune}
+              disabled={savingTune}
+            >
+              {savingTune ? (
+                <>
+                  <RefreshCw size={16} className="spinning" />
+                  Saving ECU Tune...
+                </>
+              ) : (
+                <>
+                  <Save size={16} />
+                  Download Current ECU Tune First
+                </>
+              )}
+            </button>
+            <p className="save-ecu-hint">
+              <HelpCircle size={14} />
+              Save your current ECU tune to your PC before switching INI files. This protects your existing tune.
+            </p>
+          </div>
 
           {!showOnlineSearch ? (
             <>
@@ -203,7 +254,13 @@ export default function SignatureMismatchDialog({
                               <Check size={12} /> Exact
                             </span>
                           ) : (
-                            <span className="badge partial">Partial</span>
+                            <span 
+                              className="badge partial" 
+                              title="Partial match: The signature prefix matches but version differs. May work with limited compatibility."
+                            >
+                              Partial
+                              <HelpCircle size={12} className="help-icon" />
+                            </span>
                           )}
                         </div>
                       </div>
@@ -328,7 +385,11 @@ export default function SignatureMismatchDialog({
               )}
             </button>
           )}
-          <button className="action-btn secondary" onClick={onContinue}>
+          <button 
+            className="action-btn secondary" 
+            onClick={onContinue}
+            title="Continue with current INI despite mismatch (not recommended)"
+          >
             Continue Anyway
           </button>
           <button className="action-btn cancel" onClick={onClose}>
