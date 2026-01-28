@@ -8828,6 +8828,7 @@ async fn create_project(
         connection: ConnectionSettingsResponse {
             port: project.config.connection.port.clone(),
             baud_rate: project.config.connection.baud_rate,
+            auto_connect: project.config.settings.auto_connect,
         },
     };
 
@@ -9334,6 +9335,7 @@ async fn get_current_project(
         connection: ConnectionSettingsResponse {
             port: project.config.connection.port.clone(),
             baud_rate: project.config.connection.baud_rate,
+            auto_connect: project.config.settings.auto_connect,
         },
     }))
 }
@@ -9844,6 +9846,7 @@ async fn import_tunerstudio_project(
         connection: ConnectionSettingsResponse {
             port: project.config.connection.port.clone(),
             baud_rate: project.config.connection.baud_rate,
+            auto_connect: project.config.settings.auto_connect,
         },
     };
 
@@ -10312,6 +10315,7 @@ async fn create_project_from_template(
         connection: ConnectionSettingsResponse {
             port: project.config.connection.port.clone(),
             baud_rate: project.config.connection.baud_rate,
+            auto_connect: project.config.settings.auto_connect,
         },
     };
 
