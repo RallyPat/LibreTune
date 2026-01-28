@@ -225,6 +225,24 @@
 .match-badge .badge.partial {
   background: rgba(240, 173, 78, 0.2);
   color: #f0ad4e;
+  cursor: help;
+  position: relative;
+  outline: none;
+}
+
+.match-badge .badge.partial:focus {
+  outline: 2px solid #f0ad4e;
+  outline-offset: 2px;
+}
+
+.match-badge .badge.partial .help-icon {
+  margin-left: 4px;
+  opacity: 0.7;
+}
+
+.match-badge .badge.partial:hover .help-icon,
+.match-badge .badge.partial:focus .help-icon {
+  opacity: 1;
 }
 
 .no-matches {
@@ -420,6 +438,8 @@
   padding: 16px 20px;
   border-top: 1px solid var(--border-color, #3c3c3c);
   justify-content: flex-end;
+  flex-wrap: wrap;
+  align-items: center;
 }
 
 .action-btn {
@@ -479,4 +499,59 @@
   to {
     transform: rotate(360deg);
   }
+}
+
+/* Save ECU Tune Option */
+.save-ecu-option {
+  background: rgba(74, 158, 255, 0.08);
+  border: 1px solid rgba(74, 158, 255, 0.2);
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 20px;
+}
+
+.save-ecu-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  background: var(--primary-color, #4a9eff);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s;
+  width: 100%;
+  justify-content: center;
+  margin-bottom: 12px;
+}
+
+.save-ecu-btn:hover:not(:disabled) {
+  background: var(--primary-hover, #3a8eef);
+}
+
+.save-ecu-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.save-ecu-hint {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0;
+  padding: 8px 12px;
+  background: var(--surface-darker, #161616);
+  border-radius: 6px;
+  color: var(--text-secondary, #aaa);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.save-ecu-hint svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: #4a9eff;
 }
