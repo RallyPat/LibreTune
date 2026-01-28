@@ -127,22 +127,35 @@ export default function SignatureMismatchDialog({
     setSavingTune(true);
     
     try {
-      // Sync ECU data first
-      await invoke("sync_ecu_data");
+      // Step 1: Sync ECU data first
+      try {
+        await invoke("sync_ecu_data");
+      } catch (syncError) {
+        throw new Error(
+          `Failed to read tune from ECU: ${syncError instanceof Error ? syncError.message : String(syncError)}. ` +
+          `Please ensure the ECU is connected.`
+        );
+      }
       
-      // Save the current tune with a timestamp
+      // Step 2: Save the current tune with a timestamp
       const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, -5);
       const filename = `ecu_backup_${timestamp}.msq`;
       
-      await invoke("save_tune", {
-        filename,
-        includeMetadata: true,
-      });
+      try {
+        await invoke("save_tune", {
+          filename,
+          includeMetadata: true, // Include metadata for complete backup
+        });
+      } catch (saveError) {
+        throw new Error(
+          `Failed to save tune file: ${saveError instanceof Error ? saveError.message : String(saveError)}`
+        );
+      }
       
-      alert(`ECU tune saved successfully as ${filename}`);
+      alert(`✓ ECU tune saved successfully as:\n${filename}\n\nYou can now safely switch INI files.`);
     } catch (e) {
       console.error("Failed to save ECU tune:", e);
-      alert(`Failed to save ECU tune: ${e instanceof Error ? e.message : String(e)}`);
+      alert(`✗ ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setSavingTune(false);
     }
@@ -209,6 +222,7 @@ export default function SignatureMismatchDialog({
               className="save-ecu-btn" 
               onClick={handleSaveEcuTune}
               disabled={savingTune}
+              aria-label="Save current ECU tune to PC before switching INI files"
             >
               {savingTune ? (
                 <>
@@ -218,7 +232,7 @@ export default function SignatureMismatchDialog({
               ) : (
                 <>
                   <Save size={16} />
-                  Download Current ECU Tune First
+                  Save Current ECU Tune First
                 </>
               )}
             </button>
@@ -257,6 +271,9 @@ export default function SignatureMismatchDialog({
                             <span 
                               className="badge partial" 
                               title="Partial match: The signature prefix matches but version differs. May work with limited compatibility."
+                              tabIndex={0}
+                              role="tooltip"
+                              aria-label="Partial match information"
                             >
                               Partial
                               <HelpCircle size={12} className="help-icon" />

@@ -227,6 +227,12 @@
   color: #f0ad4e;
   cursor: help;
   position: relative;
+  outline: none;
+}
+
+.match-badge .badge.partial:focus {
+  outline: 2px solid #f0ad4e;
+  outline-offset: 2px;
 }
 
 .match-badge .badge.partial .help-icon {
@@ -234,7 +240,8 @@
   opacity: 0.7;
 }
 
-.match-badge .badge.partial:hover .help-icon {
+.match-badge .badge.partial:hover .help-icon,
+.match-badge .badge.partial:focus .help-icon {
   opacity: 1;
 }
 
