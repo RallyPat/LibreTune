@@ -440,6 +440,7 @@ interface CurrentProject {
   connection: {
     port: string | null;
     baud_rate: number;
+    auto_connect: boolean;
   };
 }
 
@@ -483,6 +484,9 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
   // Auto-reconnect setting: whether to automatically sync & reconnect after controller commands
   const [autoReconnectAfterControllerCommand, setAutoReconnectAfterControllerCommand] = useState<boolean>(false);
   
+  // Project-specific settings
+  const [autoConnect, setAutoConnect] = useState(false);
+  
   // Unit preferences from context
   const unitPrefs = useUnitPreferences();
   
@@ -517,6 +521,11 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
         if (settings.auto_reconnect_after_controller_command !== undefined) setAutoReconnectAfterControllerCommand(!!settings.auto_reconnect_after_controller_command);
       }).catch(console.error);
 
+      // Load project-specific settings
+      if (currentProject) {
+        setAutoConnect(currentProject.connection.auto_connect);
+      }
+
       // Load available output channels from ECU definition
       // Backend returns ChannelInfo[]; normalize to string[] (channel names) to avoid render errors
       invoke<any[]>('get_available_channels').then((channels) => {
@@ -537,7 +546,7 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
         .then((v) => setDemoMode(!!v))
         .catch(console.error);
     }
-  }, [theme, isOpen]);
+  }, [theme, isOpen, currentProject]);
 
   const handleDemoToggle = useCallback(async (enabled: boolean) => {
     setDemoLoading(true);
@@ -625,9 +634,19 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
     // Update runtime packet mode
     await invoke('update_setting', { key: 'runtime_packet_mode', value: runtimePacketMode });
     await invoke('update_setting', { key: 'auto_reconnect_after_controller_command', value: autoReconnectAfterControllerCommand.toString() });
+    
+    // Update project-specific settings
+    if (currentProject) {
+      try {
+        await invoke('update_project_auto_connect', { autoConnect });
+      } catch (e) {
+        console.error('Failed to update auto-connect setting:', e);
+      }
+    }
+    
     onSettingsChange?.({ units: localUnits, autoBurnOnClose, indicatorColumnCount, indicatorFillEmpty, indicatorTextFit, statusBarChannels, runtimePacketMode });
     onClose();
-  }, [localTheme, localUnits, autoBurnOnClose, statusBarChannels, indicatorColumnCount, indicatorFillEmpty, indicatorTextFit, heatmapValueScheme, heatmapChangeScheme, heatmapCoverageScheme, gaugeSnapToGrid, gaugeFreeMove, gaugeLock, autoCommitOnSave, commitMessageFormat, runtimePacketMode, onThemeChange, onSettingsChange, onClose]);
+  }, [localTheme, localUnits, autoBurnOnClose, statusBarChannels, indicatorColumnCount, indicatorFillEmpty, indicatorTextFit, heatmapValueScheme, heatmapChangeScheme, heatmapCoverageScheme, gaugeSnapToGrid, gaugeFreeMove, gaugeLock, autoCommitOnSave, commitMessageFormat, runtimePacketMode, autoReconnectAfterControllerCommand, autoConnect, currentProject, onThemeChange, onSettingsChange, onClose]);
 
   if (!isOpen) return null;
 
@@ -879,6 +898,20 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
           {currentProject && (
             <>
               <h3 style={{ marginTop: '1.5rem', marginBottom: '0.5rem' }}>Project Settings</h3>
+              
+              <div className="dialog-form-group">
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={autoConnect}
+                    onChange={(e) => setAutoConnect(e.target.checked)}
+                  />
+                  {' '}Auto-connect to ECU on project open
+                </label>
+                <span className="dialog-form-note">
+                  When enabled, LibreTune will automatically attempt to connect to the last used COM port when opening this project.
+                </span>
+              </div>
               
               <div className="dialog-form-group">
                 <label>ECU Definition (INI File)</label>

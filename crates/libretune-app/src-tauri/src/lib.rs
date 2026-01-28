@@ -8646,6 +8646,7 @@ struct CurrentProjectInfo {
 struct ConnectionSettingsResponse {
     port: Option<String>,
     baud_rate: u32,
+    auto_connect: bool,
 }
 
 /// Get the path to the projects directory
@@ -8891,6 +8892,7 @@ async fn open_project(
         connection: ConnectionSettingsResponse {
             port: project.config.connection.port.clone(),
             baud_rate: project.config.connection.baud_rate,
+            auto_connect: project.config.settings.auto_connect,
         },
     };
 
@@ -9358,6 +9360,25 @@ async fn update_project_connection(
 
     project.config.connection.port = port;
     project.config.connection.baud_rate = baud_rate;
+    project
+        .save_config()
+        .map_err(|e| format!("Failed to save project config: {}", e))?;
+
+    Ok(())
+}
+
+/// Update the auto-connect setting for the current project
+#[tauri::command]
+async fn update_project_auto_connect(
+    state: tauri::State<'_, AppState>,
+    auto_connect: bool,
+) -> Result<(), String> {
+    let mut proj_guard = state.current_project.lock().await;
+    let project = proj_guard
+        .as_mut()
+        .ok_or_else(|| "No project open".to_string())?;
+
+    project.config.settings.auto_connect = auto_connect;
     project
         .save_config()
         .map_err(|e| format!("Failed to save project config: {}", e))?;
@@ -11728,6 +11749,7 @@ pub fn run() {
             close_project,
             get_current_project,
             update_project_connection,
+            update_project_auto_connect,
             // Restore points commands
             create_restore_point,
             list_restore_points,
