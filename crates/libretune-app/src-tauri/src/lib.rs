@@ -5792,6 +5792,49 @@ async fn get_dash_file(path: String) -> Result<DashFile, String> {
     Ok(dash_file)
 }
 
+/// Validate a dashboard file and return a detailed report
+#[tauri::command]
+async fn validate_dashboard(
+    dash_file: DashFile,
+    project_name: Option<String>,
+    app: tauri::AppHandle,
+) -> Result<dash::ValidationReport, String> {
+    println!("[validate_dashboard] Validating dashboard");
+
+    // Load ECU definition if project name is provided
+    let ecu_def = if let Some(ref proj_name) = project_name {
+        let project_dir = get_projects_dir(&app).join(proj_name);
+        let ini_path = project_dir.join("definition.ini");
+
+        if ini_path.exists() {
+            match EcuDefinition::from_file(ini_path.to_string_lossy().as_ref()) {
+                Ok(def) => Some(def),
+                Err(e) => {
+                    println!(
+                        "[validate_dashboard] Warning: Could not load INI for validation: {}",
+                        e
+                    );
+                    None
+                }
+            }
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    let report = dash::validate_dashboard(&dash_file, ecu_def.as_ref());
+
+    println!(
+        "[validate_dashboard] Validation complete: {} errors, {} warnings",
+        report.errors.len(),
+        report.warnings.len()
+    );
+
+    Ok(report)
+}
+
 /// Save a TS .dash or .gauge file directly to a path
 #[tauri::command]
 async fn save_dash_file(path: String, dash_file: DashFile) -> Result<(), String> {
@@ -11697,6 +11740,7 @@ pub fn run() {
             get_dashboard_templates,
             load_tunerstudio_dash,
             get_dash_file,
+            validate_dashboard,
             save_dash_file,
             list_available_dashes,
             check_dash_conflict,

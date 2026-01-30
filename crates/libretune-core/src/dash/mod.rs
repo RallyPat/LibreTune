@@ -6,9 +6,11 @@
 mod parser;
 mod templates;
 mod types;
+mod validation;
 mod writer;
 
 pub use parser::*;
 pub use templates::*;
 pub use types::*;
+pub use validation::*;
 pub use writer::*;

@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<dashboard>
+  <title>Basic Dashboard</title>
+  <width>800</width>
+  <height>480</height>
+  <backgroundColor>-16777216</backgroundColor>
+  
+  <gaugeCluster>
+    <!-- RPM Tachometer -->
+    <dashComp type="Gauge">
+      <Title>Engine Speed</Title>
+      <OutputChannel>rpm</OutputChannel>
+      <Min>0</Min>
+      <Max>8000</Max>
+      <MinorTick>250</MinorTick>
+      <MajorTick>1000</MajorTick>
+      <WarnThreshold>6500</WarnThreshold>
+      <CritThreshold>7200</CritThreshold>
+      <GaugePainter>Tachometer</GaugePainter>
+      <RelativeX>0.0125</RelativeX>
+      <RelativeY>0.02</RelativeY>
+      <RelativeWidth>0.375</RelativeWidth>
+      <RelativeHeight>0.625</RelativeHeight>
+      <Units>rpm</Units>
+      <ValueDigits>0</ValueDigits>
+      <BackColor>-16777216</BackColor>
+      <TrimColor>-6710887</TrimColor>
+      <FontColor>-1</FontColor>
+      <NeedleColor>-65536</NeedleColor>
+      <PegLimits>true</PegLimits>
+    </dashComp>
+    
+    <!-- Coolant Temp Bar -->
+    <dashComp type="Gauge">
+      <Title>Coolant Temp</Title>
+      <OutputChannel>coolant</OutputChannel>
+      <Min>0</Min>
+      <Max>120</Max>
+      <MinorTick>10</MinorTick>
+      <MajorTick>20</MajorTick>
+      <HighWarning>100</HighWarning>
+      <HighCritical>110</HighCritical>
+      <GaugePainter>Vertical Bar Gauge</GaugePainter>
+      <RelativeX>0.4</RelativeX>
+      <RelativeY>0.02</RelativeY>
+      <RelativeWidth>0.1</RelativeWidth>
+      <RelativeHeight>0.625</RelativeHeight>
+      <Units>°C</Units>
+      <ValueDigits>1</ValueDigits>
+      <BackColor>-16777216</BackColor>
+      <TrimColor>-6710887</TrimColor>
+      <FontColor>-1</FontColor>
+      <NeedleColor>-16776961</NeedleColor>
+      <PegLimits>false</PegLimits>
+    </dashComp>
+    
+    <!-- AFR Digital Readout -->
+    <dashComp type="Gauge">
+      <Title>Air/Fuel Ratio</Title>
+      <OutputChannel>afr</OutputChannel>
+      <Min>10</Min>
+      <Max>20</Max>
+      <MinorTick>0.5</MinorTick>
+      <MajorTick>1</MajorTick>
+      <LowWarning>12</LowWarning>
+      <LowCritical>11</LowCritical>
+      <GaugePainter>Basic Readout</GaugePainter>
+      <RelativeX>0.525</RelativeX>
+      <RelativeY>0.02</RelativeY>
+      <RelativeWidth>0.225</RelativeWidth>
+      <RelativeHeight>0.208</RelativeHeight>
+      <Units>AFR</Units>
+      <ValueDigits>2</ValueDigits>
+      <BackColor>-16777216</BackColor>
+      <TrimColor>-6710887</TrimColor>
+      <FontColor>-1</FontColor>
+      <NeedleColor>-16711936</NeedleColor>
+      <PegLimits>false</PegLimits>
+    </dashComp>
+    
+    <!-- MAP Sweep Gauge -->
+    <dashComp type="Gauge">
+      <Title>Manifold Pressure</Title>
+      <OutputChannel>map</OutputChannel>
+      <Min>0</Min>
+      <Max>300</Max>
+      <MinorTick>20</MinorTick>
+      <MajorTick>50</MajorTick>
+      <HighWarning>250</HighWarning>
+      <HighCritical>280</HighCritical>
+      <GaugePainter>Asymetric Sweep Gauge</GaugePainter>
+      <RelativeX>0.525</RelativeX>
+      <RelativeY>0.25</RelativeY>
+      <RelativeWidth>0.4625</RelativeWidth>
+      <RelativeHeight>0.395</RelativeHeight>
+      <Units>kPa</Units>
+      <ValueDigits>1</ValueDigits>
+      <BackColor>-16777216</BackColor>
+      <TrimColor>-6710887</TrimColor>
+      <FontColor>-1</FontColor>
+      <NeedleColor>-256</NeedleColor>
+      <PegLimits>false</PegLimits>
+    </dashComp>
+    
+    <!-- Battery Voltage Indicator -->
+    <dashComp type="Indicator">
+      <OnText>Battery OK</OnText>
+      <OffText>Low Batt</OffText>
+      <OutputChannel>battery</OutputChannel>
+      <Condition>battery &gt; 12.0</Condition>
+      <Painter>Bulb Indicator</Painter>
+      <RelativeX>0.0125</RelativeX>
+      <RelativeY>0.666</RelativeY>
+      <RelativeWidth>0.075</RelativeWidth>
+      <RelativeHeight>0.125</RelativeHeight>
+      <OnBackgroundColor>-16711936</OnBackgroundColor>
+      <OffBackgroundColor>-8355712</OffBackgroundColor>
+    </dashComp>
+    
+    <!-- Check Engine Light -->
+    <dashComp type="Indicator">
+      <OnText>Check Engine</OnText>
+      <OffText>OK</OffText>
+      <OutputChannel>error_code</OutputChannel>
+      <Condition>error_code &gt; 0</Condition>
+      <Painter>Basic Rectangle Indicator</Painter>
+      <RelativeX>0.1</RelativeX>
+      <RelativeY>0.666</RelativeY>
+      <RelativeWidth>0.125</RelativeWidth>
+      <RelativeHeight>0.125</RelativeHeight>
+      <OnBackgroundColor>-65536</OnBackgroundColor>
+      <OffBackgroundColor>-8355712</OffBackgroundColor>
+    </dashComp>
+  </gaugeCluster>
+</dashboard>
