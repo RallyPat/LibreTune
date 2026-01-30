@@ -13,35 +13,32 @@ use thiserror::Error;
 pub enum ValidationError {
     #[error("Gauge '{gauge_id}' references unknown output channel '{channel}'")]
     UnknownOutputChannel { gauge_id: String, channel: String },
-    
+
     #[error("Gauge '{gauge_id}' has invalid range: min={min} >= max={max}")]
     InvalidRange {
         gauge_id: String,
         min: f64,
         max: f64,
     },
-    
+
     #[error("Gauge '{gauge_id}' references missing embedded image '{image_name}'")]
     MissingEmbeddedImage {
         gauge_id: String,
         image_name: String,
     },
-    
+
     #[error("Gauge '{gauge_id}' has overlapping position with '{other_id}'")]
-    OverlappingGauges {
-        gauge_id: String,
-        other_id: String,
-    },
-    
+    OverlappingGauges { gauge_id: String, other_id: String },
+
     #[error("Indicator '{indicator_id}' references unknown output channel '{channel}'")]
     UnknownIndicatorChannel {
         indicator_id: String,
         channel: String,
     },
-    
+
     #[error("Dashboard has no gauges or indicators")]
     EmptyDashboard,
-    
+
     #[error("Gauge '{gauge_id}' uses unsupported painter type (will render as BasicReadout)")]
     UnsupportedPainter { gauge_id: String },
 }
@@ -87,12 +84,12 @@ impl ValidationReport {
     pub fn has_errors(&self) -> bool {
         !self.errors.is_empty()
     }
-    
+
     /// Returns true if there are any warnings.
     pub fn has_warnings(&self) -> bool {
         !self.warnings.is_empty()
     }
-    
+
     /// Returns true if the dashboard is valid (no errors).
     pub fn is_valid(&self) -> bool {
         !self.has_errors()
@@ -103,16 +100,11 @@ impl ValidationReport {
 pub fn validate_dashboard(dash: &DashFile, ecu_def: Option<&EcuDefinition>) -> ValidationReport {
     let mut errors = Vec::new();
     let mut warnings = Vec::new();
-    
+
     // Collect available output channels from INI if provided
-    let available_channels: Option<HashSet<String>> = ecu_def.map(|def| {
-        def
-            .output_channels
-            .keys()
-            .cloned()
-            .collect()
-    });
-    
+    let available_channels: Option<HashSet<String>> =
+        ecu_def.map(|def| def.output_channels.keys().cloned().collect());
+
     // Collect all embedded image names for reference validation
     let embedded_images: HashSet<String> = dash
         .gauge_cluster
@@ -120,18 +112,18 @@ pub fn validate_dashboard(dash: &DashFile, ecu_def: Option<&EcuDefinition>) -> V
         .iter()
         .map(|img| img.file_name.clone())
         .collect();
-    
+
     let components = &dash.gauge_cluster.components;
-    
+
     // Check for empty dashboard
     if components.is_empty() {
         errors.push(ValidationError::EmptyDashboard);
     }
-    
+
     // Track unique channels and check each component
     let mut unique_channels = HashSet::new();
     let mut gauge_positions: Vec<(String, f64, f64, f64, f64)> = Vec::new();
-    
+
     for component in components {
         match component {
             DashComponent::Gauge(gauge) => {
@@ -143,7 +135,7 @@ pub fn validate_dashboard(dash: &DashFile, ecu_def: Option<&EcuDefinition>) -> V
                     &mut warnings,
                     &mut unique_channels,
                 );
-                
+
                 // Track position for overlap detection
                 gauge_positions.push((
                     gauge.id.clone(),
@@ -164,17 +156,17 @@ pub fn validate_dashboard(dash: &DashFile, ecu_def: Option<&EcuDefinition>) -> V
             }
         }
     }
-    
+
     // Check for overlapping gauges (warning, not error)
     check_overlaps(&gauge_positions, &mut warnings);
-    
+
     // Performance warning for large dashboards
     if components.len() > 50 {
         warnings.push(ValidationWarning::PerformanceWarning {
             component_count: components.len(),
         });
     }
-    
+
     // Build statistics
     let stats = DashboardStats {
         gauge_count: components
@@ -193,7 +185,7 @@ pub fn validate_dashboard(dash: &DashFile, ecu_def: Option<&EcuDefinition>) -> V
             .iter()
             .any(|img| img.resource_type == crate::dash::ResourceType::Ttf),
     };
-    
+
     ValidationReport {
         errors,
         warnings,
@@ -212,7 +204,7 @@ fn validate_gauge(
     // Check output channel exists
     if !gauge.output_channel.is_empty() {
         unique_channels.insert(gauge.output_channel.clone());
-        
+
         if let Some(ref channels) = available_channels {
             if !channels.contains(&gauge.output_channel) {
                 errors.push(ValidationError::UnknownOutputChannel {
@@ -222,7 +214,7 @@ fn validate_gauge(
             }
         }
     }
-    
+
     // Check min/max range
     if gauge.min >= gauge.max {
         errors.push(ValidationError::InvalidRange {
@@ -231,7 +223,7 @@ fn validate_gauge(
             max: gauge.max,
         });
     }
-    
+
     // Check embedded image references
     if let Some(ref img_name) = gauge.background_image_file_name {
         if !embedded_images.contains(img_name) {
@@ -249,16 +241,17 @@ fn validate_gauge(
             });
         }
     }
-    
+
     // Check gauge size
     if gauge.relative_width < 0.05 || gauge.relative_height < 0.05 {
         warnings.push(ValidationWarning::TinyGauge {
             gauge_id: gauge.id.clone(),
         });
     }
-    
+
     // Check if gauge extends beyond bounds
-    if gauge.relative_x + gauge.relative_width > 1.0 || gauge.relative_y + gauge.relative_height > 1.0
+    if gauge.relative_x + gauge.relative_width > 1.0
+        || gauge.relative_y + gauge.relative_height > 1.0
     {
         warnings.push(ValidationWarning::OutOfBounds {
             gauge_id: gauge.id.clone(),
@@ -276,7 +269,7 @@ fn validate_indicator(
     // Check output channel exists
     if !indicator.output_channel.is_empty() {
         unique_channels.insert(indicator.output_channel.clone());
-        
+
         if let Some(ref channels) = available_channels {
             if !channels.contains(&indicator.output_channel) {
                 errors.push(ValidationError::UnknownIndicatorChannel {
@@ -296,7 +289,7 @@ fn check_overlaps(
         for j in (i + 1)..positions.len() {
             let (id1, x1, y1, w1, h1) = &positions[i];
             let (id2, x2, y2, w2, h2) = &positions[j];
-            
+
             // Check for rectangle overlap
             if rectangles_overlap(*x1, *y1, *w1, *h1, *x2, *y2, *w2, *h2) {
                 warnings.push(ValidationWarning::OverlappingGauges {
@@ -330,14 +323,14 @@ mod tests {
     fn test_empty_dashboard_error() {
         let dash = DashFile::default();
         let report = validate_dashboard(&dash, None);
-        
+
         assert!(report.has_errors());
         assert!(matches!(
             report.errors.first(),
             Some(ValidationError::EmptyDashboard)
         ));
     }
-    
+
     #[test]
     fn test_invalid_range_error() {
         let mut dash = DashFile::default();
@@ -345,17 +338,17 @@ mod tests {
         gauge.id = "test_gauge".to_string();
         gauge.min = 100.0;
         gauge.max = 50.0; // Invalid: min > max
-        
+
         dash.gauge_cluster
             .components
             .push(DashComponent::Gauge(Box::new(gauge)));
-        
+
         let report = validate_dashboard(&dash, None);
-        
+
         assert!(report.has_errors());
-        assert!(report.errors.iter().any(|e| matches!(
-            e,
-            ValidationError::InvalidRange { .. }
-        )));
+        assert!(report
+            .errors
+            .iter()
+            .any(|e| matches!(e, ValidationError::InvalidRange { .. })));
     }
 }
