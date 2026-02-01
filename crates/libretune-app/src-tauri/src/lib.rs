@@ -322,6 +322,8 @@ struct AppState {
     // Cached output channels to avoid repeated cloning in realtime streaming loop
     // This is an Arc-wrapped copy that is updated whenever definition is loaded/changed
     cached_output_channels: Mutex<Option<Arc<HashMap<String, libretune_core::ini::OutputChannel>>>>,
+    // Console command history for rusEFI/FOME/epicEFI console
+    console_history: Mutex<Vec<String>>,
 }
 
 /// AutoTune configuration stored when tuning session starts
@@ -1782,6 +1784,70 @@ async fn get_connection_status(
         ini_name: def_guard.as_ref().map(|d| d.signature.clone()),
         demo_mode,
     })
+}
+
+/// Get the current ECU type (for console and other ECU-specific features)
+/// Returns EcuType as a string: "Speeduino", "RusEFI", "FOME", "EpicEFI", "MS2", "MS3", or "Unknown"
+#[tauri::command]
+async fn get_ecu_type(state: tauri::State<'_, AppState>) -> Result<String, String> {
+    let def_guard = state.definition.lock().await;
+    let def = def_guard.as_ref().ok_or("No INI definition loaded")?;
+    
+    Ok(format!("{:?}", def.ecu_type))
+}
+
+/// Send a console command to the ECU (rusEFI/FOME/epicEFI only)
+/// 
+/// Returns the response from the ECU as a string with trailing whitespace trimmed.
+/// The command is automatically appended with a newline for transmission.
+#[tauri::command]
+async fn send_console_command(
+    state: tauri::State<'_, AppState>,
+    command: String,
+) -> Result<String, String> {
+    let mut conn_guard = state.connection.lock().await;
+    let conn = conn_guard.as_mut().ok_or("Not connected to ECU")?;
+    
+    let def_guard = state.definition.lock().await;
+    let def = def_guard.as_ref().ok_or("No INI definition loaded")?;
+    
+    // Check if ECU supports console
+    if !def.ecu_type.supports_console() {
+        return Err(format!(
+            "ECU type {:?} does not support text-based console",
+            def.ecu_type
+        ));
+    }
+    
+    // Create and send console command
+    let console_cmd = libretune_core::protocol::ConsoleCommand::new(command.clone());
+    let response = conn.send_console_command(&console_cmd)
+        .map_err(|e| format!("Console command failed: {}", e))?;
+    
+    // Add to history
+    let mut history = state.console_history.lock().await;
+    history.push(format!("{}: {}", command, &response));
+    // Keep history size reasonable (max 1000 entries)
+    if history.len() > 1000 {
+        history.remove(0);
+    }
+    
+    Ok(response)
+}
+
+/// Get console command history
+#[tauri::command]
+async fn get_console_history(state: tauri::State<'_, AppState>) -> Result<Vec<String>, String> {
+    let history = state.console_history.lock().await;
+    Ok(history.clone())
+}
+
+/// Clear console command history
+#[tauri::command]
+async fn clear_console_history(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    let mut history = state.console_history.lock().await;
+    history.clear();
+    Ok(())
 }
 
 /// Retrieves the path to the last-used INI file from settings.
@@ -11745,7 +11811,11 @@ pub fn run() {
             controller_bridge: Mutex::new(None),
             migration_report: Mutex::new(None),
             connection_factory: Mutex::new(None),
+<<<<<<< HEAD
             cached_output_channels: Mutex::new(None),
+=======
+            console_history: Mutex::new(Vec::new()),
+>>>>>>> 51ec5aa (Add Tauri backend commands for console communication (Step 4))
         })
         .invoke_handler(tauri::generate_handler![
             get_serial_ports,
@@ -11757,6 +11827,10 @@ pub fn run() {
             disable_adaptive_timing,
             get_adaptive_timing_stats,
             get_connection_status,
+            get_ecu_type,
+            send_console_command,
+            get_console_history,
+            clear_console_history,
             load_ini,
             get_realtime_data,
             start_realtime_stream,
