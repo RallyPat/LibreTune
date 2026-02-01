@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef, useEffect, KeyboardEvent, useMemo } from 'react';
 import { useChannels } from '../../stores/realtimeStore';
+import { useHeatmapSettings } from '../../utils/useHeatmapSettings';
 import './TableEditor.css';
 import TableEditor3DNew from '../tables/TableEditor3DNew';
 
@@ -104,6 +105,16 @@ export function TableEditor({
   
   // Track if heatmap coloring is enabled
   const [heatmapEnabled, setHeatmapEnabled] = useState(true);
+
+  // Heatmap settings from user preferences
+  const { settings: heatmapSettings, getColor: getHeatmapColor } = useHeatmapSettings();
+
+  const heatmapScheme = useMemo(() => {
+    if (heatmapSettings.valueScheme === 'custom' && heatmapSettings.customValueStops?.length) {
+      return heatmapSettings.customValueStops;
+    }
+    return heatmapSettings.valueScheme ?? 'tunerstudio';
+  }, [heatmapSettings]);
   
   // Track if 3D view is enabled
   const [show3D, setShow3D] = useState(false);
@@ -198,18 +209,13 @@ export function TableEditor({
   // Calculate color for value based on min/max
   const getValueColor = useCallback((value: number) => {
     if (!heatmapEnabled) return 'var(--table-cell-bg)';
-    
+
     const min = data.min ?? Math.min(...data.zValues.flat());
     const max = data.max ?? Math.max(...data.zValues.flat());
-    const range = max - min;
-    if (range === 0) return 'var(--table-cell-bg)';
-    
-    const normalized = (value - min) / range;
-    // Blue (rich) to Red (lean) gradient
-    const r = Math.round(normalized * 200);
-    const b = Math.round((1 - normalized) * 200);
-    return `rgb(${r}, 60, ${b})`;
-  }, [data.min, data.max, data.zValues, heatmapEnabled]);
+    if (min === max) return 'var(--table-cell-bg)';
+
+    return getHeatmapColor(value, min, max, 'value');
+  }, [data.min, data.max, data.zValues, heatmapEnabled, getHeatmapColor]);
 
   // Get selected cells as array of positions
   const getSelectedCells = useCallback((): CellPosition[] => {
@@ -856,6 +862,7 @@ export function TableEditor({
           selectedCell={selection ? { x: selection.start.col, y: selection.start.row } : null}
           liveCell={effectiveLivePosition ? { x: effectiveLivePosition.col, y: effectiveLivePosition.row } : null}
           historyTrail={followMode ? historyTrail : undefined}
+          heatmapScheme={heatmapScheme}
         />
       )}
 
