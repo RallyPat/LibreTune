@@ -256,14 +256,128 @@ Based on analysis of common ECU tuning software patterns:
 [x] Reset tune to defaults - Implemented reset_tune_to_defaults command
 [x] Tooth logger (Speeduino/rusEFI/MS2) - Backend + ToothLoggerView.tsx
 [x] Composite logger (Speeduino/rusEFI/MS2) - Backend + CompositeLoggerView.tsx
-[ ] rusEFI console support (text-based command interface) - FOUNDATION STARTED Feb 1, 2026
+[ ] rusEFI console support (text-based command interface) - COMPLETED Feb 1-2, 2026
   - [x] ECU type detection (Speeduino, RusEFI, FOME, EpicEFI, MS2, MS3)
-  - [ ] Console command pass-through protocol
-  - [ ] FOME fast comms with intelligent fallback
-  - [ ] Console UI component (MVP: input + output log + history)
-  - [ ] Tauri commands: send_console_command, get_ecu_type
+  - [x] Console command pass-through protocol (Step 3 - connection.rs)
+  - [x] FOME fast comms with intelligent fallback (Step 5 - settings)
+  - [x] Console UI component (Step 6 - EcuConsole.tsx + CSS)
+  - [x] Tauri commands: send_console_command, get_ecu_type (Step 4 - lib.rs)
+  - [x] App integration and menu items (Step 7 - App.tsx)
 
 ## Recent Changes (Session History)
+
+### rusEFI Console Support - Completed Feb 1-2, 2026
+- **Overall Feature**: Text-based console interface for rusEFI/FOME/epicEFI ECUs with intelligent command/response handling and FOME optimization support
+- **Implementation Timeline**:
+  - Step 1: Research official rusEFI console architecture (completed in previous session)
+  - Step 2: Implement ECU type detection (completed Feb 1)
+  - Step 3: Add console protocol layer (completed Feb 1)
+  - Step 4: Create Tauri backend commands (completed Feb 1)
+  - Step 5: FOME fast comms support (completed Feb 1)
+  - Step 6: Console UI component (completed Feb 2)
+  - Step 7: App navigation integration (completed Feb 2)
+
+### Step 3: Console Protocol Implementation - Feb 1, 2026
+- **Feature**: Text-based command/response protocol in libretune-core
+- **Added** (`protocol/commands.rs`):
+  - `ConsoleCommand` struct wrapping text commands for ECU transmission
+  - `to_bytes()` helper that appends newline for ECU processing
+  - `get_timeout_ms()` for command-specific timeouts
+  - 4 unit tests for ConsoleCommand creation and serialization
+- **Implemented** (`protocol/connection.rs`):
+  - `send_console_command(&mut self, cmd: &ConsoleCommand) -> Result<String, ProtocolError>`
+  - Uses same inter-character timeout detection as binary protocol
+  - Sends command bytes (with newline) and reads response until timeout
+  - Trims whitespace from response
+  - Records metrics (tx_bytes, rx_bytes, packets)
+- **Updated** (`protocol/mod.rs`):
+  - Exported `ConsoleCommand` from module
+- **Status**: 133 tests pass (all passing)
+
+### Step 4: Tauri Backend Commands - Feb 1, 2026
+- **Feature**: Backend API for console communication and ECU type discovery
+- **Modified** (`AppState` struct):
+  - Added `console_history: Mutex<Vec<String>>` field for command/response history
+- **Implemented Tauri commands** (`lib.rs`):
+  - `get_ecu_type() -> Result<String, String>` - Returns ECU type as debug string
+  - `send_console_command(command: String) -> Result<String, String>` - Sends command, maintains history
+  - `get_console_history() -> Result<Vec<String>, String>` - Retrieves full history
+  - `clear_console_history() -> Result<(), String>` - Clears history
+- **Command integration**:
+  - All 4 commands added to Tauri `invoke_handler`
+  - Error handling with user-friendly messages
+  - History automatically capped at 1000 entries (LRU)
+- **Status**: Release build successful
+
+### Step 5: FOME Fast Comms Support - Feb 1, 2026
+- **Feature**: Automatic protocol optimization for FOME ECUs with transparent fallback
+- **Added** (`Settings` struct):
+  - `fome_fast_comms_enabled: bool` setting (default true) - User-toggleable
+- **Enhanced** (`send_console_command` function):
+  - Detects FOME ECU type and setting
+  - Attempts faster protocol path first (if conditions met)
+  - Falls back to standard console protocol on ANY error (transparent to user)
+  - No error propagation during fallback - works silently
+  - Debug logging for troubleshooting (`[DEBUG]` and `[WARN]` messages)
+- **User Experience**:
+  - For FOME users: Faster console commands (when fast path available)
+  - For non-FOME: Standard protocol always used
+  - Toggle available in settings for advanced users
+  - Fallback ensures reliability over speed
+- **Status**: Compile verified (release build successful)
+
+### Step 6: Console UI Component - Feb 2, 2026
+- **Feature**: Professional terminal-style UI for ECU console
+- **Created** (`components/console/EcuConsole.tsx`):
+  - TypeScript React component with full console interaction
+  - Features:
+    - Text input field with Enter key submission
+    - Scrollable output log showing command/response history
+    - Command history navigation (Arrow Up/Down keys)
+    - FOME fast comms toggle (shows only for FOME ECUs)
+    - Auto-scroll to bottom on new output
+    - Usage hints placeholder when empty
+    - Connected/disconnected state indicators
+    - Loading state during command execution
+  - Tauri API integration:
+    - Calls `send_console_command()` for execution
+    - Calls `get_console_history()` on component mount
+    - Calls `clear_console_history()` on clear button
+  - Error handling with user-friendly messages
+  - Disabled when disconnected or ECU doesn't support console
+- **Created** (`components/console/EcuConsole.css`):
+  - Professional dark terminal theme with cyan accents (#00d9ff)
+  - Glass-card style header and footer with backdrop effects
+  - Responsive scrollbar styling (thin, custom colors)
+  - Loading state animation (blinking cursor)
+  - Color-coded output lines:
+    - Cyan for commands (> prefix)
+    - Gray for responses (<- prefix)
+    - Red for errors (✗ prefix)
+    - Orange for loading (… prefix)
+  - Mobile-friendly (16px font size prevents iOS zoom on input)
+  - Smooth transitions and hover effects
+- **TypeScript Compilation**: Passes (no console component errors)
+
+### Step 7: App Navigation Integration - Feb 2, 2026
+- **Feature**: Console tab accessible from menu with context-aware visibility
+- **Updated** (`App.tsx`):
+  - Imported `EcuConsole` component from `components/console/EcuConsole`
+  - Updated `TabContent` interface type to include `"console"`
+  - Added `ecuType` state variable to track current ECU type
+  - Enhanced `checkStatus()` function:
+    - Calls `get_ecu_type()` after connection established
+    - Sets `ecuType` to "Unknown" when disconnected
+    - Fetches type asynchronously in background
+  - Added console case to `renderTabContent()`:
+    - Renders `<EcuConsole ecuType={ecuType} isConnected={status.state === "Connected"} />`
+  - Added ECU Console menu item to Tools menu:
+    - Label: "&ECU Console"
+    - Target: Opens new tab "console" with title "Console - [EcuType]"
+    - Disabled when: no project, not connected, or ECU doesn't support console
+    - Only visible for RusEFI/FOME/EpicEFI ECUs
+    - Keyboard shortcut available: Alt+E (on Windows/Linux)
+- **Status**: TypeScript compilation passes (no console-related errors)
 
 ### ECU Type Detection Infrastructure - Completed Feb 1, 2026
 - **Feature**: rusEFI console support foundation and ECU type detection
