@@ -39,6 +39,9 @@ jobs:
       - name: Run tests
         run: cargo test --workspace
 
+      - name: Verify build info format
+        run: cargo test --package libretune-app --test build_info -- --nocapture
+
       - name: Clippy (non-blocking)
         continue-on-error: true
         run: cargo clippy --workspace

@@ -152,11 +152,28 @@ Use clear, descriptive commit messages:
 - [ ] UI changes tested in the app
 - [ ] Documentation updated if needed
 
+## Version Management & Build Info
+
+### Nightly Builds
+
+LibreTune uses semantic versioning with nightly build metadata:
+
+- **Version**: `0.1.0-nightly` (fixed in [crates/libretune-app/src-tauri/tauri.conf.json](crates/libretune-app/src-tauri/tauri.conf.json))
+- **Build ID**: Generated at compile-time from git metadata in [crates/libretune-app/src-tauri/build.rs](crates/libretune-app/src-tauri/build.rs)
+- **Format**: `YYYY.MM.DD+g<short-sha>` (e.g., `2026.01.31+g3ab2a3f`)
+
+The build ID is displayed in the **About** dialog for bug reporting and is verified by the CI workflow test `Verify build info format`.
+
+### Release Builds
+
+For release builds, increment `version` in `tauri.conf.json` (e.g., `0.2.0`) and create a git tag matching the version.
+
 ## Reporting Issues
 
 When reporting bugs, please include:
 - Operating system and version
 - ECU type (Speeduino, rusEFI, etc.)
+- **Build ID** (from About dialog, e.g., `2026.01.31+g3ab2a3f`)
 - Steps to reproduce the issue
 - Expected vs actual behavior
 - Any error messages or logs
