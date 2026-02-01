@@ -256,8 +256,63 @@ Based on analysis of common ECU tuning software patterns:
 [x] Reset tune to defaults - Implemented reset_tune_to_defaults command
 [x] Tooth logger (Speeduino/rusEFI/MS2) - Backend + ToothLoggerView.tsx
 [x] Composite logger (Speeduino/rusEFI/MS2) - Backend + CompositeLoggerView.tsx
+[ ] rusEFI console support (text-based command interface) - FOUNDATION STARTED Feb 1, 2026
+  - [x] ECU type detection (Speeduino, RusEFI, FOME, EpicEFI, MS2, MS3)
+  - [ ] Console command pass-through protocol
+  - [ ] FOME fast comms with intelligent fallback
+  - [ ] Console UI component (MVP: input + output log + history)
+  - [ ] Tauri commands: send_console_command, get_ecu_type
 
 ## Recent Changes (Session History)
+
+### ECU Type Detection Infrastructure - Completed Feb 1, 2026
+- **Feature**: rusEFI console support foundation and ECU type detection
+- **Added** (`ini/types.rs`):
+  - `EcuType` enum with variants: Speeduino, RusEFI, FOME, EpicEFI, MS2, MS3, Unknown
+  - `EcuType::detect()` method identifies ECU from INI signature and filename patterns
+  - `supports_console()` method returns true for RusEFI/FOME/epicEFI
+  - `is_fome()` method for FOME-specific optimizations
+- **Added** (`ini/mod.rs`):
+  - `ecu_type` field in `EcuDefinition` struct stores detected type
+  - Default value set to `EcuType::Unknown`
+- **Updated** (`ini/parser.rs`):
+  - Auto-detect ECU type during INI parsing before returning definition
+  - Import `EcuType` in module dependencies
+- **Benefit**: Foundation for conditional console UI, FOME fast comms, and ECU-specific features
+- **Status**: All tests pass (84+ unit tests), no breaking changes
+
+### Build Number & Nightly Version Management - Completed Feb 1, 2026
+- **Status** (from previous session): Build ID (YYYY.MM.DD+g<sha>) displayed in About dialog
+- **Added** (`src-tauri/tests/build_info.rs`):
+  - New test file to verify build ID format matches `YYYY.MM.DD+g<sha>` pattern
+  - Validates date components (year 4-digit, month 01-12, day 01-31)
+  - Validates git SHA contains only hex characters
+  - 2 tests: `test_build_id_format` and `test_build_id_not_empty`
+- **Updated** (`.github/workflows/ci.yml`):
+  - Added "Verify build info format" CI step to check build ID format after compilation
+- **Updated** (`src-tauri/tauri.conf.json`):
+  - Changed version from "0.1.0" to "0.1.0-nightly" for consistency
+- **Updated** (`CONTRIBUTING.md`):
+  - Added "Version Management & Nightly Builds" section with clear guidelines
+  - Documented build ID format and display location
+  - Explained nightly vs. release versioning strategy
+- **Status**: All CI checks pass, build metadata verified
+
+### Build & Drag-Drop Features - Completed Jan 31, 2026
+- **Issue #27**: Build number feature (see above for details)
+- **Issue #28**: Drag-drop gauge creation from sidebar to dashboard
+  - [crates/libretune-app/src/components/dashboards/DashboardDesigner.tsx](crates/libretune-app/src/components/dashboards/DashboardDesigner.tsx)
+    - Added `ChannelInfo` interface matching TsDashboard structure
+    - Added `channelInfoMap` optional prop to `DashboardDesignerProps`
+    - Implemented `handleDragOver`, `handleDragLeave`, `handleDrop` handlers
+    - Calculate drop position, apply grid snap, create gauge with INI metadata
+    - Added to undo/redo history via `pushHistory()`
+  - [crates/libretune-app/src/components/dashboards/DashboardDesigner.css](crates/libretune-app/src/components/dashboards/DashboardDesigner.css)
+    - Added `.drag-over-dropzone` class with dashed border and semi-transparent blue background
+  - [crates/libretune-app/src/components/dashboards/TsDashboard.tsx](crates/libretune-app/src/components/dashboards/TsDashboard.tsx)
+    - Pass `channelInfoMap` prop to DashboardDesigner component
+  - **Features**: INI data population (min/max/units), grid snap, visual feedback, history tracking
+  - **Status**: Tested and working, pushed to GitHub (commit d6f06f5)
 
 ### AutoTune Live Table Lookup Fix - Completed Jan 11, 2026
 - **Problem**: AutoTune Live failed with "Table veTable1 not found" for rusEFI/epicEFI INIs

@@ -1323,6 +1323,115 @@ impl Connection {
         );
         self.send_raw_command_no_response(bytes)
     }
+
+    /// Send a text console command to the ECU (rusEFI/FOME/epicEFI only)
+    /// Sends command followed by newline and reads back response until inter-char timeout
+    /// Returns the response as a String (with trailing whitespace trimmed)
+    pub fn send_console_command(&mut self, cmd: &super::commands::ConsoleCommand) -> Result<String, ProtocolError> {
+        // Get timing parameters before borrowing port
+        let baud_rate = self.config.baud_rate;
+        let min_wait = Some(self.get_effective_min_wait());
+        let timeout = Duration::from_millis(cmd.get_timeout_ms());
+        let inter_char_timeout = self.get_effective_inter_char_timeout();
+
+        let port = self.port.as_mut().ok_or(ProtocolError::NotConnected)?;
+
+        eprintln!("[DEBUG] send_console_command: sending '{}'", cmd.command);
+
+        // Clear buffers before sending
+        let _ = port.clear(serialport::ClearBuffer::All);
+
+        // Convert command to bytes and send
+        let cmd_bytes = cmd.to_bytes();
+        write_and_wait(port, &cmd_bytes, baud_rate, min_wait)
+            .map_err(|e| ProtocolError::SerialError(e.to_string()))?;
+
+        eprintln!("[DEBUG] send_console_command: command sent, waiting for response");
+
+        // Read response with timeout
+        let mut response = Vec::new();
+        let mut buffer = [0u8; 512];
+        let start = Instant::now();
+        let mut last_data_time = Instant::now();
+
+        loop {
+            if start.elapsed() > timeout {
+                eprintln!("[DEBUG] send_console_command: overall timeout reached");
+                break;
+            }
+
+            // Check for available data
+            let available = match port.bytes_to_read() {
+                Ok(n) => n,
+                Err(e) => {
+                    eprintln!("[DEBUG] send_console_command: bytes_to_read error: {}", e);
+                    return Err(ProtocolError::SerialError(e.to_string()));
+                }
+            };
+
+            if available > 0 {
+                let to_read = std::cmp::min(available as usize, buffer.len());
+                match port.read(&mut buffer[..to_read]) {
+                    Ok(0) => {
+                        eprintln!("[DEBUG] send_console_command: read returned 0 (EOF)");
+                        break;
+                    }
+                    Ok(n) => {
+                        response.extend_from_slice(&buffer[..n]);
+                        last_data_time = Instant::now();
+                        eprintln!(
+                            "[DEBUG] send_console_command: read {} bytes: {:?}",
+                            n,
+                            String::from_utf8_lossy(&buffer[..n])
+                        );
+                    }
+                    Err(ref e)
+                        if e.kind() == std::io::ErrorKind::TimedOut
+                            || e.kind() == std::io::ErrorKind::WouldBlock =>
+                    {
+                        // Non-blocking, continue
+                    }
+                    Err(e) => {
+                        eprintln!("[DEBUG] send_console_command: read error: {}", e);
+                        return Err(ProtocolError::SerialError(e.to_string()));
+                    }
+                }
+            } else if response.is_empty() {
+                // No data yet, wait a bit
+                std::thread::sleep(Duration::from_millis(1));
+            } else {
+                // We have data, check inter-character timeout
+                if last_data_time.elapsed() > inter_char_timeout {
+                    eprintln!(
+                        "[DEBUG] send_console_command: inter-character timeout, response complete"
+                    );
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        }
+
+        // Convert response to string
+        let response_str = String::from_utf8_lossy(&response).trim().to_string();
+
+        eprintln!(
+            "[DEBUG] send_console_command: received {} bytes: '{}'",
+            response.len(),
+            response_str
+        );
+
+        if response_str.is_empty() {
+            return Err(ProtocolError::Timeout);
+        }
+
+        // Record metrics
+        self.tx_bytes = self.tx_bytes.saturating_add(cmd_bytes.len() as u64);
+        self.tx_packets = self.tx_packets.saturating_add(1);
+        self.rx_bytes = self.rx_bytes.saturating_add(response.len() as u64);
+        self.rx_packets = self.rx_packets.saturating_add(1);
+
+        Ok(response_str)
+    }
 }
 
 impl Drop for Connection {

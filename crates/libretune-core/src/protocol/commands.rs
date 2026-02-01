@@ -141,6 +141,47 @@ impl BurnParams {
     }
 }
 
+/// Console command for rusEFI/FOME/epicEFI text-based console I/O
+/// These commands are sent as plain text strings (typically ASCII) to the ECU's
+/// text-based console interface and receive text-based responses.
+#[derive(Debug, Clone)]
+pub struct ConsoleCommand {
+    /// The text command to send (e.g., "help", "status", "set someVar 100")
+    pub command: String,
+    /// Timeout for this specific command (ms). If None, uses default 1000ms
+    pub timeout_ms: Option<u64>,
+}
+
+impl ConsoleCommand {
+    /// Create a new console command
+    pub fn new(command: impl Into<String>) -> Self {
+        Self {
+            command: command.into(),
+            timeout_ms: None,
+        }
+    }
+
+    /// Create a console command with custom timeout
+    pub fn with_timeout(command: impl Into<String>, timeout_ms: u64) -> Self {
+        Self {
+            command: command.into(),
+            timeout_ms: Some(timeout_ms),
+        }
+    }
+
+    /// Get effective timeout for this command
+    pub fn get_timeout_ms(&self) -> u64 {
+        self.timeout_ms.unwrap_or(1000)
+    }
+
+    /// Convert command to bytes, appending newline for transmission
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut bytes = self.command.as_bytes().to_vec();
+        bytes.push(b'\n'); // Append newline for ECU to detect end of command
+        bytes
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -156,5 +197,27 @@ mod tests {
     fn test_command_response() {
         assert!(Command::QuerySignature.expects_response());
         assert!(!Command::BurnToFlash.expects_response());
+    }
+
+    #[test]
+    fn test_console_command_creation() {
+        let cmd = ConsoleCommand::new("help");
+        assert_eq!(cmd.command, "help");
+        assert_eq!(cmd.timeout_ms, None);
+        assert_eq!(cmd.get_timeout_ms(), 1000);
+    }
+
+    #[test]
+    fn test_console_command_with_timeout() {
+        let cmd = ConsoleCommand::with_timeout("status", 2000);
+        assert_eq!(cmd.command, "status");
+        assert_eq!(cmd.get_timeout_ms(), 2000);
+    }
+
+    #[test]
+    fn test_console_command_to_bytes() {
+        let cmd = ConsoleCommand::new("help");
+        let bytes = cmd.to_bytes();
+        assert_eq!(bytes, b"help\n".to_vec());
     }
 }

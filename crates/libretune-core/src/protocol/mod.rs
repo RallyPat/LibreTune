@@ -12,7 +12,7 @@ mod packet;
 pub mod serial;
 
 pub use command_builder::CommandBuilder;
-pub use commands::Command;
+pub use commands::{Command, ConsoleCommand};
 pub use connection::{Connection, ConnectionConfig, ConnectionState, RuntimePacketMode};
 pub use error::ProtocolError;
 pub use packet::{Packet, PacketBuilder};
