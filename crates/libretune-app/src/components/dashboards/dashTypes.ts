@@ -231,6 +231,9 @@ export function isIndicator(comp: DashComponent): comp is { Indicator: TsIndicat
 /** Gauge cluster - container for dashboard components */
 export interface GaugeCluster {
   anti_aliasing: boolean;
+  force_aspect: boolean;
+  force_aspect_width: number;
+  force_aspect_height: number;
   background_dither_color: TsColor | null;
   cluster_background_color: TsColor;
   cluster_background_image_file_name: string | null;

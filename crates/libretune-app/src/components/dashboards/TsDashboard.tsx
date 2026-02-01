@@ -26,11 +26,13 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useChannels } from '../../stores/realtimeStore';
 import { invoke } from '@tauri-apps/api/core';
+import { listen, UnlistenFn } from '@tauri-apps/api/event';
 import { save } from '@tauri-apps/plugin-dialog';
 import { useRealtimeStore } from '../../stores/realtimeStore';
 import {
   DashFile,
   DashFileInfo,
+  TsGaugeConfig,
   isGauge,
   isIndicator,
   buildEmbeddedImageMap,
@@ -60,6 +62,20 @@ interface ChannelInfo {
   units: string;
   scale: number;
   translate: number;
+}
+
+interface GaugeInfo {
+  name: string;
+  channel: string;
+  title: string;
+  units: string;
+  lo: number;
+  hi: number;
+  low_warning: number;
+  high_warning: number;
+  low_danger: number;
+  high_danger: number;
+  digits: number;
 }
 
 export default function TsDashboard({ initialDashPath, isConnected = false }: TsDashboardProps) {
@@ -109,10 +125,15 @@ export default function TsDashboard({ initialDashPath, isConnected = false }: Ts
   const [newDashName, setNewDashName] = useState('');
   const [renameName, setRenameName] = useState('');
   const [showCompatReport, setShowCompatReport] = useState(false);
+  const [legacyMode, setLegacyMode] = useState(false);
+  const [compatBarVisible, setCompatBarVisible] = useState(true);
+  const [syncToken, setSyncToken] = useState(0);
+  const [autoSyncGaugeRanges, setAutoSyncGaugeRanges] = useState(true);
   
   // Dynamic scaling state for responsive dashboard sizing
   const [scale, setScale] = useState(1);
   const dashboardWrapperRef = useRef<HTMLDivElement>(null);
+  const initialSyncDoneRef = useRef(false);
 
   // Build embedded images map
   const embeddedImages = dashFile 
@@ -189,14 +210,26 @@ export default function TsDashboard({ initialDashPath, isConnected = false }: Ts
     maxX = Math.max(1.0, maxX);
     maxY = Math.max(1.0, maxY);
     
-    // Aspect ratio is width / height
-    const aspectRatio = maxX / maxY;
+    const forceAspect = dashFile.gauge_cluster.force_aspect
+      && dashFile.gauge_cluster.force_aspect_width > 0
+      && dashFile.gauge_cluster.force_aspect_height > 0;
+    const forcedRatio = forceAspect
+      ? dashFile.gauge_cluster.force_aspect_width / dashFile.gauge_cluster.force_aspect_height
+      : null;
+
+    // Aspect ratio is width / height (use forced aspect for legacy TunerStudio dashboards)
+    const aspectRatio = forcedRatio ?? (maxX / maxY);
     
     // Minimum dashboard size based on smallest gauge requirement
     const minSize = minShortestSize === Infinity ? 50 : minShortestSize;
     
     return { maxX, maxY, aspectRatio, minSize };
   }, [dashFile]);
+
+  const isLegacyPath = useMemo(() => {
+    const lower = (selectedPath ?? '').toLowerCase();
+    return lower.endsWith('.dash') || lower.endsWith('.gauge');
+  }, [selectedPath]);
 
   const compatibilityReport = useMemo(() => {
     if (!dashFile) return null;
@@ -271,15 +304,7 @@ export default function TsDashboard({ initialDashPath, isConnected = false }: Ts
     );
   }, [compatibilityReport]);
 
-  const handleCopyCompatReport = useCallback(async () => {
-    if (!compatibilityReport) return;
-    const reportJson = JSON.stringify(compatibilityReport, null, 2);
-    try {
-      await navigator.clipboard.writeText(reportJson);
-    } catch (e) {
-      console.warn('Failed to copy compatibility report:', e);
-    }
-  }, [compatibilityReport]);
+
 
   // Gauge demo animation
   useEffect(() => {
@@ -421,6 +446,132 @@ export default function TsDashboard({ initialDashPath, isConnected = false }: Ts
       console.error('Failed to save dashboard:', e);
     }
   }, [dashFile, selectedPath]);
+
+  // Sync gauge ranges from INI GaugeConfigurations
+  const handleSyncGaugeRanges = useCallback(async () => {
+    if (!dashFile) return;
+
+    try {
+      const gauges = await invoke<GaugeInfo[]>('get_gauge_configs');
+      const byChannel = new Map(gauges.map(g => [g.channel.toLowerCase(), g]));
+      const byName = new Map(gauges.map(g => [g.name.toLowerCase(), g]));
+
+      const updatedComponents = dashFile.gauge_cluster.components.map((comp) => {
+        if (!isGauge(comp)) return comp;
+
+        const gauge = comp.Gauge;
+        const channelKey = (gauge.output_channel || '').toLowerCase();
+        const nameKey = (gauge.title || '').toLowerCase();
+        const info = byChannel.get(channelKey) || byName.get(nameKey);
+        if (!info) return comp;
+
+        return {
+          Gauge: {
+            ...gauge,
+            min: info.lo,
+            max: info.hi,
+            units: info.units,
+            low_warning: Number.isFinite(info.low_warning) ? info.low_warning : gauge.low_warning,
+            high_warning: Number.isFinite(info.high_warning) ? info.high_warning : gauge.high_warning,
+            low_critical: Number.isFinite(info.low_danger) ? info.low_danger : gauge.low_critical,
+            high_critical: Number.isFinite(info.high_danger) ? info.high_danger : gauge.high_critical,
+            value_digits: Number.isFinite(info.digits) ? info.digits : gauge.value_digits,
+          },
+        };
+      });
+
+      setDashFile({
+        ...dashFile,
+        gauge_cluster: { ...dashFile.gauge_cluster, components: updatedComponents },
+      });
+    } catch (e) {
+      console.warn('Failed to sync gauge ranges from INI:', e);
+    }
+  }, [dashFile]);
+
+  // Auto-sync once on initial dashboard load
+  useEffect(() => {
+    if (!dashFile) return;
+    if (!autoSyncGaugeRanges) return;
+    if (initialSyncDoneRef.current) return;
+    initialSyncDoneRef.current = true;
+    handleSyncGaugeRanges();
+  }, [dashFile, handleSyncGaugeRanges, autoSyncGaugeRanges]);
+
+  // Auto-sync on INI/definition changes
+  useEffect(() => {
+    if (!dashFile) return;
+    if (!autoSyncGaugeRanges) return;
+    if (syncToken === 0) return;
+    handleSyncGaugeRanges();
+  }, [syncToken, dashFile, handleSyncGaugeRanges, autoSyncGaugeRanges]);
+
+  // Load auto-sync preference
+  useEffect(() => {
+    invoke<any>('get_settings')
+      .then((settings) => {
+        if (settings.auto_sync_gauge_ranges !== undefined) {
+          setAutoSyncGaugeRanges(!!settings.auto_sync_gauge_ranges);
+        }
+      })
+      .catch((e) => console.warn('[TsDashboard] get_settings failed:', e));
+  }, []);
+
+  useEffect(() => {
+    let unlistenIni: UnlistenFn | null = null;
+    let unlistenDefLoaded: UnlistenFn | null = null;
+    let unlistenDefChanged: UnlistenFn | null = null;
+    let unlistenSettings: UnlistenFn | null = null;
+
+    (async () => {
+      try {
+        unlistenIni = await listen('ini:changed', () => {
+          setSyncToken((v) => v + 1);
+        });
+      } catch (e) {
+        console.warn('[TsDashboard] Failed to listen for ini:changed:', e);
+      }
+
+      try {
+        unlistenDefLoaded = await listen('definition:loaded', () => {
+          setSyncToken((v) => v + 1);
+        });
+      } catch (e) {
+        console.warn('[TsDashboard] Failed to listen for definition:loaded:', e);
+      }
+
+      try {
+        unlistenDefChanged = await listen('definition:changed', () => {
+          setSyncToken((v) => v + 1);
+        });
+      } catch (e) {
+        console.warn('[TsDashboard] Failed to listen for definition:changed:', e);
+      }
+
+      try {
+        unlistenSettings = await listen<string>('settings:changed', (event) => {
+          if (event.payload === 'auto_sync_gauge_ranges') {
+            invoke<any>('get_settings')
+              .then((settings) => {
+                if (settings.auto_sync_gauge_ranges !== undefined) {
+                  setAutoSyncGaugeRanges(!!settings.auto_sync_gauge_ranges);
+                }
+              })
+              .catch((e) => console.warn('[TsDashboard] get_settings failed:', e));
+          }
+        });
+      } catch (e) {
+        console.warn('[TsDashboard] Failed to listen for settings:changed:', e);
+      }
+    })();
+
+    return () => {
+      if (unlistenIni) unlistenIni();
+      if (unlistenDefLoaded) unlistenDefLoaded();
+      if (unlistenDefChanged) unlistenDefChanged();
+      if (unlistenSettings) unlistenSettings();
+    };
+  }, []);
 
   // Exit designer mode
   const handleExitDesigner = useCallback(() => {
@@ -568,33 +719,39 @@ export default function TsDashboard({ initialDashPath, isConnected = false }: Ts
     }
   }, [dashFile, selectedPath]);
 
+  const computeScale = useCallback(() => {
+    const wrapper = dashboardWrapperRef.current;
+    if (!wrapper) return;
+
+    const { width: containerWidth, height: containerHeight } = wrapper.getBoundingClientRect();
+
+    // Calculate minimum size needed based on aspect ratio and minimum gauge sizes
+    // Assume dashboards need at least 600px width at scale 1.0 for readability
+    const minDashWidth = 600;
+    const minDashHeight = minDashWidth / Math.max(0.1, dashboardBounds.aspectRatio);
+
+    // Calculate scale factor based on container size
+    const scaleX = containerWidth / minDashWidth;
+    const scaleY = containerHeight / minDashHeight;
+    const newScale = Math.min(1, Math.min(scaleX, scaleY));
+
+    setScale(Math.max(0.5, newScale)); // Minimum 50% scale
+  }, [dashboardBounds.aspectRatio]);
+
   // Dynamic scaling - scale dashboard down when viewport is too small
   useEffect(() => {
     if (!dashboardWrapperRef.current) return;
-    
+
     const wrapper = dashboardWrapperRef.current;
-    
-    const resizeObserver = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        const { width: containerWidth, height: containerHeight } = entry.contentRect;
-        
-        // Calculate minimum size needed based on aspect ratio and minimum gauge sizes
-        // Assume dashboards need at least 600px width at scale 1.0 for readability
-        const minDashWidth = 600;
-        const minDashHeight = minDashWidth / 1.6; // Assume ~16:10 default aspect
-        
-        // Calculate scale factor based on container size
-        const scaleX = containerWidth / minDashWidth;
-        const scaleY = containerHeight / minDashHeight;
-        const newScale = Math.min(1, Math.min(scaleX, scaleY));
-        
-        setScale(Math.max(0.5, newScale)); // Minimum 50% scale
-      }
+
+    const resizeObserver = new ResizeObserver(() => {
+      computeScale();
     });
-    
+
     resizeObserver.observe(wrapper);
+    computeScale();
     return () => resizeObserver.disconnect();
-  }, []);
+  }, [computeScale]);
 
   // Load available dashboards
   useEffect(() => {
@@ -605,7 +762,13 @@ export default function TsDashboard({ initialDashPath, isConnected = false }: Ts
       if (!selectedPath && dashes.length > 0) {
         // Prefer Basic.ltdash.xml as the default
         const basicDash = dashes.find(d => d.name === 'Basic.ltdash.xml');
-        setSelectedPath(basicDash?.path || dashes[0].path);
+        if (basicDash) {
+          setSelectedPath(basicDash.path);
+          return;
+        }
+
+        const libreTuneDash = dashes.find(d => d.category === 'LibreTune');
+        setSelectedPath(libreTuneDash?.path || dashes[0].path);
       }
     };
     loadInitial();
@@ -630,6 +793,8 @@ export default function TsDashboard({ initialDashPath, isConnected = false }: Ts
           file = await invoke<DashFile>('get_dash_file', { path: selectedPath });
         }
         setDashFile(file);
+        setLegacyMode(isLegacyPath);
+        requestAnimationFrame(() => computeScale());
 
         // Note: Do not start sweep here based on realtime updates — we will decide sweep in a separate effect using an instantaneous snapshot
       } catch (e) {
@@ -640,7 +805,7 @@ export default function TsDashboard({ initialDashPath, isConnected = false }: Ts
     };
 
     loadDashboard();
-  }, [selectedPath]);
+  }, [selectedPath, isLegacyPath, computeScale]);
 
   // On dashboard file load, decide whether to run the initial sweep using a snapshot of realtime data
   useEffect(() => {
@@ -777,31 +942,35 @@ export default function TsDashboard({ initialDashPath, isConnected = false }: Ts
           >
             💾 Export
           </button>
-          <button
+          <button 
             className="ts-dashboard-action-btn"
-            onClick={() => setShowCompatReport(true)}
-            title="Compatibility Report"
+            onClick={handleSyncGaugeRanges}
+            title="Sync gauge ranges from INI"
           >
-            🧪 Compatibility
+            🔄 Sync Ranges
+          </button>
+          <button
+            className={`ts-dashboard-action-btn ${legacyMode ? 'active' : ''}`}
+            onClick={() => setLegacyMode(prev => !prev)}
+            title={legacyMode ? 'Legacy TS layout enabled' : 'Enable legacy TS layout'}
+          >
+            🧭 Legacy: {legacyMode ? 'On' : 'Off'}
           </button>
         </div>
       </div>
 
-      {compatibilityReport && (
-        <div className={`ts-dashboard-compat ${hasCompatibilityIssues ? 'warn' : 'ok'}`}>
+      {compatibilityReport && compatBarVisible && hasCompatibilityIssues && (
+        <div className={`ts-dashboard-compat warn`}>
           <span>
-            {hasCompatibilityIssues
-              ? 'Compatibility: unsupported features detected'
-              : 'Compatibility: full TunerStudio feature coverage detected'}
+            Compatibility: some features not yet supported
           </span>
-          {hasCompatibilityIssues && (
-            <button
-              className="ts-dashboard-compat-btn"
-              onClick={() => setShowCompatReport(true)}
-            >
-              View Report
-            </button>
-          )}
+          <button
+            className="ts-dashboard-compat-close"
+            onClick={() => setCompatBarVisible(false)}
+            title="Dismiss"
+          >
+            ✕
+          </button>
         </div>
       )}
 
@@ -865,32 +1034,14 @@ export default function TsDashboard({ initialDashPath, isConnected = false }: Ts
                   setShowImportDialog(true);
                 }}
               >
-                📁 Import Dashboard Files...
+                📁 Import TS Dashboard Files...
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {showCompatReport && compatibilityReport && (
-        <div className="ts-dashboard-compat-overlay" onClick={() => setShowCompatReport(false)}>
-          <div className="ts-dashboard-compat-panel" onClick={(e) => e.stopPropagation()}>
-            <h3>Compatibility Report</h3>
-            <p>
-              {hasCompatibilityIssues
-                ? 'Some features are not yet supported.'
-                : 'All detected features are supported.'}
-            </p>
-            <pre>
-              {JSON.stringify(compatibilityReport, null, 2)}
-            </pre>
-            <div className="ts-dashboard-compat-actions">
-              <button onClick={handleCopyCompatReport}>Copy JSON</button>
-              <button onClick={() => setShowCompatReport(false)}>Close</button>
-            </div>
-          </div>
-        </div>
-      )}
+
       
       {/* Import dialog */}
       <ImportDashboardDialog
@@ -983,6 +1134,7 @@ export default function TsDashboard({ initialDashPath, isConnected = false }: Ts
           onDashFileChange={setDashFile}
           selectedGaugeId={selectedGaugeId}
           onSelectGauge={setSelectedGaugeId}
+          onContextMenu={handleContextMenu}
           gridSnap={gridSnap}
           onGridSnapChange={setGridSnap}
           showGrid={showGrid}
@@ -1011,6 +1163,125 @@ export default function TsDashboard({ initialDashPath, isConnected = false }: Ts
             transformOrigin: 'top center',
         }}
         onContextMenu={(e) => handleContextMenu(e, null)}
+        onDragOver={(e) => {
+          if (!designerMode) return;
+          e.preventDefault();
+          e.stopPropagation();
+          e.dataTransfer.dropEffect = 'copy';
+          e.currentTarget.style.opacity = '0.8';
+        }}
+        onDragLeave={(e) => {
+          if (!designerMode) return;
+          e.currentTarget.style.opacity = '1';
+        }}
+        onDrop={(e) => {
+          if (!designerMode) return;
+          e.preventDefault();
+          e.stopPropagation();
+          e.currentTarget.style.opacity = '1';
+
+          try {
+            const data = e.dataTransfer.getData('application/json');
+            if (!data) return;
+            
+            const channel = JSON.parse(data);
+            if (channel.type !== 'channel' || !dashFile) return;
+
+            // Calculate relative drop position (0.0-1.0)
+            const rect = e.currentTarget.getBoundingClientRect();
+            const relX = (e.clientX - rect.left) / rect.width;
+            const relY = (e.clientY - rect.top) / rect.height;
+
+            // Get channel info (units, label)
+            const info = channelInfoMap[channel.id];
+            const units = info?.units || '';
+            const label = info?.label || channel.label;
+
+            // Create default gauge config
+            const defaultGauge: TsGaugeConfig = {
+              id: `gauge_${Date.now()}`,
+              gauge_painter: 'BasicReadout',
+              gauge_style: '',
+              output_channel: channel.id,
+              title: label || channel.label,
+              units: units,
+              value: 0,
+              min: 0,
+              max: 100,
+              min_vp: null,
+              max_vp: null,
+              default_min: null,
+              default_max: null,
+              peg_limits: false,
+              low_warning: null,
+              high_warning: null,
+              low_critical: null,
+              high_critical: null,
+              low_warning_vp: null,
+              high_warning_vp: null,
+              low_critical_vp: null,
+              high_critical_vp: null,
+              back_color: { alpha: 0, red: 40, green: 40, blue: 40 },
+              font_color: { alpha: 0, red: 255, green: 255, blue: 255 },
+              trim_color: { alpha: 0, red: 100, green: 100, blue: 100 },
+              warn_color: { alpha: 0, red: 255, green: 165, blue: 0 },
+              critical_color: { alpha: 0, red: 255, green: 0, blue: 0 },
+              needle_color: { alpha: 0, red: 200, green: 200, blue: 200 },
+              value_digits: 2,
+              label_digits: 0,
+              font_family: 'Arial',
+              font_size_adjustment: 0,
+              italic_font: false,
+              sweep_angle: 270,
+              start_angle: 225,
+              face_angle: 0,
+              sweep_begin_degree: 0,
+              counter_clockwise: false,
+              major_ticks: 5,
+              minor_ticks: 0,
+              relative_x: relX - 0.1,
+              relative_y: relY - 0.1,
+              relative_width: 0.2,
+              relative_height: 0.2,
+              border_width: 1,
+              shortest_size: 0,
+              shape_locked_to_aspect: false,
+              antialiasing_on: true,
+              background_image_file_name: null,
+              needle_image_file_name: null,
+              show_history: false,
+              history_value: 0,
+              history_delay: 0,
+              needle_smoothing: 0,
+              short_click_action: null,
+              long_click_action: null,
+              display_value_at_180: false,
+            };
+
+            // Add new gauge to dashboard
+            const updatedComponents = [...dashFile.gauge_cluster.components, { Gauge: defaultGauge }];
+            const updatedFile: DashFile = {
+              ...dashFile,
+              gauge_cluster: {
+                ...dashFile.gauge_cluster,
+                components: updatedComponents,
+              },
+            };
+            setDashFile(updatedFile);
+
+            // Auto-save
+            try {
+              invoke('save_dash_file', { 
+                path: selectedPath,
+                dashFile: updatedFile,
+              }).catch(err => console.error('Failed to auto-save dashboard:', err));
+            } catch (err) {
+              console.error('Failed to save dashboard:', err);
+            }
+          } catch (err) {
+            console.error('Failed to process dropped channel:', err);
+          }
+        }}
       >
         {cluster.components.map((component, index) => {
           // Convert relative positions to percentages - allow values outside 0-1 range
@@ -1034,8 +1305,8 @@ export default function TsDashboard({ initialDashPath, isConnected = false }: Ts
               width: `${toPercent(gauge.relative_width)}%`,
               height: `${toPercent(gauge.relative_height)}%`,
               // Enforce minimum size from shortest_size property
-              minWidth: gauge.shortest_size > 0 ? `${gauge.shortest_size}px` : undefined,
-              minHeight: gauge.shortest_size > 0 ? `${gauge.shortest_size}px` : undefined,
+              minWidth: !legacyMode && gauge.shortest_size > 0 ? `${gauge.shortest_size}px` : undefined,
+              minHeight: !legacyMode && gauge.shortest_size > 0 ? `${gauge.shortest_size}px` : undefined,
               // Force square aspect ratio when shape is locked
               aspectRatio: gauge.shape_locked_to_aspect ? '1 / 1' : undefined,
             };
@@ -1051,6 +1322,7 @@ export default function TsDashboard({ initialDashPath, isConnected = false }: Ts
                   config={gauge}
                   value={value}
                   embeddedImages={embeddedImages}
+                  legacyMode={legacyMode}
                 />
               </div>
             );
@@ -1126,12 +1398,49 @@ export default function TsDashboard({ initialDashPath, isConnected = false }: Ts
         }}
         onReloadDefaultGauges={handleReloadDefaultGauges}
         onResetValue={() => {
-          // Reset value for the targeted gauge (if needed)
-          console.log('Reset value for gauge:', contextMenu.targetGaugeId);
+          // Reset channel value to minimum
+          if (!contextMenu.targetGaugeId || !dashFile) return;
+          
+          const gauge = dashFile.gauge_cluster.components.find((comp) =>
+            isGauge(comp) && comp.Gauge.id === contextMenu.targetGaugeId
+          );
+          
+          if (gauge && isGauge(gauge)) {
+            const channel = gauge.Gauge.output_channel;
+            const minValue = gauge.Gauge.min || 0;
+            // You would need to emit an update to the realtime store or send to ECU
+            console.log('Reset channel', channel, 'to', minValue);
+          }
+          closeContextMenu();
         }}
         onReplaceGauge={(channel, gaugeInfo) => {
-          // Replace the targeted gauge with a new one
-          console.log('Replace gauge with:', channel, gaugeInfo);
+          // Replace the targeted gauge with a new one from INI
+          if (!dashFile || !contextMenu.targetGaugeId) return;
+          
+          // Find the gauge to replace
+          const updatedComponents = dashFile.gauge_cluster.components.map((comp) => {
+            if (!isGauge(comp)) return comp;
+            if (comp.Gauge.id !== contextMenu.targetGaugeId) return comp;
+            
+            // Replace with new gauge info - keep position/size but update channel
+            return {
+              Gauge: {
+                ...comp.Gauge,
+                output_channel: channel,
+                title: gaugeInfo.title,
+                units: gaugeInfo.units,
+                min: gaugeInfo.min,
+                max: gaugeInfo.max,
+              }
+            };
+          });
+          
+          const newFile = {
+            ...dashFile,
+            gauge_cluster: { ...dashFile.gauge_cluster, components: updatedComponents },
+          };
+          setDashFile(newFile);
+          closeContextMenu();
         }}
       />
         </>

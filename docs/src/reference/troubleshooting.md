@@ -165,7 +165,10 @@ If these solutions don't work:
 2. Search existing issues first
 3. Create new issue with:
    - LibreTune version
+   - Build ID (About → Build)
    - Operating system
    - ECU type and firmware
    - Steps to reproduce
    - Error messages/logs
+
+**Build ID format**: `YYYY.MM.DD+g<short-sha>` (nightly build date plus git commit hash).

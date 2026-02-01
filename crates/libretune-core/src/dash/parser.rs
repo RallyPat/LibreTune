@@ -368,6 +368,15 @@ fn parse_gauge_cluster_attributes(e: &BytesStart) -> GaugeCluster {
     if let Some(val) = get_attribute(e, "antiAliasing") {
         cluster.anti_aliasing = val.parse().unwrap_or(true);
     }
+    if let Some(val) = get_attribute(e, "forceAspect") {
+        cluster.force_aspect = val.parse().unwrap_or(false);
+    }
+    if let Some(val) = get_attribute(e, "forceAspectWidth") {
+        cluster.force_aspect_width = val.parse().unwrap_or(0.0);
+    }
+    if let Some(val) = get_attribute(e, "forceAspectHeight") {
+        cluster.force_aspect_height = val.parse().unwrap_or(0.0);
+    }
     if let Some(val) = get_attribute(e, "clusterBackgroundColor") {
         if let Ok(int_val) = val.parse::<i32>() {
             cluster.cluster_background_color = TsColor::from_argb_int(int_val);

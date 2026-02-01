@@ -40,63 +40,20 @@
   color: #ffd79a;
 }
 
-.ts-dashboard-compat-btn {
-  padding: 4px 10px;
-  font-size: 11px;
-  background: rgba(255, 255, 255, 0.12);
-  border: 1px solid rgba(255, 255, 255, 0.2);
+.ts-dashboard-compat-close {
+  padding: 2px 6px;
+  font-size: 14px;
+  background: transparent;
+  border: none;
   border-radius: 4px;
   color: inherit;
   cursor: pointer;
+  opacity: 0.6;
+  transition: opacity 0.2s;
 }
 
-.ts-dashboard-compat-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0, 0, 0, 0.6);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1200;
-}
-
-.ts-dashboard-compat-panel {
-  background: var(--card-bg, #222);
-  border-radius: 8px;
-  padding: 16px;
-  max-width: 600px;
-  width: 90%;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
-  color: var(--text-color, #fff);
-}
-
-.ts-dashboard-compat-panel pre {
-  max-height: 320px;
-  overflow: auto;
-  background: rgba(0, 0, 0, 0.4);
-  padding: 12px;
-  border-radius: 6px;
-  font-size: 11px;
-  color: #cbd5f5;
-}
-
-.ts-dashboard-compat-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  margin-top: 12px;
-}
-
-.ts-dashboard-compat-actions button {
-  padding: 6px 12px;
-  border-radius: 4px;
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  background: rgba(255, 255, 255, 0.1);
-  color: var(--text-color, #fff);
-  cursor: pointer;
+.ts-dashboard-compat-close:hover {
+  opacity: 1;
 }
 
 .ts-dashboard-title {
@@ -118,6 +75,12 @@
 
 .ts-dashboard-selector-btn:hover {
   background: rgba(255, 255, 255, 0.2);
+}
+
+.ts-dashboard-action-btn.active {
+  background: rgba(59, 130, 246, 0.2);
+  border-color: rgba(59, 130, 246, 0.45);
+  color: #cfe3ff;
 }
 
 /* Dashboard selector overlay */

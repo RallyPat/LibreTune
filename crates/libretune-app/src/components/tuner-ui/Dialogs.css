@@ -419,6 +419,12 @@
 .dialog-version {
   color: var(--text-muted);
   font-size: 12px;
+  margin-bottom: 4px !important;
+}
+
+.dialog-build {
+  color: var(--text-muted);
+  font-size: 12px;
   margin-bottom: 16px !important;
 }
 

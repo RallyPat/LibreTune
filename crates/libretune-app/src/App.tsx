@@ -2777,7 +2777,7 @@ function NewProjectDialog({
         filters: [
           { name: "Tune Files", extensions: ["xml", "msq"] },
           { name: "LibreTune Tune", extensions: ["xml"] },
-          { name: "TunerStudio MSQ", extensions: ["msq"] },
+          { name: "TS MSQ", extensions: ["msq"] },
           { name: "All Files", extensions: ["*"] },
         ],
       });

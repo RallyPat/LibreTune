@@ -30,6 +30,7 @@ interface DashboardDesignerProps {
   onDashFileChange: (file: DashFile) => void;
   selectedGaugeId: string | null;
   onSelectGauge: (id: string | null) => void;
+  onContextMenu: (e: React.MouseEvent, gaugeId: string | null) => void;
   gridSnap: number; // Grid snap size in percentage (e.g., 5 = 5%)
   onGridSnapChange: (snap: number) => void;
   showGrid: boolean;
@@ -71,6 +72,7 @@ export default function DashboardDesigner({
   onDashFileChange,
   selectedGaugeId,
   onSelectGauge,
+  onContextMenu,
   gridSnap,
   onGridSnapChange,
   showGrid,
@@ -226,10 +228,22 @@ export default function DashboardDesigner({
 
   // Handle mouse down on gauge for dragging
   const handleGaugeMouseDown = useCallback((e: React.MouseEvent, gaugeId: string, component: DashComponent) => {
+    // Don't start drag if clicking on an interactive element (input, button, etc.)
+    const target = e.target as HTMLElement;
+    if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.tagName === 'BUTTON') {
+      return; // Allow default input handling
+    }
+    
+    // Only drag with left mouse button, not middle or right
+    if (e.button !== 0) {
+      return;
+    }
+    
+    // Select gauge immediately on click
+    onSelectGauge(gaugeId);
+    
     e.preventDefault();
     e.stopPropagation();
-    
-    onSelectGauge(gaugeId);
     
     // Get relative position
     let relX = 0, relY = 0;
@@ -558,6 +572,7 @@ export default function DashboardDesigner({
             '--grid-size': `${gridSnap}%`,
           } as React.CSSProperties}
           onClick={() => onSelectGauge(null)}
+          onContextMenu={(e) => onContextMenu(e, null)}
         >
           {dashFile.gauge_cluster.components.map((component, index) => {
             let id: string, relX: number, relY: number, width: number, height: number;
@@ -595,6 +610,11 @@ export default function DashboardDesigner({
                   height: `${height * 100}%`,
                 }}
                 onMouseDown={(e) => handleGaugeMouseDown(e, id, component)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onSelectGauge(id);
+                }}
+                onContextMenu={(e) => onContextMenu(e, id)}
               >
                 <div className="gauge-preview">
                   {isGauge(component) && (

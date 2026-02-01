@@ -8,11 +8,16 @@ import { act } from 'react';
 // Minimal DashFile stub
 const mockDashFile = {
   gauge_cluster: {
+    force_aspect: false,
+    force_aspect_width: 0,
+    force_aspect_height: 0,
     components: [
       { Gauge: { id: 'g1', output_channel: 'RPM', min: 0, max: 8000, relative_x: 0, relative_y: 0, relative_width: 0.25, relative_height: 0.25, shortest_size: 50 } }
     ],
-    cluster_background_color: '#000000',
+    cluster_background_color: { alpha: 255, red: 0, green: 0, blue: 0 },
     cluster_background_image_file_name: null,
+    cluster_background_image_style: 'Stretch',
+    background_dither_color: null,
     // Ensure embedded_images exists in tests
     embedded_images: [],
   },

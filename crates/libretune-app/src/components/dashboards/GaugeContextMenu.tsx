@@ -166,48 +166,52 @@ export default function GaugeContextMenu({
         Reload Default Gauges
       </div>
 
-      {/* LibreTune Gauges Submenu */}
-      <div
-        className="menu-item has-submenu"
-        onMouseEnter={() => setExpandedSubmenu('gauges')}
-      >
-        LibreTune Gauges
-        <span className="submenu-arrow">▶</span>
-        
-        {expandedSubmenu === 'gauges' && (
-          <div className="submenu">
-            {gaugeCategories.map((category) => (
-              <div
-                key={category.name}
-                className="menu-item has-submenu"
-                onMouseEnter={() => setExpandedCategory(category.name)}
-              >
-                {category.name}
-                <span className="submenu-arrow">▶</span>
-                
-                {expandedCategory === category.name && (
-                  <div className="submenu">
-                    {category.gauges.map((gauge) => (
-                      <div
-                        key={gauge.channel}
-                        className="menu-item"
-                        onClick={() => {
-                          onReplaceGauge(gauge.channel, gauge);
-                          onClose();
-                        }}
-                      >
-                        {gauge.title}
+      {/* TS/LibreTune Gauges Submenu (Designer Mode Only) */}
+      {designerMode && (
+        <>
+          <div
+            className="menu-item has-submenu"
+            onMouseEnter={() => setExpandedSubmenu('gauges')}
+          >
+            TS/LibreTune Gauges
+            <span className="submenu-arrow">▶</span>
+            
+            {expandedSubmenu === 'gauges' && (
+              <div className="submenu">
+                {gaugeCategories.map((category) => (
+                  <div
+                    key={category.name}
+                    className="menu-item has-submenu"
+                    onMouseEnter={() => setExpandedCategory(category.name)}
+                  >
+                    {category.name}
+                    <span className="submenu-arrow">▶</span>
+                    
+                    {expandedCategory === category.name && (
+                      <div className="submenu">
+                        {category.gauges.map((gauge) => (
+                          <div
+                            key={gauge.channel}
+                            className="menu-item"
+                            onClick={() => {
+                              onReplaceGauge(gauge.channel, gauge);
+                              onClose();
+                            }}
+                          >
+                            {gauge.title}
+                          </div>
+                        ))}
                       </div>
-                    ))}
+                    )}
                   </div>
-                )}
+                ))}
               </div>
-            ))}
+            )}
           </div>
-        )}
-      </div>
 
-      <div className="menu-separator" />
+          <div className="menu-separator" />
+        </>
+      )}
 
       {/* Reset Value (only if a gauge is selected) */}
       {state.targetGaugeId && (

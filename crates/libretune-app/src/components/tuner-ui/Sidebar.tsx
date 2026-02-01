@@ -371,6 +371,17 @@ function TreeView({
             <div
               className={`tree-item-row ${isDisabled ? 'tree-item-disabled' : ''}`}
               style={{ paddingLeft: level * 16 + 8 }}
+              draggable={!hasChildren}
+              onDragStart={(e) => {
+                if (!hasChildren) {
+                  e.dataTransfer.effectAllowed = 'copy';
+                  e.dataTransfer.setData('application/json', JSON.stringify({
+                    type: 'channel',
+                    id: item.id,
+                    label: item.label,
+                  }));
+                }
+              }}
               onClick={() => {
                 // Always allow folder expand/collapse even if disabled
                 if (hasChildren || !isDisabled) {
@@ -382,7 +393,7 @@ function TreeView({
                   onItemDoubleClick(item);
                 }
               }}
-              title={isDisabled ? item.disabledReason || 'Not available' : undefined}
+              title={isDisabled ? item.disabledReason || 'Not available' : ((!hasChildren) ? 'Drag to dashboard to create gauge' : undefined)}
             >
               <span className="tree-item-expander">
                 {hasChildren && (isExpanded ? '▼' : '▶')}

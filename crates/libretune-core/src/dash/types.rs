@@ -618,6 +618,12 @@ pub enum DashComponent {
 pub struct GaugeCluster {
     /// Enable anti-aliasing for all gauges
     pub anti_aliasing: bool,
+    /// Force a specific aspect ratio (TunerStudio legacy dashboards)
+    pub force_aspect: bool,
+    /// Forced aspect width (TunerStudio legacy dashboards)
+    pub force_aspect_width: f64,
+    /// Forced aspect height (TunerStudio legacy dashboards)
+    pub force_aspect_height: f64,
     /// Background dither color
     pub background_dither_color: Option<TsColor>,
     /// Cluster background color
@@ -636,6 +642,9 @@ impl Default for GaugeCluster {
     fn default() -> Self {
         Self {
             anti_aliasing: true,
+            force_aspect: false,
+            force_aspect_width: 0.0,
+            force_aspect_height: 0.0,
             background_dither_color: None,
             cluster_background_color: TsColor::black(),
             cluster_background_image_file_name: None,

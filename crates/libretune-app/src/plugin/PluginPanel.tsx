@@ -51,7 +51,7 @@ export const PluginPanel: React.FC<PluginPanelProps> = ({ onClose }) => {
       const selected = await open({
         multiple: false,
         filters: [{ name: 'JAR files', extensions: ['jar'] }],
-        title: 'Select TunerStudio Plugin JAR',
+        title: 'Select TS Plugin JAR',
       });
 
       if (!selected) return;

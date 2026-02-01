@@ -24,6 +24,11 @@ interface TuneInfo {
   has_tune: boolean;
 }
 
+interface BuildInfo {
+  version: string;
+  build_id: string;
+}
+
 // =============================================================================
 // Save Dialog
 // =============================================================================
@@ -447,7 +452,7 @@ interface CurrentProject {
 interface SettingsDialogProps extends DialogProps {
   theme: string;
   onThemeChange: (theme: string) => void;
-  onSettingsChange?: (settings: { units?: string; autoBurnOnClose?: boolean; demoMode?: boolean; indicatorColumnCount?: string; indicatorFillEmpty?: boolean; indicatorTextFit?: string; statusBarChannels?: string[]; runtimePacketMode?: string }) => void;
+  onSettingsChange?: (settings: { units?: string; autoBurnOnClose?: boolean; demoMode?: boolean; indicatorColumnCount?: string; indicatorFillEmpty?: boolean; indicatorTextFit?: string; statusBarChannels?: string[]; runtimePacketMode?: string; autoSyncGaugeRanges?: boolean }) => void;
   currentProject?: CurrentProject | null;
 }
 
@@ -476,6 +481,7 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
   const [gaugeSnapToGrid, setGaugeSnapToGrid] = useState(true);
   const [gaugeFreeMove, setGaugeFreeMove] = useState(false);
   const [gaugeLock, setGaugeLock] = useState(false);
+  const [autoSyncGaugeRanges, setAutoSyncGaugeRanges] = useState(true);
   
   // Version control settings
   const [autoCommitOnSave, setAutoCommitOnSave] = useState('never');
@@ -514,6 +520,7 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
         if (settings.gauge_snap_to_grid !== undefined) setGaugeSnapToGrid(!!settings.gauge_snap_to_grid);
         if (settings.gauge_free_move !== undefined) setGaugeFreeMove(!!settings.gauge_free_move);
         if (settings.gauge_lock !== undefined) setGaugeLock(!!settings.gauge_lock);
+        if (settings.auto_sync_gauge_ranges !== undefined) setAutoSyncGaugeRanges(!!settings.auto_sync_gauge_ranges);
         // Version control settings
         if (settings.auto_commit_on_save !== undefined) setAutoCommitOnSave(settings.auto_commit_on_save);
         if (settings.commit_message_format !== undefined) setCommitMessageFormat(settings.commit_message_format);
@@ -628,6 +635,7 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
     await invoke('update_setting', { key: 'gauge_snap_to_grid', value: gaugeSnapToGrid.toString() });
     await invoke('update_setting', { key: 'gauge_free_move', value: gaugeFreeMove.toString() });
     await invoke('update_setting', { key: 'gauge_lock', value: gaugeLock.toString() });
+    await invoke('update_setting', { key: 'auto_sync_gauge_ranges', value: autoSyncGaugeRanges.toString() });
     // Update version control settings
     await invoke('update_setting', { key: 'auto_commit_on_save', value: autoCommitOnSave });
     await invoke('update_setting', { key: 'commit_message_format', value: commitMessageFormat });
@@ -644,9 +652,9 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
       }
     }
     
-    onSettingsChange?.({ units: localUnits, autoBurnOnClose, indicatorColumnCount, indicatorFillEmpty, indicatorTextFit, statusBarChannels, runtimePacketMode });
+    onSettingsChange?.({ units: localUnits, autoBurnOnClose, indicatorColumnCount, indicatorFillEmpty, indicatorTextFit, statusBarChannels, runtimePacketMode, autoSyncGaugeRanges });
     onClose();
-  }, [localTheme, localUnits, autoBurnOnClose, statusBarChannels, indicatorColumnCount, indicatorFillEmpty, indicatorTextFit, heatmapValueScheme, heatmapChangeScheme, heatmapCoverageScheme, gaugeSnapToGrid, gaugeFreeMove, gaugeLock, autoCommitOnSave, commitMessageFormat, runtimePacketMode, autoReconnectAfterControllerCommand, autoConnect, currentProject, onThemeChange, onSettingsChange, onClose]);
+  }, [localTheme, localUnits, autoBurnOnClose, statusBarChannels, indicatorColumnCount, indicatorFillEmpty, indicatorTextFit, heatmapValueScheme, heatmapChangeScheme, heatmapCoverageScheme, gaugeSnapToGrid, gaugeFreeMove, gaugeLock, autoSyncGaugeRanges, autoCommitOnSave, commitMessageFormat, runtimePacketMode, autoReconnectAfterControllerCommand, autoConnect, currentProject, onThemeChange, onSettingsChange, onClose]);
 
   if (!isOpen) return null;
 
@@ -1016,6 +1024,18 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
             <span className="dialog-form-note">Prevent accidental gauge movement</span>
           </div>
 
+          <div className="dialog-form-group">
+            <label>
+              <input
+                type="checkbox"
+                checked={autoSyncGaugeRanges}
+                onChange={(e) => setAutoSyncGaugeRanges(e.target.checked)}
+              />
+              Auto-sync gauge ranges from INI
+            </label>
+            <span className="dialog-form-note">Apply INI gauge min/max/units automatically when a project or INI changes</span>
+          </div>
+
           <h3 style={{ marginTop: '1.5rem', marginBottom: '0.5rem' }}>Version Control</h3>
           
           <div className="dialog-form-group">
@@ -1097,6 +1117,15 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
 // =============================================================================
 
 export function AboutDialog({ isOpen, onClose }: DialogProps) {
+  const [buildInfo, setBuildInfo] = useState<BuildInfo | null>(null);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    invoke<BuildInfo>('get_build_info')
+      .then(setBuildInfo)
+      .catch(() => setBuildInfo(null));
+  }, [isOpen]);
+
   if (!isOpen) return null;
 
   return (
@@ -1110,7 +1139,12 @@ export function AboutDialog({ isOpen, onClose }: DialogProps) {
         <div className="dialog-content dialog-about">
           <div className="dialog-about-logo">🔧</div>
           <h3>LibreTune</h3>
-          <p className="dialog-version">Version 0.1.0</p>
+          <p className="dialog-version">
+            Version {buildInfo?.version ?? 'unknown'}
+          </p>
+          <p className="dialog-build">
+            Build {buildInfo?.build_id ?? 'unknown'}
+          </p>
           
           <p>Open-source ECU tuning software compatible with standard INI definition files.</p>
           

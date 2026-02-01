@@ -130,6 +130,17 @@ fn write_gauge_cluster<W: Write>(
             "false"
         },
     ));
+    if cluster.force_aspect {
+        elem.push_attribute(("forceAspect", "true"));
+        if cluster.force_aspect_width > 0.0 {
+            let width_str = cluster.force_aspect_width.to_string();
+            elem.push_attribute(("forceAspectWidth", width_str.as_str()));
+        }
+        if cluster.force_aspect_height > 0.0 {
+            let height_str = cluster.force_aspect_height.to_string();
+            elem.push_attribute(("forceAspectHeight", height_str.as_str()));
+        }
+    }
     let bg_color = cluster.cluster_background_color.to_argb_int().to_string();
     elem.push_attribute(("clusterBackgroundColor", bg_color.as_str()));
 

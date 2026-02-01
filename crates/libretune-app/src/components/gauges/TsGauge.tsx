@@ -13,6 +13,7 @@ interface TsGaugeProps {
   config: TsGaugeConfig;
   value: number;
   embeddedImages?: Map<string, string>;
+  legacyMode?: boolean;
 }
 
 // Cache for loaded fonts
@@ -27,7 +28,7 @@ const VALUE_CHANGE_THRESHOLD_PERCENT = 0.5;
 /**
  * Internal TsGauge component - wrapped in React.memo below
  */
-function TsGaugeInner({ config, value, embeddedImages }: TsGaugeProps) {
+function TsGaugeInner({ config, value, embeddedImages, legacyMode = false }: TsGaugeProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [fontsReady, setFontsReady] = useState(false);
   const [imagesReady, setImagesReady] = useState(false);
@@ -273,7 +274,7 @@ function TsGaugeInner({ config, value, embeddedImages }: TsGaugeProps) {
       // Render based on gauge painter type
       switch (config.gauge_painter) {
         case 'BasicReadout':
-          drawBasicReadout(ctx, rect.width, rect.height);
+          drawBasicReadout(ctx, rect.width, rect.height, bgImage);
           break;
         case 'HorizontalBarGauge':
           drawHorizontalBar(ctx, rect.width, rect.height);
@@ -324,7 +325,7 @@ function TsGaugeInner({ config, value, embeddedImages }: TsGaugeProps) {
           break;
         default:
           // Fallback to basic readout for unimplemented types
-          drawBasicReadout(ctx, rect.width, rect.height);
+          drawBasicReadout(ctx, rect.width, rect.height, bgImage);
       }
     }); // End of requestAnimationFrame callback
 
@@ -335,10 +336,15 @@ function TsGaugeInner({ config, value, embeddedImages }: TsGaugeProps) {
         rafIdRef.current = null;
       }
     };
-  }, [config, clampedValue, value, embeddedImages, fontsReady, imagesReady, getValueColor, createMetallicGradient, getEmbeddedImage, getFontFamily]);
+  }, [config, clampedValue, value, embeddedImages, fontsReady, imagesReady, legacyMode, getValueColor, createMetallicGradient, getEmbeddedImage, getFontFamily]);
 
   /** Draw digital readout (LCD style) with improved visuals */
-  const drawBasicReadout = (ctx: CanvasRenderingContext2D, width: number, height: number) => {
+  const drawBasicReadout = (
+    ctx: CanvasRenderingContext2D,
+    width: number,
+    height: number,
+    bgImage: HTMLImageElement | null,
+  ) => {
     const padding = 6;
     const innerWidth = width - padding * 2;
     const innerHeight = height - padding * 2;
@@ -349,39 +355,44 @@ function TsGaugeInner({ config, value, embeddedImages }: TsGaugeProps) {
     // Apply font_size_adjustment as a multiplier (typically -2 to +2, we scale by ~10% per unit)
     const fontScale = 1 + (config.font_size_adjustment ?? 0) * 0.1;
 
-    // Outer frame with gradient (metallic look)
-    const frameGradient = ctx.createLinearGradient(0, 0, width, height);
-    frameGradient.addColorStop(0, '#555555');
-    frameGradient.addColorStop(0.5, '#333333');
-    frameGradient.addColorStop(1, '#222222');
-    ctx.fillStyle = frameGradient;
-    roundRect(ctx, 0, 0, width, height, cornerRadius);
-    ctx.fill();
+    const useLegacyBackground = legacyMode && !!bgImage;
+    if (useLegacyBackground && bgImage) {
+      ctx.drawImage(bgImage, 0, 0, width, height);
+    } else {
+      // Outer frame with gradient (metallic look)
+      const frameGradient = ctx.createLinearGradient(0, 0, width, height);
+      frameGradient.addColorStop(0, '#555555');
+      frameGradient.addColorStop(0.5, '#333333');
+      frameGradient.addColorStop(1, '#222222');
+      ctx.fillStyle = frameGradient;
+      roundRect(ctx, 0, 0, width, height, cornerRadius);
+      ctx.fill();
 
-    // Inner LCD panel with subtle inset effect
-    const innerX = padding - 2;
-    const innerY = padding - 2;
-    const innerW = innerWidth + 4;
-    const innerH = innerHeight + 4;
-    
-    // Inset shadow
-    ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
-    ctx.shadowBlur = 4;
-    ctx.shadowOffsetX = 2;
-    ctx.shadowOffsetY = 2;
-    ctx.fillStyle = tsColorToRgba(config.back_color);
-    roundRect(ctx, innerX, innerY, innerW, innerH, cornerRadius - 2);
-    ctx.fill();
-    ctx.shadowColor = 'transparent';
+      // Inner LCD panel with subtle inset effect
+      const innerX = padding - 2;
+      const innerY = padding - 2;
+      const innerW = innerWidth + 4;
+      const innerH = innerHeight + 4;
+      
+      // Inset shadow
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
+      ctx.shadowBlur = 4;
+      ctx.shadowOffsetX = 2;
+      ctx.shadowOffsetY = 2;
+      ctx.fillStyle = tsColorToRgba(config.back_color);
+      roundRect(ctx, innerX, innerY, innerW, innerH, cornerRadius - 2);
+      ctx.fill();
+      ctx.shadowColor = 'transparent';
 
-    // LCD background with slight gradient for depth
-    const lcdGradient = ctx.createLinearGradient(padding, padding, padding, height - padding);
-    const bgHex = tsColorToHex(config.back_color);
-    lcdGradient.addColorStop(0, lightenColor(bgHex, 5));
-    lcdGradient.addColorStop(1, darkenColor(bgHex, 10));
-    ctx.fillStyle = lcdGradient;
-    roundRect(ctx, padding, padding, innerWidth, innerHeight, cornerRadius - 2);
-    ctx.fill();
+      // LCD background with slight gradient for depth
+      const lcdGradient = ctx.createLinearGradient(padding, padding, padding, height - padding);
+      const bgHex = tsColorToHex(config.back_color);
+      lcdGradient.addColorStop(0, lightenColor(bgHex, 5));
+      lcdGradient.addColorStop(1, darkenColor(bgHex, 10));
+      ctx.fillStyle = lcdGradient;
+      roundRect(ctx, padding, padding, innerWidth, innerHeight, cornerRadius - 2);
+      ctx.fill();
+    }
 
     // Calculate font sizes based on the smaller dimension for balanced scaling
     const titleFontSize = Math.max(9, minDim * 0.12 * fontScale);
@@ -685,7 +696,7 @@ function TsGaugeInner({ config, value, embeddedImages }: TsGaugeProps) {
     // Convert to radians: TS angles are measured from 3 o'clock position,
     // canvas arc() measures from the positive x-axis (also 3 o'clock)
     // So we just need to convert degrees to radians
-    const startAngle = (startDeg - 90) * Math.PI / 180;
+    const startAngle = startDeg * Math.PI / 180;
     const sweepAngle = sweepDeg * Math.PI / 180;
     const endAngle = ccw ? startAngle - sweepAngle : startAngle + sweepAngle;
     
@@ -904,7 +915,7 @@ function TsGaugeInner({ config, value, embeddedImages }: TsGaugeProps) {
     const sweepDeg = config.sweep_angle ?? 120;
     const ccw = config.counter_clockwise ?? false;
     
-    const startAngle = (startDeg - 90) * Math.PI / 180;
+    const startAngle = startDeg * Math.PI / 180;
     const sweepAngle = sweepDeg * Math.PI / 180;
     const endAngle = ccw ? startAngle - sweepAngle : startAngle + sweepAngle;
     

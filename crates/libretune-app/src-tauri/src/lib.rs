@@ -41,6 +41,12 @@ use tauri::Manager;
 use tauri_plugin_window_state::{AppHandleExt, StateFlags};
 use tokio::sync::Mutex;
 
+#[derive(Serialize)]
+struct BuildInfo {
+    version: String,
+    build_id: String,
+}
+
 /// Parse a runtime packet mode string into enum
 fn parse_runtime_packet_mode(mode: &str) -> libretune_core::protocol::RuntimePacketMode {
     use libretune_core::protocol::RuntimePacketMode as Rpm;
@@ -79,6 +85,16 @@ fn get_settings_path(app: &tauri::AppHandle) -> PathBuf {
 /// Get the dashboards directory (cross-platform)
 fn get_dashboards_dir(app: &tauri::AppHandle) -> PathBuf {
     get_app_data_dir(app).join("dashboards")
+}
+
+/// Get application build information (version + nightly build ID).
+#[tauri::command]
+fn get_build_info(app: tauri::AppHandle) -> BuildInfo {
+    let version = app.package_info().version.to_string();
+    let build_id = option_env!("LIBRETUNE_BUILD_ID")
+        .unwrap_or("unknown")
+        .to_string();
+    BuildInfo { version, build_id }
 }
 
 /// Start periodic connection metrics emission task (1s interval)
@@ -415,6 +431,8 @@ struct Settings {
     gauge_snap_to_grid: bool,       // Dashboard gauge snap to grid
     gauge_free_move: bool,          // Dashboard gauge free move
     gauge_lock: bool,               // Dashboard gauge lock in place
+    #[serde(default = "default_true")]
+    auto_sync_gauge_ranges: bool,   // Auto-sync gauge ranges from INI
     indicator_column_count: String, // "auto" or number like "12"
     indicator_fill_empty: bool,     // Fill empty cells in last row
     indicator_text_fit: String,     // "scale" or "wrap"
@@ -522,6 +540,9 @@ fn convert_layout_to_dashfile(layout: &DashboardLayout) -> DashFile {
         },
         gauge_cluster: GaugeCluster {
             anti_aliasing: true,
+            force_aspect: false,
+            force_aspect_width: 0.0,
+            force_aspect_height: 0.0,
             cluster_background_color: TsColor {
                 alpha: 255,
                 red: 30,
@@ -6019,7 +6040,7 @@ struct DashFileInfo {
 }
 
 /// Helper to scan a directory for .dash and .ltdash.xml files
-fn scan_dash_directory(dir: &Path, category: &str, dashes: &mut Vec<DashFileInfo>) {
+fn scan_dash_directory(dir: &Path, _category: &str, dashes: &mut Vec<DashFileInfo>) {
     if let Ok(entries) = std::fs::read_dir(dir) {
         for entry in entries.flatten() {
             let path = entry.path();
@@ -6028,23 +6049,24 @@ fn scan_dash_directory(dir: &Path, category: &str, dashes: &mut Vec<DashFileInfo
                 .map(|n| n.to_string_lossy().to_lowercase())
                 .unwrap_or_default();
 
-            // Accept .ltdash.xml (native) and .dash (TunerStudio import)
-            if file_name.ends_with(".ltdash.xml") || file_name.ends_with(".dash") {
-                if let Some(name) = path.file_name() {
+            if let Some(name) = path.file_name() {
+                if file_name.ends_with(".ltdash.xml") {
                     dashes.push(DashFileInfo {
                         name: name.to_string_lossy().to_string(),
                         path: path.to_string_lossy().to_string(),
-                        category: category.to_string(),
+                        category: "LibreTune".to_string(),
                     });
-                }
-            }
-            // Also scan .gauge files for individual gauge templates
-            if file_name.ends_with(".gauge") {
-                if let Some(name) = path.file_name() {
+                } else if file_name.ends_with(".dash") {
                     dashes.push(DashFileInfo {
                         name: name.to_string_lossy().to_string(),
                         path: path.to_string_lossy().to_string(),
-                        category: format!("{} (Gauge)", category),
+                        category: "Legacy (TunerStudio)".to_string(),
+                    });
+                } else if file_name.ends_with(".gauge") {
+                    dashes.push(DashFileInfo {
+                        name: name.to_string_lossy().to_string(),
+                        path: path.to_string_lossy().to_string(),
+                        category: "Legacy Gauges".to_string(),
                     });
                 }
             }
@@ -6053,7 +6075,8 @@ fn scan_dash_directory(dir: &Path, category: &str, dashes: &mut Vec<DashFileInfo
 }
 
 /// List all available dashboard files (.ltdash.xml and .dash for import)
-/// Scans app data dashboards directory, reference directory, and creates defaults if needed
+/// List all available dashboard files from the user dashboards directory
+/// Creates 3 default LibreTune dashboards if the directory is empty
 #[tauri::command]
 async fn list_available_dashes(app: tauri::AppHandle) -> Result<Vec<DashFileInfo>, String> {
     let dash_dir = get_dashboards_dir(&app);
@@ -6064,12 +6087,22 @@ async fn list_available_dashes(app: tauri::AppHandle) -> Result<Vec<DashFileInfo
             .map_err(|e| format!("Failed to create dashboards directory: {}", e))?;
     }
 
-    // Check if directory is empty and create defaults if so
-    let is_empty = std::fs::read_dir(&dash_dir)
-        .map(|mut entries| entries.next().is_none())
-        .unwrap_or(true);
+    // Ensure default dashboards exist if no native LibreTune dashboards are present
+    let has_native_dash = std::fs::read_dir(&dash_dir)
+        .ok()
+        .and_then(|entries| {
+            entries
+                .flatten()
+                .map(|entry| entry.path())
+                .find(|path| {
+                    path.file_name()
+                        .map(|n| n.to_string_lossy().to_lowercase().ends_with(".ltdash.xml"))
+                        .unwrap_or(false)
+                })
+        })
+        .is_some();
 
-    if is_empty {
+    if !has_native_dash {
         println!(
             "[list_available_dashes] Creating default dashboards in {:?}",
             dash_dir
@@ -6079,46 +6112,11 @@ async fn list_available_dashes(app: tauri::AppHandle) -> Result<Vec<DashFileInfo
 
     let mut dashes = Vec::new();
 
-    // 1. Scan user dashboards directory (these appear first as "User" category)
+    // Scan only the user dashboards directory (imported or created by user)
     scan_dash_directory(&dash_dir, "User", &mut dashes);
 
-    // 2. Try to get bundled dashboards from app resource directory (for production builds)
-    if let Ok(resource_path) = app.path().resource_dir() {
-        let bundled_dash = resource_path.join("dashboards");
-        if bundled_dash.exists() {
-            println!(
-                "[list_available_dashes] Scanning bundled dashboards: {:?}",
-                bundled_dash
-            );
-            scan_dash_directory(&bundled_dash, "Bundled", &mut dashes);
-        }
-    }
-
-    // 3. Scan reference dashboards directory for development builds
-    if let Ok(cwd) = std::env::current_dir() {
-        let candidates = [
-            cwd.join("reference").join("TunerStudioMS").join("Dash"),
-            cwd.join("../reference").join("TunerStudioMS").join("Dash"),
-            cwd.join("../../reference")
-                .join("TunerStudioMS")
-                .join("Dash"),
-        ];
-        if let Some(reference_dash) = candidates.into_iter().find(|path| path.exists()) {
-            println!(
-                "[list_available_dashes] Scanning reference dashboards: {:?}",
-                reference_dash
-            );
-            scan_dash_directory(&reference_dash, "Reference", &mut dashes);
-        }
-    }
-
-    // Sort: User first, then by name
-    dashes.sort_by(|a, b| match (a.category.as_str(), b.category.as_str()) {
-        ("User", "User") => a.name.cmp(&b.name),
-        ("User", _) => std::cmp::Ordering::Less,
-        (_, "User") => std::cmp::Ordering::Greater,
-        _ => a.name.cmp(&b.name),
-    });
+    // Sort by name
+    dashes.sort_by(|a, b| a.name.cmp(&b.name));
 
     println!("[list_available_dashes] Found {} dashboards", dashes.len());
     Ok(dashes)
@@ -6133,6 +6131,30 @@ struct DashConflictInfo {
     has_conflict: bool,
     /// Suggested alternative name if conflict exists
     suggested_name: Option<String>,
+}
+
+/// Reset dashboards to defaults - removes all user dashboards and recreates the 3 defaults
+#[tauri::command]
+async fn reset_dashboards_to_defaults(app: tauri::AppHandle) -> Result<(), String> {
+    let dash_dir = get_dashboards_dir(&app);
+    
+    println!("[reset_dashboards_to_defaults] Clearing dashboards directory: {:?}", dash_dir);
+    
+    // Remove the entire dashboards directory
+    if dash_dir.exists() {
+        std::fs::remove_dir_all(&dash_dir)
+            .map_err(|e| format!("Failed to remove dashboards directory: {}", e))?;
+    }
+    
+    // Recreate it
+    std::fs::create_dir_all(&dash_dir)
+        .map_err(|e| format!("Failed to create dashboards directory: {}", e))?;
+    
+    // Create the 3 defaults
+    create_default_dashboard_files(&dash_dir)?;
+    
+    println!("[reset_dashboards_to_defaults] Reset complete - 3 default dashboards created");
+    Ok(())
 }
 
 /// Check if a dashboard file with the given name already exists
@@ -6231,17 +6253,29 @@ async fn import_dash_file(
         });
     }
 
-    // Validate it's a parseable dash file
-    let content =
-        std::fs::read_to_string(source).map_err(|e| format!("Failed to read file: {}", e))?;
+    // Validate it's a parseable dash or gauge file
+    let lower = source_path.to_lowercase();
+    if lower.ends_with(".gauge") {
+        if let Err(e) = dash::load_gauge_file(source) {
+            return Ok(DashImportResult {
+                source_path: source_path.clone(),
+                success: false,
+                error: Some(format!("Invalid gauge file: {}", e)),
+                file_info: None,
+            });
+        }
+    } else {
+        let content =
+            std::fs::read_to_string(source).map_err(|e| format!("Failed to read file: {}", e))?;
 
-    if let Err(e) = dash::parse_dash_file(&content) {
-        return Ok(DashImportResult {
-            source_path: source_path.clone(),
-            success: false,
-            error: Some(format!("Invalid dashboard file: {}", e)),
-            file_info: None,
-        });
+        if let Err(e) = dash::parse_dash_file(&content) {
+            return Ok(DashImportResult {
+                source_path: source_path.clone(),
+                success: false,
+                error: Some(format!("Invalid dashboard file: {}", e)),
+                file_info: None,
+            });
+        }
     }
 
     // Determine target filename
@@ -11253,6 +11287,9 @@ async fn update_setting(app: tauri::AppHandle, key: String, value: String) -> Re
             settings.gauge_free_move = value.parse().map_err(|_| "Invalid boolean value")?
         }
         "gauge_lock" => settings.gauge_lock = value.parse().map_err(|_| "Invalid boolean value")?,
+        "auto_sync_gauge_ranges" => {
+            settings.auto_sync_gauge_ranges = value.parse().map_err(|_| "Invalid boolean value")?
+        }
         "indicator_column_count" => settings.indicator_column_count = value,
         "indicator_fill_empty" => {
             settings.indicator_fill_empty = value.parse().map_err(|_| "Invalid boolean value")?
@@ -11279,6 +11316,7 @@ async fn update_setting(app: tauri::AppHandle, key: String, value: String) -> Re
     }
 
     save_settings(&app, &settings);
+    let _ = app.emit("settings:changed", key.clone());
     Ok(())
 }
 
@@ -11713,6 +11751,7 @@ pub fn run() {
             get_protocol_defaults,
             get_protocol_capabilities,
             get_help_topic,
+            get_build_info,
             get_constant,
             get_constant_value,
             get_constant_string_value,
@@ -11743,6 +11782,7 @@ pub fn run() {
             validate_dashboard,
             save_dash_file,
             list_available_dashes,
+            reset_dashboards_to_defaults,
             check_dash_conflict,
             import_dash_file,
             create_new_dashboard,
