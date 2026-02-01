@@ -29,6 +29,7 @@ import {
 import ConnectionMetrics from './components/layout/ConnectionMetrics';
 import TsDashboard from "./components/dashboards/TsDashboard";
 import { ToothLoggerView, CompositeLoggerView } from "./components/diagnostics";
+import { EcuConsole } from "./components/console/EcuConsole";
 import DialogRenderer, { DialogDefinition as RendererDialogDef } from "./components/dialogs/DialogRenderer";
 import CurveEditor, { CurveData, SimpleGaugeInfo } from "./components/curves/CurveEditor";
 import HelpViewer, { HelpTopicData } from "./components/dialogs/HelpViewer";
@@ -201,7 +202,7 @@ interface PortEditorConfig {
 
 // Tab content types
 interface TabContent {
-  type: "dashboard" | "table" | "curve" | "dialog" | "portEditor" | "settings" | "project" | "autotune" | "datalog" | "tooth-logger" | "composite-logger";
+  type: "dashboard" | "table" | "curve" | "dialog" | "portEditor" | "settings" | "project" | "autotune" | "datalog" | "tooth-logger" | "composite-logger" | "console";
   data?: TunerTableData | RendererDialogDef | PortEditorConfig | CurveData | string;
   gauge?: SimpleGaugeInfo | null; // For curve tabs with associated gauges
   /** Search term to highlight within the content (e.g., matching field labels in dialogs) */
@@ -227,6 +228,7 @@ function AppContent() {
     signature: null,
     has_definition: false,
   });
+  const [ecuType, setEcuType] = useState<string>("Unknown");
   const [ports, setPorts] = useState<string[]>([]);
   const [selectedPort, setSelectedPort] = useState("");
   const [baudRate, setBaudRate] = useState(115200);
@@ -907,6 +909,19 @@ function AppContent() {
     try {
       const s = await invoke<ConnectionStatus>("get_connection_status");
       setStatus(s);
+      
+      // Also fetch ECU type if connected
+      if (s.state === "Connected") {
+        try {
+          const type = await invoke<string>("get_ecu_type");
+          setEcuType(type);
+        } catch (err) {
+          console.warn("Failed to get ECU type:", err);
+          setEcuType("Unknown");
+        }
+      } else {
+        setEcuType("Unknown");
+      }
     } catch (e) {
       console.error(e);
     }
@@ -1835,6 +1850,7 @@ function AppContent() {
         { id: "sep1", label: "", separator: true },
         { id: "tooth-logger", label: "&Tooth Logger", onClick: () => openTarget("tooth-logger", "Tooth Logger"), disabled: !currentProject },
         { id: "composite-logger", label: "&Composite Logger", onClick: () => openTarget("composite-logger", "Composite Logger"), disabled: !currentProject },
+        { id: "console", label: "&ECU Console", onClick: () => openTarget("console", `Console - ${ecuType}`), disabled: !currentProject || status.state !== "Connected" || !ecuType.includes("RusEFI") && !ecuType.includes("FOME") && !ecuType.includes("EpicEFI") },
         { id: "sep2", label: "", separator: true },
         { id: "compare-tables", label: "Table &Comparison", onClick: () => setTableComparisonOpen(true), disabled: !currentProject },
         { id: "performance", label: "&Performance Calculator", onClick: () => setPerformanceDialogOpen(true), disabled: !currentProject },
@@ -2201,6 +2217,8 @@ function AppContent() {
         return <ToothLoggerView onClose={() => handleTabClose("tooth-logger")} />;
       case "composite-logger":
         return <CompositeLoggerView onClose={() => handleTabClose("composite-logger")} />;
+      case "console":
+        return <EcuConsole ecuType={ecuType} isConnected={status.state === "Connected"} />;
       default:
         return null;
     }
