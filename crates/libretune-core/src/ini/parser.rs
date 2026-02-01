@@ -13,7 +13,7 @@ use super::{
     tables::{CurveDefinition, TableDefinition},
     types::{
         AnalysisFilter, CommandButtonCloseAction, CommandPart, ControllerCommand, DatalogEntry,
-        DatalogView, DialogComponent, DialogDefinition, FTPBrowserConfig, FilterOperator,
+        DatalogView, DialogComponent, DialogDefinition, EcuType, FTPBrowserConfig, FilterOperator,
         FrontPageConfig, FrontPageIndicator, GammaEConfig, HelpTopic, IndicatorDefinition,
         IndicatorPanel, KeyAction, LoggerDefinition, MaintainConstantValue, Menu, MenuItem,
         PortEditorConfig, ReferenceTable, SettingGroup, SettingOption, VeAnalyzeConfig,
@@ -339,6 +339,9 @@ fn parse_ini_internal(content: &str, ctx: &mut IncludeContext) -> Result<EcuDefi
 
     // Post-process tables to resolve x_size/y_size from referenced constants
     post_process_table_sizes(&mut definition);
+
+    // Detect ECU type from signature
+    definition.ecu_type = EcuType::detect(&definition.signature, ctx.base_dir.as_ref().and_then(|p| p.file_name()).and_then(|n| n.to_str()));
 
     Ok(definition)
 }

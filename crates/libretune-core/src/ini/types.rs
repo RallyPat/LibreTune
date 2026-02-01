@@ -4,6 +4,96 @@ use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::time::Duration;
 
+/// ECU type detected from INI signature
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum EcuType {
+    /// Speeduino open-source Arduino-based ECU
+    Speeduino,
+    /// rusEFI standard implementation
+    RusEFI,
+    /// FOME (Fork of Massive Enhancements) - rusEFI variant
+    FOME,
+    /// epicEFI - rusEFI variant for epicECU boards
+    EpicEFI,
+    /// MegaSquirt 2
+    MS2,
+    /// MegaSquirt 3
+    MS3,
+    /// Unknown or unsupported ECU type
+    Unknown,
+}
+
+impl EcuType {
+    /// Detect ECU type from signature string
+    ///
+    /// # Arguments
+    /// * `signature` - The ECU signature from [MegaTune] section
+    /// * `filename` - The INI filename for additional context
+    ///
+    /// # Returns
+    /// The detected ECU type
+    pub fn detect(signature: &str, filename: Option<&str>) -> Self {
+        let sig_lower = signature.to_lowercase();
+        let filename_lower = filename.map(|f| f.to_lowercase());
+
+        // Check for FOME first (it also contains "rusefi")
+        if sig_lower.contains("fome") || filename_lower.as_ref().map_or(false, |f| f.contains("fome")) {
+            return EcuType::FOME;
+        }
+
+        // Check for epicEFI (contains "epicECU" or filename suggests it)
+        if sig_lower.contains("epicECU")
+            || filename_lower.as_ref().map_or(false, |f| f.contains("epicECU"))
+        {
+            return EcuType::EpicEFI;
+        }
+
+        // Check for rusEFI (standard)
+        if sig_lower.contains("rusefi") {
+            return EcuType::RusEFI;
+        }
+
+        // Check for Speeduino
+        if sig_lower.contains("speeduino") {
+            return EcuType::Speeduino;
+        }
+
+        // Check for MegaSquirt
+        if sig_lower.starts_with("ms3") || sig_lower.starts_with("ms3format") {
+            return EcuType::MS3;
+        }
+
+        if sig_lower.starts_with("ms2") || sig_lower.contains("ms2extra") {
+            return EcuType::MS2;
+        }
+
+        EcuType::Unknown
+    }
+
+    /// Check if this ECU type supports the rusEFI console
+    pub fn supports_console(&self) -> bool {
+        matches!(self, EcuType::RusEFI | EcuType::FOME | EcuType::EpicEFI)
+    }
+
+    /// Check if this is a FOME variant
+    pub fn is_fome(&self) -> bool {
+        matches!(self, EcuType::FOME)
+    }
+
+    /// Get display name for the ECU type
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            EcuType::Speeduino => "Speeduino",
+            EcuType::RusEFI => "rusEFI",
+            EcuType::FOME => "FOME",
+            EcuType::EpicEFI => "epicEFI",
+            EcuType::MS2 => "MegaSquirt 2",
+            EcuType::MS3 => "MegaSquirt 3",
+            EcuType::Unknown => "Unknown",
+        }
+    }
+}
+
 /// Data types supported by ECU constants
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DataType {

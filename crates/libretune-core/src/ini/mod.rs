@@ -33,6 +33,9 @@ use std::path::Path;
 /// Complete ECU definition parsed from an INI file
 #[derive(Debug, Clone)]
 pub struct EcuDefinition {
+    /// ECU type detected from signature
+    pub ecu_type: EcuType,
+
     /// ECU signature string (e.g., "speeduino 202310")
     pub signature: String,
 
@@ -304,6 +307,7 @@ impl EcuDefinition {
 impl Default for EcuDefinition {
     fn default() -> Self {
         Self {
+            ecu_type: EcuType::Unknown,
             signature: String::new(),
             query_command: "Q".to_string(),
             version_info: String::new(),
