@@ -1141,6 +1141,7 @@ export default function TsDashboard({ initialDashPath, isConnected = false }: Ts
           onShowGridChange={setShowGrid}
           onSave={handleSaveDashboard}
           onExit={handleExitDesigner}
+          channelInfoMap={channelInfoMap}
         />
       ) : (
         <>

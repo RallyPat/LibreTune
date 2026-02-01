@@ -121,6 +121,13 @@
   background-size: var(--grid-size, 5%) var(--grid-size, 5%);
 }
 
+/* Drag-over dropzone effect */
+.designer-canvas.drag-over-dropzone {
+  border: 2px dashed var(--accent-color, #3a7bd5);
+  background-color: rgba(58, 123, 213, 0.08);
+  transition: border-color 0.2s, background-color 0.2s;
+}
+
 /* Gauge placeholder in designer */
 .designer-gauge {
   position: absolute;
