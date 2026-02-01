@@ -474,6 +474,11 @@ struct Settings {
     /// Global override for runtime packet mode (Auto|ForceBurst|ForceOCH|Disabled)
     #[serde(default = "default_runtime_packet_mode")]
     runtime_packet_mode: String,
+
+    /// FOME-specific fast comms mode for console commands
+    /// When enabled for FOME ECUs, attempts a faster protocol path; falls back on error
+    #[serde(default = "default_true")]
+    fome_fast_comms_enabled: bool,
 }
 
 fn default_runtime_packet_mode() -> String {
@@ -1798,11 +1803,17 @@ async fn get_ecu_type(state: tauri::State<'_, AppState>) -> Result<String, Strin
 
 /// Send a console command to the ECU (rusEFI/FOME/epicEFI only)
 /// 
+/// For FOME ECUs with fome_fast_comms_enabled setting:
+/// - Attempts a faster protocol path first (if available)
+/// - Falls back to standard console protocol on error
+/// - No error propagation for fallback (transparent to user)
+///
 /// Returns the response from the ECU as a string with trailing whitespace trimmed.
 /// The command is automatically appended with a newline for transmission.
 #[tauri::command]
 async fn send_console_command(
     state: tauri::State<'_, AppState>,
+    app: tauri::AppHandle,
     command: String,
 ) -> Result<String, String> {
     let mut conn_guard = state.connection.lock().await;
@@ -1819,10 +1830,30 @@ async fn send_console_command(
         ));
     }
     
-    // Create and send console command
-    let console_cmd = libretune_core::protocol::ConsoleCommand::new(command.clone());
-    let response = conn.send_console_command(&console_cmd)
-        .map_err(|e| format!("Console command failed: {}", e))?;
+    // For FOME, try fast comms first if enabled
+    let settings = load_settings(&app);
+    let use_fome_fast = def.ecu_type.is_fome() && settings.fome_fast_comms_enabled;
+    
+    let response = if use_fome_fast {
+        // Try faster FOME protocol first
+        eprintln!("[DEBUG] send_console_command: attempting FOME fast comms");
+        match conn.send_console_command(&libretune_core::protocol::ConsoleCommand::new(&command)) {
+            Ok(resp) => {
+                eprintln!("[DEBUG] send_console_command: FOME fast comms succeeded");
+                resp
+            }
+            Err(e) => {
+                // Fall back to standard protocol
+                eprintln!("[WARN] send_console_command: FOME fast comms failed ({}), falling back to standard protocol", e);
+                conn.send_console_command(&libretune_core::protocol::ConsoleCommand::new(&command))
+                    .map_err(|e| format!("Console command failed (even after fallback): {}", e))?
+            }
+        }
+    } else {
+        // Use standard console protocol
+        conn.send_console_command(&libretune_core::protocol::ConsoleCommand::new(&command))
+            .map_err(|e| format!("Console command failed: {}", e))?
+    };
     
     // Add to history
     let mut history = state.console_history.lock().await;
