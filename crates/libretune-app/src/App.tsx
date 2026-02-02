@@ -732,15 +732,47 @@ function AppContent() {
   useEffect(() => {
     let unlistenUpdate: UnlistenFn | null = null;
     let unlistenErr: UnlistenFn | null = null;
+    let pollIntervalHandle: NodeJS.Timeout | null = null;
 
     if (status.state === "Connected" && status.has_definition) {
       (async () => {
         try {
           await invoke("start_realtime_stream", { intervalMs: 100 });
         } catch (e) {
-          console.warn("Realtime stream failed, falling back to polling:", e);
-          const pollInterval = setInterval(fetchRealtimeData, 100);
-          unlistenUpdate = () => clearInterval(pollInterval);
+          console.warn("Realtime stream failed, falling back to polling with backoff:", e);
+          // Use exponential backoff to reduce load if streaming fails
+          let pollInterval = 500; // Start with 500ms
+          let failureCount = 0;
+          const maxInterval = 2000; // Cap at 2s
+          
+          const startPolling = () => {
+            pollIntervalHandle = setInterval(async () => {
+              try {
+                await fetchRealtimeData();
+                // Success - reduce interval gradually
+                if (pollInterval > 100) {
+                  pollInterval = Math.max(100, pollInterval / 1.5);
+                  if (pollIntervalHandle) clearInterval(pollIntervalHandle);
+                  startPolling();
+                }
+                failureCount = 0;
+              } catch (error) {
+                // Failure - increase interval with exponential backoff
+                failureCount++;
+                if (failureCount >= 3) {
+                  pollInterval = Math.min(maxInterval, pollInterval * 1.5);
+                  if (pollIntervalHandle) clearInterval(pollIntervalHandle);
+                  startPolling();
+                  failureCount = 0;
+                }
+              }
+            }, pollInterval);
+          };
+          
+          startPolling();
+          unlistenUpdate = () => {
+            if (pollIntervalHandle) clearInterval(pollIntervalHandle);
+          };
         }
 
         try {
@@ -760,6 +792,7 @@ function AppContent() {
     return () => {
       if (unlistenUpdate) unlistenUpdate();
       if (unlistenErr) unlistenErr();
+      if (pollIntervalHandle) clearInterval(pollIntervalHandle);
       // Clear realtime data when disconnecting
       useRealtimeStore.getState().clearChannels();
       try {
