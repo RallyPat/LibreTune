@@ -1934,6 +1934,10 @@ fn parse_user_defined_entry(
                 if let Some(dialog) = def.dialogs.get_mut(name) {
                     let parts = split_ini_line(value);
                     let panel_name = parts.first().unwrap_or(&String::new()).trim().to_string();
+                    // Position is the second part (e.g., "West", "East", "Center")
+                    let position = parts.get(1)
+                        .filter(|p| !p.trim().starts_with('{'))
+                        .map(|p| p.trim().to_string());
                     // Check for visibility condition in curly braces (last part)
                     let visibility_condition = parts
                         .iter()
@@ -1942,6 +1946,7 @@ fn parse_user_defined_entry(
                         .map(|p| p.trim().trim_matches(|c| c == '{' || c == '}').to_string());
                     dialog.components.push(DialogComponent::Panel {
                         name: panel_name,
+                        position,
                         visibility_condition,
                     });
                 }

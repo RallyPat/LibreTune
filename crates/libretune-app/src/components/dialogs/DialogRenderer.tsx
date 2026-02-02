@@ -1,4 +1,4 @@
-import { useState, useEffect, useLayoutEffect, useRef, memo, useMemo } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef, memo, useMemo } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { ArrowLeft, Activity, Grid3X3, HelpCircle } from 'lucide-react';
 import CurveEditor, { SimpleGaugeInfo } from '../curves/CurveEditor';
@@ -1360,9 +1360,44 @@ export default function DialogRenderer({ definition, onBack, openTable, context,
   useEffect(() => {
     console.log(`[DialogRenderer] Rendering dialog '${definition.name}' with ${definition.components.length} components:`);
     definition.components.forEach((comp, i) => {
-      console.log(`  [${i}] type=${comp.type}, name=${comp.name || 'N/A'}, visibility=${comp.visibility_condition || 'none'}`);
+      console.log(`  [${i}] type=${comp.type}, name=${comp.name || 'N/A'}, position=${comp.position || 'none'}, visibility=${comp.visibility_condition || 'none'}`);
     });
   }, [definition]);
+  
+  // Group components by position for multi-column layout
+  const organizeComponents = () => {
+    const rows: { west: DialogComponent[], east: DialogComponent[], unpositioned: DialogComponent[] }[] = [];
+    let currentRow: { west: DialogComponent[], east: DialogComponent[], unpositioned: DialogComponent[] } | null = null;
+    
+    for (const comp of definition.components) {
+      const position = comp.position?.toLowerCase();
+      
+      if (position === 'west' || position === 'east') {
+        // Start a new row if we don't have one or if current row already has items in this position
+        if (!currentRow || (position === 'west' && currentRow.west.length > 0) || (position === 'east' && currentRow.east.length > 0)) {
+          currentRow = { west: [], east: [], unpositioned: [] };
+          rows.push(currentRow);
+        }
+        
+        if (position === 'west') {
+          currentRow.west.push(comp);
+        } else {
+          currentRow.east.push(comp);
+        }
+      } else {
+        // Unpositioned components - add to unpositioned array
+        if (!currentRow) {
+          currentRow = { west: [], east: [], unpositioned: [] };
+          rows.push(currentRow);
+        }
+        currentRow.unpositioned.push(comp);
+      }
+    }
+    
+    return rows;
+  };
+  
+  const componentRows = useMemo(() => organizeComponents(), [definition.components]);
   
   return (
     <div className="dialog-view view-transition">
@@ -1376,9 +1411,81 @@ export default function DialogRenderer({ definition, onBack, openTable, context,
       </div>
 
       <div className="glass-card dialog-container" ref={containerRef}>
-        {definition.components.map((comp, i) => (
-          <DialogComponentRenderer key={i} comp={comp} openTable={openTable} context={context} onUpdate={onUpdate} onOptimisticUpdate={onOptimisticUpdate} onFieldFocus={handleFieldFocus} showAllHelpIcons={showAllHelpIcons} />
-        ))}
+        {componentRows.map((row, rowIndex) => {
+          const hasPositioned = row.west.length > 0 || row.east.length > 0;
+          
+          if (!hasPositioned) {
+            // No positioned components - render unpositioned components normally
+            return (
+              <React.Fragment key={`row-${rowIndex}`}>
+                {row.unpositioned.map((comp, i) => (
+                  <DialogComponentRenderer 
+                    key={`unpositioned-${rowIndex}-${i}`} 
+                    comp={comp} 
+                    openTable={openTable} 
+                    context={context} 
+                    onUpdate={onUpdate} 
+                    onOptimisticUpdate={onOptimisticUpdate} 
+                    onFieldFocus={handleFieldFocus} 
+                    showAllHelpIcons={showAllHelpIcons} 
+                  />
+                ))}
+              </React.Fragment>
+            );
+          }
+          
+          // Has positioned components - use grid layout
+          return (
+            <React.Fragment key={`row-${rowIndex}`}>
+              {row.unpositioned.map((comp, i) => (
+                <DialogComponentRenderer 
+                  key={`pre-${rowIndex}-${i}`} 
+                  comp={comp} 
+                  openTable={openTable} 
+                  context={context} 
+                  onUpdate={onUpdate} 
+                  onOptimisticUpdate={onOptimisticUpdate} 
+                  onFieldFocus={handleFieldFocus} 
+                  showAllHelpIcons={showAllHelpIcons} 
+                />
+              ))}
+              <div className="dialog-row-container">
+                {row.west.length > 0 && (
+                  <div className="dialog-column">
+                    {row.west.map((comp, i) => (
+                      <DialogComponentRenderer 
+                        key={`west-${rowIndex}-${i}`} 
+                        comp={comp} 
+                        openTable={openTable} 
+                        context={context} 
+                        onUpdate={onUpdate} 
+                        onOptimisticUpdate={onOptimisticUpdate} 
+                        onFieldFocus={handleFieldFocus} 
+                        showAllHelpIcons={showAllHelpIcons} 
+                      />
+                    ))}
+                  </div>
+                )}
+                {row.east.length > 0 && (
+                  <div className="dialog-column">
+                    {row.east.map((comp, i) => (
+                      <DialogComponentRenderer 
+                        key={`east-${rowIndex}-${i}`} 
+                        comp={comp} 
+                        openTable={openTable} 
+                        context={context} 
+                        onUpdate={onUpdate} 
+                        onOptimisticUpdate={onOptimisticUpdate} 
+                        onFieldFocus={handleFieldFocus} 
+                        showAllHelpIcons={showAllHelpIcons} 
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+            </React.Fragment>
+          );
+        })}
       </div>
       
       <div className="dialog-description-panel">

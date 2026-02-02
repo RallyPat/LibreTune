@@ -48,6 +48,22 @@
   width: 100%;
 }
 
+/* Multi-column layout support for dialogs with East/West positioned panels */
+.dialog-view .dialog-row-container {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  align-items: start;
+}
+
+/* Single column within row (for West/East positioning) */
+.dialog-view .dialog-column {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 0;
+}
+
 /* Field layout - use .dialog-view parent for specificity over App.css */
 .dialog-view .settings-field {
   display: flex;
@@ -200,7 +216,7 @@
   font-weight: 600;
   color: var(--text-primary);
   border-bottom: 1px solid var(--border-color);
-  text-align: right; /* Right-justify panel titles */
+  text-align: left; /* Left-justify panel titles */
 }
 
 .panel-content {

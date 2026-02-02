@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+body { font-family: Arial, sans-serif; background: #1a1a1a; color: #fff; padding: 20px; }
+.container { max-width: 1400px; margin: 0 auto; }
+h1 { text-align: center; color: #6495ed; }
+.comparison { display: flex; gap: 40px; margin-top: 30px; }
+.layout { flex: 1; }
+.layout h2 { color: #ff6b6b; text-align: center; }
+.dialog-mock { background: #2d2d2d; border: 2px solid #444; border-radius: 8px; padding: 20px; }
+.header { background: #3d3d3d; padding: 15px; margin: -20px -20px 20px -20px; border-radius: 6px 6px 0 0; border-bottom: 1px solid #555; }
+.header h3 { margin: 0; font-size: 16px; color: #ddd; }
+.panel { background: #383838; border: 1px solid #555; border-radius: 4px; margin-bottom: 15px; overflow: hidden; }
+.panel-title { background: #444; padding: 12px 15px; border-bottom: 1px solid #555; font-weight: bold; font-size: 13px; color: #fff; }
+.panel-content { padding: 15px; }
+.field { background: #3d3d3d; padding: 10px; margin-bottom: 8px; border-radius: 3px; font-size: 12px; color: #ccc; }
+.graph { height: 200px; background: linear-gradient(135deg, #1a3a52 0%, #2d5a7b 100%); border: 1px solid #4a7ba7; border-radius: 4px; display: flex; align-items: center; justify-content: center; color: #6495ed; font-size: 14px; }
+.scroll-indicator { text-align: center; color: #ff6b6b; margin: 10px 0; font-size: 14px; }
+.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
+.feature-list { background: #2d2d2d; padding: 20px; border-radius: 8px; margin-top: 30px; }
+.feature-list h2 { color: #6495ed; }
+.feature-list ul { list-style: none; padding: 0; }
+.feature-list li { padding: 8px 0; padding-left: 25px; position: relative; }
+.feature-list li:before { content: "✓"; position: absolute; left: 0; color: #4caf50; font-weight: bold; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>LibreTune Dialog Layout Optimization</h1>
+  <p style="text-align: center; color: #aaa;">Optimizing space usage for Throttle Body #1 dialog</p>
+  
+  <div class="comparison">
+    <div class="layout">
+      <h2>❌ BEFORE: Vertical Stack</h2>
+      <div class="dialog-mock">
+        <div class="header"><h3>Throttle Body #1</h3></div>
+        <div class="panel">
+          <div class="panel-title" style="text-align: right;">tpsSensorLeft ▶</div>
+          <div class="panel-content">
+            <div class="field">TBI Diameter: 67.5 mm</div>
+            <div class="field">TPS Sensor 1: 5A TPS1</div>
+            <div class="field">TPS Sensor 1 Closed: 188 ADC</div>
+            <div class="field">TPS Sensor 1 Open: 658 ADC</div>
+            <div class="field">TPS Sensor 2: 15A TPS2</div>
+            <div class="field">TPS Sensor 2 Closed: 1000 ADC</div>
+            <div class="field">TPS Sensor 2 Open: 0 ADC</div>
+            <div class="field">TPS Filter: 200</div>
+          </div>
+        </div>
+        <div class="scroll-indicator">⬇ User must scroll down ⬇</div>
+        <div class="panel">
+          <div class="panel-title" style="text-align: right;">tpsGauges ▶</div>
+          <div class="panel-content">
+            <div class="graph">📊 Throttle Position Graph</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    
+    <div class="layout">
+      <h2>✅ AFTER: Side-by-Side</h2>
+      <div class="dialog-mock">
+        <div class="header"><h3>Throttle Body #1</h3></div>
+        <div class="two-col">
+          <div class="panel">
+            <div class="panel-title">▶ tpsSensorLeft</div>
+            <div class="panel-content">
+              <div class="field">TBI Diameter: 67.5 mm</div>
+              <div class="field">TPS Sensor 1: 5A TPS1</div>
+              <div class="field">TPS Sensor 1 Closed: 188 ADC</div>
+              <div class="field">TPS Sensor 1 Open: 658 ADC</div>
+              <div class="field">TPS Sensor 2: 15A TPS2</div>
+              <div class="field">TPS Sensor 2 Closed: 1000 ADC</div>
+              <div class="field">TPS Sensor 2 Open: 0 ADC</div>
+              <div class="field">TPS Filter: 200</div>
+            </div>
+          </div>
+          <div class="panel">
+            <div class="panel-title">▶ tpsGauges</div>
+            <div class="panel-content">
+              <div class="graph">📊 Throttle Position Graph</div>
+            </div>
+          </div>
+        </div>
+        <p style="text-align: center; color: #4caf50; margin-top: 15px;">✓ All content visible without scrolling</p>
+      </div>
+    </div>
+  </div>
+  
+  <div class="feature-list">
+    <h2>Key Improvements</h2>
+    <ul>
+      <li>Panel titles now left-aligned (easier to scan)</li>
+      <li>Settings and graph visible simultaneously (no scrolling)</li>
+      <li>Better horizontal space utilization</li>
+      <li>TSP2 configuration moved to right column</li>
+      <li>Backward compatible with existing dialogs</li>
+    </ul>
+  </div>
+</div>
+</body>
+</html>
