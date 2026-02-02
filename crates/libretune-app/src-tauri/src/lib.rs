@@ -40,6 +40,7 @@ use tauri::Emitter;
 use tauri::Manager;
 use tauri_plugin_window_state::{AppHandleExt, StateFlags};
 use tokio::sync::Mutex;
+use std::sync::Arc;
 
 #[derive(Serialize)]
 struct BuildInfo {
@@ -318,6 +319,9 @@ struct AppState {
     controller_bridge: Mutex<Option<std::sync::Arc<ControllerBridge>>>,
     // Migration report when loading a tune from a different INI version
     migration_report: Mutex<Option<MigrationReport>>,
+    // Cached output channels to avoid repeated cloning in realtime streaming loop
+    // This is an Arc-wrapped copy that is updated whenever definition is loaded/changed
+    cached_output_channels: Mutex<Option<Arc<HashMap<String, libretune_core::ini::OutputChannel>>>>,
 }
 
 /// AutoTune configuration stored when tuning session starts
@@ -1003,6 +1007,11 @@ async fn load_ini(
             let mut guard = state.definition.lock().await;
             *guard = Some(def);
             drop(guard);
+
+            // Cache output channels to avoid repeated cloning in realtime streaming loop
+            let mut channels_cache_guard = state.cached_output_channels.lock().await;
+            *channels_cache_guard = Some(Arc::new(def_clone.output_channels.clone()));
+            drop(channels_cache_guard);
 
             // Initialize TuneCache from new definition
             let cache = TuneCache::from_definition(&def_clone);
@@ -2782,14 +2791,21 @@ async fn update_curve_data(
 async fn get_realtime_data(
     state: tauri::State<'_, AppState>,
 ) -> Result<HashMap<String, f64>, String> {
-    // Snapshot definition first to avoid holding both `definition` and `connection` locks at the same time.
-    // This prevents deadlocks when other tasks may take the locks in the opposite order.
-    let (channels_snapshot, endianness) = {
-        let def_guard = state.definition.lock().await;
-        if let Some(def) = &*def_guard {
-            (def.output_channels.clone(), def.endianness)
+    // Use cached output channels to avoid expensive cloning
+    let (channels_arc, endianness) = {
+        let channels_cache_guard = state.cached_output_channels.lock().await;
+        if let Some(ref cached_channels) = *channels_cache_guard {
+            let def_guard = state.definition.lock().await;
+            let endianness = def_guard.as_ref().map(|d| d.endianness).unwrap_or(libretune_core::ini::Endianness::Little);
+            (Arc::clone(cached_channels), endianness)
         } else {
-            return Err("Connection or definition missing".to_string());
+            // Fallback: clone from definition if cache not available
+            let def_guard = state.definition.lock().await;
+            if let Some(def) = &*def_guard {
+                (Arc::new(def.output_channels.clone()), def.endianness)
+            } else {
+                return Err("Connection or definition missing".to_string());
+            }
         }
     };
 
@@ -2803,12 +2819,12 @@ async fn get_realtime_data(
         conn.get_realtime_data().map_err(|e| e.to_string())?
     };
 
-    // Two-pass approach for computed channels using the cloned snapshot:
+    // Two-pass approach for computed channels using the Arc reference:
     // Pass 1: Parse all non-computed channels
     let mut data = HashMap::new();
     let mut computed_channels = Vec::new();
 
-    for (name, channel) in &channels_snapshot {
+    for (name, channel) in channels_arc.iter() {
         if channel.is_computed() {
             computed_channels.push((name.clone(), channel.clone()));
         } else if let Some(val) = channel.parse(&raw_data, endianness) {
@@ -3045,17 +3061,24 @@ async fn start_realtime_stream(
                     }
                 } // conn_guard dropped here - mutex released immediately after I/O
 
-                // Phase 2: Get definition for parsing (quick lock, clone what we need)
-                let def_data: Option<(
-                    HashMap<String, libretune_core::ini::OutputChannel>,
-                    libretune_core::ini::Endianness,
-                )>;
+                // Phase 2: Get cached output channels and endianness (using Arc to avoid clone)
+                let def_data: Option<(Arc<HashMap<String, libretune_core::ini::OutputChannel>>, libretune_core::ini::Endianness)>;
                 {
-                    let def_guard = app_state.definition.lock().await;
-                    def_data = def_guard
-                        .as_ref()
-                        .map(|def| (def.output_channels.clone(), def.endianness));
-                } // def_guard dropped here
+                    // Try cached channels first
+                    let channels_cache_guard = app_state.cached_output_channels.lock().await;
+                    if let Some(ref cached_channels) = *channels_cache_guard {
+                        // Get endianness from definition
+                        let def_guard = app_state.definition.lock().await;
+                        let endianness = def_guard.as_ref().map(|d| d.endianness).unwrap_or(libretune_core::ini::Endianness::Little);
+                        def_data = Some((Arc::clone(cached_channels), endianness));
+                    } else {
+                        // Fallback: clone from definition if cache not available
+                        let def_guard = app_state.definition.lock().await;
+                        def_data = def_guard
+                            .as_ref()
+                            .map(|def| (Arc::new(def.output_channels.clone()), def.endianness));
+                    }
+                } // locks dropped here
 
                 // Phase 3: Process data outside of any mutex locks
                 match (raw_result, def_data) {
@@ -3065,7 +3088,7 @@ async fn start_realtime_stream(
                         let mut data: HashMap<String, f64> = HashMap::new();
                         let mut computed_channels = Vec::new();
 
-                        for (name, channel) in &output_channels {
+                        for (name, channel) in output_channels.iter() {
                             if channel.is_computed() {
                                 computed_channels.push((name.clone(), channel.clone()));
                             } else if let Some(val) = channel.parse(&raw, endianness) {
@@ -3085,9 +3108,16 @@ async fn start_realtime_stream(
                         // Feed data to AutoTune if running
                         feed_autotune_data(&app_state, &data, current_time_ms).await;
 
-                        // Forward realtime data to plugin bridge for TS-compatible plugins
-                        if let Some(ref bridge) = *app_state.controller_bridge.lock().await {
-                            bridge.update_realtime(data);
+                        // Forward realtime data to plugin bridge for TS-compatible plugins (only if bridge exists)
+                        // Check if bridge exists before locking to avoid unnecessary mutex contention
+                        let has_bridge = {
+                            let bridge_guard = app_state.controller_bridge.lock().await;
+                            bridge_guard.is_some()
+                        };
+                        if has_bridge {
+                            if let Some(ref bridge) = *app_state.controller_bridge.lock().await {
+                                bridge.update_realtime(data);
+                            }
                         }
                     }
                     (Err(e), _) => {
@@ -11715,6 +11745,7 @@ pub fn run() {
             controller_bridge: Mutex::new(None),
             migration_report: Mutex::new(None),
             connection_factory: Mutex::new(None),
+            cached_output_channels: Mutex::new(None),
         })
         .invoke_handler(tauri::generate_handler![
             get_serial_ports,
