@@ -360,6 +360,8 @@ pub enum DialogComponent {
     Panel {
         name: String,
         #[serde(skip_serializing_if = "Option::is_none")]
+        position: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
         visibility_condition: Option<String>,
     },
     /// A constant field with label and optional visibility/enable conditions
