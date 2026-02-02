@@ -81,6 +81,11 @@ interface FieldInfo {
   help?: string;
 }
 
+// Helper to check if input is incomplete numeric value (empty, just minus, just decimal)
+function isIncompleteNumericInput(value: string): boolean {
+  return value === '' || value === '-' || value === '.';
+}
+
 function DialogField({ 
   label, 
   name, 
@@ -102,6 +107,7 @@ function DialogField({
 }) {
   const [constant, setConstant] = useState<Constant | null>(null);
   const [numValue, setNumValue] = useState<number | null>(null);
+  const [numInputStr, setNumInputStr] = useState<string>(''); // Raw string value during editing
   const [strValue, setStrValue] = useState<string>('');
   const [selectedBit, setSelectedBit] = useState<number>(0);
   const [isEnabled, setIsEnabled] = useState<boolean>(true);
@@ -131,8 +137,14 @@ function DialogField({
           });
       } else {
         invoke<number>('get_constant_value', { name })
-          .then(setNumValue)
-          .catch(() => setNumValue(0));
+          .then((v) => {
+            setNumValue(v);
+            setNumInputStr(v.toString());
+          })
+          .catch(() => {
+            setNumValue(0);
+            setNumInputStr('0');
+          });
       }
     }).catch((e) => {
       console.error(`[DialogField] Failed to fetch constant '${name}':`, e);
@@ -447,20 +459,52 @@ function DialogField({
       </label>
       <div className="field-input-wrap">
         <input
-          type="number"
-          step={1 / Math.pow(10, constant.digits)}
-          value={numValue ?? 0}
+          type="text"
+          inputMode="decimal"
+          value={numInputStr}
           disabled={!isEnabled}
           onFocus={handleFocus}
-          onChange={(e) => setNumValue(parseFloat(e.target.value))}
+          onChange={(e) => {
+            // Store raw string value to preserve partial input like "1." or ""
+            // Allow numbers, decimal point, minus sign, and empty string using regex
+            const value = e.target.value;
+            if (/^-?\d*\.?\d*$/.test(value) || value === '') {
+              setNumInputStr(value);
+            }
+          }}
           onBlur={() => {
-            if (numValue !== null) {
-              invoke('update_constant', { name, value: numValue })
+            // Parse and validate on blur
+            const parsed = parseFloat(numInputStr);
+            if (!isNaN(parsed)) {
+              // Clamp to min/max
+              const clamped = Math.max(constant.min, Math.min(constant.max, parsed));
+              setNumValue(clamped);
+              setNumInputStr(clamped.toString());
+              invoke('update_constant', { name, value: clamped })
                 .then(() => {
-                  onOptimisticUpdate?.(name, numValue);
+                  onOptimisticUpdate?.(name, clamped);
                   onUpdate?.();
                 })
                 .catch((e) => alert('Update failed: ' + e));
+            } else if (isIncompleteNumericInput(numInputStr)) {
+              // Incomplete input (empty, just minus, or just decimal) - treat as 0
+              setNumValue(0);
+              setNumInputStr('0');
+              invoke('update_constant', { name, value: 0 })
+                .then(() => {
+                  onOptimisticUpdate?.(name, 0);
+                  onUpdate?.();
+                })
+                .catch((e) => alert('Update failed: ' + e));
+            } else {
+              // Invalid input - restore previous valid value
+              setNumInputStr(numValue?.toString() ?? '0');
+            }
+          }}
+          onKeyDown={(e) => {
+            // Submit on Enter
+            if (e.key === 'Enter') {
+              e.currentTarget.blur();
             }
           }}
         />

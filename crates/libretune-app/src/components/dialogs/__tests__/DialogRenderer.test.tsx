@@ -78,3 +78,103 @@ describe('DialogRenderer CommandButton', () => {
     window.removeEventListener('reconnect:request', handler as EventListener);
   });
 });
+
+describe('DialogRenderer numeric input field', () => {
+  let tauriHandle: ReturnType<typeof setupTauriMocks> | null = null;
+
+  beforeEach(() => {
+    const mockGetConstant = {
+      name: 'testVoltage',
+      label: 'Test Voltage',
+      units: 'voltage',
+      digits: 2,
+      min: 0,
+      max: 5,
+      value_type: 'scalar',
+      bit_options: [],
+    };
+    
+    tauriHandle = setupTauriMocks({
+      get_constant: mockGetConstant,
+      get_constant_value: 1.5,
+      update_constant: null,
+      get_settings: { show_all_help_icons: true },
+    });
+  });
+
+  afterEach(() => {
+    if (tauriHandle) {
+      tearDownTauriMocks();
+      tauriHandle = null;
+    }
+  });
+
+  it('preserves partial numeric input while typing', async () => {
+    const def: DialogDefinition = {
+      name: 'testDialog',
+      title: 'Test Dialog',
+      components: [
+        {
+          type: 'Field',
+          name: 'testVoltage',
+          label: 'Test Voltage',
+        },
+      ],
+    };
+
+    render(
+      <ToastProvider>
+        <DialogRenderer definition={def} onBack={() => {}} openTable={() => {}} context={{}} />
+      </ToastProvider>
+    );
+
+    // Wait for field to load
+    await waitFor(() => expect(screen.getByDisplayValue('1.5')).toBeInTheDocument(), { timeout: 3000 });
+
+    const input = screen.getByDisplayValue('1.5') as HTMLInputElement;
+
+    // Type "2.35" - the key test is that intermediate states like "2." don't cause issues
+    fireEvent.change(input, { target: { value: '2.35' } });
+    // In controlled inputs, we need to wait for React to update
+    await waitFor(() => expect(input.value).toBe('2.35'));
+
+    // Test that empty string is preserved during typing
+    fireEvent.change(input, { target: { value: '' } });
+    await waitFor(() => expect(input.value).toBe(''));
+
+    // Type partial decimal
+    fireEvent.change(input, { target: { value: '3.' } });
+    await waitFor(() => expect(input.value).toBe('3.'));
+  });
+
+  it('handles empty input on blur by setting to zero', async () => {
+    const def: DialogDefinition = {
+      name: 'testDialog',
+      title: 'Test Dialog',
+      components: [
+        {
+          type: 'Field',
+          name: 'testVoltage',
+          label: 'Test Voltage',
+        },
+      ],
+    };
+
+    render(
+      <ToastProvider>
+        <DialogRenderer definition={def} onBack={() => {}} openTable={() => {}} context={{}} />
+      </ToastProvider>
+    );
+
+    await waitFor(() => expect(screen.getByDisplayValue('1.5')).toBeInTheDocument(), { timeout: 3000 });
+
+    const input = screen.getByDisplayValue('1.5') as HTMLInputElement;
+
+    // Clear the input and blur
+    fireEvent.change(input, { target: { value: '' } });
+    fireEvent.blur(input);
+
+    // Should reset to 0
+    await waitFor(() => expect(input.value).toBe('0'));
+  });
+});
