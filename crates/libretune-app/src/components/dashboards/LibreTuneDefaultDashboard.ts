@@ -42,6 +42,9 @@ export function createLibreTuneDefaultDashboard(): DashFile {
 
   const cluster: GaugeCluster = {
     anti_aliasing: true,
+    force_aspect: false,
+    force_aspect_width: 0,
+    force_aspect_height: 0,
     background_dither_color: color(24, 24, 32, 64),
     cluster_background_color: color(18, 20, 28),
     cluster_background_image_file_name: null,

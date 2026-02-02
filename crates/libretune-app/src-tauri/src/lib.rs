@@ -10947,6 +10947,7 @@ mod demo_mode_tests {
             online_ini_repository: Mutex::new(OnlineIniRepository::new()),
             tune_cache: Mutex::new(None),
             demo_mode: Mutex::new(false),
+            console_history: Mutex::new(Vec::new()),
             // Background task for connection metrics emission (added recently)
             metrics_task: Mutex::new(None),
             plugin_manager: Mutex::new(None),
@@ -11014,6 +11015,7 @@ mod concurrency_tests {
             online_ini_repository: Mutex::new(OnlineIniRepository::new()),
             tune_cache: Mutex::new(None),
             demo_mode: Mutex::new(false),
+            console_history: Mutex::new(Vec::new()),
             plugin_manager: Mutex::new(None),
             controller_bridge: Mutex::new(None),
             migration_report: Mutex::new(None),
@@ -11154,6 +11156,7 @@ signature = "Speeduino 2023-04"
             online_ini_repository: Mutex::new(OnlineIniRepository::new()),
             tune_cache: Mutex::new(None),
             demo_mode: Mutex::new(false),
+            console_history: Mutex::new(Vec::new()),
             plugin_manager: Mutex::new(None),
             controller_bridge: Mutex::new(None),
             migration_report: Mutex::new(None),
@@ -11214,6 +11217,7 @@ signature = "Speeduino 2023-04"
             online_ini_repository: Mutex::new(OnlineIniRepository::new()),
             tune_cache: Mutex::new(None),
             demo_mode: Mutex::new(false),
+            console_history: Mutex::new(Vec::new()),
             plugin_manager: Mutex::new(None),
             controller_bridge: Mutex::new(None),
             migration_report: Mutex::new(None),
@@ -11277,6 +11281,7 @@ signature = "Speeduino 2023-04"
             online_ini_repository: Mutex::new(OnlineIniRepository::new()),
             tune_cache: Mutex::new(None),
             demo_mode: Mutex::new(false),
+            console_history: Mutex::new(Vec::new()),
             plugin_manager: Mutex::new(None),
             controller_bridge: Mutex::new(None),
             migration_report: Mutex::new(None),
@@ -11352,6 +11357,7 @@ signature = "Speeduino 2023-04"
             online_ini_repository: Mutex::new(OnlineIniRepository::new()),
             tune_cache: Mutex::new(None),
             demo_mode: Mutex::new(false),
+            console_history: Mutex::new(Vec::new()),
             plugin_manager: Mutex::new(None),
             controller_bridge: Mutex::new(None),
             migration_report: Mutex::new(None),
@@ -11838,15 +11844,12 @@ pub fn run() {
             online_ini_repository: Mutex::new(OnlineIniRepository::new()),
             tune_cache: Mutex::new(None),
             demo_mode: Mutex::new(false),
+            console_history: Mutex::new(Vec::new()),
             plugin_manager: Mutex::new(None),
             controller_bridge: Mutex::new(None),
             migration_report: Mutex::new(None),
             connection_factory: Mutex::new(None),
-<<<<<<< HEAD
             cached_output_channels: Mutex::new(None),
-=======
-            console_history: Mutex::new(Vec::new()),
->>>>>>> 51ec5aa (Add Tauri backend commands for console communication (Step 4))
         })
         .invoke_handler(tauri::generate_handler![
             get_serial_ports,

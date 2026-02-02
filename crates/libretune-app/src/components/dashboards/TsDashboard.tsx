@@ -124,7 +124,6 @@ export default function TsDashboard({ initialDashPath, isConnected = false }: Ts
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [newDashName, setNewDashName] = useState('');
   const [renameName, setRenameName] = useState('');
-  const [showCompatReport, setShowCompatReport] = useState(false);
   const [legacyMode, setLegacyMode] = useState(false);
   const [compatBarVisible, setCompatBarVisible] = useState(true);
   const [syncToken, setSyncToken] = useState(0);

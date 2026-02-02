@@ -10,7 +10,7 @@
  * - Mix of gauge types (analog, digital, bar)
  */
 
-import { TsColor, TsGaugeConfig, TsIndicatorConfig, GaugeCluster, DashFile, Bibliography, VersionInfo, GaugePainter } from './dashTypes';
+import { TsColor, TsGaugeConfig, TsIndicatorConfig, GaugeCluster, DashFile, Bibliography, VersionInfo } from './dashTypes';
 
 // LibreTune brand colors
 const LT_DARK_BG: TsColor = { red: 18, green: 20, blue: 28, alpha: 255 };
@@ -21,14 +21,8 @@ const LT_ACCENT_AMBER: TsColor = { red: 251, green: 191, blue: 36, alpha: 255 };
 const LT_ACCENT_GREEN: TsColor = { red: 34, green: 197, blue: 94, alpha: 255 };
 const LT_TEXT_PRIMARY: TsColor = { red: 255, green: 255, blue: 255, alpha: 255 };
 const LT_TEXT_SECONDARY: TsColor = { red: 148, green: 163, blue: 184, alpha: 255 };
-const LT_TEXT_MUTED: TsColor = { red: 100, green: 116, blue: 139, alpha: 255 };
 const LT_WARN_COLOR: TsColor = { red: 234, green: 179, blue: 8, alpha: 255 };
 const LT_CRITICAL_COLOR: TsColor = { red: 239, green: 68, blue: 68, alpha: 255 };
-
-// Helper to create a TsColor
-function color(r: number, g: number, b: number, a: number = 255): TsColor {
-  return { red: r, green: g, blue: b, alpha: a };
-}
 
 // Helper to create gauge config with LibreTune defaults
 function createGauge(config: Partial<TsGaugeConfig>): TsGaugeConfig {
@@ -98,33 +92,7 @@ function createGauge(config: Partial<TsGaugeConfig>): TsGaugeConfig {
   };
 }
 
-// Helper to create indicator config with LibreTune defaults
-function createIndicator(config: Partial<TsIndicatorConfig>): TsIndicatorConfig {
-  return {
-    id: config.id || '',
-    indicator_painter: config.indicator_painter || 'BasicRectangleIndicator',
-    output_channel: config.output_channel || '',
-    value: config.value || 0,
-    on_text: config.on_text || 'On',
-    off_text: config.off_text || 'Off',
-    on_text_color: config.on_text_color || LT_TEXT_PRIMARY,
-    off_text_color: config.off_text_color || LT_DARK_BG,
-    on_background_color: config.on_background_color || LT_DARK_BG,
-    off_background_color: config.off_background_color || LT_DARKER_BG,
-    on_image_file_name: config.on_image_file_name || null,
-    off_image_file_name: config.off_image_file_name || null,
-    relative_x: config.relative_x ?? 0,
-    relative_y: config.relative_y ?? 0,
-    relative_width: config.relative_width ?? 0.1,
-    relative_height: config.relative_height ?? 0.05,
-    font_family: config.font_family || 'Inter',
-    italic_font: config.italic_font || false,
-    antialiasing_on: config.antialiasing_on ?? true,
-    short_click_action: config.short_click_action || null,
-    long_click_action: config.long_click_action || null,
-    ecu_configuration_name: config.ecu_configuration_name || null,
-  };
-}
+
 
 /**
  * Create a LibreTune default dashboard.
@@ -368,49 +336,75 @@ export function createLibreTuneDefaultDashboard(): DashFile {
       id: 'accel',
       indicator_painter: 'BasicRectangleIndicator',
       output_channel: 'tpsAccelEn',
+      value: 0,
       on_text: 'Accel',
       off_text: 'Off',
       on_text_color: LT_ACCENT_TEAL,
       off_text_color: LT_DARK_BG,
       on_background_color: LT_DARK_BG,
       off_background_color: LT_DARKER_BG,
+      on_image_file_name: null,
+      off_image_file_name: null,
       relative_x: 0.73,
       relative_y: 0.00,
       relative_width: 0.24,
       relative_height: 0.05,
+      font_family: 'Inter',
+      italic_font: false,
+      antialiasing_on: true,
+      short_click_action: null,
+      long_click_action: null,
+      ecu_configuration_name: null,
     },
     // Indicator: Not Cranking (Top-Right) - Derived from XML 'crank'
     {
       id: 'notCranking',
       indicator_painter: 'BasicRectangleIndicator',
       output_channel: 'crank',
+      value: 0,
       on_text: 'Cranking',
       off_text: 'Not Cranking',
       on_text_color: LT_ACCENT_BLUE,
       off_text_color: LT_DARK_BG,
       on_background_color: LT_DARK_BG,
       off_background_color: LT_DARKER_BG,
+      on_image_file_name: null,
+      off_image_file_name: null,
       relative_x: 0.88,
       relative_y: 0.00,
       relative_width: 0.12,
       relative_height: 0.05,
+      font_family: 'Inter',
+      italic_font: false,
+      antialiasing_on: true,
+      short_click_action: null,
+      long_click_action: null,
+      ecu_configuration_name: null,
     },
     // Indicator: Data Logging (Top-Right) - Derived from XML 'dataLoggingActive'
     {
       id: 'dataLogging',
       indicator_painter: 'BasicRectangleIndicator',
       output_channel: 'dataLoggingActive',
+      value: 0,
       on_text: 'Data Logging',
       off_text: 'Data Logging',
       on_text_color: LT_TEXT_PRIMARY,
       off_text_color: LT_DARK_BG,
       on_background_color: LT_DARK_BG,
       off_background_color: LT_DARKER_BG,
+      on_image_file_name: null,
+      off_image_file_name: null,
       relative_x: 0.70,
       relative_y: 0.00,
       relative_width: 0.22,
       relative_height: 0.05,
       font_family: 'Inter',
+      italic_font: false,
+      antialiasing_on: true,
+      short_click_action: null,
+      long_click_action: null,
+      ecu_configuration_name: null,
     },
   ];
 
