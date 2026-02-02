@@ -81,6 +81,11 @@ interface FieldInfo {
   help?: string;
 }
 
+// Helper to check if input is incomplete numeric value (empty, just minus, just decimal)
+function isIncompleteNumericInput(value: string): boolean {
+  return value === '' || value === '-' || value === '.';
+}
+
 function DialogField({ 
   label, 
   name, 
@@ -461,9 +466,9 @@ function DialogField({
           onFocus={handleFocus}
           onChange={(e) => {
             // Store raw string value to preserve partial input like "1." or ""
-            // Allow numbers, decimal point, minus sign, and empty string
+            // Allow numbers, decimal point, minus sign, and empty string using regex
             const value = e.target.value;
-            if (value === '' || value === '-' || value === '.' || /^-?\d*\.?\d*$/.test(value)) {
+            if (/^-?\d*\.?\d*$/.test(value) || value === '') {
               setNumInputStr(value);
             }
           }}
@@ -481,8 +486,8 @@ function DialogField({
                   onUpdate?.();
                 })
                 .catch((e) => alert('Update failed: ' + e));
-            } else if (numInputStr === '' || numInputStr === '-' || numInputStr === '.') {
-              // Empty, just minus sign, or just decimal - treat as 0
+            } else if (isIncompleteNumericInput(numInputStr)) {
+              // Incomplete input (empty, just minus, or just decimal) - treat as 0
               setNumValue(0);
               setNumInputStr('0');
               invoke('update_constant', { name, value: 0 })
