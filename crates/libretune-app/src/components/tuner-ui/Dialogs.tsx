@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { open, save } from '@tauri-apps/plugin-dialog';
 import { openUrl } from '@tauri-apps/plugin-opener';
@@ -1228,6 +1228,20 @@ export function ConnectionDialog({
   runtimePacketMode,
   onRuntimePacketModeChange,
 }: ConnectionDialogProps) {
+  // Track previous connected state to detect connection transitions
+  const prevConnectedRef = useRef<boolean>(false);
+
+  // Auto-close dialog when connection succeeds
+  useEffect(() => {
+    // Check if we just transitioned from disconnected/connecting to connected
+    if (connected && !prevConnectedRef.current && !connecting) {
+      // Close the dialog after successful connection
+      onClose();
+    }
+    // Update the previous state
+    prevConnectedRef.current = connected;
+  }, [connected, connecting, onClose]);
+
   if (!isOpen) return null;
 
   return (
