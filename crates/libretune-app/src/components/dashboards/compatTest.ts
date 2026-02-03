@@ -1,5 +1,10 @@
 import { createLibreTuneDefaultDashboard } from './LibreTuneDefaultDashboard';
-import { DashFile, isGauge, isIndicator } from './dashTypes';
+import {
+  DashFile,
+  SUPPORTED_GAUGE_PAINTERS,
+  isGauge,
+  isIndicator,
+} from './dashTypes';
 
 /**
  * Automated compatibility test for LibreTune default dashboard vs reference .dash files.
@@ -16,9 +21,7 @@ export async function testLibreTuneDashboardCompatibility(referenceDashFiles: Da
   summary: string;
 }> {
   const defaultDash = createLibreTuneDefaultDashboard();
-  const supportedPainters = new Set([
-    'AnalogGauge','BasicAnalogGauge','CircleAnalogGauge','AsymmetricSweepGauge','BasicReadout','HorizontalBarGauge','HorizontalDashedBar','VerticalBarGauge','HorizontalLineGauge','VerticalDashedBar','AnalogBarGauge','AnalogMovingBarGauge','Histogram','LineGraph','RoundGauge','RoundDashedGauge','FuelMeter','Tachometer',
-  ]);
+  const supportedPainters = new Set(SUPPORTED_GAUGE_PAINTERS);
   const unsupportedPainters: string[] = [];
   const missingFields: string[] = [];
   let usesReferenceAssets = false;

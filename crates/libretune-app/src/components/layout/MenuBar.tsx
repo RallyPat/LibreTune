@@ -61,7 +61,7 @@ const standardMenus: MenuItem[] = [
   {
     name: 'Tuning',
     children: [
-      { name: 'AutoTune Live', target: 'autoTune', hotkey: 'Ctrl+A' },
+      { name: 'AutoTune', target: 'autoTune', hotkey: 'Ctrl+A' },
       { name: 'Performance Calculator', target: 'performance' },
       { separator: true, name: 'sep1' },
       { name: 'Tooth Logger', target: 'toothLogger' },

@@ -1,8 +1,8 @@
 /* =============================================================================
- * AutoTune Live Styles
+ * AutoTune Styles
  * ============================================================================= */
 
-.autotune-live {
+.autotune {
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -32,6 +32,28 @@
   display: flex;
   align-items: center;
   gap: 12px;
+}
+
+.autotune-table-selectors {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.autotune-table-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.autotune-secondary-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
 }
 
 .autotune-header h2 {

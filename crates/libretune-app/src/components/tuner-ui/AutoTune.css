@@ -1,0 +1,413 @@
+/* =============================================================================
+ * AutoTune Styles
+ * ============================================================================= */
+
+.autotune {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+.autotune-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--text-muted);
+}
+
+/* Header */
+.autotune-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background: var(--bg-elevated);
+  border-bottom: 1px solid var(--border-default);
+}
+
+.autotune-title-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.autotune-table-selectors {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.autotune-table-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.autotune-secondary-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.autotune-header h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.autotune-table-selector {
+  padding: 6px 12px;
+  border: 1px solid var(--border-default);
+  border-radius: 4px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 13px;
+  cursor: pointer;
+  min-width: 180px;
+}
+
+.autotune-table-selector:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.autotune-controls {
+  display: flex;
+  gap: 8px;
+}
+
+.autotune-controls button {
+  padding: 6px 12px;
+  border: 1px solid var(--border-default);
+  border-radius: 4px;
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.autotune-controls button:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+
+.autotune-controls button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.autotune-start {
+  background: var(--success) !important;
+  border-color: var(--success) !important;
+  color: white !important;
+}
+
+.autotune-stop {
+  background: var(--error) !important;
+  border-color: var(--error) !important;
+  color: white !important;
+}
+
+/* Error */
+.autotune-error {
+  padding: 10px 16px;
+  background: rgba(255, 68, 68, 0.1);
+  border-bottom: 1px solid var(--error);
+  color: var(--error);
+  font-size: 13px;
+}
+
+/* Content */
+.autotune-content {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+/* Table Panel */
+.autotune-table-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-right: 1px solid var(--border-default);
+}
+
+.autotune-table-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--bg-subtle);
+  border-bottom: 1px solid var(--border-default);
+  font-size: 13px;
+}
+
+.autotune-table-toolbar select {
+  padding: 4px 8px;
+  border: 1px solid var(--border-default);
+  border-radius: 4px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+.autotune-table-toolbar button {
+  padding: 4px 8px;
+  border: 1px solid var(--border-default);
+  border-radius: 4px;
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.autotune-table-container {
+  flex: 1;
+  overflow: auto;
+  padding: 12px;
+}
+
+/* Table */
+.autotune-table {
+  border-collapse: collapse;
+  font-size: 11px;
+  font-family: monospace;
+}
+
+.autotune-table th,
+.autotune-table td {
+  border: 1px solid var(--border-default);
+  padding: 4px 6px;
+  text-align: center;
+  min-width: 40px;
+}
+
+.autotune-table th {
+  background: var(--bg-subtle);
+  color: var(--text-muted);
+  font-weight: 500;
+  position: sticky;
+}
+
+.autotune-table thead th {
+  top: 0;
+  z-index: 2;
+}
+
+.autotune-table tbody th {
+  left: 0;
+  z-index: 1;
+}
+
+.autotune-corner {
+  position: sticky;
+  top: 0;
+  left: 0;
+  z-index: 3;
+  background: var(--bg-subtle);
+}
+
+/* Cell styles */
+.autotune-cell {
+  position: relative;
+  cursor: pointer;
+  color: white;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+  transition: all 0.1s ease;
+}
+
+.autotune-cell:hover {
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
+  z-index: 1;
+}
+
+.autotune-cell.locked {
+  opacity: 0.6;
+}
+
+.autotune-cell.selected {
+  outline: 2px solid var(--warning);
+  outline-offset: -2px;
+}
+
+.autotune-cell.current {
+  outline: 3px solid var(--primary);
+  outline-offset: -3px;
+  animation: pulse 1s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.8; }
+}
+
+.cell-change {
+  font-weight: bold;
+}
+
+.cell-lock-icon {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  font-size: 8px;
+  opacity: 0.8;
+}
+
+.cell-hit-badge {
+  position: absolute;
+  top: -2px;
+  left: -2px;
+  background: var(--primary, #4a9eff);
+  color: white;
+  font-size: 8px;
+  font-weight: 600;
+  padding: 1px 3px;
+  border-radius: 4px;
+  line-height: 1;
+  min-width: 14px;
+  text-align: center;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+.autotune-cell.has-hits {
+  /* Subtle glow for cells with data */
+  box-shadow: inset 0 0 0 1px rgba(74, 158, 255, 0.3);
+}
+
+/* Legend */
+.autotune-legend {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--bg-subtle);
+  border-top: 1px solid var(--border-default);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.legend-gradient {
+  width: 100px;
+  height: 12px;
+  border-radius: 2px;
+}
+
+.legend-gradient.weighting {
+  background: linear-gradient(to right, hsl(60, 80%, 30%), hsl(-120, 80%, 50%));
+}
+
+.legend-gradient.change {
+  background: linear-gradient(to right, hsl(0, 80%, 40%), hsl(0, 0%, 50%), hsl(210, 80%, 40%));
+}
+
+.legend-label {
+  font-size: 10px;
+}
+
+/* Settings Panel */
+.autotune-settings-panel {
+  width: 280px;
+  overflow-y: auto;
+  background: var(--bg-subtle);
+  padding: 12px;
+}
+
+.autotune-stats {
+  margin-bottom: 16px;
+  padding: 12px;
+  background: var(--bg-elevated);
+  border-radius: 4px;
+  border: 1px solid var(--border-default);
+}
+
+.autotune-stats h3 {
+  margin: 0 0 10px 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.stat-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  padding: 4px 0;
+  color: var(--text-secondary);
+}
+
+.stat-row span:last-child {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.autotune-settings-section {
+  margin-bottom: 16px;
+  padding: 12px;
+  background: var(--bg-elevated);
+  border-radius: 4px;
+  border: 1px solid var(--border-default);
+}
+
+.autotune-settings-section h3 {
+  margin: 0 0 10px 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  font-size: 12px;
+}
+
+.setting-row:last-child {
+  margin-bottom: 0;
+}
+
+.setting-row label {
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.setting-row input[type="number"],
+.setting-row select {
+  width: 80px;
+  padding: 4px 6px;
+  border: 1px solid var(--border-default);
+  border-radius: 4px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 12px;
+}
+
+.setting-row input[type="checkbox"] {
+  margin: 0;
+}
+
+/* CSS Variables for cell colors */
+:root {
+  --cell-locked: #555;
+  --cell-neutral: #666;
+  --cell-default: #444;
+}
+
+[data-theme="light"] {
+  --cell-locked: #ccc;
+  --cell-neutral: #999;
+  --cell-default: #888;
+}

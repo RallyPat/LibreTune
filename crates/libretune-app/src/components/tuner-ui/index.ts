@@ -39,8 +39,8 @@ export {
   ConnectionDialog,
 } from './Dialogs';
 
-// AutoTune Live
-export { AutoTuneLive } from './AutoTuneLive';
+// AutoTune
+export { AutoTune } from './AutoTune';
 
 // Data Logging
 export { DataLogView } from './DataLogView';

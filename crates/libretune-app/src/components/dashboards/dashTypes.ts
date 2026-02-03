@@ -83,8 +83,34 @@ export type GaugePainter =
   | 'FuelMeter'
   | 'Tachometer';
 
+export const SUPPORTED_GAUGE_PAINTERS = [
+  'AnalogGauge',
+  'BasicAnalogGauge',
+  'CircleAnalogGauge',
+  'AsymmetricSweepGauge',
+  'BasicReadout',
+  'HorizontalBarGauge',
+  'HorizontalDashedBar',
+  'VerticalBarGauge',
+  'HorizontalLineGauge',
+  'VerticalDashedBar',
+  'AnalogBarGauge',
+  'AnalogMovingBarGauge',
+  'Histogram',
+  'LineGraph',
+  'RoundGauge',
+  'RoundDashedGauge',
+  'FuelMeter',
+  'Tachometer',
+] as const satisfies readonly GaugePainter[];
+
 /** Indicator painter type */
 export type IndicatorPainter = 'BasicRectangleIndicator' | 'BulbIndicator';
+
+export const SUPPORTED_INDICATOR_PAINTERS = [
+  'BasicRectangleIndicator',
+  'BulbIndicator',
+] as const satisfies readonly IndicatorPainter[];
 
 /** Gauge configuration from TS .dash file */
 export interface TsGaugeConfig {

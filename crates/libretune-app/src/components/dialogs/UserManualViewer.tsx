@@ -14,9 +14,10 @@
  * ```
  */
 
-import { useState } from 'react';
+import { MouseEvent, useEffect, useState } from 'react';
 import { X, ExternalLink, ChevronLeft, ChevronRight, Home, Book } from 'lucide-react';
 import { openUrl } from '@tauri-apps/plugin-opener';
+import { marked } from 'marked';
 import './UserManualViewer.css';
 
 /** Props for UserManualViewer component */
@@ -35,10 +36,10 @@ interface TocEntry {
 }
 
 /** Fallback online docs URL */
-const ONLINE_DOCS_URL = 'https://github.com/RallyPat/LibreTune/tree/main/docs';
+const ONLINE_DOCS_URL = 'https://github.com/RallyPat/LibreTune/tree/main/docs/src';
 
 /** Table of contents for navigation */
-const TABLE_OF_CONTENTS: TocEntry[] = [
+const FALLBACK_TOC: TocEntry[] = [
   { title: 'Introduction', path: 'introduction' },
   {
     title: 'Getting Started',
@@ -54,7 +55,7 @@ const TABLE_OF_CONTENTS: TocEntry[] = [
     path: 'features',
     children: [
       { title: 'Table Editing', path: 'features/table-editing' },
-      { title: 'AutoTune Live', path: 'features/autotune' },
+      { title: 'AutoTune', path: 'features/autotune' },
       { title: 'Dashboards', path: 'features/dashboards' },
       { title: 'Data Logging', path: 'features/datalog' },
     ],
@@ -86,7 +87,34 @@ const TABLE_OF_CONTENTS: TocEntry[] = [
 export default function UserManualViewer({ section = 'introduction', onClose }: UserManualViewerProps) {
   const [currentSection, setCurrentSection] = useState(section);
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [loading] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [tocEntries, setTocEntries] = useState<TocEntry[]>(FALLBACK_TOC);
+  const [contentHtml, setContentHtml] = useState('');
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setCurrentSection(section);
+  }, [section]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/manual/toc.json')
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error('toc load failed'))))
+      .then((data) => {
+        if (!cancelled && Array.isArray(data)) {
+          setTocEntries(data);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setTocEntries(FALLBACK_TOC);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Get the current section title
   const getCurrentTitle = (): string => {
@@ -100,7 +128,7 @@ export default function UserManualViewer({ section = 'introduction', onClose }: 
       }
       return null;
     };
-    return findTitle(TABLE_OF_CONTENTS, currentSection) || 'User Manual';
+    return findTitle(tocEntries, currentSection) || 'User Manual';
   };
 
   // Get flat list for prev/next navigation
@@ -108,11 +136,13 @@ export default function UserManualViewer({ section = 'introduction', onClose }: 
     const flat: TocEntry[] = [];
     const flatten = (entries: TocEntry[]) => {
       for (const entry of entries) {
-        flat.push(entry);
+        if (entry.path) {
+          flat.push(entry);
+        }
         if (entry.children) flatten(entry.children);
       }
     };
-    flatten(TABLE_OF_CONTENTS);
+    flatten(tocEntries);
     return flat;
   };
 
@@ -123,14 +153,19 @@ export default function UserManualViewer({ section = 'introduction', onClose }: 
 
   const handleOpenOnline = async () => {
     try {
-      await openUrl(`${ONLINE_DOCS_URL}/src/${currentSection}.md`);
+      await openUrl(`${ONLINE_DOCS_URL}/${currentSection}.md`);
     } catch (err) {
       console.error('Failed to open URL:', err);
     }
   };
 
-  const renderTocEntry = (entry: TocEntry, depth = 0) => {
+  const renderTocEntry = (entry: TocEntry, depth = 0, parentActive = false) => {
+    if (!entry.path) {
+      return null;
+    }
+
     const isActive = currentSection === entry.path || currentSection.startsWith(entry.path + '/');
+    const shouldShowChildren = entry.children && entry.children.length > 0;
     
     return (
       <div key={entry.path}>
@@ -141,29 +176,116 @@ export default function UserManualViewer({ section = 'introduction', onClose }: 
         >
           {entry.title}
         </button>
-        {entry.children && isActive && (
+        {shouldShowChildren && (
           <div className="toc-children">
-            {entry.children.map(child => renderTocEntry(child, depth + 1))}
+            {entry.children!.map(child => renderTocEntry(child, depth + 1, isActive || parentActive))}
           </div>
         )}
       </div>
     );
   };
 
-  // Map section to content (simplified - in production, load from bundled HTML)
-  const getContent = (): string => {
-    // This would load from bundled mdBook output in production
-    // For now, return a placeholder pointing to docs
-    return `
-      <div class="manual-placeholder">
-        <h1>${getCurrentTitle()}</h1>
-        <p>The full user manual is available in the <code>docs/</code> folder.</p>
-        <p>To build and view the manual:</p>
-        <pre><code>cd docs
-mdbook serve --open</code></pre>
-        <p>Or click "Open Online" to view on GitHub.</p>
-      </div>
-    `;
+  const normalizeSectionPath = (path: string) => path.replace(/^\//, '').replace(/\.md$/i, '');
+
+  const resolveRelativePath = (baseSection: string, href: string) => {
+    const baseParts = baseSection.split('/').slice(0, -1);
+    const relParts = href.split('/');
+    for (const part of relParts) {
+      if (part === '.' || part === '') continue;
+      if (part === '..') {
+        baseParts.pop();
+      } else {
+        baseParts.push(part);
+      }
+    }
+    return baseParts.join('/');
+  };
+
+  const normalizeImageSrc = (href: string, baseSection: string) => {
+    if (!href || href.startsWith('http') || href.startsWith('data:')) return href;
+    if (href.startsWith('/manual/')) return href;
+
+    const cleaned = href.replace(/^\.\//, '');
+    const screenshotPrefix = '../screenshots/';
+    if (cleaned.startsWith(screenshotPrefix)) {
+      return `/manual/screenshots/${cleaned.slice(screenshotPrefix.length)}`;
+    }
+    if (cleaned.startsWith('screenshots/')) {
+      return `/manual/${cleaned}`;
+    }
+
+    const resolved = resolveRelativePath(baseSection, cleaned);
+    if (resolved.startsWith('screenshots/')) {
+      return `/manual/${resolved}`;
+    }
+    return `/manual/${resolved}`;
+  };
+
+  const createRenderer = (baseSection: string) => {
+    const renderer = new marked.Renderer();
+
+    renderer.image = (href, title, text) => {
+      const src = normalizeImageSrc(href ?? '', baseSection);
+      const safeTitle = title ? ` title="${title}"` : '';
+      const alt = text ?? '';
+      return `<img src="${src}" alt="${alt}"${safeTitle} />`;
+    };
+
+    renderer.link = (href, title, text) => {
+      if (!href) return text ?? '';
+      if (href.startsWith('http') || href.startsWith('mailto:')) {
+        const safeTitle = title ? ` title="${title}"` : '';
+        return `<a href="${href}" target="_blank" rel="noreferrer"${safeTitle}>${text ?? href}</a>`;
+      }
+
+      const resolved = resolveRelativePath(baseSection, href.replace(/^\.\//, ''));
+      const sectionPath = normalizeSectionPath(resolved);
+      const safeTitle = title ? ` title="${title}"` : '';
+      return `<a href="#" data-manual-link="${sectionPath}"${safeTitle}>${text ?? href}</a>`;
+    };
+
+    return renderer;
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setLoadError(null);
+
+    const sectionPath = normalizeSectionPath(currentSection);
+
+    fetch(`/manual/${sectionPath}.md`)
+      .then((res) => (res.ok ? res.text() : Promise.reject(new Error('manual load failed'))))
+      .then((markdown) => {
+        if (cancelled) return;
+        const renderer = createRenderer(sectionPath);
+        const html = marked.parse(markdown, { renderer }) as string;
+        setContentHtml(html);
+        setLoading(false);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        console.error('Failed to load manual section:', err);
+        setLoadError('Unable to load this manual section.');
+        setContentHtml('');
+        setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentSection]);
+
+  const handleContentClick = (event: MouseEvent<HTMLDivElement>) => {
+    const target = event.target as HTMLElement | null;
+    if (!target) return;
+    const link = target.closest('a[data-manual-link]') as HTMLAnchorElement | null;
+    if (!link) return;
+    event.preventDefault();
+    const next = link.getAttribute('data-manual-link');
+    if (next) {
+      setCurrentSection(next);
+    }
   };
 
   return (
@@ -199,7 +321,7 @@ mdbook serve --open</code></pre>
                 </button>
               </div>
               <div className="manual-toc">
-                {TABLE_OF_CONTENTS.map(entry => renderTocEntry(entry))}
+                {tocEntries.map(entry => renderTocEntry(entry))}
               </div>
             </div>
           )}
@@ -214,14 +336,17 @@ mdbook serve --open</code></pre>
               {sidebarOpen ? <ChevronLeft size={20} /> : <ChevronRight size={20} />}
             </button>
 
-            <div className="manual-content-inner">
-              {loading ? (
-                <div className="manual-loading">Loading...</div>
-              ) : (
-                <div
-                  className="manual-text"
-                  dangerouslySetInnerHTML={{ __html: getContent() }}
-                />
+            <div className="manual-content-inner" onClick={handleContentClick}>
+              {loading && <div className="manual-loading">Loading...</div>}
+              {!loading && loadError && (
+                <div className="manual-placeholder">
+                  <h1>{getCurrentTitle()}</h1>
+                  <p>{loadError}</p>
+                  <button className="toc-home-btn" onClick={handleOpenOnline}>Open Online</button>
+                </div>
+              )}
+              {!loading && !loadError && (
+                <div className="manual-text" dangerouslySetInnerHTML={{ __html: contentHtml }} />
               )}
             </div>
 

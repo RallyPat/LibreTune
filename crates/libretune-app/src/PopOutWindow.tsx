@@ -12,7 +12,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen, emit, UnlistenFn } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { ThemeProvider } from './themes';
-import { TableEditor, TableData as TunerTableData, AutoTuneLive, DataLogView } from './components/tuner-ui';
+import { TableEditor, TableData as TunerTableData, AutoTune, DataLogView } from './components/tuner-ui';
 import CurveEditor, { CurveData, SimpleGaugeInfo } from './components/curves/CurveEditor';
 import TsDashboard from './components/dashboards/TsDashboard';
 import DialogRenderer, { DialogDefinition as RendererDialogDef } from './components/dialogs/DialogRenderer';
@@ -375,7 +375,7 @@ export default function PopOutWindow() {
       
       case 'autotune':
         return (
-          <AutoTuneLive
+          <AutoTune
             tableName={(popOutData.data as string) || 'veTable1'}
             onClose={handleClose}
           />

@@ -14,6 +14,8 @@ interface TsGaugeProps {
   value: number;
   embeddedImages?: Map<string, string>;
   legacyMode?: boolean;
+  /** Optional history array for strip chart visualization (LineGraph only) */
+  history?: number[];
 }
 
 // Cache for loaded fonts
@@ -28,7 +30,7 @@ const VALUE_CHANGE_THRESHOLD_PERCENT = 0.5;
 /**
  * Internal TsGauge component - wrapped in React.memo below
  */
-function TsGaugeInner({ config, value, embeddedImages, legacyMode = false }: TsGaugeProps) {
+function TsGaugeInner({ config, value, embeddedImages, legacyMode = false, history }: TsGaugeProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [fontsReady, setFontsReady] = useState(false);
   const [imagesReady, setImagesReady] = useState(false);
@@ -1507,24 +1509,43 @@ function TsGaugeInner({ config, value, embeddedImages, legacyMode = false }: TsG
       ctx.stroke();
     }
 
-    // Generate sample data showing current value with some history
-    // In a real implementation, this would use a history buffer
-    const numPoints = 50;
+    // Build points from history (or generate sample data if no history)
     const points: { x: number; y: number }[] = [];
-    const valuePercent = (clampedValue - config.min) / (config.max - config.min);
     
-    for (let i = 0; i < numPoints; i++) {
-      const t = i / (numPoints - 1);
-      // Simulate some variation leading up to current value
-      const noise = Math.sin(t * 20) * 0.05 + Math.sin(t * 7) * 0.03;
-      const historicalPercent = valuePercent + (1 - t) * (Math.random() * 0.2 - 0.1) + noise * (1 - t);
-      const clampedPercent = Math.max(0, Math.min(1, historicalPercent));
+    if (history && history.length > 0) {
+      // Use actual history data
+      const dataRange = config.max - config.min;
+      for (let i = 0; i < history.length; i++) {
+        const t = i / (history.length - 1);
+        const historicalValue = history[i];
+        const historicalPercent = (historicalValue - config.min) / dataRange;
+        const clampedPercent = Math.max(0, Math.min(1, historicalPercent));
+        
+        points.push({
+          x: padding + t * graphWidth,
+          y: graphY + graphHeight - clampedPercent * graphHeight
+        });
+      }
+    } else {
+      // No history available - show simulated data for demo
+      const numPoints = 50;
+      const valuePercent = (clampedValue - config.min) / (config.max - config.min);
       
-      points.push({
-        x: padding + t * graphWidth,
-        y: graphY + graphHeight - clampedPercent * graphHeight
-      });
+      for (let i = 0; i < numPoints; i++) {
+        const t = i / (numPoints - 1);
+        // Simulate some variation leading up to current value
+        const noise = Math.sin(t * 20) * 0.05 + Math.sin(t * 7) * 0.03;
+        const historicalPercent = valuePercent + (1 - t) * (Math.random() * 0.2 - 0.1) + noise * (1 - t);
+        const clampedPercent = Math.max(0, Math.min(1, historicalPercent));
+        
+        points.push({
+          x: padding + t * graphWidth,
+          y: graphY + graphHeight - clampedPercent * graphHeight
+        });
+      }
     }
+
+    if (points.length === 0) return; // Nothing to draw
 
     // Draw filled area under the line
     const lineColor = tsColorToHex(getValueColor());

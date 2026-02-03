@@ -61,37 +61,64 @@ fn interpolate_value(
     y_bins: &[f64],
     z_values: &[Vec<f64>],
 ) -> f64 {
-    let x_idx = find_bin_index(target_x, x_bins);
-    let y_idx = find_bin_index(target_y, y_bins);
+    let (x0, x1, tx) = find_surrounding_indices(target_x, x_bins);
+    let (y0, y1, ty) = find_surrounding_indices(target_y, y_bins);
 
-    match (x_idx, y_idx) {
-        (Some(xi), Some(yi)) => z_values[yi][xi],
-        (Some(xi), None) => {
-            let row = &z_values[0];
-            if row.is_empty() {
-                0.0f64
-            } else {
-                row[xi]
-            }
-        }
-        (None, Some(yi)) => {
-            let row = &z_values[yi];
-            if row.is_empty() {
-                0.0f64
-            } else {
-                row[0]
-            }
-        }
-        _ => 0.0f64,
-    }
+    let v00 = get_value(z_values, y0, x0);
+    let v10 = get_value(z_values, y0, x1);
+    let v01 = get_value(z_values, y1, x0);
+    let v11 = get_value(z_values, y1, x1);
+
+    let top = v00 + (v10 - v00) * tx;
+    let bottom = v01 + (v11 - v01) * tx;
+
+    top + (bottom - top) * ty
 }
 
-/// Find bin index for a value
-fn find_bin_index(value: f64, bins: &[f64]) -> Option<usize> {
-    bins.iter()
-        .enumerate()
-        .find(|&(_, bin)| (bin - value).abs() < 0.1)
-        .map(|(i, _)| i)
+/// Find surrounding bin indices and interpolation ratio (clamped to edges)
+fn find_surrounding_indices(value: f64, bins: &[f64]) -> (usize, usize, f64) {
+    if bins.is_empty() {
+        return (0, 0, 0.0);
+    }
+
+    // Clamp below first bin
+    if value <= bins[0] {
+        return (0, 0, 0.0);
+    }
+
+    // Clamp above last bin
+    let last_idx = bins.len() - 1;
+    if value >= bins[last_idx] {
+        return (last_idx, last_idx, 0.0);
+    }
+
+    for window in bins.windows(2).enumerate() {
+        let (i, pair) = window;
+        let left = pair[0];
+        let right = pair[1];
+
+        if value >= left && value <= right {
+            let span = right - left;
+            let ratio = if span.abs() < f64::EPSILON {
+                0.0
+            } else {
+                (value - left) / span
+            };
+            return (i, i + 1, ratio);
+        }
+    }
+
+    // Fallback (should not reach here due to early clamps)
+    (last_idx, last_idx, 0.0)
+}
+
+/// Safe value fetch with bounds checks
+fn get_value(z_values: &[Vec<f64>], y: usize, x: usize) -> f64 {
+    z_values
+        .get(y)
+        .and_then(|row| row.get(x))
+        .copied()
+        .unwrap_or(0.0)
 }
 
 /// Smooth table values using 2D Gaussian weighted average

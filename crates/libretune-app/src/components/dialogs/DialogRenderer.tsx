@@ -31,6 +31,37 @@ interface DialogDefinition {
   components: DialogComponent[];
 }
 
+function buildStdPlaceholderDefinition(name: string): DialogDefinition | null {
+  if (name === 'std_injection') {
+    return {
+      name,
+      title: 'Injection Setup',
+      components: [
+        {
+          type: 'Label',
+          text:
+            'This dashboard references the standard "std_injection" panel. LibreTune does not bundle that legacy panel, but you can configure injectors via the Engine Constants and Injector Characteristics dialogs.',
+        },
+      ],
+    };
+  }
+
+  if (name.startsWith('std_')) {
+    return {
+      name,
+      title: `Standard Panel: ${name.replace(/^std_/, '')}`,
+      components: [
+        {
+          type: 'Label',
+          text: `Panel "${name}" is a standard TunerStudio shortcut. LibreTune doesn't ship this panel yet; please open the related dialog from the menu instead.`,
+        },
+      ],
+    };
+  }
+
+  return null;
+}
+
 interface Constant {
   name: string;
   label?: string;
@@ -788,6 +819,15 @@ const RecursivePanel = memo(function RecursivePanel({
     setCurveData(null);
     setGaugeConfig(null);
     setPortEditor(null);
+
+    const stdPlaceholder = buildStdPlaceholderDefinition(name);
+    if (stdPlaceholder) {
+      setDefinition(stdPlaceholder);
+      setPanelType('dialog');
+      return () => {
+        cancelled = true;
+      };
+    }
 
     // First try as indicatorPanel
     invoke<IndicatorPanel>('get_indicator_panel', { name })

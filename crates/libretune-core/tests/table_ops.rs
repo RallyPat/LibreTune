@@ -99,6 +99,69 @@ fn test_rebin_table_bin_values_persisted() {
 }
 
 #[test]
+fn test_rebin_table_interpolates_shifted_bins() {
+    // z = 10*y + x across bins for predictable bilinear interpolation
+    let old_x_bins = vec![0.0, 10.0];
+    let old_y_bins = vec![0.0, 10.0];
+    let old_z_values = vec![
+        vec![0.0, 10.0],    // y = 0
+        vec![100.0, 110.0], // y = 10
+    ];
+
+    let new_x_bins = vec![5.0];
+    let new_y_bins = vec![5.0];
+
+    let result = rebin_table(
+        &old_x_bins,
+        &old_y_bins,
+        &old_z_values,
+        new_x_bins,
+        new_y_bins,
+        true,
+    );
+
+    assert_eq!(result.z_values.len(), 1);
+    assert_eq!(result.z_values[0].len(), 1);
+    let interpolated = result.z_values[0][0];
+
+    // Expected bilinear interpolation at (5,5): 55.0
+    assert!(
+        (interpolated - 55.0).abs() < 0.001,
+        "Expected ~55.0 at (5,5), got {}",
+        interpolated
+    );
+}
+
+#[test]
+fn test_rebin_table_clamps_outside_range() {
+    let old_x_bins = vec![0.0, 10.0];
+    let old_y_bins = vec![0.0, 10.0];
+    let old_z_values = vec![vec![0.0, 10.0], vec![100.0, 110.0]];
+
+    let new_x_bins = vec![-5.0, 0.0, 15.0];
+    let new_y_bins = vec![-2.0, 0.0, 12.0];
+
+    let result = rebin_table(
+        &old_x_bins,
+        &old_y_bins,
+        &old_z_values,
+        new_x_bins,
+        new_y_bins,
+        true,
+    );
+
+    assert_eq!(result.z_values.len(), 3);
+    assert_eq!(result.z_values[0].len(), 3);
+
+    // Clamped to first bin -> top-left value
+    assert!((result.z_values[0][0] - 0.0).abs() < 0.001);
+    // Exact bin matches should be preserved
+    assert!((result.z_values[1][1] - 0.0).abs() < 0.001);
+    // Clamped to last bin -> bottom-right value
+    assert!((result.z_values[2][2] - 110.0).abs() < 0.001);
+}
+
+#[test]
 fn test_smooth_table() {
     let z_values = vec![
         vec![10.0, 10.0, 10.0],

@@ -23,7 +23,7 @@ import {
   SettingsDialog,
   AboutDialog,
   ConnectionDialog,
-  AutoTuneLive,
+  AutoTune,
   DataLogView,
 } from "./components/tuner-ui";
 import ConnectionMetrics from './components/layout/ConnectionMetrics';
@@ -1328,7 +1328,7 @@ function AppContent() {
 
       // Handle special built-in views
       if (name === "autotune") {
-        const newTab: Tab = { id: "autotune", title: "AutoTune Live", icon: "autotune" };
+        const newTab: Tab = { id: "autotune", title: "AutoTune", icon: "autotune" };
         setTabs([...tabs, newTab]);
         setTabContents({ ...tabContents, autotune: { type: "autotune", data: "" } }); // Empty = auto-detect VE table
         setActiveTabId("autotune");
@@ -1845,7 +1845,7 @@ function AppContent() {
       id: "tools",
       label: "&Tools",
       items: [
-        { id: "autotune", label: "&AutoTune Live", onClick: () => openTarget("autotune", "AutoTune Live"), disabled: !currentProject },
+        { id: "autotune", label: "&AutoTune", onClick: () => openTarget("autotune", "AutoTune"), disabled: !currentProject },
         { id: "datalog", label: "&Data Logging", onClick: () => openTarget("datalog", "Data Logging"), disabled: !currentProject },
         { id: "sep1", label: "", separator: true },
         { id: "tooth-logger", label: "&Tooth Logger", onClick: () => openTarget("tooth-logger", "Tooth Logger"), disabled: !currentProject },
@@ -2206,7 +2206,7 @@ function AppContent() {
         return <SettingsView />;
       case "autotune":
         return (
-          <AutoTuneLive 
+          <AutoTune 
             tableName={content.data as string || "veTable1"} 
             onClose={() => handleTabClose("autotune")} 
           />

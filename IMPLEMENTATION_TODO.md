@@ -105,8 +105,8 @@
   - [x] Selected XY coordinate display
   - [x] Add CSS for 3D editor
 
-### AutoTune Live
-- [ ] Complete `crates/libretune-app/src/components/realtime/AutoTuneLive.tsx`
+### AutoTune
+- [ ] Complete `crates/libretune-app/src/components/tuner-ui/AutoTune.tsx`
   - [ ] Primary controls panel:
     - [ ] Update Controller checkbox
     - [ ] Send button
@@ -231,7 +231,7 @@
 - [x] Add missing imports (Play, MoreHorizontal from lucide-react)
 - [ ] Fix `showAutoTune` render logic
 - [ ] Replace sidebar placeholders:
-    - [ ] AutoTune → Opens AutoTuneLive component
+    - [ ] AutoTune → Opens AutoTune component
     - [ ] Performance → Opens PerformanceFieldsDialog
     - [ ] Actions → Opens ActionManagement component
 - [ ] Integrate TabbedDashboard into main content area
@@ -241,7 +241,7 @@
     - [ ] showActionsPanel boolean
     - [ ] dashboardLayouts array
 - [ ] Connect TableEditor2D/3D to backend commands
-- [ ] Connect AutoTuneLive to backend commands
+- [ ] Connect AutoTune to backend commands
 - [ ] Connect TabbedDashboard to backend commands
 - [ ] Connect all dialogs to backend commands
 

@@ -280,6 +280,7 @@ struct AppState {
     connection: Mutex<Option<Connection>>,
     definition: Mutex<Option<EcuDefinition>>,
     autotune_state: Mutex<AutoTuneState>,
+    autotune_secondary_state: Mutex<AutoTuneState>,
     // Optional test seam: factory to produce a signature without opening real serial ports
     connection_factory: Mutex<Option<Arc<ConnectionFactory>>>,
     // AutoTune configuration (stored when start_autotune is called)
@@ -320,12 +321,15 @@ struct AppState {
 struct AutoTuneConfig {
     #[allow(dead_code)]
     table_name: String,
+    secondary_table_name: Option<String>,
     settings: AutoTuneSettings,
     filters: AutoTuneFilters,
     authority_limits: AutoTuneAuthorityLimits,
     // Table bin values for cell lookup
     x_bins: Vec<f64>,
     y_bins: Vec<f64>,
+    secondary_x_bins: Option<Vec<f64>>,
+    secondary_y_bins: Option<Vec<f64>>,
     // Previous TPS value for calculating rate
     last_tps: Option<f64>,
     last_timestamp_ms: Option<u64>,
@@ -3042,6 +3046,8 @@ async fn feed_autotune_data(
     // Clone the config values before we release the guard
     let x_bins = config.x_bins.clone();
     let y_bins = config.y_bins.clone();
+    let secondary_x_bins = config.secondary_x_bins.clone();
+    let secondary_y_bins = config.secondary_y_bins.clone();
     let settings = config.settings.clone();
     let filters = config.filters.clone();
     let authority = config.authority_limits.clone();
@@ -3050,8 +3056,25 @@ async fn feed_autotune_data(
     // Feed to AutoTune
     let mut autotune_guard = app_state.autotune_state.lock().await;
     autotune_guard.add_data_point(
-        data_point, &x_bins, &y_bins, &settings, &filters, &authority,
+        data_point.clone(),
+        &x_bins,
+        &y_bins,
+        &settings,
+        &filters,
+        &authority,
     );
+
+    if let (Some(sec_x_bins), Some(sec_y_bins)) = (secondary_x_bins, secondary_y_bins) {
+        let mut secondary_guard = app_state.autotune_secondary_state.lock().await;
+        secondary_guard.add_data_point(
+            data_point,
+            &sec_x_bins,
+            &sec_y_bins,
+            &settings,
+            &filters,
+            &authority,
+        );
+    }
 }
 
 /// Starts continuous realtime data streaming from the ECU.
@@ -4757,6 +4780,7 @@ async fn get_all_constant_values(
 async fn start_autotune(
     state: tauri::State<'_, AppState>,
     table_name: String,
+    secondary_table_name: Option<String>,
     settings: AutoTuneSettings,
     filters: AutoTuneFilters,
     authority_limits: AutoTuneAuthorityLimits,
@@ -4791,17 +4815,38 @@ async fn start_autotune(
         )
     };
 
+    let (secondary_x_bins, secondary_y_bins) =
+        if let Some(ref secondary_name) = secondary_table_name {
+            if let Some(table) = def.get_table_by_name_or_map(secondary_name) {
+                let x_bins = read_axis_bins(def, cache, &table.x_bins, table.x_size)?;
+                let y_bins = if let Some(ref y_bins_name) = table.y_bins {
+                    read_axis_bins(def, cache, y_bins_name, table.y_size)?
+                } else {
+                    vec![0.0]
+                };
+
+                (Some(x_bins), Some(y_bins))
+            } else {
+                return Err(format!("Secondary table {} not found", secondary_name));
+            }
+        } else {
+            (None, None)
+        };
+
     drop(cache_guard);
     drop(def_guard);
 
     // Store the config for realtime stream to use
     let config = AutoTuneConfig {
         table_name: table_name.clone(),
+        secondary_table_name: secondary_table_name.clone(),
         settings: settings.clone(),
         filters: filters.clone(),
         authority_limits: authority_limits.clone(),
         x_bins,
         y_bins,
+        secondary_x_bins,
+        secondary_y_bins,
         last_tps: None,
         last_timestamp_ms: None,
     };
@@ -4810,6 +4855,13 @@ async fn start_autotune(
 
     let mut guard = state.autotune_state.lock().await;
     guard.start();
+
+    let mut secondary_guard = state.autotune_secondary_state.lock().await;
+    if secondary_table_name.is_some() {
+        secondary_guard.start();
+    } else {
+        secondary_guard.stop();
+    }
     Ok(())
 }
 
@@ -4877,6 +4929,9 @@ async fn stop_autotune(state: tauri::State<'_, AppState>) -> Result<(), String> 
     let mut guard = state.autotune_state.lock().await;
     guard.stop();
 
+    let mut secondary_guard = state.autotune_secondary_state.lock().await;
+    secondary_guard.stop();
+
     // Clear the config
     *state.autotune_config.lock().await = None;
     Ok(())
@@ -4902,9 +4957,27 @@ struct AutoTuneHeatEntry {
 #[tauri::command]
 async fn get_autotune_recommendations(
     state: tauri::State<'_, AppState>,
+    table_name: Option<String>,
 ) -> Result<Vec<AutoTuneRecommendation>, String> {
-    let guard = state.autotune_state.lock().await;
-    Ok(guard.get_recommendations())
+    let secondary_name = state
+        .autotune_config
+        .lock()
+        .await
+        .as_ref()
+        .and_then(|config| config.secondary_table_name.clone());
+
+    let use_secondary = matches!(
+        (table_name.as_deref(), secondary_name.as_deref()),
+        (Some(table), Some(secondary)) if table == secondary
+    );
+
+    if use_secondary {
+        let guard = state.autotune_secondary_state.lock().await;
+        Ok(guard.get_recommendations())
+    } else {
+        let guard = state.autotune_state.lock().await;
+        Ok(guard.get_recommendations())
+    }
 }
 
 /// Retrieves AutoTune heatmap data for visualization.
@@ -4915,9 +4988,25 @@ async fn get_autotune_recommendations(
 #[tauri::command]
 async fn get_autotune_heatmap(
     state: tauri::State<'_, AppState>,
+    table_name: Option<String>,
 ) -> Result<Vec<AutoTuneHeatEntry>, String> {
-    let guard = state.autotune_state.lock().await;
-    let recs = guard.get_recommendations();
+    let secondary_name = state
+        .autotune_config
+        .lock()
+        .await
+        .as_ref()
+        .and_then(|config| config.secondary_table_name.clone());
+
+    let recs = if matches!(
+        (table_name.as_deref(), secondary_name.as_deref()),
+        (Some(table), Some(secondary)) if table == secondary
+    ) {
+        let guard = state.autotune_secondary_state.lock().await;
+        guard.get_recommendations()
+    } else {
+        let guard = state.autotune_state.lock().await;
+        guard.get_recommendations()
+    };
 
     let mut entries: Vec<AutoTuneHeatEntry> = Vec::new();
     for r in recs.iter() {
@@ -4951,8 +5040,23 @@ async fn send_autotune_recommendations(
     table_name: String,
 ) -> Result<(), String> {
     // Collect recommendations
-    let guard = state.autotune_state.lock().await;
-    let recs = guard.get_recommendations();
+    let secondary_name = state
+        .autotune_config
+        .lock()
+        .await
+        .as_ref()
+        .and_then(|config| config.secondary_table_name.clone());
+
+    let recs = if matches!(
+        (Some(table_name.as_str()), secondary_name.as_deref()),
+        (Some(table), Some(secondary)) if table == secondary
+    ) {
+        let guard = state.autotune_secondary_state.lock().await;
+        guard.get_recommendations()
+    } else {
+        let guard = state.autotune_state.lock().await;
+        guard.get_recommendations()
+    };
     if recs.is_empty() {
         return Err("No recommendations to send".to_string());
     }
@@ -5098,9 +5202,27 @@ async fn burn_autotune_recommendations(
 async fn lock_autotune_cells(
     state: tauri::State<'_, AppState>,
     cells: Vec<(usize, usize)>,
+    table_name: Option<String>,
 ) -> Result<(), String> {
-    let mut guard = state.autotune_state.lock().await;
-    guard.lock_cells(cells);
+    let secondary_name = state
+        .autotune_config
+        .lock()
+        .await
+        .as_ref()
+        .and_then(|config| config.secondary_table_name.clone());
+
+    let use_secondary = matches!(
+        (table_name.as_deref(), secondary_name.as_deref()),
+        (Some(table), Some(secondary)) if table == secondary
+    );
+
+    if use_secondary {
+        let mut guard = state.autotune_secondary_state.lock().await;
+        guard.lock_cells(cells);
+    } else {
+        let mut guard = state.autotune_state.lock().await;
+        guard.lock_cells(cells);
+    }
     Ok(())
 }
 
@@ -5149,7 +5271,20 @@ async fn start_autotune_autosend(
             ticker.tick().await;
 
             // Run send_autotune_recommendations logic
-            let recs = {
+            let secondary_name = app_state
+                .autotune_config
+                .lock()
+                .await
+                .as_ref()
+                .and_then(|config| config.secondary_table_name.clone());
+
+            let recs = if matches!(
+                (Some(table.as_str()), secondary_name.as_deref()),
+                (Some(table_name), Some(secondary)) if table_name == secondary
+            ) {
+                let guard = app_state.autotune_secondary_state.lock().await;
+                guard.get_recommendations()
+            } else {
                 let guard = app_state.autotune_state.lock().await;
                 guard.get_recommendations()
             };
@@ -5274,9 +5409,27 @@ async fn stop_autotune_autosend(state: tauri::State<'_, AppState>) -> Result<(),
 async fn unlock_autotune_cells(
     state: tauri::State<'_, AppState>,
     cells: Vec<(usize, usize)>,
+    table_name: Option<String>,
 ) -> Result<(), String> {
-    let mut guard = state.autotune_state.lock().await;
-    guard.unlock_cells(cells);
+    let secondary_name = state
+        .autotune_config
+        .lock()
+        .await
+        .as_ref()
+        .and_then(|config| config.secondary_table_name.clone());
+
+    let use_secondary = matches!(
+        (table_name.as_deref(), secondary_name.as_deref()),
+        (Some(table), Some(secondary)) if table == secondary
+    );
+
+    if use_secondary {
+        let mut guard = state.autotune_secondary_state.lock().await;
+        guard.unlock_cells(cells);
+    } else {
+        let mut guard = state.autotune_state.lock().await;
+        guard.unlock_cells(cells);
+    }
     Ok(())
 }
 
@@ -10934,6 +11087,7 @@ mod demo_mode_tests {
             connection: Mutex::new(None),
             definition: Mutex::new(None),
             autotune_state: Mutex::new(AutoTuneState::new()),
+            autotune_secondary_state: Mutex::new(AutoTuneState::new()),
             autotune_config: Mutex::new(None),
             streaming_task: Mutex::new(None),
             autotune_send_task: Mutex::new(None),
@@ -11002,6 +11156,7 @@ mod concurrency_tests {
             connection: Mutex::new(Some(Connection::new(ConnectionConfig::default()))),
             definition: Mutex::new(Some(def)),
             autotune_state: Mutex::new(AutoTuneState::new()),
+            autotune_secondary_state: Mutex::new(AutoTuneState::new()),
             autotune_config: Mutex::new(None),
             streaming_task: Mutex::new(None),
             autotune_send_task: Mutex::new(None),
@@ -11144,6 +11299,7 @@ signature = "Speeduino 2023-04"
             connection: Mutex::new(None),
             definition: Mutex::new(None),
             autotune_state: Mutex::new(AutoTuneState::default()),
+            autotune_secondary_state: Mutex::new(AutoTuneState::default()),
             autotune_config: Mutex::new(None),
             streaming_task: Mutex::new(None),
             autotune_send_task: Mutex::new(None),
@@ -11206,6 +11362,7 @@ signature = "Speeduino 2023-04"
             connection: Mutex::new(None),
             definition: Mutex::new(None),
             autotune_state: Mutex::new(AutoTuneState::default()),
+            autotune_secondary_state: Mutex::new(AutoTuneState::default()),
             autotune_config: Mutex::new(None),
             streaming_task: Mutex::new(None),
             autotune_send_task: Mutex::new(None),
@@ -11271,6 +11428,7 @@ signature = "Speeduino 2023-04"
             connection: Mutex::new(None),
             definition: Mutex::new(Some(def)),
             autotune_state: Mutex::new(AutoTuneState::default()),
+            autotune_secondary_state: Mutex::new(AutoTuneState::default()),
             autotune_config: Mutex::new(None),
             streaming_task: Mutex::new(None),
             autotune_send_task: Mutex::new(None),
@@ -11348,6 +11506,7 @@ signature = "Speeduino 2023-04"
                 .expect("parse def"),
             )),
             autotune_state: Mutex::new(AutoTuneState::default()),
+            autotune_secondary_state: Mutex::new(AutoTuneState::default()),
             autotune_config: Mutex::new(None),
             streaming_task: Mutex::new(None),
             autotune_send_task: Mutex::new(None),
@@ -11835,6 +11994,7 @@ pub fn run() {
             connection: Mutex::new(None),
             definition: Mutex::new(None),
             autotune_state: Mutex::new(AutoTuneState::new()),
+            autotune_secondary_state: Mutex::new(AutoTuneState::new()),
             autotune_config: Mutex::new(None),
             streaming_task: Mutex::new(None),
             autotune_send_task: Mutex::new(None),

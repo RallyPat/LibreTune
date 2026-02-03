@@ -1,0 +1,185 @@
+[
+  {
+    "title": "Getting Started",
+    "path": "getting-started/installation",
+    "children": [
+      {
+        "title": "Installation",
+        "path": "getting-started/installation",
+        "children": []
+      },
+      {
+        "title": "Creating Your First Project",
+        "path": "getting-started/first-project",
+        "children": []
+      },
+      {
+        "title": "Connecting to Your ECU",
+        "path": "getting-started/connecting",
+        "children": []
+      },
+      {
+        "title": "Settings & Preferences",
+        "path": "getting-started/settings",
+        "children": []
+      }
+    ]
+  },
+  {
+    "title": "Core Features",
+    "path": "features/table-editing",
+    "children": [
+      {
+        "title": "Table Editing",
+        "path": "features/table-editing",
+        "children": [
+          {
+            "title": "2D Tables",
+            "path": "features/table-editing/2d-tables",
+            "children": []
+          },
+          {
+            "title": "3D Visualization",
+            "path": "features/table-editing/3d-visualization",
+            "children": []
+          },
+          {
+            "title": "Keyboard Shortcuts",
+            "path": "features/table-editing/shortcuts",
+            "children": []
+          }
+        ]
+      },
+      {
+        "title": "AutoTune",
+        "path": "features/autotune",
+        "children": [
+          {
+            "title": "Usage Guide",
+            "path": "features/autotune/usage-guide",
+            "children": []
+          },
+          {
+            "title": "Setting Up AutoTune",
+            "path": "features/autotune/setup",
+            "children": []
+          },
+          {
+            "title": "Understanding Recommendations",
+            "path": "features/autotune/recommendations",
+            "children": []
+          },
+          {
+            "title": "Filters and Authority",
+            "path": "features/autotune/filters",
+            "children": []
+          }
+        ]
+      },
+      {
+        "title": "Dashboards",
+        "path": "features/dashboards",
+        "children": [
+          {
+            "title": "Using Dashboards",
+            "path": "features/dashboards/using",
+            "children": []
+          },
+          {
+            "title": "Customizing Gauges",
+            "path": "features/dashboards/customizing",
+            "children": []
+          },
+          {
+            "title": "Creating Dashboards",
+            "path": "features/dashboards/creating",
+            "children": []
+          }
+        ]
+      },
+      {
+        "title": "Data Logging",
+        "path": "features/datalog",
+        "children": []
+      },
+      {
+        "title": "Performance Calculator",
+        "path": "features/performance-calculator",
+        "children": []
+      },
+      {
+        "title": "Diagnostic Loggers",
+        "path": "features/diagnostic-loggers",
+        "children": []
+      },
+      {
+        "title": "Tools",
+        "path": "features/tools",
+        "children": []
+      }
+    ]
+  },
+  {
+    "title": "Project Management",
+    "path": "projects/tunes",
+    "children": [
+      {
+        "title": "Managing Tunes",
+        "path": "projects/tunes",
+        "children": []
+      },
+      {
+        "title": "Version Control",
+        "path": "projects/version-control",
+        "children": []
+      },
+      {
+        "title": "Restore Points",
+        "path": "projects/restore-points",
+        "children": []
+      },
+      {
+        "title": "Importing Projects",
+        "path": "projects/importing",
+        "children": []
+      }
+    ]
+  },
+  {
+    "title": "Reference",
+    "path": "reference/supported-ecus",
+    "children": [
+      {
+        "title": "Supported ECUs",
+        "path": "reference/supported-ecus",
+        "children": []
+      },
+      {
+        "title": "INI File Format",
+        "path": "reference/ini-format",
+        "children": []
+      },
+      {
+        "title": "Keyboard Shortcuts",
+        "path": "reference/shortcuts",
+        "children": []
+      },
+      {
+        "title": "Troubleshooting",
+        "path": "reference/troubleshooting",
+        "children": []
+      }
+    ]
+  },
+  {
+    "title": "FAQ",
+    "path": "faq",
+    "children": [
+      {
+        "title": "Frequently Asked Questions",
+        "path": "faq",
+        "children": []
+      }
+    ]
+  }
+]

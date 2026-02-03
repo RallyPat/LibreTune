@@ -14,12 +14,16 @@ interface RealtimeState {
   channels: Record<string, number>;
   /** Timestamp of last update (for debugging/monitoring) */
   lastUpdateTime: number;
+  /** Channel history for strip chart visualization (last 60 seconds, max 300 points) */
+  channelHistory: Record<string, number[]>;
   
   // Actions
   /** Update all channels with new data (called from event listener) */
   updateChannels: (data: Record<string, number>) => void;
   /** Clear all channel data */
   clearChannels: () => void;
+  /** Get channel history, creating if needed */
+  getChannelHistory: (channelName: string) => number[];
 }
 
 /**
@@ -31,19 +35,45 @@ interface RealtimeState {
  * - In event listener: `useRealtimeStore.getState().updateChannels(data);`
  */
 export const useRealtimeStore = create<RealtimeState>()(
-  subscribeWithSelector((set) => ({
+  subscribeWithSelector((set, get) => ({
     channels: {},
     lastUpdateTime: 0,
+    channelHistory: {},
     
-    updateChannels: (data) => set({ 
-      channels: data, 
-      lastUpdateTime: Date.now() 
-    }),
+    updateChannels: (data) => {
+      const state = get();
+      const newHistory = { ...state.channelHistory };
+      
+      // Update history for each channel (max 300 points, ~60s at 5Hz)
+      for (const [name, value] of Object.entries(data)) {
+        if (!newHistory[name]) {
+          newHistory[name] = [];
+        }
+        const history = newHistory[name];
+        history.push(value);
+        // Keep only last 300 points (60 seconds at 5 Hz, or 120 seconds at 2.5 Hz)
+        if (history.length > 300) {
+          history.shift();
+        }
+      }
+      
+      set({ 
+        channels: data,
+        channelHistory: newHistory,
+        lastUpdateTime: Date.now() 
+      });
+    },
     
     clearChannels: () => set({
       channels: {},
+      channelHistory: {},
       lastUpdateTime: 0
     }),
+    
+    getChannelHistory: (channelName: string) => {
+      const state = get();
+      return state.channelHistory[channelName] ?? [];
+    },
   }))
 );
 
@@ -120,6 +150,64 @@ export const useChannels = (names: string[]): Record<string, number> => {
     return result;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [channels, namesKey]); // Use namesKey instead of spreading names
+};
+
+/**
+ * Hook to get channel history for strip chart visualization.
+ * Returns history array (up to 300 points, ~60s at 5Hz).
+ * Component only re-renders when THIS specific channel's history changes.
+ * 
+ * @param name - Channel name (e.g., 'rpm', 'afr', 'map')
+ * @returns History array (empty array if no history available)
+ * 
+ * @example
+ * function RealtimeTrendChart() {
+ *   const history = useChannelHistory('rpm');
+ *   return <LineChart data={history} />;
+ * }
+ */
+export const useChannelHistory = (name: string): number[] =>
+  useRealtimeStore((state) => state.channelHistory[name] ?? []);
+
+/**
+ * Hook to get histories for multiple channels.
+ * Component re-renders when ANY of the specified channels' histories change.
+ * Uses shallow equality comparison for the returned object.
+ * 
+ * @param names - Array of channel names
+ * @returns Object mapping channel names to history arrays
+ * 
+ * @example
+ * function DashboardWithTrends() {
+ *   const histories = useChannelHistories(['rpm', 'map', 'afr']);
+ *   return (
+ *     <div>
+ *       {Object.entries(histories).map(([name, history]) => (
+ *         <TrendChart key={name} channel={name} data={history} />
+ *       ))}
+ *     </div>
+ *   );
+ * }
+ */
+export const useChannelHistories = (names: string[]): Record<string, number[]> => {
+  // Get the full history object from the store
+  const channelHistory = useRealtimeStore((state) => state.channelHistory);
+  
+  // Create a stable key from names array for dependency comparison
+  const namesKey = names.join(',');
+  
+  // Use useMemo to create a stable result object that only changes when values change
+  return useMemo(() => {
+    const result: Record<string, number[]> = {};
+    for (const name of names) {
+      const history = channelHistory[name];
+      if (history) {
+        result[name] = history;
+      }
+    }
+    return result;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [channelHistory, namesKey]); // Use namesKey instead of spreading names
 };
 
 /**

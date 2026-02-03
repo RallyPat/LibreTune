@@ -41,6 +41,9 @@ byteorder = "1.5"
 # Regex for INI parsing
 regex = "1.11"
 
+# Expression evaluation for AutoTune custom filters
+evalexpr = "11.3"
+
 # XML parsing for TunerStudio dashboard format
 quick-xml = { version = "0.37", features = ["serialize"] }
 base64 = "0.22"

@@ -8,6 +8,7 @@
 //! - Cell locking functionality
 //! - Reference tables (Lambda Delay, AFR Target)
 
+use evalexpr::{eval_with_context, ContextWithMutableVariables, HashMapContext, Value};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -62,6 +63,7 @@ impl Default for AutoTuneAuthorityLimits {
 
 /// Data filters for VE Analyze
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct AutoTuneFilters {
     pub min_rpm: f64,
     pub max_rpm: f64,
@@ -358,6 +360,37 @@ impl AutoTuneState {
             .map(|(i, _)| i)
     }
 
+    fn evaluate_custom_filter(&self, expr: &str, point: &VEDataPoint) -> Result<bool, String> {
+        let mut ctx = HashMapContext::new();
+
+        let set_value = |ctx: &mut HashMapContext, name: &str, value: Value| {
+            ctx.set_value(name.to_string(), value)
+                .map_err(|e| format!("Failed to set {name}: {e}"))
+        };
+
+        set_value(&mut ctx, "rpm", point.rpm.into())?;
+        set_value(&mut ctx, "map", point.map.into())?;
+        set_value(&mut ctx, "afr", point.afr.into())?;
+        set_value(&mut ctx, "ve", point.ve.into())?;
+        set_value(&mut ctx, "clt", point.clt.into())?;
+        set_value(&mut ctx, "tps", point.tps.into())?;
+        set_value(&mut ctx, "tps_rate", point.tps_rate.into())?;
+
+        let accel_enrich = point.accel_enrich_active.unwrap_or(false);
+        set_value(&mut ctx, "accel_enrich", accel_enrich.into())?;
+        set_value(&mut ctx, "accel_enrich_active", accel_enrich.into())?;
+
+        match eval_with_context(expr, &ctx) {
+            Ok(Value::Boolean(val)) => Ok(val),
+            Ok(Value::Int(val)) => Ok(val != 0),
+            Ok(Value::Float(val)) => Ok(val != 0.0),
+            Ok(other) => Err(format!(
+                "Custom filter must return boolean or number, got {other:?}"
+            )),
+            Err(e) => Err(format!("Custom filter eval error: {e}")),
+        }
+    }
+
     fn passes_filters(&self, point: &VEDataPoint, filters: &AutoTuneFilters) -> bool {
         // Basic RPM and CLT filters
         if point.rpm < filters.min_rpm || point.rpm > filters.max_rpm {
@@ -379,6 +412,20 @@ impl AutoTuneState {
             }
         }
 
+        if let Some(ref expr) = filters.custom_filter {
+            let trimmed = expr.trim();
+            if !trimmed.is_empty() {
+                match self.evaluate_custom_filter(trimmed, point) {
+                    Ok(true) => {}
+                    Ok(false) => return false,
+                    Err(e) => {
+                        tracing::warn!("AutoTune custom filter rejected data: {e}");
+                        return false;
+                    }
+                }
+            }
+        }
+
         true
     }
 
@@ -395,5 +442,56 @@ impl AutoTuneState {
 
     pub fn get_recommendations(&self) -> Vec<AutoTuneRecommendation> {
         self.recommendations.values().cloned().collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn custom_filter_allows_matching_point() {
+        let state = AutoTuneState::default();
+        let mut filters = AutoTuneFilters::default();
+        filters.custom_filter = Some("rpm > 2000 && tps < 50 && clt > 70".to_string());
+        filters.min_clt = 70.0;
+
+        let point = VEDataPoint {
+            rpm: 2500.0,
+            tps: 25.0,
+            clt: 85.0,
+            ..VEDataPoint::default()
+        };
+
+        assert!(state.passes_filters(&point, &filters));
+    }
+
+    #[test]
+    fn custom_filter_rejects_non_matching_point() {
+        let state = AutoTuneState::default();
+        let mut filters = AutoTuneFilters::default();
+        filters.custom_filter = Some("rpm > 3000 && afr < 13.5".to_string());
+
+        let point = VEDataPoint {
+            rpm: 2500.0,
+            afr: 14.7,
+            ..VEDataPoint::default()
+        };
+
+        assert!(!state.passes_filters(&point, &filters));
+    }
+
+    #[test]
+    fn custom_filter_invalid_expression_rejects_point() {
+        let state = AutoTuneState::default();
+        let mut filters = AutoTuneFilters::default();
+        filters.custom_filter = Some("rpm >".to_string());
+
+        let point = VEDataPoint {
+            rpm: 2500.0,
+            ..VEDataPoint::default()
+        };
+
+        assert!(!state.passes_filters(&point, &filters));
     }
 }

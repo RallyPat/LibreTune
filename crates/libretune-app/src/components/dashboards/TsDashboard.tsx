@@ -1,43 +1,39 @@
-/**
- * TsDashboard - TunerStudio-compatible dashboard renderer.
- * 
- * Renders a complete dashboard from a DashFile structure, supporting all
- * TunerStudio gauge types, indicators, embedded images, and proper positioning.
- * 
- * Features:
- * - 13 gauge types (Analog, Digital, Bar, Sweep, Line Graph, etc.)
- * - Boolean indicators (LED, image-based)
- * - Gauge sweep animation on load (sportscar-style)
- * - Designer mode for layout editing
- * - Context menu for gauge configuration
- * - Dashboard selector with categories
- * - Import from TunerStudio .dash files
- * - Responsive scaling for different screen sizes
- * - Realtime data from Zustand store (per-channel subscription for efficiency)
- * 
- * @example
- * ```tsx
- * <TsDashboard
- *   isConnected={connectionStatus.state === 'Connected'}
- * />
- * ```
- */
+import {
+  DashFile,
+  DashFileInfo,
+  GaugeConfig,
+  GaugeConfigDefaults,
+  GaugeFile,
+  GaugeFileInfo,
+  GaugeFileWithPath,
+  GaugeFileWithPathResult,
+  GaugeGridItem,
+  GaugeStyleDefaults,
+  GaugeTextDefaults,
+  IndicatorConfig,
+  IndicatorConfigDefaults,
+  IndicatorFile,
+  IndicatorFileInfo,
+  IndicatorFileWithPath,
+  IndicatorFileWithPathResult,
+  IndicatorStyleDefaults,
+  IndicatorTextDefaults,
+  SUPPORTED_GAUGE_PAINTERS,
+  SUPPORTED_INDICATOR_PAINTERS,
+  isGauge,
+  isIndicator,
+  isLegacyDashFile,
+  TsGaugeConfig,
+  buildEmbeddedImageMap,
+  tsColorToRgba,
+} from './dashTypes';
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { useChannels } from '../../stores/realtimeStore';
+import { useChannels, useChannelHistories } from '../../stores/realtimeStore';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, UnlistenFn } from '@tauri-apps/api/event';
 import { save } from '@tauri-apps/plugin-dialog';
 import { useRealtimeStore } from '../../stores/realtimeStore';
-import {
-  DashFile,
-  DashFileInfo,
-  TsGaugeConfig,
-  isGauge,
-  isIndicator,
-  buildEmbeddedImageMap,
-  tsColorToRgba,
-} from './dashTypes';
 import { createLibreTuneDefaultDashboard } from './LibreTuneDefaultDashboard';
 import TsGauge from '../gauges/TsGauge';
 import TsIndicator from '../gauges/TsIndicator';
@@ -153,6 +149,7 @@ export default function TsDashboard({ initialDashPath, isConnected = false }: Ts
   }, [dashFile]);
 
   const channelValues = useChannels(usedChannels);
+  const channelHistories = useChannelHistories(usedChannels);
 
   // Resolve RPM channel from INI output channels (INI-driven, no hardcoded names)
   useEffect(() => {
@@ -233,30 +230,8 @@ export default function TsDashboard({ initialDashPath, isConnected = false }: Ts
   const compatibilityReport = useMemo(() => {
     if (!dashFile) return null;
 
-    const supportedGaugePainters = new Set([
-      'AnalogGauge',
-      'BasicAnalogGauge',
-      'CircleAnalogGauge',
-      'AsymmetricSweepGauge',
-      'BasicReadout',
-      'HorizontalBarGauge',
-      'HorizontalDashedBar',
-      'VerticalBarGauge',
-      'HorizontalLineGauge',
-      'VerticalDashedBar',
-      'AnalogBarGauge',
-      'AnalogMovingBarGauge',
-      'Histogram',
-      'LineGraph',
-      'RoundGauge',
-      'RoundDashedGauge',
-      'FuelMeter',
-      'Tachometer',
-    ]);
-    const supportedIndicatorPainters = new Set([
-      'BasicRectangleIndicator',
-      'BulbIndicator',
-    ]);
+    const supportedGaugePainters = new Set(SUPPORTED_GAUGE_PAINTERS);
+    const supportedIndicatorPainters = new Set(SUPPORTED_INDICATOR_PAINTERS);
 
     const gaugePainters: Record<string, number> = {};
     const indicatorPainters: Record<string, number> = {};
@@ -1323,6 +1298,7 @@ export default function TsDashboard({ initialDashPath, isConnected = false }: Ts
                   value={value}
                   embeddedImages={embeddedImages}
                   legacyMode={legacyMode}
+                  history={channelHistories[gauge.output_channel]}
                 />
               </div>
             );

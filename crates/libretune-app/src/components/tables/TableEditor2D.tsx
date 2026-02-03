@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { ArrowLeft, Save, Zap, ExternalLink } from 'lucide-react';
 import TableToolbar from './TableToolbar';
@@ -8,8 +8,16 @@ import RebinDialog from '../dialogs/RebinDialog';
 import CellEditDialog from '../dialogs/CellEditDialog';
 import { useHeatmapSettings } from '../../utils/useHeatmapSettings';
 import { useChannels } from '../../stores/realtimeStore';
+import { useToast } from '../ToastContext';
 import './TableComponents.css';
 import './TableEditor2D.css';
+
+type TableOperationResult = {
+  table_name: string;
+  x_bins: number[];
+  y_bins: number[];
+  z_values: number[][];
+};
 
 /**
  * Props for the TableEditor2D component.
@@ -159,9 +167,28 @@ export default function TableEditor2D({
 
   const [followMode, setFollowMode] = useState(false);
   const [activeCell, setActiveCell] = useState<[number, number] | null>(null);
+
+  const { showToast } = useToast();
   
   // Get heatmap scheme from user settings
   const { settings: heatmapSettings } = useHeatmapSettings();
+
+  const selectedCellsPayload = useMemo(
+    () => Array.from(selectedCells).map((key) => {
+      const [x, y] = key.split(',').map(Number);
+      return [y, x] as [number, number]; // Backend expects (row, col)
+    }),
+    [selectedCells]
+  );
+
+  const handleOperationError = useCallback(
+    (operation: string, err: unknown) => {
+      console.error(`${operation} failed:`, err);
+      const message = err instanceof Error ? err.message : String(err ?? 'Unknown error');
+      showToast(`${operation} failed: ${message}`, 'error');
+    },
+    [showToast]
+  );
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -361,12 +388,9 @@ export default function TableEditor2D({
     const avgValue = values.reduce((sum, v) => sum + v.value, 0) / values.length;
 
     try {
-      const result: any = await invoke('set_cells_equal', {
+      const result = await invoke<TableOperationResult>('set_cells_equal', {
         table_name,
-        selected_cells: Array.from(selectedCells).map(key => {
-          const [x, y] = key.split(',').map(Number);
-          return [y, x] as [number, number];  // Backend expects (row, col)
-        }),
+        selected_cells: selectedCellsPayload,
         value: avgValue
       });
       if (result && result.z_values) {
@@ -375,7 +399,7 @@ export default function TableEditor2D({
         setCanUndo(true);
       }
     } catch (err) {
-      console.error('Set equal failed:', err);
+      handleOperationError('Set equal', err);
     }
   };
 
@@ -426,12 +450,9 @@ export default function TableEditor2D({
 
   const handleScale = async (factor: number) => {
     try {
-      const result: any = await invoke('scale_cells', {
+      const result = await invoke<TableOperationResult>('scale_cells', {
         table_name,
-        selected_cells: Array.from(selectedCells).map(key => {
-          const [x, y] = key.split(',').map(Number);
-          return [y, x] as [number, number];  // Backend expects (row, col)
-        }),
+        selected_cells: selectedCellsPayload,
         scale_factor: factor
       });
       if (result && result.z_values) {
@@ -440,18 +461,15 @@ export default function TableEditor2D({
         setCanUndo(true);
       }
     } catch (err) {
-      console.error('Scale failed:', err);
+      handleOperationError('Scale', err);
     }
   };
 
   const handleSmooth = async () => {
     try {
-      const result: any = await invoke('smooth_table', {
+      const result = await invoke<TableOperationResult>('smooth_table', {
         table_name,
-        selected_cells: Array.from(selectedCells).map(key => {
-          const [x, y] = key.split(',').map(Number);
-          return [y, x] as [number, number];  // Backend expects (row, col)
-        }),
+        selected_cells: selectedCellsPayload,
         factor: 1.0
       });
       if (result && result.z_values) {
@@ -460,19 +478,15 @@ export default function TableEditor2D({
         setCanUndo(true);
       }
     } catch (err) {
-      console.error('Smooth failed:', err);
-      // TODO: Show toast notification when toast system is available as prop
+      handleOperationError('Smooth', err);
     }
   };
 
   const handleInterpolate = async () => {
     try {
-      const result: any = await invoke('interpolate_cells', {
+      const result = await invoke<TableOperationResult>('interpolate_cells', {
         table_name,
-        selected_cells: Array.from(selectedCells).map(key => {
-          const [x, y] = key.split(',').map(Number);
-          return [y, x] as [number, number];  // Backend expects (row, col)
-        })
+        selected_cells: selectedCellsPayload
       });
       if (result && result.z_values) {
         setLocalZValues(result.z_values);
@@ -480,7 +494,7 @@ export default function TableEditor2D({
         setCanUndo(true);
       }
     } catch (err) {
-      console.error('Interpolate failed:', err);
+      handleOperationError('Interpolate', err);
     }
   };
 
@@ -488,7 +502,7 @@ export default function TableEditor2D({
     setRebinDialog({ show: false, newXBins, newYBins });
     
     try {
-      const result: any = await invoke('rebin_table', {
+      const result = await invoke<TableOperationResult>('rebin_table', {
         table_name,
         new_x_bins: newXBins,
         new_y_bins: newYBins,
@@ -501,7 +515,7 @@ export default function TableEditor2D({
         setSelectedCells(new Set());
       }
     } catch (err) {
-      console.error('Rebin failed:', err);
+      handleOperationError('Rebin', err);
     }
   };
 
