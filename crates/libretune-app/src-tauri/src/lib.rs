@@ -4,13 +4,12 @@ use libretune_core::autotune::{
 };
 use libretune_core::dash::{
     self, create_basic_dashboard, create_racing_dashboard, create_tuning_dashboard, Bibliography,
-    DashComponent, DashFile, GaugeCluster, GaugePainter, TsColor, VersionInfo,
+    DashComponent, DashFile, GaugePainter, TsColor, VersionInfo,
 };
 use libretune_core::dashboard::{
-    get_dashboard_file, get_dashboard_file_path, DashboardLayout,
-    GaugeConfig as DashboardGaugeConfig,
+    get_dashboard_file_path, DashboardLayout, GaugeConfig as DashboardGaugeConfig,
 };
-use libretune_core::datalog::{DataLogger, LogEntry};
+use libretune_core::datalog::DataLogger;
 use libretune_core::demo::DemoSimulator;
 use libretune_core::ini::{
     AdaptiveTimingConfig, CommandPart, Constant, DataType, DialogDefinition, EcuDefinition,
@@ -20,21 +19,18 @@ use libretune_core::plugin::{
     ControllerBridge, PluginEvent, PluginInfo, PluginManager, SwingComponent,
 };
 use libretune_core::project::{
-    BranchInfo, CommitDiff, CommitInfo, ConnectionSettings, IniEntry, IniRepository, IniSource,
-    OnlineIniEntry, OnlineIniRepository, Project, ProjectConfig, ProjectInfo, ProjectSettings,
-    ProjectTemplate, TemplateManager, VersionControl,
+    BranchInfo, CommitDiff, CommitInfo, ConnectionSettings, IniRepository, IniSource,
+    OnlineIniEntry, OnlineIniRepository, Project, ProjectConfig, ProjectSettings, ProjectTemplate,
+    TemplateManager, VersionControl,
 };
 use libretune_core::protocol::serial::list_ports;
 use libretune_core::protocol::{Connection, ConnectionConfig, ConnectionState};
 use libretune_core::table_ops;
 use libretune_core::tune::{
-    ConstantChange, ConstantManifestEntry, IniMetadata, MigrationReport, PageState, TuneCache,
-    TuneFile, TuneValue,
+    ConstantManifestEntry, IniMetadata, MigrationReport, PageState, TuneCache, TuneFile, TuneValue,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::fs;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tauri::Emitter;
@@ -276,28 +272,21 @@ fn bit_mask_u8(bits: u8) -> u8 {
     }
 }
 
+type ConnectionFactory = dyn Fn(ConnectionConfig, Option<ProtocolSettings>, Endianness) -> Result<String, String>
+    + Send
+    + Sync;
+
 struct AppState {
     connection: Mutex<Option<Connection>>,
     definition: Mutex<Option<EcuDefinition>>,
     autotune_state: Mutex<AutoTuneState>,
     // Optional test seam: factory to produce a signature without opening real serial ports
-    connection_factory: Mutex<
-        Option<
-            std::sync::Arc<
-                dyn Fn(
-                        ConnectionConfig,
-                        Option<ProtocolSettings>,
-                        Endianness,
-                    ) -> Result<String, String>
-                    + Send
-                    + Sync,
-            >,
-        >,
-    >,
+    connection_factory: Mutex<Option<Arc<ConnectionFactory>>>,
     // AutoTune configuration (stored when start_autotune is called)
     autotune_config: Mutex<Option<AutoTuneConfig>>,
     streaming_task: Mutex<Option<tokio::task::JoinHandle<()>>>,
     // Background task for AutoTune auto-send
+    #[allow(dead_code)]
     autotune_send_task: Mutex<Option<tokio::task::JoinHandle<()>>>,
     // Background task for connection metrics emission
     metrics_task: Mutex<Option<tokio::task::JoinHandle<()>>>,
@@ -329,6 +318,7 @@ struct AppState {
 /// AutoTune configuration stored when tuning session starts
 #[derive(Clone)]
 struct AutoTuneConfig {
+    #[allow(dead_code)]
     table_name: String,
     settings: AutoTuneSettings,
     filters: AutoTuneFilters,
@@ -783,6 +773,7 @@ fn compare_signatures(ecu_sig: &str, ini_sig: &str) -> SignatureMatchType {
 }
 
 /// Build a shallow SignatureMismatchInfo (without resolving matching INIs) for testing
+#[allow(dead_code)]
 fn build_shallow_mismatch_info(
     ecu_signature: &str,
     ini_signature: &str,
@@ -803,7 +794,7 @@ async fn find_matching_inis_internal(
     state: &tauri::State<'_, AppState>,
     ecu_signature: &str,
 ) -> Vec<MatchingIniInfo> {
-    find_matching_inis_from_state(&*state, ecu_signature).await
+    find_matching_inis_from_state(state, ecu_signature).await
 }
 
 // Test-only helper: simulate the signature handling part of connect_to_ecu
@@ -1076,7 +1067,7 @@ async fn load_ini(
                             let bits_remaining_after_first_byte =
                                 bit_size.saturating_sub(8 - bit_in_byte);
                             let bytes_needed = if bits_remaining_after_first_byte > 0 {
-                                1 + ((bits_remaining_after_first_byte + 7) / 8)
+                                1 + bits_remaining_after_first_byte.div_ceil(8)
                             } else {
                                 1
                             };
@@ -1208,7 +1199,6 @@ async fn load_ini(
                                 }
                             }
                             TuneValue::Array(arr) => {
-                                let write_count = arr.len().min(element_count);
                                 let last_value = arr.last().copied().unwrap_or(0.0);
 
                                 for i in 0..element_count {
@@ -1300,8 +1290,10 @@ async fn connect_to_ecu(
     timeout_ms: Option<u64>,
     runtime_packet_mode: Option<String>,
 ) -> Result<ConnectResult, String> {
-    let mut config = ConnectionConfig::default();
-    config.port_name = port_name.clone();
+    let mut config = ConnectionConfig {
+        port_name: port_name.clone(),
+        ..Default::default()
+    };
 
     // Apply runtime_packet_mode override if provided
     if let Some(mode) = runtime_packet_mode {
@@ -2023,7 +2015,7 @@ async fn get_table_data(
     fn read_const_from_source(
         constant: &Constant,
         tune: Option<&TuneFile>,
-        cache: Option<&TuneCache>,
+        _cache: Option<&TuneCache>,
         conn: &mut Option<&mut Connection>,
         endianness: libretune_core::ini::Endianness,
     ) -> Result<Vec<f64>, String> {
@@ -2059,7 +2051,7 @@ async fn get_table_data(
 
                 if let Some(page_data) = tune_file.pages.get(&constant.page) {
                     let offset = constant.offset as usize;
-                    let total_bytes = (element_count * element_size) as usize;
+                    let total_bytes = element_count * element_size;
                     if offset + total_bytes <= page_data.len() {
                         eprintln!("[DEBUG] read_const_from_source: '{}' reading from TuneFile.pages[{}] at offset {}", 
                             constant.name, constant.page, offset);
@@ -2573,7 +2565,7 @@ async fn get_curve_data(
                 // This handles cases where the constant wasn't explicitly in the MSQ file
                 if let Some(page_data) = tune_file.pages.get(&constant.page) {
                     let offset = constant.offset as usize;
-                    let total_bytes = (element_count * element_size) as usize;
+                    let total_bytes = element_count * element_size;
 
                     if offset + total_bytes <= page_data.len() {
                         eprintln!("[DEBUG] read_const_from_source: '{}' reading from TuneFile.pages[{}] at offset {}", 
@@ -2715,7 +2707,7 @@ async fn update_table_data(
 
     // Convert display values to raw bytes
     let element_size = constant.data_type.size_bytes();
-    let mut raw_data = vec![0u8; constant.size_bytes() as usize];
+    let mut raw_data = vec![0u8; constant.size_bytes()];
 
     for (i, val) in flat_values.iter().enumerate() {
         let raw_val = constant.display_to_raw(*val);
@@ -2816,7 +2808,7 @@ async fn update_curve_data(
 
     // Convert display values to raw bytes
     let element_size = constant.data_type.size_bytes();
-    let mut raw_data = vec![0u8; constant.size_bytes() as usize];
+    let mut raw_data = vec![0u8; constant.size_bytes()];
 
     for (i, val) in y_values.iter().enumerate() {
         let raw_val = constant.display_to_raw(*val);
@@ -3784,13 +3776,13 @@ async fn get_searchable_index(
 /// Returns: Boolean result of expression evaluation
 #[tauri::command]
 async fn evaluate_expression(
-    state: tauri::State<'_, AppState>,
+    _state: tauri::State<'_, AppState>,
     expression: String,
     context: HashMap<String, f64>,
 ) -> Result<bool, String> {
     let mut parser = libretune_core::ini::expression::Parser::new(&expression);
-    let expr = parser.parse().map_err(|e| e)?;
-    let val = libretune_core::ini::expression::evaluate_simple(&expr, &context).map_err(|e| e)?;
+    let expr = parser.parse()?;
+    let val = libretune_core::ini::expression::evaluate_simple(&expr, &context)?;
     Ok(val.as_bool())
 }
 
@@ -3913,7 +3905,7 @@ async fn get_constant(
         constant.bit_options.len(),
         value_type
     );
-    if constant.bit_options.len() > 0 && constant.bit_options.len() <= 10 {
+    if !constant.bit_options.is_empty() && constant.bit_options.len() <= 10 {
         eprintln!(
             "[DEBUG] get_constant '{}': bit_options={:?}",
             name, constant.bit_options
@@ -3947,7 +3939,6 @@ async fn get_constant_string_value(
 ) -> Result<String, String> {
     let mut conn_guard = state.connection.lock().await;
     let def_guard = state.definition.lock().await;
-    let cache_guard = state.tune_cache.lock().await;
     let tune_guard = state.current_tune.lock().await;
 
     let def = def_guard.as_ref().ok_or("Definition not loaded")?;
@@ -4135,7 +4126,7 @@ async fn get_constant_value(
         let bits_remaining_after_first_byte = bit_size.saturating_sub(8 - bit_in_byte);
         let bytes_needed = if bits_remaining_after_first_byte > 0 {
             // Need multiple bytes: first byte + additional bytes
-            1 + ((bits_remaining_after_first_byte + 7) / 8)
+            1 + bits_remaining_after_first_byte.div_ceil(8)
         } else {
             // All bits fit in one byte
             1
@@ -4168,7 +4159,7 @@ async fn get_constant_value(
                 // If bits span multiple bytes, extract from additional bytes
                 if bits_remaining_after_first_byte > 0 && bytes.len() > 1 {
                     let mut bits_collected = bits_in_first_byte;
-                    for i in 1..bytes.len() {
+                    for byte in bytes.iter().skip(1) {
                         let remaining_bits = bit_size - bits_collected;
                         if remaining_bits == 0 {
                             break;
@@ -4179,7 +4170,7 @@ async fn get_constant_value(
                         } else {
                             (1u8 << bits_from_this_byte) - 1
                         };
-                        let val_from_byte = (bytes[i] & mask) as u32;
+                        let val_from_byte = (*byte & mask) as u32;
                         bit_val |= val_from_byte << bits_collected;
                         bits_collected += bits_from_this_byte;
                     }
@@ -4292,7 +4283,7 @@ async fn update_constant(
         // Calculate how many bytes we need to read/write (may span multiple bytes)
         let bits_remaining_after_first_byte = bit_size.saturating_sub(8 - bit_in_byte);
         let bytes_needed: usize = if bits_remaining_after_first_byte > 0 {
-            (1 + ((bits_remaining_after_first_byte + 7) / 8)) as usize
+            (1 + bits_remaining_after_first_byte.div_ceil(8)) as usize
         } else {
             1
         };
@@ -4341,7 +4332,7 @@ async fn update_constant(
             existing_bytes[0] = (existing_bytes[0] & !mask_first) | val_first;
 
             let mut bits_written = bits_in_first_byte;
-            for i in 1..bytes_needed {
+            for byte in existing_bytes.iter_mut().skip(1) {
                 let remaining_bits = bit_size - bits_written;
                 if remaining_bits == 0 {
                     break;
@@ -4353,7 +4344,7 @@ async fn update_constant(
                     (1u8 << bits_for_this_byte) - 1
                 };
                 let val_for_byte = ((new_bit_val >> bits_written) as u8) & mask;
-                existing_bytes[i] = (existing_bytes[i] & !mask) | val_for_byte;
+                *byte = (*byte & !mask) | val_for_byte;
                 bits_written += bits_for_this_byte;
             }
         }
@@ -4412,7 +4403,7 @@ async fn update_constant(
 
     // Convert display value to raw bytes (for non-bits constants)
     let raw_val = constant.display_to_raw(value);
-    let mut raw_data = vec![0u8; constant.size_bytes() as usize];
+    let mut raw_data = vec![0u8; constant.size_bytes()];
     constant
         .data_type
         .write_to_bytes(&mut raw_data, 0, raw_val, def.endianness);
@@ -4522,7 +4513,8 @@ async fn get_all_constant_values(
                 // Bits constant - read from byte and extract bits
                 let byte_offset = (constant.bit_position.unwrap_or(0) / 8) as u16;
                 let bit_in_byte = constant.bit_position.unwrap_or(0) % 8;
-                let bytes_needed = ((bit_in_byte + constant.bit_size.unwrap_or(0) + 7) / 8) as u16;
+                let bytes_needed =
+                    (bit_in_byte + constant.bit_size.unwrap_or(0)).div_ceil(8) as u16;
                 let params = libretune_core::protocol::commands::ReadMemoryParams {
                     can_id: 0,
                     page: constant.page,
@@ -4594,7 +4586,7 @@ async fn get_all_constant_values(
                             if let Some(raw_val) =
                                 constant
                                     .data_type
-                                    .read_from_bytes(&raw_data, 0, def.endianness)
+                                    .read_from_bytes(raw_data, 0, def.endianness)
                             {
                                 constant.raw_to_display(raw_val)
                             } else {
@@ -4608,7 +4600,7 @@ async fn get_all_constant_values(
                         let byte_offset = (constant.bit_position.unwrap_or(0) / 8) as u16;
                         let bit_in_byte = constant.bit_position.unwrap_or(0) % 8;
                         let bytes_needed =
-                            ((bit_in_byte + constant.bit_size.unwrap_or(0) + 7) / 8) as u16;
+                            (bit_in_byte + constant.bit_size.unwrap_or(0)).div_ceil(8) as u16;
                         if let Some(raw_data) = cache.read_bytes(
                             constant.page,
                             constant.offset + byte_offset,
@@ -4645,7 +4637,7 @@ async fn get_all_constant_values(
                                 if let Some(raw_val) =
                                     constant
                                         .data_type
-                                        .read_from_bytes(&raw_data, 0, def.endianness)
+                                        .read_from_bytes(raw_data, 0, def.endianness)
                                 {
                                     constant.raw_to_display(raw_val)
                                 } else {
@@ -4659,7 +4651,7 @@ async fn get_all_constant_values(
                             let byte_offset = (constant.bit_position.unwrap_or(0) / 8) as u16;
                             let bit_in_byte = constant.bit_position.unwrap_or(0) % 8;
                             let bytes_needed =
-                                ((bit_in_byte + constant.bit_size.unwrap_or(0) + 7) / 8) as u16;
+                                (bit_in_byte + constant.bit_size.unwrap_or(0)).div_ceil(8) as u16;
                             if let Some(raw_data) = cache.read_bytes(
                                 constant.page,
                                 constant.offset + byte_offset,
@@ -4698,7 +4690,7 @@ async fn get_all_constant_values(
                         if let Some(raw_val) =
                             constant
                                 .data_type
-                                .read_from_bytes(&raw_data, 0, def.endianness)
+                                .read_from_bytes(raw_data, 0, def.endianness)
                         {
                             constant.raw_to_display(raw_val)
                         } else {
@@ -4712,7 +4704,7 @@ async fn get_all_constant_values(
                     let byte_offset = (constant.bit_position.unwrap_or(0) / 8) as u16;
                     let bit_in_byte = constant.bit_position.unwrap_or(0) % 8;
                     let bytes_needed =
-                        ((bit_in_byte + constant.bit_size.unwrap_or(0) + 7) / 8) as u16;
+                        (bit_in_byte + constant.bit_size.unwrap_or(0)).div_ceil(8) as u16;
                     if let Some(raw_data) = cache.read_bytes(
                         constant.page,
                         constant.offset + byte_offset,
@@ -5031,7 +5023,7 @@ async fn send_autotune_recommendations(
     }
 
     // Convert back to raw bytes
-    let mut raw_out = vec![0u8; constant.size_bytes() as usize];
+    let mut raw_out = vec![0u8; constant.size_bytes()];
     for (i, val) in values.iter().enumerate() {
         let raw_val = constant.display_to_raw(*val);
         let offset = i * element_size;
@@ -5122,6 +5114,7 @@ async fn lock_autotune_cells(
 /// * `interval_ms` - Send interval in milliseconds (default: 15000)
 ///
 /// Returns: Nothing on success
+#[allow(dead_code)]
 #[tauri::command]
 async fn start_autotune_autosend(
     app: tauri::AppHandle,
@@ -5232,7 +5225,7 @@ async fn start_autotune_autosend(
             }
 
             // Convert back to bytes
-            let mut raw_out = vec![0u8; constant.size_bytes() as usize];
+            let mut raw_out = vec![0u8; constant.size_bytes()];
             for (i, v) in values.iter().enumerate() {
                 let rv = constant.display_to_raw(*v);
                 let offset = i * element_size;
@@ -5261,6 +5254,7 @@ async fn start_autotune_autosend(
 /// Aborts the periodic recommendation sending task.
 ///
 /// Returns: Nothing on success
+#[allow(dead_code)]
 #[tauri::command]
 async fn stop_autotune_autosend(state: tauri::State<'_, AppState>) -> Result<(), String> {
     let mut task_guard = state.autotune_send_task.lock().await;
@@ -5353,7 +5347,7 @@ async fn get_table_data_internal(
 
             if let Some(page_data) = tune_file.pages.get(&constant.page) {
                 let offset = constant.offset as usize;
-                let total_bytes = (element_count * element_size) as usize;
+                let total_bytes = element_count * element_size;
                 if offset + total_bytes <= page_data.len() {
                     let mut values = Vec::with_capacity(element_count);
                     for i in 0..element_count {
@@ -5446,7 +5440,7 @@ async fn update_table_z_values_internal(
 
     // Convert display values to raw bytes
     let element_size = constant.data_type.size_bytes();
-    let mut raw_data = vec![0u8; constant.size_bytes() as usize];
+    let mut raw_data = vec![0u8; constant.size_bytes()];
 
     for (i, val) in flat_values.iter().enumerate() {
         let raw_val = constant.display_to_raw(*val);
@@ -5524,7 +5518,7 @@ async fn update_constant_array_internal(
     }
 
     let element_size = constant.data_type.size_bytes();
-    let mut raw_data = vec![0u8; constant.size_bytes() as usize];
+    let mut raw_data = vec![0u8; constant.size_bytes()];
 
     for (i, val) in values.iter().enumerate() {
         let raw_val = constant.display_to_raw(*val);
@@ -5773,7 +5767,7 @@ async fn set_cells_equal(
 /// Returns: Nothing on success
 #[tauri::command]
 async fn save_dashboard_layout(
-    state: tauri::State<'_, AppState>,
+    _state: tauri::State<'_, AppState>,
     project_name: String,
     layout: DashboardLayout,
 ) -> Result<(), String> {
@@ -5799,7 +5793,7 @@ async fn save_dashboard_layout(
 /// Returns: DashboardLayout configuration
 #[tauri::command]
 async fn load_dashboard_layout(
-    state: tauri::State<'_, AppState>,
+    _state: tauri::State<'_, AppState>,
     project_name: String,
 ) -> Result<DashboardLayout, String> {
     let path = get_dashboard_file_path(&project_name);
@@ -5826,8 +5820,8 @@ async fn load_dashboard_layout(
 /// Returns: Vector of dashboard names (without extension)
 #[tauri::command]
 async fn list_dashboard_layouts(
-    state: tauri::State<'_, AppState>,
-    project_name: String,
+    _state: tauri::State<'_, AppState>,
+    _project_name: String,
 ) -> Result<Vec<String>, String> {
     let projects_dir = libretune_core::project::Project::projects_dir()
         .map_err(|e| format!("Failed to get projects directory: {}", e))?;
@@ -5859,12 +5853,10 @@ async fn list_dashboard_layouts(
 /// Create a LibreTune default dashboard
 #[tauri::command]
 async fn create_default_dashboard(
-    state: tauri::State<'_, AppState>,
+    _state: tauri::State<'_, AppState>,
     project_name: String,
     template: String,
 ) -> Result<DashboardLayout, String> {
-    use libretune_core::dash::{BackgroundStyle, GaugeCluster};
-
     println!(
         "[create_default_dashboard] Creating template: {} for project: {}",
         template, project_name
@@ -5924,9 +5916,11 @@ async fn get_dash_file(path: String) -> Result<DashFile, String> {
         let gauge_file = dash::load_gauge_file(Path::new(&path))
             .map_err(|e| format!("Failed to parse gauge XML: {}", e))?;
 
-        let mut dash_file = DashFile::default();
-        dash_file.bibliography = gauge_file.bibliography;
-        dash_file.version_info = gauge_file.version_info;
+        let mut dash_file = DashFile {
+            bibliography: gauge_file.bibliography,
+            version_info: gauge_file.version_info,
+            ..Default::default()
+        };
         dash_file.gauge_cluster.embedded_images = gauge_file.embedded_images;
         dash_file
             .gauge_cluster
@@ -6623,7 +6617,7 @@ async fn save_tune(
                 let byte_offset = (constant.bit_position.unwrap_or(0) / 8) as u16;
                 let bit_in_byte = constant.bit_position.unwrap_or(0) % 8;
                 let bit_size = constant.bit_size.unwrap_or(0);
-                let bytes_needed = ((bit_in_byte + bit_size + 7) / 8).max(1) as u16;
+                let bytes_needed = (bit_in_byte + bit_size).div_ceil(8).max(1) as u16;
 
                 if let Some(bytes) =
                     cache.read_bytes(constant.page, constant.offset + byte_offset, bytes_needed)
@@ -6730,11 +6724,9 @@ async fn save_tune(
                         name, element_count
                     );
                 }
-            } else {
-                if name == "veTable" || name == "veRpmBins" || name == "veLoadBins" {
-                    eprintln!("[DEBUG] save_tune: ✗ Failed to read '{}' from cache - page_state={:?}, page_size={:?}, page_data_len={}, required_offset={}", 
-                        name, page_state, page_size, page_data_len, constant.offset as usize + length as usize);
-                }
+            } else if name == "veTable" || name == "veRpmBins" || name == "veLoadBins" {
+                eprintln!("[DEBUG] save_tune: ✗ Failed to read '{}' from cache - page_state={:?}, page_size={:?}, page_data_len={}, required_offset={}", 
+                    name, page_state, page_size, page_data_len, constant.offset as usize + length as usize);
             }
         }
 
@@ -7074,7 +7066,7 @@ async fn load_tune(
                             let bits_remaining_after_first_byte =
                                 bit_size.saturating_sub(8 - bit_in_byte);
                             let bytes_needed = if bits_remaining_after_first_byte > 0 {
-                                1 + ((bits_remaining_after_first_byte + 7) / 8)
+                                1 + bits_remaining_after_first_byte.div_ceil(8)
                             } else {
                                 1
                             };
@@ -7718,7 +7710,7 @@ async fn write_project_tune_to_ecu(
     let def_guard = state.definition.lock().await;
 
     let project = project_guard.as_ref().ok_or("No project open")?;
-    let def = def_guard.as_ref().ok_or("Definition not loaded")?;
+    let _def = def_guard.as_ref().ok_or("Definition not loaded")?;
 
     // Load project tune
     let tune_path = project.current_tune_path();
@@ -7998,7 +7990,7 @@ async fn start_tooth_logger(
     let def_guard = state.definition.lock().await;
 
     let conn = conn_guard.as_mut().ok_or("Not connected to ECU")?;
-    let def = def_guard.as_ref().ok_or("Definition not loaded")?;
+    let _def = def_guard.as_ref().ok_or("Definition not loaded")?;
 
     // Detect ECU type from signature
     let signature = conn.signature().unwrap_or_default().to_lowercase();
@@ -8142,7 +8134,7 @@ async fn start_composite_logger(
     let def_guard = state.definition.lock().await;
 
     let conn = conn_guard.as_mut().ok_or("Not connected to ECU")?;
-    let def = def_guard.as_ref().ok_or("Definition not loaded")?;
+    let _def = def_guard.as_ref().ok_or("Definition not loaded")?;
 
     let signature = conn.signature().unwrap_or_default().to_lowercase();
 
@@ -8343,12 +8335,10 @@ async fn compare_tables(
             if diff.abs() > 0.0001 {
                 let percent_diff = if val_a.abs() > 0.0001 {
                     (diff / val_a) * 100.0
+                } else if diff.abs() > 0.0001 {
+                    100.0
                 } else {
-                    if diff.abs() > 0.0001 {
-                        100.0
-                    } else {
-                        0.0
-                    }
+                    0.0
                 };
 
                 differences.push(TableCellDiff {
@@ -9264,7 +9254,7 @@ async fn open_project(
                         let bits_remaining_after_first_byte =
                             bit_size.saturating_sub(8 - bit_in_byte);
                         let bytes_needed = if bits_remaining_after_first_byte > 0 {
-                            1 + ((bits_remaining_after_first_byte + 7) / 8)
+                            1 + bits_remaining_after_first_byte.div_ceil(8)
                         } else {
                             1
                         };
@@ -9724,7 +9714,6 @@ async fn update_project_ini(
                         }
                         TuneValue::Array(arr) => {
                             // Handle size mismatches
-                            let write_count = arr.len().min(element_count);
                             let last_value = arr.last().copied().unwrap_or(0.0);
 
                             for i in 0..element_count {
@@ -10014,7 +10003,7 @@ async fn preview_tunerstudio_import(path: String) -> Result<TsImportPreview, Str
             .map(|entries| {
                 entries
                     .filter_map(|e| e.ok())
-                    .filter(|e| e.path().extension().map_or(false, |ext| ext == "msq"))
+                    .filter(|e| e.path().extension().is_some_and(|ext| ext == "msq"))
                     .count()
             })
             .unwrap_or(0)
@@ -10914,6 +10903,7 @@ async fn apply_demo_enable(
     Ok(())
 }
 
+#[allow(dead_code)]
 async fn apply_demo_disable(state: &AppState) -> Result<(), String> {
     {
         let mut demo_guard = state.demo_mode.lock().await;
