@@ -432,16 +432,16 @@ struct ConstantInfo {
 #[derive(Serialize, Deserialize, Default)]
 struct Settings {
     last_ini_path: Option<String>,
-    units_system: String,           // "metric" or "imperial"
-    auto_burn_on_close: bool,       // Auto-burn toggle
-    gauge_snap_to_grid: bool,       // Dashboard gauge snap to grid
-    gauge_free_move: bool,          // Dashboard gauge free move
-    gauge_lock: bool,               // Dashboard gauge lock in place
+    units_system: String,     // "metric" or "imperial"
+    auto_burn_on_close: bool, // Auto-burn toggle
+    gauge_snap_to_grid: bool, // Dashboard gauge snap to grid
+    gauge_free_move: bool,    // Dashboard gauge free move
+    gauge_lock: bool,         // Dashboard gauge lock in place
     #[serde(default = "default_true")]
-    auto_sync_gauge_ranges: bool,   // Auto-sync gauge ranges from INI
+    auto_sync_gauge_ranges: bool, // Auto-sync gauge ranges from INI
     indicator_column_count: String, // "auto" or number like "12"
-    indicator_fill_empty: bool,     // Fill empty cells in last row
-    indicator_text_fit: String,     // "scale" or "wrap"
+    indicator_fill_empty: bool, // Fill empty cells in last row
+    indicator_text_fit: String, // "scale" or "wrap"
 
     // Status bar channel configuration
     #[serde(default)]
@@ -1797,12 +1797,12 @@ async fn get_connection_status(
 async fn get_ecu_type(state: tauri::State<'_, AppState>) -> Result<String, String> {
     let def_guard = state.definition.lock().await;
     let def = def_guard.as_ref().ok_or("No INI definition loaded")?;
-    
+
     Ok(format!("{:?}", def.ecu_type))
 }
 
 /// Send a console command to the ECU (rusEFI/FOME/epicEFI only)
-/// 
+///
 /// For FOME ECUs with fome_fast_comms_enabled setting:
 /// - Attempts a faster protocol path first (if available)
 /// - Falls back to standard console protocol on error
@@ -1818,10 +1818,10 @@ async fn send_console_command(
 ) -> Result<String, String> {
     let mut conn_guard = state.connection.lock().await;
     let conn = conn_guard.as_mut().ok_or("Not connected to ECU")?;
-    
+
     let def_guard = state.definition.lock().await;
     let def = def_guard.as_ref().ok_or("No INI definition loaded")?;
-    
+
     // Check if ECU supports console
     if !def.ecu_type.supports_console() {
         return Err(format!(
@@ -1829,11 +1829,11 @@ async fn send_console_command(
             def.ecu_type
         ));
     }
-    
+
     // For FOME, try fast comms first if enabled
     let settings = load_settings(&app);
     let use_fome_fast = def.ecu_type.is_fome() && settings.fome_fast_comms_enabled;
-    
+
     let response = if use_fome_fast {
         // Try faster FOME protocol first
         eprintln!("[DEBUG] send_console_command: attempting FOME fast comms");
@@ -1854,7 +1854,7 @@ async fn send_console_command(
         conn.send_console_command(&libretune_core::protocol::ConsoleCommand::new(&command))
             .map_err(|e| format!("Console command failed: {}", e))?
     };
-    
+
     // Add to history
     let mut history = state.console_history.lock().await;
     history.push(format!("{}: {}", command, &response));
@@ -1862,7 +1862,7 @@ async fn send_console_command(
     if history.len() > 1000 {
         history.remove(0);
     }
-    
+
     Ok(response)
 }
 
@@ -6218,14 +6218,11 @@ async fn list_available_dashes(app: tauri::AppHandle) -> Result<Vec<DashFileInfo
     let has_native_dash = std::fs::read_dir(&dash_dir)
         .ok()
         .and_then(|entries| {
-            entries
-                .flatten()
-                .map(|entry| entry.path())
-                .find(|path| {
-                    path.file_name()
-                        .map(|n| n.to_string_lossy().to_lowercase().ends_with(".ltdash.xml"))
-                        .unwrap_or(false)
-                })
+            entries.flatten().map(|entry| entry.path()).find(|path| {
+                path.file_name()
+                    .map(|n| n.to_string_lossy().to_lowercase().ends_with(".ltdash.xml"))
+                    .unwrap_or(false)
+            })
         })
         .is_some();
 
@@ -6264,22 +6261,25 @@ struct DashConflictInfo {
 #[tauri::command]
 async fn reset_dashboards_to_defaults(app: tauri::AppHandle) -> Result<(), String> {
     let dash_dir = get_dashboards_dir(&app);
-    
-    println!("[reset_dashboards_to_defaults] Clearing dashboards directory: {:?}", dash_dir);
-    
+
+    println!(
+        "[reset_dashboards_to_defaults] Clearing dashboards directory: {:?}",
+        dash_dir
+    );
+
     // Remove the entire dashboards directory
     if dash_dir.exists() {
         std::fs::remove_dir_all(&dash_dir)
             .map_err(|e| format!("Failed to remove dashboards directory: {}", e))?;
     }
-    
+
     // Recreate it
     std::fs::create_dir_all(&dash_dir)
         .map_err(|e| format!("Failed to create dashboards directory: {}", e))?;
-    
+
     // Create the 3 defaults
     create_default_dashboard_files(&dash_dir)?;
-    
+
     println!("[reset_dashboards_to_defaults] Reset complete - 3 default dashboards created");
     Ok(())
 }

@@ -10,17 +10,72 @@ use super::{
 use chrono;
 
 // LibreTune brand colors - consistent dark theme with vibrant accents
-const LT_DARKER_BG: TsColor = TsColor { alpha: 255, red: 12, green: 14, blue: 20 };
-const LT_GAUGE_BG: TsColor = TsColor { alpha: 255, red: 28, green: 32, blue: 40 };
-const LT_ACCENT_BLUE: TsColor = TsColor { alpha: 255, red: 74, green: 158, blue: 248 };
-const LT_ACCENT_TEAL: TsColor = TsColor { alpha: 255, red: 56, green: 189, blue: 248 };
-const LT_ACCENT_AMBER: TsColor = TsColor { alpha: 255, red: 251, green: 191, blue: 36 };
-const LT_ACCENT_GREEN: TsColor = TsColor { alpha: 255, red: 34, green: 197, blue: 94 };
-const LT_ACCENT_RED: TsColor = TsColor { alpha: 255, red: 239, green: 68, blue: 68 };
-const LT_TEXT_PRIMARY: TsColor = TsColor { alpha: 255, red: 255, green: 255, blue: 255 };
-const LT_TEXT_SECONDARY: TsColor = TsColor { alpha: 255, red: 148, green: 163, blue: 184 };
-const LT_WARN_COLOR: TsColor = TsColor { alpha: 255, red: 234, green: 179, blue: 8 };
-const LT_CRITICAL_COLOR: TsColor = TsColor { alpha: 255, red: 239, green: 68, blue: 68 };
+const LT_DARKER_BG: TsColor = TsColor {
+    alpha: 255,
+    red: 12,
+    green: 14,
+    blue: 20,
+};
+const LT_GAUGE_BG: TsColor = TsColor {
+    alpha: 255,
+    red: 28,
+    green: 32,
+    blue: 40,
+};
+const LT_ACCENT_BLUE: TsColor = TsColor {
+    alpha: 255,
+    red: 74,
+    green: 158,
+    blue: 248,
+};
+const LT_ACCENT_TEAL: TsColor = TsColor {
+    alpha: 255,
+    red: 56,
+    green: 189,
+    blue: 248,
+};
+const LT_ACCENT_AMBER: TsColor = TsColor {
+    alpha: 255,
+    red: 251,
+    green: 191,
+    blue: 36,
+};
+const LT_ACCENT_GREEN: TsColor = TsColor {
+    alpha: 255,
+    red: 34,
+    green: 197,
+    blue: 94,
+};
+const LT_ACCENT_RED: TsColor = TsColor {
+    alpha: 255,
+    red: 239,
+    green: 68,
+    blue: 68,
+};
+const LT_TEXT_PRIMARY: TsColor = TsColor {
+    alpha: 255,
+    red: 255,
+    green: 255,
+    blue: 255,
+};
+const LT_TEXT_SECONDARY: TsColor = TsColor {
+    alpha: 255,
+    red: 148,
+    green: 163,
+    blue: 184,
+};
+const LT_WARN_COLOR: TsColor = TsColor {
+    alpha: 255,
+    red: 234,
+    green: 179,
+    blue: 8,
+};
+const LT_CRITICAL_COLOR: TsColor = TsColor {
+    alpha: 255,
+    red: 239,
+    green: 68,
+    blue: 68,
+};
 
 /// Create a basic dashboard layout - LibreTune default
 /// Clean 4x2 grid: Large RPM + AFR in center, supporting gauges around edges
@@ -362,7 +417,7 @@ pub fn create_racing_dashboard() -> DashFile {
         .components
         .push(DashComponent::Gauge(Box::new(GaugeConfig {
             id: "rpm".to_string(),
-            title: "".to_string(),  // No title - let the gauge speak for itself
+            title: "".to_string(), // No title - let the gauge speak for itself
             units: "RPM".to_string(),
             output_channel: "rpm".to_string(),
             min: 0.0,

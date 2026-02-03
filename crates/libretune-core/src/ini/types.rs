@@ -37,13 +37,19 @@ impl EcuType {
         let filename_lower = filename.map(|f| f.to_lowercase());
 
         // Check for FOME first (it also contains "rusefi")
-        if sig_lower.contains("fome") || filename_lower.as_ref().map_or(false, |f| f.contains("fome")) {
+        if sig_lower.contains("fome")
+            || filename_lower
+                .as_ref()
+                .map_or(false, |f| f.contains("fome"))
+        {
             return EcuType::FOME;
         }
 
         // Check for epicEFI (contains "epicECU" or filename suggests it)
         if sig_lower.contains("epicECU")
-            || filename_lower.as_ref().map_or(false, |f| f.contains("epicECU"))
+            || filename_lower
+                .as_ref()
+                .map_or(false, |f| f.contains("epicECU"))
         {
             return EcuType::EpicEFI;
         }

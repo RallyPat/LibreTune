@@ -1327,7 +1327,10 @@ impl Connection {
     /// Send a text console command to the ECU (rusEFI/FOME/epicEFI only)
     /// Sends command followed by newline and reads back response until inter-char timeout
     /// Returns the response as a String (with trailing whitespace trimmed)
-    pub fn send_console_command(&mut self, cmd: &super::commands::ConsoleCommand) -> Result<String, ProtocolError> {
+    pub fn send_console_command(
+        &mut self,
+        cmd: &super::commands::ConsoleCommand,
+    ) -> Result<String, ProtocolError> {
         // Get timing parameters before borrowing port
         let baud_rate = self.config.baud_rate;
         let min_wait = Some(self.get_effective_min_wait());
