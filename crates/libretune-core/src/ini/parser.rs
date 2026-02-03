@@ -501,9 +501,9 @@ fn extract_help_text(name_with_help: &str) -> (&str, Option<String>) {
         let help_part = name_with_help[semicolon_pos + 1..].trim();
 
         // TunerStudio requires '+' after semicolon for tooltip to appear
-        if help_part.starts_with('+') {
+        if let Some(help_text) = help_part.strip_prefix('+') {
             // Extract help text (everything after '+' up to optional quoted units)
-            let help_text = help_part[1..].trim();
+            let help_text = help_text.trim();
 
             // Remove quoted units suffix if present (e.g., ;"Ohm" at the end)
             let help_clean = if let Some(quote_pos) = help_text.find(';') {
@@ -593,8 +593,7 @@ fn parse_define_directive(def: &mut EcuDefinition, line: &str) {
             .flat_map(|v| {
                 let v = v.trim().trim_matches('"').to_string();
                 // Resolve $references to other defines
-                if v.starts_with('$') {
-                    let ref_name = &v[1..];
+                if let Some(ref_name) = v.strip_prefix('$') {
                     def.defines
                         .get(ref_name)
                         .cloned()
@@ -622,8 +621,7 @@ fn resolve_bits_options(
         .into_iter()
         .flat_map(|v| {
             let v = v.trim().trim_matches('"').to_string();
-            if v.starts_with('$') {
-                let ref_name = &v[1..];
+            if let Some(ref_name) = v.strip_prefix('$') {
                 defines.get(ref_name).cloned().unwrap_or_else(|| vec![v])
             } else if !v.is_empty() {
                 vec![v]
@@ -963,12 +961,8 @@ fn parse_output_channel_entry(def: &mut EcuDefinition, key: &str, value: &str) {
 
 /// Parse [BurstMode] section entries
 fn parse_burst_mode_entry(def: &mut EcuDefinition, key: &str, value: &str) {
-    let key_lower = key.to_lowercase();
-    match key_lower.as_str() {
-        "getcommand" => {
-            def.protocol.burst_get_command = Some(value.trim_matches('"').to_string());
-        }
-        _ => {}
+    if key.eq_ignore_ascii_case("getcommand") {
+        def.protocol.burst_get_command = Some(value.trim_matches('"').to_string());
     }
 }
 
@@ -1283,16 +1277,18 @@ fn parse_table_editor_entry(
         // Where mapName is what menus reference (e.g., veTable1Map)
         let parts: Vec<&str> = value.split(',').map(|s| s.trim()).collect();
         if parts.len() >= 3 {
-            let mut table = TableDefinition::default();
-            table.name = parts[0].to_string();
             // Store map_name (parts[1]) - this is what menus reference
             let map_name = parts[1].to_string();
-            table.map_name = Some(map_name.clone());
-            table.title = parts
-                .get(2)
-                .map(|s| s.trim_matches('"').to_string())
-                .unwrap_or_default();
-            table.page = parts.get(3).and_then(|s| s.parse().ok()).unwrap_or(0);
+            let table = TableDefinition {
+                name: parts[0].to_string(),
+                map_name: Some(map_name.clone()),
+                title: parts
+                    .get(2)
+                    .map(|s| s.trim_matches('"').to_string())
+                    .unwrap_or_default(),
+                page: parts.get(3).and_then(|s| s.parse().ok()).unwrap_or(0),
+                ..Default::default()
+            };
 
             // Build reverse lookup: map_name -> table name
             def.table_map_to_name.insert(map_name, table.name.clone());
