@@ -8,6 +8,7 @@
 //! - Escaped special characters
 
 use std::collections::HashMap;
+use std::fmt;
 use std::fs;
 use std::io;
 use std::path::Path;
@@ -199,27 +200,21 @@ impl Properties {
     }
 }
 
-impl ToString for Properties {
-    fn to_string(&self) -> String {
-        let mut output = String::new();
-
+impl fmt::Display for Properties {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // Write header comments
         for comment in &self.header_comments {
-            output.push_str(comment);
-            output.push('\n');
+            writeln!(f, "{}", comment)?;
         }
 
         // Write entries
         for (key, value) in &self.entries {
             let escaped_key = escape_key(key);
             let escaped_value = escape_value(value);
-            output.push_str(&escaped_key);
-            output.push('=');
-            output.push_str(&escaped_value);
-            output.push('\n');
+            writeln!(f, "{}={}", escaped_key, escaped_value)?;
         }
 
-        output
+        Ok(())
     }
 }
 

@@ -22,6 +22,7 @@
 //! This matches TS project layout for familiarity.
 
 mod online_repository;
+#[allow(clippy::module_inception)]
 mod project;
 mod properties;
 mod repository;

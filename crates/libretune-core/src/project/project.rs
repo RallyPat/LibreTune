@@ -335,7 +335,7 @@ impl Project {
             for entry in fs::read_dir(&ts_restore_dir)? {
                 let entry = entry?;
                 let path = entry.path();
-                if path.extension().map_or(false, |e| e == "msq") {
+                if path.extension().is_some_and(|e| e == "msq") {
                     let dest = dest_restore_dir.join(path.file_name().unwrap());
                     fs::copy(&path, &dest)?;
                 }
@@ -463,7 +463,7 @@ impl Project {
             let entry = entry?;
             let path = entry.path();
 
-            if path.extension().map_or(false, |e| e == "msq") {
+            if path.extension().is_some_and(|e| e == "msq") {
                 let filename = path.file_name().unwrap().to_string_lossy().to_string();
                 let metadata = entry.metadata()?;
 

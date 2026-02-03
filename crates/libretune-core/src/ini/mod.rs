@@ -171,6 +171,7 @@ impl EcuDefinition {
     /// Note: This method does not support `#include` directives since there
     /// is no file path context for resolving relative includes. Use `from_file`
     /// if you need `#include` support.
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(content: &str) -> Result<Self, IniError> {
         parser::parse_ini(content)
     }

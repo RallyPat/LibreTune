@@ -22,6 +22,7 @@ pub struct PluginInstance {
 
 /// Pending requests shared between main thread and reader thread
 type PendingRequests = Arc<Mutex<HashMap<u64, tokio::sync::oneshot::Sender<RpcResponse>>>>;
+type UiUpdateCallback = Box<dyn Fn(String, UiDiff) + Send + Sync>;
 
 /// Manages TS-compatible plugin loading and execution
 pub struct PluginManager {
@@ -41,7 +42,7 @@ pub struct PluginManager {
     #[allow(dead_code)]
     bridge: Arc<ControllerBridge>,
     /// Callback for UI updates
-    ui_update_callback: RwLock<Option<Box<dyn Fn(String, UiDiff) + Send + Sync>>>,
+    ui_update_callback: RwLock<Option<UiUpdateCallback>>,
 }
 
 impl PluginManager {
