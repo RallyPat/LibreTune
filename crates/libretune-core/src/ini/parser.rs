@@ -1355,12 +1355,14 @@ fn parse_curve_editor_entry(
         // Format: curve = curveName, "Title"
         let parts: Vec<&str> = value.split(',').map(|s| s.trim()).collect();
         if !parts.is_empty() {
-            let mut curve = CurveDefinition::default();
-            curve.name = parts[0].to_string();
-            curve.title = parts
-                .get(1)
-                .map(|s| s.trim_matches('"').to_string())
-                .unwrap_or_default();
+            let curve = CurveDefinition {
+                name: parts[0].to_string(),
+                title: parts
+                    .get(1)
+                    .map(|s| s.trim_matches('"').to_string())
+                    .unwrap_or_default(),
+                ..Default::default()
+            };
 
             *current_curve = Some(curve.name.clone());
             def.curves.insert(curve.name.clone(), curve);

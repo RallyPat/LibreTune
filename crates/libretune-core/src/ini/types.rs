@@ -37,10 +37,7 @@ impl EcuType {
         let filename_lower = filename.map(|f| f.to_lowercase());
 
         // Check for FOME first (it also contains "rusefi")
-        if sig_lower.contains("fome")
-            || filename_lower
-                .as_ref()
-                .map_or(false, |f| f.contains("fome"))
+        if sig_lower.contains("fome") || filename_lower.as_ref().is_some_and(|f| f.contains("fome"))
         {
             return EcuType::FOME;
         }
@@ -49,7 +46,7 @@ impl EcuType {
         if sig_lower.contains("epicECU")
             || filename_lower
                 .as_ref()
-                .map_or(false, |f| f.contains("epicECU"))
+                .is_some_and(|f| f.contains("epicECU"))
         {
             return EcuType::EpicEFI;
         }
@@ -160,7 +157,7 @@ impl DataType {
         let s = s.trim().to_uppercase();
         let override_endian = if s.starts_with('B')
             && s.len() > 1
-            && s.chars().nth(1).map_or(false, |c| c.is_ascii_uppercase())
+            && s.chars().nth(1).is_some_and(|c| c.is_ascii_uppercase())
         {
             // Types like BU08, BS16, BF32 force big-endian
             Some(Endianness::Big)
@@ -1110,6 +1107,7 @@ pub enum FilterOperator {
 
 impl FilterOperator {
     /// Parse a filter operator from INI string
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Option<Self> {
         match s.trim() {
             "<" => Some(FilterOperator::LessThan),
