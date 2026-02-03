@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { save, open } from '@tauri-apps/plugin-dialog';
 import { useRealtimeStore } from '../../stores/realtimeStore';
+import LoggerStatsPanel from './LoggerStatsPanel';
 import './DataLogView.css';
 
 interface LoggingStatus {
@@ -200,6 +201,8 @@ export const DataLogView: React.FC = () => {
   const [playbackPosition, setPlaybackPosition] = useState(0); // 0-1
   const [playbackSpeed, setPlaybackSpeed] = useState<PlaybackSpeed>(1);
   const [loadedFileName, setLoadedFileName] = useState<string | null>(null);
+  const [showStats, setShowStats] = useState(false);
+  const [selectedStatsChannel, setSelectedStatsChannel] = useState<string | null>(null);
   const playbackIntervalRef = useRef<number | null>(null);
   
   // Update chart size based on container
@@ -702,6 +705,24 @@ export const DataLogView: React.FC = () => {
             onSeek={viewMode === 'playback' ? handleSeek : undefined}
           />
         </div>
+
+        {showStats && (
+          <LoggerStatsPanel
+            data={logData}
+            selectedChannels={selectedStatsChannel ? [selectedStatsChannel] : selectedChannels}
+            onChannelSelect={setSelectedStatsChannel}
+          />
+        )}
+      </div>
+
+      <div className="stats-toggle">
+        <button 
+          className={`stat-button ${showStats ? 'active' : ''}`}
+          onClick={() => setShowStats(!showStats)}
+          title="Toggle statistics panel"
+        >
+          📊 {showStats ? 'Hide' : 'Show'} Stats
+        </button>
       </div>
     </div>
   );

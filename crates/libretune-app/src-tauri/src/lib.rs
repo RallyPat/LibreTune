@@ -473,6 +473,14 @@ struct Settings {
     /// When enabled for FOME ECUs, attempts a faster protocol path; falls back on error
     #[serde(default = "default_true")]
     fome_fast_comms_enabled: bool,
+
+    // Auto-record settings
+    #[serde(default = "default_false")]
+    auto_record_enabled: bool, // Enable auto-start/stop recording on key-on/off
+    #[serde(default = "default_key_on_rpm")]
+    key_on_threshold_rpm: f64, // RPM threshold to detect key-on (default 100)
+    #[serde(default = "default_key_off_timeout")]
+    key_off_timeout_sec: u32, // Seconds of zero RPM to detect key-off (default 2)
 }
 
 fn default_runtime_packet_mode() -> String {
@@ -487,8 +495,16 @@ fn default_true() -> bool {
     true
 }
 
-fn default_auto_commit() -> String {
-    "ask".to_string()
+fn default_false() -> bool {
+    false
+}
+
+fn default_key_on_rpm() -> f64 {
+    100.0
+}
+
+fn default_key_off_timeout() -> u32 {
+    2
 }
 
 fn default_commit_message_format() -> String {
