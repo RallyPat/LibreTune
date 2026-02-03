@@ -490,11 +490,7 @@ impl TuneFile {
                                     let mut bytes = Vec::with_capacity(hex_content.len() / 2);
                                     let mut chars =
                                         hex_content.chars().filter(|c| !c.is_whitespace());
-                                    loop {
-                                        let high = match chars.next() {
-                                            Some(c) => c,
-                                            None => break,
-                                        };
+                                    while let Some(high) = chars.next() {
                                         let low = match chars.next() {
                                             Some(c) => c,
                                             None => break,

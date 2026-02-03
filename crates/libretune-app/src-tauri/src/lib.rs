@@ -36,11 +36,11 @@ use std::collections::HashMap;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use tauri::Emitter;
 use tauri::Manager;
 use tauri_plugin_window_state::{AppHandleExt, StateFlags};
 use tokio::sync::Mutex;
-use std::sync::Arc;
 
 #[derive(Serialize)]
 struct BuildInfo {
@@ -2893,7 +2893,10 @@ async fn get_realtime_data(
         let channels_cache_guard = state.cached_output_channels.lock().await;
         if let Some(ref cached_channels) = *channels_cache_guard {
             let def_guard = state.definition.lock().await;
-            let endianness = def_guard.as_ref().map(|d| d.endianness).unwrap_or(libretune_core::ini::Endianness::Little);
+            let endianness = def_guard
+                .as_ref()
+                .map(|d| d.endianness)
+                .unwrap_or(libretune_core::ini::Endianness::Little);
             (Arc::clone(cached_channels), endianness)
         } else {
             // Fallback: clone from definition if cache not available
@@ -3159,14 +3162,20 @@ async fn start_realtime_stream(
                 } // conn_guard dropped here - mutex released immediately after I/O
 
                 // Phase 2: Get cached output channels and endianness (using Arc to avoid clone)
-                let def_data: Option<(Arc<HashMap<String, libretune_core::ini::OutputChannel>>, libretune_core::ini::Endianness)>;
+                let def_data: Option<(
+                    Arc<HashMap<String, libretune_core::ini::OutputChannel>>,
+                    libretune_core::ini::Endianness,
+                )>;
                 {
                     // Try cached channels first
                     let channels_cache_guard = app_state.cached_output_channels.lock().await;
                     if let Some(ref cached_channels) = *channels_cache_guard {
                         // Get endianness from definition
                         let def_guard = app_state.definition.lock().await;
-                        let endianness = def_guard.as_ref().map(|d| d.endianness).unwrap_or(libretune_core::ini::Endianness::Little);
+                        let endianness = def_guard
+                            .as_ref()
+                            .map(|d| d.endianness)
+                            .unwrap_or(libretune_core::ini::Endianness::Little);
                         def_data = Some((Arc::clone(cached_channels), endianness));
                     } else {
                         // Fallback: clone from definition if cache not available

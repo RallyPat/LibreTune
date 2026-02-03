@@ -227,11 +227,11 @@ impl ToString for Properties {
 fn parse_key_value(line: &str) -> (String, String) {
     // Find the first unescaped = or :
     let mut key_end = None;
-    let mut chars = line.chars().peekable();
+    let chars = line.chars();
     let mut i = 0;
     let mut prev_backslash = false;
 
-    while let Some(c) = chars.next() {
+    for c in chars {
         if !prev_backslash && (c == '=' || c == ':') {
             key_end = Some(i);
             break;
@@ -242,7 +242,7 @@ fn parse_key_value(line: &str) -> (String, String) {
 
     match key_end {
         Some(pos) => {
-            let key = unescape_key(&line[..pos].trim_end());
+            let key = unescape_key(line[..pos].trim_end());
             let value_start = pos + 1;
             let value = if value_start < line.len() {
                 line[value_start..].trim_start().to_string()

@@ -62,10 +62,10 @@ impl Command {
 
     /// Check if this command expects a response
     pub fn expects_response(&self) -> bool {
-        match self {
-            Command::WriteMemory | Command::BurnToFlash | Command::SelectPage => false,
-            _ => true,
-        }
+        !matches!(
+            self,
+            Command::WriteMemory | Command::BurnToFlash | Command::SelectPage
+        )
     }
 
     /// Get the expected response timeout in milliseconds

@@ -161,6 +161,7 @@ pub enum RuntimePacketMode {
 
 /// Choice of runtime fetch command
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(clippy::upper_case_acronyms)]
 pub enum RuntimeFetch {
     Burst(String),
     OCH(String),
@@ -582,7 +583,7 @@ impl Connection {
                     }
                 }
 
-                return Err(e);
+                Err(e)
             }
         }
     }
@@ -998,11 +999,13 @@ impl Connection {
         // Auto heuristics
         // 1) INI hint: maxUnusedRuntimeRange > 0 => prefer OCH if available
         if let Some(p) = &self.protocol_settings {
-            if p.max_unused_runtime_range > 0 && och_cmd_opt.is_some() {
-                return (
-                    RuntimeFetch::OCH(och_cmd_opt.unwrap()),
-                    "ini hint: maxUnusedRuntimeRange".to_string(),
-                );
+            if p.max_unused_runtime_range > 0 {
+                if let Some(och) = och_cmd_opt.clone() {
+                    return (
+                        RuntimeFetch::OCH(och),
+                        "ini hint: maxUnusedRuntimeRange".to_string(),
+                    );
+                }
             }
         }
 

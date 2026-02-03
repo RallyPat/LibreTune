@@ -1944,7 +1944,8 @@ fn parse_user_defined_entry(
                     let parts = split_ini_line(value);
                     let panel_name = parts.first().unwrap_or(&String::new()).trim().to_string();
                     // Position is the second part (e.g., "West", "East", "Center")
-                    let position = parts.get(1)
+                    let position = parts
+                        .get(1)
                         .filter(|p| !p.trim().starts_with('{'))
                         .map(|p| p.trim().to_string());
                     // Check for visibility condition in curly braces (last part)
