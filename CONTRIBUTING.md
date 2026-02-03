@@ -50,6 +50,25 @@ libretune/
 
 ## Development Commands
 
+### Pre-Push Testing (Recommended)
+
+**Always run local CI checks before pushing to GitHub** to catch errors early:
+
+```bash
+# Run all CI checks locally (mirrors GitHub Actions)
+./scripts/pre-push.sh
+
+# Install as automatic Git pre-push hook (runs before every push)
+./scripts/pre-push.sh --install-hook
+```
+
+The pre-push script runs:
+- ✅ Rust build, tests, and clippy
+- ✅ Frontend TypeScript check, build, and tests
+- ✅ Code formatting verification
+
+**This prevents CI failures** by catching issues before they reach GitHub Actions.
+
 ### Backend (Rust)
 
 ```bash
@@ -146,9 +165,11 @@ Use clear, descriptive commit messages:
 
 ### PR Checklist
 
+- [ ] **Pre-push checks pass** (`./scripts/pre-push.sh`)
 - [ ] Code compiles without errors (`cargo build`, `npm run build`)
-- [ ] Tests pass (`cargo test`)
-- [ ] No new clippy warnings
+- [ ] Tests pass (`cargo test`, `npm run test:run`)
+- [ ] No new clippy warnings (`cargo clippy --workspace`)
+- [ ] Code is properly formatted (`cargo fmt --all -- --check`)
 - [ ] UI changes tested in the app
 - [ ] Documentation updated if needed
 

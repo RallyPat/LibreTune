@@ -7702,7 +7702,7 @@ async fn compare_project_and_ecu_tunes(state: tauri::State<'_, AppState>) -> Res
 /// Loads the tune from the project's CurrentTune.msq and writes all pages to ECU
 #[tauri::command]
 async fn write_project_tune_to_ecu(
-    app: tauri::AppHandle,
+    _app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
     let project_guard = state.current_project.lock().await;
@@ -11477,7 +11477,7 @@ async fn update_heatmap_custom_stops(
 #[tauri::command]
 async fn update_constant_string(
     state: tauri::State<'_, AppState>,
-    app: tauri::AppHandle,
+    _app: tauri::AppHandle,
     name: String,
     value: String,
 ) -> Result<(), String> {
