@@ -10952,6 +10952,7 @@ mod demo_mode_tests {
             plugin_manager: Mutex::new(None),
             controller_bridge: Mutex::new(None),
             migration_report: Mutex::new(None),
+            cached_output_channels: Mutex::new(None),
             connection_factory: Mutex::new(None),
         };
 
@@ -11018,6 +11019,7 @@ mod concurrency_tests {
             plugin_manager: Mutex::new(None),
             controller_bridge: Mutex::new(None),
             migration_report: Mutex::new(None),
+            cached_output_channels: Mutex::new(None),
             connection_factory: Mutex::new(None),
         });
 
@@ -11159,6 +11161,7 @@ signature = "Speeduino 2023-04"
             plugin_manager: Mutex::new(None),
             controller_bridge: Mutex::new(None),
             migration_report: Mutex::new(None),
+            cached_output_channels: Mutex::new(None),
             connection_factory: Mutex::new(None),
         };
 
@@ -11220,6 +11223,7 @@ signature = "Speeduino 2023-04"
             plugin_manager: Mutex::new(None),
             controller_bridge: Mutex::new(None),
             migration_report: Mutex::new(None),
+            cached_output_channels: Mutex::new(None),
             connection_factory: Mutex::new(None),
         };
 
@@ -11284,6 +11288,7 @@ signature = "Speeduino 2023-04"
             plugin_manager: Mutex::new(None),
             controller_bridge: Mutex::new(None),
             migration_report: Mutex::new(None),
+            cached_output_channels: Mutex::new(None),
             connection_factory: Mutex::new(None),
         };
 
@@ -11360,6 +11365,7 @@ signature = "Speeduino 2023-04"
             plugin_manager: Mutex::new(None),
             controller_bridge: Mutex::new(None),
             migration_report: Mutex::new(None),
+            cached_output_channels: Mutex::new(None),
             connection_factory: Mutex::new(None),
         };
 
