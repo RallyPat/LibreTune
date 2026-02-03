@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import { save, open } from '@tauri-apps/plugin-dialog';
 import { useRealtimeStore } from '../../stores/realtimeStore';
 import LoggerStatsPanel from './LoggerStatsPanel';
@@ -195,6 +196,10 @@ export const DataLogView: React.FC = () => {
   const [chartSize, setChartSize] = useState({ width: 800, height: 400 });
   const chartContainerRef = useRef<HTMLDivElement>(null);
   
+  // Auto-record state
+  const [autoRecordEnabled, setAutoRecordEnabled] = useState(false);
+  const [keyState, setKeyState] = useState<'on' | 'off'>('off');
+  
   // Playback state
   const [viewMode, setViewMode] = useState<ViewMode>('live');
   const [isPlaying, setIsPlaying] = useState(false);
@@ -264,6 +269,38 @@ export const DataLogView: React.FC = () => {
       }
     }
   }, [realtimeData, availableChannels]);
+
+  // Listen for key-state changes and auto-record if enabled
+  useEffect(() => {
+    if (!autoRecordEnabled) return;
+
+    const unlisten = listen<string>('realtime:key_state_changed', (event) => {
+      const newState = event.payload as 'on' | 'off';
+      setKeyState(newState);
+
+      // Auto-start recording on key-on
+      if (newState === 'on' && !isRecording && viewMode === 'live') {
+        invoke('start_logging', { sampleRate })
+          .then(() => {
+            setIsRecording(true);
+            setLogData([]);
+          })
+          .catch((err) => console.error('Failed to auto-start logging:', err));
+      }
+      // Auto-stop recording on key-off
+      else if (newState === 'off' && isRecording && viewMode === 'live') {
+        invoke('stop_logging')
+          .then(() => {
+            setIsRecording(false);
+          })
+          .catch((err) => console.error('Failed to auto-stop logging:', err));
+      }
+    });
+
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, [autoRecordEnabled, isRecording, viewMode, sampleRate]);
   
   const handleStartLogging = useCallback(async () => {
     try {
@@ -556,6 +593,19 @@ export const DataLogView: React.FC = () => {
                   <option value={100}>100 Hz</option>
                 </select>
               </div>
+
+              <label className="auto-record-toggle">
+                <input
+                  type="checkbox"
+                  checked={autoRecordEnabled}
+                  onChange={(e) => setAutoRecordEnabled(e.target.checked)}
+                  disabled={isRecording}
+                  title="Auto-start/stop recording on key-on/off"
+                />
+                <span className={`toggle-label ${autoRecordEnabled ? 'active' : ''} ${keyState}`}>
+                  🔑 Auto {autoRecordEnabled && `[${keyState}]`}
+                </span>
+              </label>
               
               <button 
                 className={`log-button ${isRecording ? 'stop' : 'start'}`}

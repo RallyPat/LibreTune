@@ -93,6 +93,58 @@
   cursor: not-allowed;
 }
 
+/* Auto-record toggle */
+.auto-record-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: 6px;
+  background: rgba(0, 50, 80, 0.5);
+  border: 1px solid rgba(0, 150, 200, 0.3);
+  cursor: pointer;
+  transition: all 200ms ease;
+  user-select: none;
+}
+
+.auto-record-toggle:hover {
+  background: rgba(0, 80, 120, 0.6);
+  border-color: rgba(0, 150, 200, 0.6);
+}
+
+.auto-record-toggle input {
+  margin: 0;
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+  accent-color: #00ff88;
+}
+
+.auto-record-toggle input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.toggle-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: #888;
+  transition: all 200ms ease;
+}
+
+.toggle-label.active {
+  color: #00ff88;
+  text-shadow: 0 0 8px rgba(0, 255, 136, 0.3);
+}
+
+.toggle-label.on {
+  color: #00ff88;
+}
+
+.toggle-label.off {
+  color: #666;
+}
+
 .log-button {
   padding: 8px 16px;
   border: none;
