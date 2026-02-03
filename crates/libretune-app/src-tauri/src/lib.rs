@@ -276,6 +276,58 @@ type ConnectionFactory = dyn Fn(ConnectionConfig, Option<ProtocolSettings>, Endi
     + Send
     + Sync;
 
+/// Tracks RPM state for key-on/off detection
+struct RpmStateTracker {
+    last_rpm: f64,
+    last_state_change_time: std::time::Instant,
+    current_state: RpmState, // "on" or "off"
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum RpmState {
+    On,
+    Off,
+}
+
+impl RpmStateTracker {
+    fn new() -> Self {
+        Self {
+            last_rpm: 0.0,
+            last_state_change_time: std::time::Instant::now(),
+            current_state: RpmState::Off,
+        }
+    }
+
+    /// Update RPM and check for state transitions
+    /// Returns Some(new_state) if state changed, None otherwise
+    fn update(&mut self, rpm: f64, threshold_rpm: f64, timeout_sec: u32) -> Option<RpmState> {
+        let should_be_on = rpm >= threshold_rpm;
+        let new_state = if should_be_on {
+            RpmState::On
+        } else {
+            RpmState::Off
+        };
+
+        // Check if state transition occurred
+        if new_state != self.current_state {
+            let time_in_state = self.last_state_change_time.elapsed().as_secs();
+
+            // Debounce: only transition if we've been in this state for the timeout duration
+            if (new_state == RpmState::Off && time_in_state >= timeout_sec as u64)
+                || new_state == RpmState::On
+            {
+                self.current_state = new_state;
+                self.last_state_change_time = std::time::Instant::now();
+                self.last_rpm = rpm;
+                return Some(new_state);
+            }
+        }
+
+        self.last_rpm = rpm;
+        None
+    }
+}
+
 struct AppState {
     connection: Mutex<Option<Connection>>,
     definition: Mutex<Option<EcuDefinition>>,
@@ -314,6 +366,8 @@ struct AppState {
     cached_output_channels: Mutex<Option<Arc<HashMap<String, libretune_core::ini::OutputChannel>>>>,
     // Console command history for rusEFI/FOME/epicEFI console
     console_history: Mutex<Vec<String>>,
+    // RPM state tracker for key-on/off detection
+    rpm_state_tracker: Mutex<RpmStateTracker>,
 }
 
 /// AutoTune configuration stored when tuning session starts
@@ -3169,6 +3223,26 @@ async fn start_realtime_stream(
                     let data = sim.update(elapsed_ms);
                     let _ = app_handle.emit("realtime:update", &data);
 
+                    // Check for RPM state transitions (key-on/off detection)
+                    {
+                        let rpm = data.get("rpm")
+                            .or_else(|| data.get("RPM"))
+                            .copied()
+                            .unwrap_or(0.0);
+                        
+                        let settings = load_settings(&app_handle);
+                        let mut tracker = app_state.rpm_state_tracker.lock().await;
+                        
+                        if let Some(new_state) = tracker.update(rpm, settings.key_on_threshold_rpm, settings.key_off_timeout_sec) {
+                            // Emit event when state changes
+                            let state_str = match new_state {
+                                RpmState::On => "on",
+                                RpmState::Off => "off",
+                            };
+                            let _ = app_handle.emit("realtime:key_state_changed", &state_str);
+                        }
+                    }
+
                     // Feed data to AutoTune if running
                     feed_autotune_data(&app_state, &data, current_time_ms).await;
 
@@ -3241,6 +3315,26 @@ async fn start_realtime_stream(
                         }
 
                         let _ = app_handle.emit("realtime:update", &data);
+
+                        // Check for RPM state transitions (key-on/off detection)
+                        {
+                            let rpm = data.get("rpm")
+                                .or_else(|| data.get("RPM"))
+                                .copied()
+                                .unwrap_or(0.0);
+                            
+                            let settings = load_settings(&app_handle);
+                            let mut tracker = app_state.rpm_state_tracker.lock().await;
+                            
+                            if let Some(new_state) = tracker.update(rpm, settings.key_on_threshold_rpm, settings.key_off_timeout_sec) {
+                                // Emit event when state changes
+                                let state_str = match new_state {
+                                    RpmState::On => "on",
+                                    RpmState::Off => "off",
+                                };
+                                let _ = app_handle.emit("realtime:key_state_changed", &state_str);
+                            }
+                        }
 
                         // Feed data to AutoTune if running
                         feed_autotune_data(&app_state, &data, current_time_ms).await;
@@ -12031,6 +12125,7 @@ pub fn run() {
             migration_report: Mutex::new(None),
             connection_factory: Mutex::new(None),
             cached_output_channels: Mutex::new(None),
+            rpm_state_tracker: Mutex::new(RpmStateTracker::new()),
         })
         .invoke_handler(tauri::generate_handler![
             get_serial_ports,
