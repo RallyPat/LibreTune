@@ -146,24 +146,24 @@ fn parse_ini_internal(content: &str, ctx: &mut IncludeContext) -> Result<EcuDefi
         }
 
         // Handle preprocessor directives (always processed regardless of condition)
-        if line.starts_with("#set ") {
-            let symbol = line[5..].trim().to_string();
+        if let Some(stripped) = line.strip_prefix("#set ") {
+            let symbol = stripped.trim().to_string();
             eprintln!("[DEBUG] preprocessor: #set {}", symbol);
             defined_symbols.insert(symbol);
             i += 1;
             continue;
         }
 
-        if line.starts_with("#unset ") {
-            let symbol = line[7..].trim();
+        if let Some(stripped) = line.strip_prefix("#unset ") {
+            let symbol = stripped.trim();
             eprintln!("[DEBUG] preprocessor: #unset {}", symbol);
             defined_symbols.remove(symbol);
             i += 1;
             continue;
         }
 
-        if line.starts_with("#if ") {
-            let symbol = line[4..].trim();
+        if let Some(stripped) = line.strip_prefix("#if ") {
+            let symbol = stripped.trim();
             let is_defined = defined_symbols.contains(symbol);
             eprintln!("[DEBUG] preprocessor: #if {} -> {}", symbol, is_defined);
             condition_stack.push(is_defined);
@@ -200,9 +200,9 @@ fn parse_ini_internal(content: &str, ctx: &mut IncludeContext) -> Result<EcuDefi
         }
 
         // Handle #include directives (only if in active branch)
-        if line.starts_with("#include") {
+        if let Some(stripped) = line.strip_prefix("#include") {
             if condition_stack.iter().all(|&c| c) {
-                let include_path = line[8..].trim().trim_matches('"');
+                let include_path = stripped.trim().trim_matches('"');
                 if let Some(resolved_path) = ctx.resolve_include(include_path) {
                     // Check depth limit
                     if ctx.depth >= MAX_INCLUDE_DEPTH {

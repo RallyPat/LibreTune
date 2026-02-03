@@ -118,9 +118,7 @@ pub fn parse_gauge_file(xml: &str) -> Result<GaugeFile, DashParseError> {
                 let name = String::from_utf8_lossy(e.name().as_ref()).to_string();
 
                 if name == "gauge" {
-                    if gauge_depth > 0 {
-                        gauge_depth -= 1;
-                    }
+                    gauge_depth = gauge_depth.saturating_sub(1);
                 } else if name == "dashComp" && state.in_dash_comp {
                     if let Some(gauge) = state.current_gauge.take() {
                         gauge_file.gauge = gauge;
@@ -249,7 +247,7 @@ fn handle_end_element(
             } else if let Some(indicator) = state.current_indicator.take() {
                 dash.gauge_cluster
                     .components
-                    .push(DashComponent::Indicator(indicator));
+                    .push(DashComponent::Indicator(Box::new(indicator)));
             }
             state.in_dash_comp = false;
             state.current_dash_comp_type = None;

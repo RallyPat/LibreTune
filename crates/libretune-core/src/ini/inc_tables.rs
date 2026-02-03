@@ -7,9 +7,9 @@
 //! ```text
 //! ; Comment line
 //! #Another comment style
-//! 0.039	19.17
-//! 0.085	17.24
-//! 5.0	160
+//! 0.039    19.17
+//! 0.085    17.24
+//! 5.0      160
 //! ```
 //! Values between keys are linearly interpolated.
 //!
@@ -108,7 +108,7 @@ impl IncTable {
                 let value_part = line[2..].trim();
 
                 // Remove trailing 'T' if present (temperature marker in some formats)
-                let value_str = value_part.trim_end_matches(|c| c == 'T' || c == 't');
+                let value_str = value_part.trim_end_matches(['T', 't']);
 
                 if let Ok(value) = value_str.trim().parse::<f64>() {
                     // Extend vector if needed and set value at current index

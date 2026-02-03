@@ -474,27 +474,32 @@ fn lex(input: &str) -> Vec<Token> {
     tokens
 }
 
+type StringValueFn = dyn Fn(&str) -> Option<String> + Send + Sync;
+type BitOptionsFn = dyn Fn(&str) -> Option<Vec<String>> + Send + Sync;
+type TableLookupFn = dyn Fn(&str, f64) -> Option<f64> + Send + Sync;
+type ArrayValueFn = dyn Fn(&str, f64) -> Option<f64> + Send + Sync;
+
 /// Context for string function evaluation
 #[derive(Default)]
 pub struct StringContext {
     /// Function to get string value of a constant
-    pub get_string_value: Option<Box<dyn Fn(&str) -> Option<String> + Send + Sync>>,
+    pub get_string_value: Option<Box<StringValueFn>>,
     /// Function to get bit options for a constant
-    pub get_bit_options: Option<Box<dyn Fn(&str) -> Option<Vec<String>> + Send + Sync>>,
+    pub get_bit_options: Option<Box<BitOptionsFn>>,
     /// Function to get projects directory path
     pub get_projects_dir: Option<Box<dyn Fn() -> String + Send + Sync>>,
     /// Function to get working directory path
     pub get_working_dir: Option<Box<dyn Fn() -> String + Send + Sync>>,
     /// Function to lookup value in .inc table file
     /// Takes (filename, lookup_value) and returns the looked-up value
-    pub table_lookup: Option<Box<dyn Fn(&str, f64) -> Option<f64> + Send + Sync>>,
+    pub table_lookup: Option<Box<TableLookupFn>>,
     /// Function to check if ECU is online/connected
     pub is_online: Option<Box<dyn Fn() -> bool + Send + Sync>>,
     /// Start time for timeNow() function (epoch seconds)
     pub start_time: Option<f64>,
     /// Function to get value from a constant array with interpolation
     /// Takes (constant_name, index) and returns interpolated value
-    pub array_value: Option<Box<dyn Fn(&str, f64) -> Option<f64> + Send + Sync>>,
+    pub array_value: Option<Box<ArrayValueFn>>,
 }
 
 /// Per-channel state for stateful expression functions

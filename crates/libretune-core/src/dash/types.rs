@@ -610,7 +610,7 @@ impl Default for IndicatorConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum DashComponent {
     Gauge(Box<GaugeConfig>),
-    Indicator(IndicatorConfig),
+    Indicator(Box<IndicatorConfig>),
 }
 
 /// Gauge cluster - container for all dashboard components.

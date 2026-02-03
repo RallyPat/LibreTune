@@ -171,8 +171,10 @@ fn write_gauge_cluster<W: Write>(
     // Write components
     for component in &cluster.components {
         match component {
-            DashComponent::Gauge(gauge) => write_gauge_component(writer, &*gauge)?,
-            DashComponent::Indicator(indicator) => write_indicator_component(writer, indicator)?,
+            DashComponent::Gauge(gauge) => write_gauge_component(writer, gauge.as_ref())?,
+            DashComponent::Indicator(indicator) => {
+                write_indicator_component(writer, indicator.as_ref())?
+            }
         }
     }
 

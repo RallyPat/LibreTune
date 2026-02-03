@@ -147,7 +147,7 @@ pub fn validate_dashboard(dash: &DashFile, ecu_def: Option<&EcuDefinition>) -> V
             }
             DashComponent::Indicator(indicator) => {
                 validate_indicator(
-                    indicator,
+                    indicator.as_ref(),
                     &available_channels,
                     &mut errors,
                     &mut warnings,
@@ -290,8 +290,21 @@ fn check_overlaps(
             let (id1, x1, y1, w1, h1) = &positions[i];
             let (id2, x2, y2, w2, h2) = &positions[j];
 
+            let rect1 = Rect {
+                x: *x1,
+                y: *y1,
+                w: *w1,
+                h: *h1,
+            };
+            let rect2 = Rect {
+                x: *x2,
+                y: *y2,
+                w: *w2,
+                h: *h2,
+            };
+
             // Check for rectangle overlap
-            if rectangles_overlap(*x1, *y1, *w1, *h1, *x2, *y2, *w2, *h2) {
+            if rectangles_overlap(rect1, rect2) {
                 warnings.push(ValidationWarning::OverlappingGauges {
                     gauge_id: id1.clone(),
                     other_id: id2.clone(),
@@ -301,17 +314,16 @@ fn check_overlaps(
     }
 }
 
-fn rectangles_overlap(
-    x1: f64,
-    y1: f64,
-    w1: f64,
-    h1: f64,
-    x2: f64,
-    y2: f64,
-    w2: f64,
-    h2: f64,
-) -> bool {
-    !(x1 + w1 < x2 || x2 + w2 < x1 || y1 + h1 < y2 || y2 + h2 < y1)
+#[derive(Copy, Clone)]
+struct Rect {
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
+}
+
+fn rectangles_overlap(a: Rect, b: Rect) -> bool {
+    !(a.x + a.w < b.x || b.x + b.w < a.x || a.y + a.h < b.y || b.y + b.h < a.y)
 }
 
 #[cfg(test)]

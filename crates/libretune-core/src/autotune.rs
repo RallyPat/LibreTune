@@ -227,11 +227,7 @@ impl AutoTuneState {
         let mut best_diff = u64::MAX;
 
         for point in self.data_buffer.iter() {
-            let diff = if point.timestamp_ms > target_time {
-                point.timestamp_ms - target_time
-            } else {
-                target_time - point.timestamp_ms
-            };
+            let diff = point.timestamp_ms.abs_diff(target_time);
 
             if diff < best_diff {
                 best_diff = diff;
