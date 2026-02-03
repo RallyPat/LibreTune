@@ -490,6 +490,11 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
   // Auto-reconnect setting: whether to automatically sync & reconnect after controller commands
   const [autoReconnectAfterControllerCommand, setAutoReconnectAfterControllerCommand] = useState<boolean>(false);
   
+  // Auto-record settings for data logging
+  const [autoRecordEnabled, setAutoRecordEnabled] = useState(false);
+  const [keyOnThresholdRpm, setKeyOnThresholdRpm] = useState(100);
+  const [keyOffTimeoutSec, setKeyOffTimeoutSec] = useState(2);
+  
   // Project-specific settings
   const [autoConnect, setAutoConnect] = useState(false);
   
@@ -526,6 +531,10 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
         if (settings.commit_message_format !== undefined) setCommitMessageFormat(settings.commit_message_format);
         if (settings.runtime_packet_mode !== undefined) setRuntimePacketMode(settings.runtime_packet_mode);
         if (settings.auto_reconnect_after_controller_command !== undefined) setAutoReconnectAfterControllerCommand(!!settings.auto_reconnect_after_controller_command);
+        // Auto-record settings
+        if (settings.auto_record_enabled !== undefined) setAutoRecordEnabled(!!settings.auto_record_enabled);
+        if (settings.key_on_threshold_rpm !== undefined) setKeyOnThresholdRpm(settings.key_on_threshold_rpm);
+        if (settings.key_off_timeout_sec !== undefined) setKeyOffTimeoutSec(settings.key_off_timeout_sec);
       }).catch(console.error);
 
       // Load project-specific settings
@@ -642,6 +651,10 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
     // Update runtime packet mode
     await invoke('update_setting', { key: 'runtime_packet_mode', value: runtimePacketMode });
     await invoke('update_setting', { key: 'auto_reconnect_after_controller_command', value: autoReconnectAfterControllerCommand.toString() });
+    // Update auto-record settings
+    await invoke('update_setting', { key: 'auto_record_enabled', value: autoRecordEnabled.toString() });
+    await invoke('update_setting', { key: 'key_on_threshold_rpm', value: keyOnThresholdRpm.toString() });
+    await invoke('update_setting', { key: 'key_off_timeout_sec', value: keyOffTimeoutSec.toString() });
     
     // Update project-specific settings
     if (currentProject) {
@@ -654,7 +667,7 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
     
     onSettingsChange?.({ units: localUnits, autoBurnOnClose, indicatorColumnCount, indicatorFillEmpty, indicatorTextFit, statusBarChannels, runtimePacketMode, autoSyncGaugeRanges });
     onClose();
-  }, [localTheme, localUnits, autoBurnOnClose, statusBarChannels, indicatorColumnCount, indicatorFillEmpty, indicatorTextFit, heatmapValueScheme, heatmapChangeScheme, heatmapCoverageScheme, gaugeSnapToGrid, gaugeFreeMove, gaugeLock, autoSyncGaugeRanges, autoCommitOnSave, commitMessageFormat, runtimePacketMode, autoReconnectAfterControllerCommand, autoConnect, currentProject, onThemeChange, onSettingsChange, onClose]);
+  }, [localTheme, localUnits, autoBurnOnClose, statusBarChannels, indicatorColumnCount, indicatorFillEmpty, indicatorTextFit, heatmapValueScheme, heatmapChangeScheme, heatmapCoverageScheme, gaugeSnapToGrid, gaugeFreeMove, gaugeLock, autoSyncGaugeRanges, autoCommitOnSave, commitMessageFormat, runtimePacketMode, autoReconnectAfterControllerCommand, autoRecordEnabled, keyOnThresholdRpm, keyOffTimeoutSec, autoConnect, currentProject, onThemeChange, onSettingsChange, onClose]);
 
   if (!isOpen) return null;
 
@@ -1100,6 +1113,58 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
               <option value="scale">Scale to fit</option>
               <option value="wrap">Wrap text (2 lines)</option>
             </select>
+          </div>
+
+          <h3 style={{ marginTop: '1.5rem', marginBottom: '0.5rem' }}>Data Logging</h3>
+
+          <div className="dialog-form-group">
+            <label>
+              <input
+                type="checkbox"
+                checked={autoRecordEnabled}
+                onChange={(e) => setAutoRecordEnabled(e.target.checked)}
+              />
+              Enable auto-record
+            </label>
+            <span className="dialog-form-note">Automatically start/stop recording when ECU key is turned on/off</span>
+          </div>
+
+          <div className="dialog-form-group">
+            <label>Key-On Threshold (RPM)</label>
+            <input
+              type="range"
+              min="50"
+              max="500"
+              step="50"
+              value={keyOnThresholdRpm}
+              onChange={(e) => setKeyOnThresholdRpm(Number(e.target.value))}
+              style={{ width: '100%' }}
+            />
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', marginTop: '0.25rem' }}>
+              <span>50</span>
+              <span><strong>{keyOnThresholdRpm}</strong></span>
+              <span>500</span>
+            </div>
+            <span className="dialog-form-note">RPM threshold for detecting key-on event; recording starts when RPM exceeds this value</span>
+          </div>
+
+          <div className="dialog-form-group">
+            <label>Key-Off Timeout (seconds)</label>
+            <input
+              type="range"
+              min="1"
+              max="10"
+              step="0.5"
+              value={keyOffTimeoutSec}
+              onChange={(e) => setKeyOffTimeoutSec(Number(e.target.value))}
+              style={{ width: '100%' }}
+            />
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', marginTop: '0.25rem' }}>
+              <span>1 sec</span>
+              <span><strong>{keyOffTimeoutSec.toFixed(1)}</strong></span>
+              <span>10 sec</span>
+            </div>
+            <span className="dialog-form-note">Time to wait below threshold before stopping recording; prevents multiple stop/start cycles during brief RPM dips</span>
           </div>
         </div>
         
