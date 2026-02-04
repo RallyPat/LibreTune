@@ -373,8 +373,8 @@ impl AutoTuneState {
         bins.iter()
             .enumerate()
             .min_by(|(_, a), (_, b)| {
-                let da = (a - value).abs();
-                let db = (b - value).abs();
+                let da = (*a - value).abs();
+                let db = (*b - value).abs();
                 da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
             })
             .map(|(i, _)| i)

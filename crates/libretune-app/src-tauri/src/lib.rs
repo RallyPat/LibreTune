@@ -581,6 +581,10 @@ fn default_key_off_timeout() -> u32 {
     2
 }
 
+fn default_auto_commit() -> String {
+    "ask".to_string()
+}
+
 fn default_commit_message_format() -> String {
     "Tune saved on {date} at {time}".to_string()
 }
