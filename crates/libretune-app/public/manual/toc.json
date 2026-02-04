@@ -103,8 +103,8 @@
         "children": []
       },
       {
-        "title": "Performance Calculator",
-        "path": "features/performance-calculator",
+        "title": "Data Statistics",
+        "path": "features/data-statistics",
         "children": []
       },
       {

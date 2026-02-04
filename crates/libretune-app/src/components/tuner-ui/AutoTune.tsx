@@ -93,6 +93,8 @@ interface AutoTuneAuthorityLimits {
   max_value: number;
 }
 
+type AutoTuneLoadSource = 'map' | 'maf';
+
 /**
  * Heat map data for a single table cell.
  */
@@ -122,6 +124,13 @@ interface TableData {
   x_bins: number[];
   y_bins: number[];
   z_values: number[][];
+  x_output_channel?: string | null;
+  y_output_channel?: string | null;
+}
+
+interface ChannelInfo {
+  name: string;
+  label?: string | null;
 }
 
 /**
@@ -162,6 +171,8 @@ export function AutoTune({ tableName: initialTableName = 'veTable1', onClose }: 
   const [currentCell, _setCurrentCell] = useState<{ x: number; y: number } | null>(null);
   const [showHeatmap, setShowHeatmap] = useState<'weighting' | 'change' | 'none'>('weighting');
   const [error, setError] = useState<string | null>(null);
+  const [loadSource, setLoadSource] = useState<AutoTuneLoadSource>('map');
+  const [loadSourceHint, setLoadSourceHint] = useState<string | null>(null);
 
   // Settings state
   const [settings, setSettings] = useState<AutoTuneSettings>({
@@ -190,6 +201,63 @@ export function AutoTune({ tableName: initialTableName = 'veTable1', onClose }: 
     min_value: 0,
     max_value: 200,
   });
+
+  const isMafChannelName = useCallback((name?: string | null) => {
+    if (!name) return false;
+    const lower = name.toLowerCase();
+    return lower.includes('maf') || lower.includes('airmass') || lower.includes('airflow');
+  }, []);
+
+  const loadAvailableTables = useCallback(async () => {
+    try {
+      const tables = await invoke<TableInfo[]>('get_tables');
+      
+      // Sort: prioritize MAF or VE/fuel tables first, then alphabetically
+      const priorityKeywords =
+        loadSource === 'maf'
+          ? ['maf', 'airmass', 'airflow', 'fuel']
+          : ['ve', 'fuel', 'afr', 'lambda'];
+      const isPriorityTable = (t: TableInfo) =>
+        priorityKeywords.some(
+          (kw) => t.name.toLowerCase().includes(kw) || t.title.toLowerCase().includes(kw)
+        );
+
+      const sorted = [...tables].sort((a, b) => {
+        const aIsPriority = isPriorityTable(a);
+        const bIsPriority = isPriorityTable(b);
+        if (aIsPriority && !bIsPriority) return -1;
+        if (!aIsPriority && bIsPriority) return 1;
+        return a.title.localeCompare(b.title);
+      });
+      setAvailableTables(sorted);
+      
+      // Auto-select VE table if current selection not found
+      const currentExists = sorted.some(t => t.name === selectedTable);
+      if (!currentExists && sorted.length > 0) {
+        const primaryNames =
+          loadSource === 'maf'
+            ? ['mafTableTbl', 'mafTable1Tbl', 'mafTable1', 'mafTable']
+            : ['veTableTbl', 'veTable1Tbl', 'veTable1', 'veTable', 'fuelTableTbl'];
+        const primaryTable =
+          sorted.find((t) => primaryNames.includes(t.name)) ||
+          (loadSource === 'maf'
+            ? sorted.find((t) => t.title.toLowerCase().includes('maf'))
+            : sorted.find((t) => t.title.toLowerCase().includes('ve table'))) ||
+          sorted[0]; // Fallback to first (priority-related due to sorting)
+        if (primaryTable) {
+          setSelectedTable(primaryTable.name);
+        }
+      }
+
+      if (!secondaryTable && sorted.length > 1) {
+        const fallbackSecondary = sorted.find((t) => t.name !== selectedTable) || sorted[0];
+        setSecondaryTable(fallbackSecondary.name);
+      }
+    } catch (e) {
+      console.error('Failed to load available tables:', e);
+      setError('Failed to load tables: ' + e);
+    }
+  }, [loadSource, selectedTable, secondaryTable]);
 
   const activeTable = useMemo(() => {
     if (activeView === 'secondary' && secondaryTableEnabled && secondaryTable) {
@@ -222,11 +290,52 @@ export function AutoTune({ tableName: initialTableName = 'veTable1', onClose }: 
   // Load initial table data
   useEffect(() => {
     loadAvailableTables();
-  }, []);
+  }, [loadAvailableTables]);
 
   useEffect(() => {
     loadTableData();
   }, [activeTable]);
+
+  useEffect(() => {
+    if (!tableData || isRunning) return;
+    if (isMafChannelName(tableData.y_output_channel) && loadSource !== 'maf') {
+      setLoadSource('maf');
+    }
+  }, [isMafChannelName, isRunning, loadSource, tableData]);
+
+  useEffect(() => {
+    if (loadSource !== 'maf') {
+      return;
+    }
+
+    let cancelled = false;
+
+    const checkMafChannels = async () => {
+      try {
+        const channels = await invoke<ChannelInfo[]>('get_available_channels');
+        const hasMafChannel = channels.some(
+          (channel) => isMafChannelName(channel.name) || isMafChannelName(channel.label)
+        );
+
+        if (!hasMafChannel && !cancelled) {
+          setLoadSource('map');
+          setLoadSourceHint('MAF channel not detected. Switched to MAP load.');
+        } else if (!cancelled) {
+          setLoadSourceHint(null);
+        }
+      } catch (e) {
+        if (!cancelled) {
+          setLoadSourceHint('Unable to verify MAF channels. Using MAP load.');
+          setLoadSource('map');
+        }
+      }
+    };
+
+    checkMafChannels();
+    return () => {
+      cancelled = true;
+    };
+  }, [isMafChannelName, loadSource]);
 
   useEffect(() => {
     setLockedCells(new Set());
@@ -251,46 +360,6 @@ export function AutoTune({ tableName: initialTableName = 'veTable1', onClose }: 
 
     return () => clearInterval(interval);
   }, [isRunning, activeTable]);
-
-  const loadAvailableTables = useCallback(async () => {
-    try {
-      const tables = await invoke<TableInfo[]>('get_tables');
-      
-      // Sort: VE/fuel tables first, then alphabetically
-      const veKeywords = ['ve', 'fuel', 'afr', 'lambda'];
-      const isVeTable = (t: TableInfo) => 
-        veKeywords.some(kw => t.name.toLowerCase().includes(kw) || t.title.toLowerCase().includes(kw));
-      
-      const sorted = [...tables].sort((a, b) => {
-        const aIsVe = isVeTable(a);
-        const bIsVe = isVeTable(b);
-        if (aIsVe && !bIsVe) return -1;
-        if (!aIsVe && bIsVe) return 1;
-        return a.title.localeCompare(b.title);
-      });
-      setAvailableTables(sorted);
-      
-      // Auto-select VE table if current selection not found
-      const currentExists = sorted.some(t => t.name === selectedTable);
-      if (!currentExists && sorted.length > 0) {
-        const veNames = ['veTableTbl', 'veTable1Tbl', 'veTable1', 'veTable', 'fuelTableTbl'];
-        const veTable = sorted.find(t => veNames.includes(t.name)) 
-          || sorted.find(t => t.title.toLowerCase().includes('ve table'))
-          || sorted[0]; // Fallback to first (VE-related due to sorting)
-        if (veTable) {
-          setSelectedTable(veTable.name);
-        }
-      }
-
-      if (!secondaryTable && sorted.length > 1) {
-        const fallbackSecondary = sorted.find((t) => t.name !== selectedTable) || sorted[0];
-        setSecondaryTable(fallbackSecondary.name);
-      }
-    } catch (e) {
-      console.error('Failed to load available tables:', e);
-      setError('Failed to load tables: ' + e);
-    }
-  }, [selectedTable, secondaryTable]);
 
   const loadTableData = useCallback(async () => {
     try {
@@ -366,6 +435,7 @@ export function AutoTune({ tableName: initialTableName = 'veTable1', onClose }: 
           secondaryTableEnabled && secondaryTable && secondaryTable !== selectedTable
             ? secondaryTable
             : null,
+        loadSource,
         settings,
         filters,
         authorityLimits: authority,
@@ -375,7 +445,7 @@ export function AutoTune({ tableName: initialTableName = 'veTable1', onClose }: 
     } catch (e) {
       setError(`Failed to start AutoTune: ${e}`);
     }
-  }, [selectedTable, secondaryTableEnabled, secondaryTable, settings, filters, authority]);
+  }, [selectedTable, secondaryTableEnabled, secondaryTable, loadSource, settings, filters, authority]);
 
   const stopAutoTune = useCallback(async () => {
     try {
@@ -738,6 +808,21 @@ export function AutoTune({ tableName: initialTableName = 'veTable1', onClose }: 
                 <option value="pid">PID</option>
               </select>
             </div>
+            <div className="setting-row">
+              <label>Load Source:</label>
+              <select
+                value={loadSource}
+                onChange={(e) => {
+                  setLoadSource(e.target.value as AutoTuneLoadSource);
+                  setLoadSourceHint(null);
+                }}
+                disabled={isRunning}
+              >
+                <option value="map">MAP (Speed Density)</option>
+                <option value="maf">MAF</option>
+              </select>
+            </div>
+            {loadSourceHint && <div className="autotune-hint">{loadSourceHint}</div>}
           </div>
 
           <div className="autotune-settings-section">

@@ -370,6 +370,25 @@ struct AppState {
     rpm_state_tracker: Mutex<RpmStateTracker>,
 }
 
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+enum AutoTuneLoadSource {
+    Map,
+    Maf,
+}
+
+#[derive(Clone, Copy, Debug)]
+enum AxisHint {
+    Rpm,
+    Load(AutoTuneLoadSource),
+    Unknown,
+}
+
+fn is_maf_channel_name(name: &str) -> bool {
+    let lower = name.to_lowercase();
+    lower.contains("maf") || lower.contains("airmass") || lower.contains("airflow")
+}
+
 /// AutoTune configuration stored when tuning session starts
 #[derive(Clone)]
 struct AutoTuneConfig {
@@ -379,6 +398,7 @@ struct AutoTuneConfig {
     settings: AutoTuneSettings,
     filters: AutoTuneFilters,
     authority_limits: AutoTuneAuthorityLimits,
+    load_source: AutoTuneLoadSource,
     // Table bin values for cell lookup
     x_bins: Vec<f64>,
     y_bins: Vec<f64>,
@@ -3044,6 +3064,28 @@ async fn feed_autotune_data(
         .copied()
         .unwrap_or(0.0);
 
+    let maf_value = data
+        .get("maf")
+        .or_else(|| data.get("MAF"))
+        .or_else(|| data.get("mafValue"))
+        .or_else(|| data.get("airMass"))
+        .or_else(|| data.get("airMassFlow"))
+        .or_else(|| data.get("airflow"))
+        .or_else(|| data.get("airFlow"))
+        .copied()
+        .unwrap_or(0.0);
+
+    let load_value = match config.load_source {
+        AutoTuneLoadSource::Map => map,
+        AutoTuneLoadSource::Maf => {
+            if maf_value > 0.0 {
+                maf_value
+            } else {
+                map
+            }
+        }
+    };
+
     let afr = data
         .get("afr")
         .or_else(|| data.get("AFR"))
@@ -3104,6 +3146,8 @@ async fn feed_autotune_data(
     let data_point = VEDataPoint {
         rpm,
         map,
+        maf: maf_value,
+        load: load_value,
         afr,
         ve,
         clt,
@@ -4891,6 +4935,7 @@ async fn start_autotune(
     state: tauri::State<'_, AppState>,
     table_name: String,
     secondary_table_name: Option<String>,
+    load_source: Option<AutoTuneLoadSource>,
     settings: AutoTuneSettings,
     filters: AutoTuneFilters,
     authority_limits: AutoTuneAuthorityLimits,
@@ -4901,14 +4946,31 @@ async fn start_autotune(
     let cache_guard = state.tune_cache.lock().await;
     let cache = cache_guard.as_ref();
 
+    let mut resolved_load_source = load_source.unwrap_or(AutoTuneLoadSource::Map);
+
     // Find the table and extract bins
     let (x_bins, y_bins) = if let Some(table) = def.get_table_by_name_or_map(&table_name) {
+        let y_output_channel = table.y_output_channel.clone();
+        if resolved_load_source == AutoTuneLoadSource::Map {
+            if let Some(ref channel) = y_output_channel {
+                if is_maf_channel_name(channel) {
+                    resolved_load_source = AutoTuneLoadSource::Maf;
+                }
+            }
+        }
+
         // Read X bins from the constant
-        let x_bins = read_axis_bins(def, cache, &table.x_bins, table.x_size)?;
+        let x_bins = read_axis_bins(def, cache, &table.x_bins, table.x_size, AxisHint::Rpm)?;
 
         // Read Y bins from the constant (if it's a 3D table)
         let y_bins = if let Some(ref y_bins_name) = table.y_bins {
-            read_axis_bins(def, cache, y_bins_name, table.y_size)?
+            read_axis_bins(
+                def,
+                cache,
+                y_bins_name,
+                table.y_size,
+                AxisHint::Load(resolved_load_source),
+            )?
         } else {
             vec![0.0] // 2D table has single Y bin
         };
@@ -4916,21 +4978,42 @@ async fn start_autotune(
         (x_bins, y_bins)
     } else {
         // Use default bins if table not found
+        let default_y_bins = match resolved_load_source {
+            AutoTuneLoadSource::Maf => vec![0.0, 25.0, 50.0, 75.0, 100.0, 150.0, 200.0, 250.0, 300.0],
+            AutoTuneLoadSource::Map => vec![20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0, 100.0],
+        };
+
         (
             vec![
                 500.0, 1000.0, 1500.0, 2000.0, 2500.0, 3000.0, 3500.0, 4000.0, 4500.0, 5000.0,
                 5500.0, 6000.0,
             ],
-            vec![20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0, 100.0],
+            default_y_bins,
         )
     };
+
+    if resolved_load_source == AutoTuneLoadSource::Maf {
+        let has_maf_channel = def
+            .output_channels
+            .keys()
+            .any(|name| is_maf_channel_name(name));
+        if !has_maf_channel {
+            resolved_load_source = AutoTuneLoadSource::Map;
+        }
+    }
 
     let (secondary_x_bins, secondary_y_bins) =
         if let Some(ref secondary_name) = secondary_table_name {
             if let Some(table) = def.get_table_by_name_or_map(secondary_name) {
-                let x_bins = read_axis_bins(def, cache, &table.x_bins, table.x_size)?;
+                let x_bins = read_axis_bins(def, cache, &table.x_bins, table.x_size, AxisHint::Rpm)?;
                 let y_bins = if let Some(ref y_bins_name) = table.y_bins {
-                    read_axis_bins(def, cache, y_bins_name, table.y_size)?
+                    read_axis_bins(
+                        def,
+                        cache,
+                        y_bins_name,
+                        table.y_size,
+                        AxisHint::Load(resolved_load_source),
+                    )?
                 } else {
                     vec![0.0]
                 };
@@ -4953,6 +5036,7 @@ async fn start_autotune(
         settings: settings.clone(),
         filters: filters.clone(),
         authority_limits: authority_limits.clone(),
+        load_source: resolved_load_source,
         x_bins,
         y_bins,
         secondary_x_bins,
@@ -4981,13 +5065,40 @@ fn read_axis_bins(
     cache: Option<&TuneCache>,
     const_name: &str,
     size: usize,
+    axis_hint: AxisHint,
 ) -> Result<Vec<f64>, String> {
+    let fallback_bins = |hint: AxisHint, size: usize| -> Vec<f64> {
+        let steps = (size.saturating_sub(1)).max(1) as f64;
+        match hint {
+            AxisHint::Rpm => (0..size)
+                .map(|i| 500.0 + (i as f64 * 6000.0 / steps))
+                .collect(),
+            AxisHint::Load(AutoTuneLoadSource::Maf) => (0..size)
+                .map(|i| 0.0 + (i as f64 * 300.0 / steps))
+                .collect(),
+            AxisHint::Load(AutoTuneLoadSource::Map) => (0..size)
+                .map(|i| 20.0 + (i as f64 * 80.0 / steps))
+                .collect(),
+            AxisHint::Unknown => {
+                if size > 8 {
+                    (0..size)
+                        .map(|i| 500.0 + (i as f64 * 6000.0 / steps))
+                        .collect()
+                } else {
+                    (0..size)
+                        .map(|i| 20.0 + (i as f64 * 80.0 / steps))
+                        .collect()
+                }
+            }
+        }
+    };
+
     // Try to get the constant
     let constant = match def.constants.get(const_name) {
         Some(c) => c,
         None => {
             // Constant not found, generate linear bins
-            return Ok((0..size).map(|i| i as f64 * 500.0 + 500.0).collect());
+            return Ok(fallback_bins(axis_hint, size));
         }
     };
 
@@ -5013,19 +5124,8 @@ fn read_axis_bins(
         }
     }
 
-    // Last resort: generate linear bins based on typical RPM/MAP ranges
-    // For RPM bins (x-axis typically)
-    if size > 8 {
-        // Likely RPM axis - 500 to 6500 RPM
-        Ok((0..size)
-            .map(|i| 500.0 + (i as f64 * 6000.0 / (size - 1) as f64))
-            .collect())
-    } else {
-        // Likely MAP/load axis - 20 to 100 kPa
-        Ok((0..size)
-            .map(|i| 20.0 + (i as f64 * 80.0 / (size - 1).max(1) as f64))
-            .collect())
-    }
+    // Last resort: generate linear bins based on axis hint
+    Ok(fallback_bins(axis_hint, size))
 }
 
 /// Stops AutoTune data collection.

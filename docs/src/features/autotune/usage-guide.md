@@ -52,6 +52,12 @@ Target AFR: 14.7 (gasoline stoich)
 Algorithm: Simple (recommended for beginners)
 ```
 
+**Load Source (MAP vs MAF)**
+- **MAP (Speed Density)**: Default for VE tables
+- **MAF**: Use for mass-airflow based tables
+- If the table load axis reports MAF, AutoTune auto-switches to **MAF**
+- If no MAF channel is detected, AutoTune falls back to **MAP** and shows a hint
+
 **Step 4: Set Authority Limits**
 For your FIRST session ever with this tune:
 ```

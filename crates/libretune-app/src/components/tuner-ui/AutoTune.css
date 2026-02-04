@@ -399,6 +399,16 @@
   margin: 0;
 }
 
+.autotune-hint {
+  margin-top: 6px;
+  padding: 6px 8px;
+  font-size: 11px;
+  color: var(--warning);
+  background: rgba(255, 184, 0, 0.08);
+  border: 1px solid rgba(255, 184, 0, 0.35);
+  border-radius: 4px;
+}
+
 /* CSS Variables for cell colors */
 :root {
   --cell-locked: #555;

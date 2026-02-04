@@ -15,6 +15,7 @@ fn heatmap_entries_accumulate_hits_and_compute_change() {
         VEDataPoint {
             rpm: 1000.0,
             map: 10.0,
+            load: 10.0,
             afr: 14.7,
             ve: 50.0,
             clt: 170.0,
@@ -23,6 +24,7 @@ fn heatmap_entries_accumulate_hits_and_compute_change() {
         VEDataPoint {
             rpm: 1000.0,
             map: 10.0,
+            load: 10.0,
             afr: 13.0,
             ve: 50.0,
             clt: 170.0,
@@ -31,6 +33,7 @@ fn heatmap_entries_accumulate_hits_and_compute_change() {
         VEDataPoint {
             rpm: 1000.0,
             map: 10.0,
+            load: 10.0,
             afr: 12.0,
             ve: 50.0,
             clt: 170.0,

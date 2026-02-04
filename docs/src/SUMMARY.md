@@ -24,8 +24,8 @@
   - [Using Dashboards](./features/dashboards/using.md)
   - [Customizing Gauges](./features/dashboards/customizing.md)
   - [Creating Dashboards](./features/dashboards/creating.md)
-- [Data Logging](./features/datalog.md)
-- [Performance Calculator](./features/performance-calculator.md)
+- [Data Logging](./features/datalog.md)- [Smart Recording](features/smart-recording.md)
+- [Data Statistics](features/data-statistics.md)- [Performance Calculator](./features/performance-calculator.md)
 - [Diagnostic Loggers](./features/diagnostic-loggers.md)
 - [Tools](./features/tools.md)
 

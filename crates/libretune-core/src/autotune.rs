@@ -126,6 +126,8 @@ impl Default for AutoTuneState {
 pub struct VEDataPoint {
     pub rpm: f64,
     pub map: f64,
+    pub maf: f64,
+    pub load: f64,
     pub afr: f64,
     pub ve: f64,
     pub clt: f64,
@@ -142,6 +144,8 @@ impl Default for VEDataPoint {
         Self {
             rpm: 0.0,
             map: 0.0,
+            maf: 0.0,
+            load: 0.0,
             afr: 0.0,
             ve: 0.0,
             clt: 0.0,
@@ -278,17 +282,17 @@ impl AutoTuneState {
         };
 
         // Use historical cell location if available, otherwise use current
-        let (cell_rpm, cell_map, cell_ve) = if let Some(ref hist) = historical_point {
-            // Use the historical RPM/MAP to find the correct cell
+        let (cell_rpm, cell_load, cell_ve) = if let Some(ref hist) = historical_point {
+            // Use the historical RPM/load to find the correct cell
             // but use current AFR (which corresponds to that historical moment)
-            (hist.rpm, hist.map, hist.ve)
+            (hist.rpm, hist.load, hist.ve)
         } else {
             // No historical data available, use current (less accurate but better than nothing)
-            (point.rpm, point.map, point.ve)
+            (point.rpm, point.load, point.ve)
         };
 
         let x_idx = self.find_bin_index(cell_rpm, table_x_bins);
-        let y_idx = self.find_bin_index(cell_map, table_y_bins);
+        let y_idx = self.find_bin_index(cell_load, table_y_bins);
 
         if x_idx.is_none() || y_idx.is_none() {
             return;
@@ -354,9 +358,25 @@ impl AutoTuneState {
     }
 
     fn find_bin_index(&self, value: f64, bins: &[f64]) -> Option<usize> {
-        bins.iter()
+        if bins.is_empty() {
+            return None;
+        }
+
+        if let Some((i, _)) = bins
+            .iter()
             .enumerate()
             .find(|&(_, bin)| (bin - value).abs() < 0.1)
+        {
+            return Some(i);
+        }
+
+        bins.iter()
+            .enumerate()
+            .min_by(|(_, a), (_, b)| {
+                let da = (a - value).abs();
+                let db = (b - value).abs();
+                da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
+            })
             .map(|(i, _)| i)
     }
 
@@ -370,6 +390,8 @@ impl AutoTuneState {
 
         set_value(&mut ctx, "rpm", point.rpm.into())?;
         set_value(&mut ctx, "map", point.map.into())?;
+        set_value(&mut ctx, "maf", point.maf.into())?;
+        set_value(&mut ctx, "load", point.load.into())?;
         set_value(&mut ctx, "afr", point.afr.into())?;
         set_value(&mut ctx, "ve", point.ve.into())?;
         set_value(&mut ctx, "clt", point.clt.into())?;
