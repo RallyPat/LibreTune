@@ -157,6 +157,77 @@ Common problems and solutions.
 3. Check for runaway processes
 4. Update graphics drivers
 
+## AppImage Issues (Linux)
+
+AppImages bundle the application with necessary libraries for maximum compatibility. However, on some modern Linux systems (especially Arch-based distributions like CachyOS), bundled graphics libraries may conflict with system drivers.
+
+### AppImage Crashes or Freezes on Wayland
+
+**Symptoms**: AppImage window appears but is completely blank, or app crashes immediately with graphics errors
+
+**Environment**: Arch-based systems (CachyOS, Manjaro) running Wayland display server with Intel/AMD integrated graphics (Mesa drivers)
+
+**Root Causes**:
+1. Bundled Wayland/EGL libraries (`libwayland-*.so`, `libepoxy.so`) conflict with system Mesa drivers
+2. WebKit subprocess library paths don't match packaged file structure
+3. ICU libraries bundled in AppImage but not on library search path
+
+**Automatic Fix**:
+The LibreTune AppImage includes an automatic runtime fix that:
+- Detects Wayland display server
+- Removes conflicting graphics libraries to use system versions
+- Creates symlinks for WebKit subprocess library discovery
+- Configures library search paths for bundled ICU
+
+This should resolve the issue automatically on most systems.
+
+**Manual Workaround** (if automatic fix fails):
+
+1. Extract the AppImage:
+```bash
+./libretune-*.AppImage --appimage-extract
+cd squashfs-root
+```
+
+2. Remove conflicting graphics libraries:
+```bash
+rm -f usr/lib/libwayland-egl.so.1
+rm -f usr/lib/libwayland-client.so.0
+rm -f usr/lib/libwayland-server.so.0
+rm -f usr/lib/libwayland-cursor.so.0
+rm -f usr/lib/libepoxy.so.0
+```
+
+3. Create library path symlink for WebKit:
+```bash
+mkdir -p lib
+ln -s ../usr/lib/x86_64-linux-gnu lib/x86_64-linux-gnu
+```
+
+4. Launch with library path configured:
+```bash
+LD_LIBRARY_PATH=./usr/lib:$LD_LIBRARY_PATH ./usr/bin/libretune-app
+```
+
+**Non-Critical Warnings**:
+The following warnings may appear on launch but do not affect functionality:
+- `Fontconfig warning: using without calling FcInit()`
+- `Failed to load module "colorreload-gtk-module"`
+- `Failed to load module "window-decorations-gtk-module"`
+
+These are harmless and can be safely ignored.
+
+**Prevention**:
+- Keep Mesa drivers updated: `sudo pacman -S mesa` (Arch)
+- Ensure Wayland session is properly configured
+- Use the automatic bundled fix (no manual steps needed)
+
+**Getting Help**:
+If the AppImage still fails after these steps:
+1. Check your display server: `echo $WAYLAND_DISPLAY` (should be non-empty for Wayland)
+2. Verify GPU drivers: `glxinfo | grep "OpenGL version"`
+3. Report issue with system information and error messages
+
 ## Getting Help
 
 If these solutions don't work:

@@ -381,6 +381,7 @@ enum AutoTuneLoadSource {
 enum AxisHint {
     Rpm,
     Load(AutoTuneLoadSource),
+    #[allow(dead_code)]
     Unknown,
 }
 
@@ -3273,15 +3274,20 @@ async fn start_realtime_stream(
 
                     // Check for RPM state transitions (key-on/off detection)
                     {
-                        let rpm = data.get("rpm")
+                        let rpm = data
+                            .get("rpm")
                             .or_else(|| data.get("RPM"))
                             .copied()
                             .unwrap_or(0.0);
-                        
+
                         let settings = load_settings(&app_handle);
                         let mut tracker = app_state.rpm_state_tracker.lock().await;
-                        
-                        if let Some(new_state) = tracker.update(rpm, settings.key_on_threshold_rpm, settings.key_off_timeout_sec) {
+
+                        if let Some(new_state) = tracker.update(
+                            rpm,
+                            settings.key_on_threshold_rpm,
+                            settings.key_off_timeout_sec,
+                        ) {
                             // Emit event when state changes
                             let state_str = match new_state {
                                 RpmState::On => "on",
@@ -3366,15 +3372,20 @@ async fn start_realtime_stream(
 
                         // Check for RPM state transitions (key-on/off detection)
                         {
-                            let rpm = data.get("rpm")
+                            let rpm = data
+                                .get("rpm")
                                 .or_else(|| data.get("RPM"))
                                 .copied()
                                 .unwrap_or(0.0);
-                            
+
                             let settings = load_settings(&app_handle);
                             let mut tracker = app_state.rpm_state_tracker.lock().await;
-                            
-                            if let Some(new_state) = tracker.update(rpm, settings.key_on_threshold_rpm, settings.key_off_timeout_sec) {
+
+                            if let Some(new_state) = tracker.update(
+                                rpm,
+                                settings.key_on_threshold_rpm,
+                                settings.key_off_timeout_sec,
+                            ) {
                                 // Emit event when state changes
                                 let state_str = match new_state {
                                     RpmState::On => "on",
@@ -4983,7 +4994,9 @@ async fn start_autotune(
     } else {
         // Use default bins if table not found
         let default_y_bins = match resolved_load_source {
-            AutoTuneLoadSource::Maf => vec![0.0, 25.0, 50.0, 75.0, 100.0, 150.0, 200.0, 250.0, 300.0],
+            AutoTuneLoadSource::Maf => {
+                vec![0.0, 25.0, 50.0, 75.0, 100.0, 150.0, 200.0, 250.0, 300.0]
+            }
             AutoTuneLoadSource::Map => vec![20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0, 100.0],
         };
 
@@ -5006,29 +5019,30 @@ async fn start_autotune(
         }
     }
 
-    let (secondary_x_bins, secondary_y_bins) =
-        if let Some(ref secondary_name) = secondary_table_name {
-            if let Some(table) = def.get_table_by_name_or_map(secondary_name) {
-                let x_bins = read_axis_bins(def, cache, &table.x_bins, table.x_size, AxisHint::Rpm)?;
-                let y_bins = if let Some(ref y_bins_name) = table.y_bins {
-                    read_axis_bins(
-                        def,
-                        cache,
-                        y_bins_name,
-                        table.y_size,
-                        AxisHint::Load(resolved_load_source),
-                    )?
-                } else {
-                    vec![0.0]
-                };
-
-                (Some(x_bins), Some(y_bins))
+    let (secondary_x_bins, secondary_y_bins) = if let Some(ref secondary_name) =
+        secondary_table_name
+    {
+        if let Some(table) = def.get_table_by_name_or_map(secondary_name) {
+            let x_bins = read_axis_bins(def, cache, &table.x_bins, table.x_size, AxisHint::Rpm)?;
+            let y_bins = if let Some(ref y_bins_name) = table.y_bins {
+                read_axis_bins(
+                    def,
+                    cache,
+                    y_bins_name,
+                    table.y_size,
+                    AxisHint::Load(resolved_load_source),
+                )?
             } else {
-                return Err(format!("Secondary table {} not found", secondary_name));
-            }
+                vec![0.0]
+            };
+
+            (Some(x_bins), Some(y_bins))
         } else {
-            (None, None)
-        };
+            return Err(format!("Secondary table {} not found", secondary_name));
+        }
+    } else {
+        (None, None)
+    };
 
     drop(cache_guard);
     drop(def_guard);

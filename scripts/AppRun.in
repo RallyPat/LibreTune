@@ -1,0 +1,41 @@
+#!/bin/bash
+# LibreTune AppRun wrapper for AppImage
+# Handles Wayland/EGL graphics library conflicts and library path resolution
+# This script is executed by the AppImage launcher before the main application
+
+set -e
+
+# Get the directory where this script is located (AppImage root)
+APPDIR="${APPDIR:-.}"
+export APPDIR
+
+# Detect if running on Wayland display server
+if [ -n "$WAYLAND_DISPLAY" ]; then
+    # Remove bundled Wayland/EGL libraries that conflict with system versions
+    # These libraries often conflict with Mesa/Iris drivers on modern Wayland systems
+    for lib in libwayland-egl.so.1 libwayland-client.so.0 libwayland-server.so.0 \
+               libwayland-cursor.so.0 libepoxy.so.0; do
+        if [ -f "$APPDIR/usr/lib/$lib" ]; then
+            rm -f "$APPDIR/usr/lib/$lib"
+        fi
+        if [ -f "$APPDIR/usr/lib/x86_64-linux-gnu/$lib" ]; then
+            rm -f "$APPDIR/usr/lib/x86_64-linux-gnu/$lib"
+        fi
+    done
+    
+    # Create symlink for WebKit helper processes to locate libraries
+    # WebKit subprocess expects lib/x86_64-linux-gnu but files are at usr/lib/x86_64-linux-gnu
+    if [ ! -L "$APPDIR/lib/x86_64-linux-gnu" ] && [ -d "$APPDIR/usr/lib/x86_64-linux-gnu" ]; then
+        mkdir -p "$APPDIR/lib"
+        ln -sf ../usr/lib/x86_64-linux-gnu "$APPDIR/lib/x86_64-linux-gnu"
+    fi
+    
+    # Set LD_LIBRARY_PATH to include bundled ICU libraries for runtime discovery
+    # ICU libraries (libicudata.so.74, libicui18n.so.74, libicuuc.so.74) are in usr/lib
+    # but are not found by default without explicit path configuration
+    export LD_LIBRARY_PATH="$APPDIR/usr/lib:$LD_LIBRARY_PATH"
+fi
+
+# Launch the main application binary
+# The @EXEC@ placeholder is replaced by Tauri during AppImage build
+exec "@EXEC@" "$@"

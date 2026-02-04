@@ -33,6 +33,11 @@
     ],
     "resources": [
       "resources/*"
-    ]
+    ],
+    "linux": {
+      "appimage": {
+        "bundleMediaFramework": false
+      }
+    }
   }
 }
