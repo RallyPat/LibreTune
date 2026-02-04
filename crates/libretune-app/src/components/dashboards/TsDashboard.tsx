@@ -56,6 +56,18 @@ interface GaugeInfo {
   digits: number;
 }
 
+interface ValidationReport {
+  errors: Record<string, any>[];
+  warnings: Record<string, any>[];
+  stats: {
+    gauge_count: number;
+    indicator_count: number;
+    unique_channels: number;
+    embedded_image_count: number;
+    has_embedded_fonts: boolean;
+  };
+}
+
 export default function TsDashboard({ initialDashPath, isConnected = false }: TsDashboardProps) {
   const [dashFile, setDashFile] = useState<DashFile | null>(null);
   const [availableDashes, setAvailableDashes] = useState<DashFileInfo[]>([]);
@@ -106,6 +118,8 @@ export default function TsDashboard({ initialDashPath, isConnected = false }: Ts
   const [compatBarVisible, setCompatBarVisible] = useState(true);
   const [syncToken, setSyncToken] = useState(0);
   const [autoSyncGaugeRanges, setAutoSyncGaugeRanges] = useState(true);
+  const [validationReport, setValidationReport] = useState<ValidationReport | null>(null);
+  const [showValidationPanel, setShowValidationPanel] = useState(false);
   
   // Dynamic scaling state for responsive dashboard sizing
   const [scale, setScale] = useState(1);
@@ -709,6 +723,13 @@ export default function TsDashboard({ initialDashPath, isConnected = false }: Ts
     return () => resizeObserver.disconnect();
   }, [computeScale]);
 
+  // Recompute scale when validation panel visibility changes
+  useEffect(() => {
+    // Small delay to ensure DOM has updated and layout has settled
+    const timer = setTimeout(() => computeScale(), 100);
+    return () => clearTimeout(timer);
+  }, [showValidationPanel, computeScale]);
+
   // Load available dashboards
   useEffect(() => {
     const loadInitial = async () => {
@@ -763,6 +784,24 @@ export default function TsDashboard({ initialDashPath, isConnected = false }: Ts
     loadDashboard();
   }, [selectedPath, isLegacyPath, computeScale]);
 
+  useEffect(() => {
+    if (!dashFile) return;
+
+    invoke<ValidationReport>('validate_dashboard', {
+      dashFile,
+      projectName: null,
+    })
+      .then((report) => {
+        setValidationReport(report);
+        // Don't auto-show validation panel - let user click the button if they want to see issues
+        // User can see issue count in the button text: "⚠ Validate (2E/3W)"
+      })
+      .catch((err) => {
+        console.warn('[TsDashboard] Validation failed:', err);
+        setValidationReport(null);
+      });
+  }, [dashFile]);
+
   // On dashboard file load, decide whether to run the initial sweep using a snapshot of realtime data
   useEffect(() => {
     if (!dashFile) return;
@@ -780,6 +819,19 @@ export default function TsDashboard({ initialDashPath, isConnected = false }: Ts
     setSelectedPath(path);
     setShowSelector(false);
   };
+
+  const formatValidationIssue = useCallback((issue: Record<string, any>) => {
+    const entries = Object.entries(issue);
+    if (entries.length === 0) return 'Unknown issue';
+    const [kind, details] = entries[0];
+    if (details && typeof details === 'object') {
+      const parts = Object.entries(details)
+        .map(([key, value]) => `${key}: ${String(value)}`)
+        .join(', ');
+      return `${kind} (${parts})`;
+    }
+    return kind;
+  }, []);
 
   if (loading) {
     return (
@@ -905,6 +957,21 @@ export default function TsDashboard({ initialDashPath, isConnected = false }: Ts
           >
             🔄 Sync Ranges
           </button>
+          {validationReport && (
+            <button
+              className={`ts-dashboard-action-btn ${
+                validationReport.errors.length > 0
+                  ? 'danger'
+                  : validationReport.warnings.length > 0
+                    ? 'warn'
+                    : ''
+              }`}
+              onClick={() => setShowValidationPanel((prev) => !prev)}
+              title="Dashboard validation issues"
+            >
+              ⚠ Validate ({validationReport.errors.length}E/{validationReport.warnings.length}W)
+            </button>
+          )}
           <button
             className={`ts-dashboard-action-btn ${legacyMode ? 'active' : ''}`}
             onClick={() => setLegacyMode(prev => !prev)}
@@ -914,6 +981,49 @@ export default function TsDashboard({ initialDashPath, isConnected = false }: Ts
           </button>
         </div>
       </div>
+
+      {showValidationPanel && validationReport && (
+        <div className="ts-dashboard-validation">
+          <div className="ts-dashboard-validation-header">
+            <div>
+              Validation: {validationReport.errors.length} error(s), {validationReport.warnings.length} warning(s)
+            </div>
+            <button
+              className="ts-dashboard-compat-close"
+              onClick={() => setShowValidationPanel(false)}
+              title="Dismiss"
+            >
+              ✕
+            </button>
+          </div>
+          {validationReport.errors.length === 0 && validationReport.warnings.length === 0 ? (
+            <div className="ts-dashboard-validation-empty">No issues detected.</div>
+          ) : (
+            <div className="ts-dashboard-validation-body">
+              {validationReport.errors.length > 0 && (
+                <div className="ts-dashboard-validation-section">
+                  <h4>Errors</h4>
+                  <ul>
+                    {validationReport.errors.map((issue, idx) => (
+                      <li key={`err-${idx}`}>{formatValidationIssue(issue)}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {validationReport.warnings.length > 0 && (
+                <div className="ts-dashboard-validation-section">
+                  <h4>Warnings</h4>
+                  <ul>
+                    {validationReport.warnings.map((issue, idx) => (
+                      <li key={`warn-${idx}`}>{formatValidationIssue(issue)}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {compatibilityReport && compatBarVisible && hasCompatibilityIssues && (
         <div className={`ts-dashboard-compat warn`}>

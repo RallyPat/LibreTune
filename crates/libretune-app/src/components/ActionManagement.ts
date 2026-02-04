@@ -43,7 +43,8 @@ export type UserActionType =
   | "send_controller_command"
   | "show_global_warning"
   | "show_passive_message"
-  | "show_settings_dialog";
+  | "show_settings_dialog"
+  | "lua_script";
 
 export interface ActionManagementDialog {
   triggers: ActionTrigger[];

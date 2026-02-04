@@ -36,4 +36,6 @@ pub use project::{
 pub use properties::Properties;
 pub use repository::{IniEntry, IniRepository};
 pub use templates::{ProjectTemplate, TemplateManager};
-pub use version_control::{BranchInfo, CommitDiff, CommitInfo, TuneChange, VersionControl};
+pub use version_control::{
+    format_commit_message, BranchInfo, CommitDiff, CommitInfo, TuneChange, VersionControl,
+};

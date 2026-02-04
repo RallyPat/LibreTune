@@ -9,6 +9,8 @@ use git2::{
 };
 use std::path::Path;
 
+const NOTE_PREFIX: &str = "LT-Note:";
+
 /// Information about a commit in the tune history
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CommitInfo {
@@ -18,12 +20,36 @@ pub struct CommitInfo {
     pub sha: String,
     /// Commit message
     pub message: String,
+    /// Optional user annotation
+    pub annotation: Option<String>,
     /// Author name
     pub author: String,
     /// Commit timestamp (ISO 8601)
     pub timestamp: String,
     /// Whether this is the current HEAD
     pub is_head: bool,
+}
+
+pub fn format_commit_message(message: &str, annotation: Option<&str>) -> String {
+    let note = annotation.map(str::trim).filter(|value| !value.is_empty());
+
+    if let Some(note) = note {
+        format!("{message}\n\n{NOTE_PREFIX} {note}")
+    } else {
+        message.to_string()
+    }
+}
+
+fn extract_annotation(message: &str) -> Option<String> {
+    message
+        .lines()
+        .find_map(|line| {
+            let trimmed = line.trim();
+            trimmed
+                .strip_prefix(NOTE_PREFIX)
+                .map(|rest| rest.trim().to_string())
+        })
+        .filter(|value| !value.is_empty())
 }
 
 /// Information about a branch
@@ -339,13 +365,13 @@ datalogs/
         let sha = commit.id().to_string();
         let sha_short = sha[..7.min(sha.len())].to_string();
 
-        let message = commit
-            .message()
-            .unwrap_or("")
+        let full_message = commit.message().unwrap_or("");
+        let message = full_message
             .lines()
             .next()
             .unwrap_or("")
             .to_string();
+        let annotation = extract_annotation(full_message);
 
         let author = commit.author().name().unwrap_or("Unknown").to_string();
 
@@ -358,6 +384,7 @@ datalogs/
             sha_short,
             sha,
             message,
+            annotation,
             author,
             timestamp,
             is_head,

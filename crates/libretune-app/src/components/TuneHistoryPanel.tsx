@@ -13,6 +13,7 @@ interface CommitInfo {
   sha_short: string;
   sha: string;
   message: string;
+  annotation?: string | null;
   author: string;
   timestamp: string;
   is_head: boolean;
@@ -154,8 +155,12 @@ export function TuneHistoryPanel({ isOpen, onClose }: TuneHistoryPanelProps) {
   async function handleCommit() {
     const message = prompt("Commit message:", "Manual checkpoint");
     if (message) {
+      const annotation = prompt("Annotation (optional):", "");
       try {
-        await invoke("git_commit", { message });
+        await invoke("git_commit", {
+          message,
+          annotation: annotation?.trim() ? annotation : null,
+        });
         await loadData();
       } catch (e) {
         console.error("Failed to commit:", e);
@@ -238,6 +243,9 @@ export function TuneHistoryPanel({ isOpen, onClose }: TuneHistoryPanelProps) {
                         <span className="commit-time">{commit.timestamp}</span>
                       </div>
                       <div className="commit-message">{commit.message}</div>
+                      {commit.annotation && (
+                        <div className="commit-annotation">Note: {commit.annotation}</div>
+                      )}
                       <div className="commit-actions">
                         {idx < history.length - 1 && (
                           <button 

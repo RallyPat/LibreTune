@@ -24,8 +24,13 @@
   - [Using Dashboards](./features/dashboards/using.md)
   - [Customizing Gauges](./features/dashboards/customizing.md)
   - [Creating Dashboards](./features/dashboards/creating.md)
-- [Data Logging](./features/datalog.md)- [Smart Recording](features/smart-recording.md)
-- [Data Statistics](features/data-statistics.md)- [Performance Calculator](./features/performance-calculator.md)
+  - [Dashboard Validation](./features/dashboards/validation.md)
+- [Data Logging](./features/datalog.md)
+- [Smart Recording](./features/smart-recording.md)
+- [Data Statistics](./features/data-statistics.md)
+- [Alert Rules](./features/alert-rules.md)
+- [Lua Scripting](./features/lua-scripting.md)
+- [Performance Calculator](./features/performance-calculator.md)
 - [Diagnostic Loggers](./features/diagnostic-loggers.md)
 - [Tools](./features/tools.md)
 
@@ -33,6 +38,7 @@
 
 - [Managing Tunes](./projects/tunes.md)
 - [Version Control](./projects/version-control.md)
+- [Change Annotations](./projects/change-annotations.md)
 - [Restore Points](./projects/restore-points.md)
 - [Importing Projects](./projects/importing.md)
 
@@ -42,6 +48,16 @@
 - [INI File Format](./reference/ini-format.md)
 - [Keyboard Shortcuts](./reference/shortcuts.md)
 - [Troubleshooting](./reference/troubleshooting.md)
+
+# Technical Reference
+
+- [Overview](./technical/README.md)
+- [AutoTune Algorithm](./technical/autotune-algorithm.md)
+- [Table Operations](./technical/table-operations.md)
+- [INI Parser](./technical/ini-parser.md)
+- [ECU Protocol](./technical/ecu-protocol.md)
+- [Version Control](./technical/version-control.md)
+- [Lua Scripting](./technical/lua-scripting.md)
 
 # FAQ
 

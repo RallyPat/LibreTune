@@ -169,6 +169,10 @@ export default function TableEditor2D({
   const [activeCell, setActiveCell] = useState<[number, number] | null>(null);
 
   const { showToast } = useToast();
+
+  const [alertLargeChangeEnabled, setAlertLargeChangeEnabled] = useState(true);
+  const [alertLargeChangeAbs, setAlertLargeChangeAbs] = useState(5);
+  const [alertLargeChangePercent, setAlertLargeChangePercent] = useState(10);
   
   // Get heatmap scheme from user settings
   const { settings: heatmapSettings } = useHeatmapSettings();
@@ -181,6 +185,14 @@ export default function TableEditor2D({
     [selectedCells]
   );
 
+  const selectedCellsCoords = useMemo(
+    () => Array.from(selectedCells).map((key) => {
+      const [x, y] = key.split(',').map(Number);
+      return [x, y] as [number, number];
+    }),
+    [selectedCells]
+  );
+
   const handleOperationError = useCallback(
     (operation: string, err: unknown) => {
       console.error(`${operation} failed:`, err);
@@ -188,6 +200,86 @@ export default function TableEditor2D({
       showToast(`${operation} failed: ${message}`, 'error');
     },
     [showToast]
+  );
+
+  useEffect(() => {
+    invoke('get_settings')
+      .then((settings: any) => {
+        if (settings.alert_large_change_enabled !== undefined) {
+          setAlertLargeChangeEnabled(!!settings.alert_large_change_enabled);
+        }
+        if (settings.alert_large_change_abs !== undefined) {
+          setAlertLargeChangeAbs(settings.alert_large_change_abs);
+        }
+        if (settings.alert_large_change_percent !== undefined) {
+          setAlertLargeChangePercent(settings.alert_large_change_percent);
+        }
+      })
+      .catch((err) => console.warn('[TableEditor2D] Failed to load alert settings:', err));
+  }, []);
+
+  const warnIfLargeChange = useCallback(
+    (prevValue: number, nextValue: number, operation: string) => {
+      if (!alertLargeChangeEnabled) return;
+      const absDelta = Math.abs(nextValue - prevValue);
+      const denom = Math.max(Math.abs(prevValue), 1e-6);
+      const pctDelta = (absDelta / denom) * 100;
+
+      if (absDelta >= alertLargeChangeAbs || pctDelta >= alertLargeChangePercent) {
+        showToast(
+          `${operation}: large change detected (Δ ${absDelta.toFixed(2)}, ${pctDelta.toFixed(1)}%)`,
+          'warning'
+        );
+      }
+    },
+    [alertLargeChangeEnabled, alertLargeChangeAbs, alertLargeChangePercent, showToast]
+  );
+
+  const warnIfLargeChangeBatch = useCallback(
+    (
+      previousValues: number[][],
+      nextValues: number[][],
+      coords: Array<[number, number]> | null,
+      operation: string
+    ) => {
+      if (!alertLargeChangeEnabled) return;
+
+      let maxAbs = 0;
+      let maxPct = 0;
+      let hits = 0;
+
+      const checkCell = (x: number, y: number) => {
+        const prev = previousValues?.[y]?.[x];
+        const next = nextValues?.[y]?.[x];
+        if (prev === undefined || next === undefined) return;
+        const absDelta = Math.abs(next - prev);
+        const denom = Math.max(Math.abs(prev), 1e-6);
+        const pctDelta = (absDelta / denom) * 100;
+        if (absDelta >= alertLargeChangeAbs || pctDelta >= alertLargeChangePercent) {
+          hits += 1;
+          maxAbs = Math.max(maxAbs, absDelta);
+          maxPct = Math.max(maxPct, pctDelta);
+        }
+      };
+
+      if (coords && coords.length > 0) {
+        coords.forEach(([x, y]) => checkCell(x, y));
+      } else {
+        for (let y = 0; y < nextValues.length; y += 1) {
+          for (let x = 0; x < nextValues[y].length; x += 1) {
+            checkCell(x, y);
+          }
+        }
+      }
+
+      if (hits > 0) {
+        showToast(
+          `${operation}: ${hits} cells exceeded thresholds (max Δ ${maxAbs.toFixed(2)}, ${maxPct.toFixed(1)}%)`,
+          'warning'
+        );
+      }
+    },
+    [alertLargeChangeEnabled, alertLargeChangeAbs, alertLargeChangePercent, showToast]
   );
 
   useEffect(() => {
@@ -356,13 +448,23 @@ export default function TableEditor2D({
     }
   };
 
-  const handleCellChange = (x: number, y: number, value: number) => {
+  const handleCellChange = (
+    x: number,
+    y: number,
+    value: number,
+    options?: { suppressAlert?: boolean; operation?: string }
+  ) => {
+    const prevValue = localZValues[y][x];
     const newValues = [...localZValues];
     newValues[y][x] = value;
     setLocalZValues(newValues);
     setSelectedCells(new Set([`${x},${y}`]));
     setCanUndo(true);
     onValuesChange?.(newValues);
+
+    if (!options?.suppressAlert) {
+      warnIfLargeChange(prevValue, value, options?.operation ?? 'Cell edit');
+    }
   };
 
   const handleAxisChange = (axis: 'x' | 'y', index: number, value: number) => {
@@ -387,6 +489,8 @@ export default function TableEditor2D({
 
     const avgValue = values.reduce((sum, v) => sum + v.value, 0) / values.length;
 
+    const previousValues = localZValues.map((row) => [...row]);
+
     try {
       const result = await invoke<TableOperationResult>('set_cells_equal', {
         table_name,
@@ -397,6 +501,7 @@ export default function TableEditor2D({
         setLocalZValues(result.z_values);
         onValuesChange?.(result.z_values);
         setCanUndo(true);
+        warnIfLargeChangeBatch(previousValues, result.z_values, selectedCellsCoords, 'Set equal');
       }
     } catch (err) {
       handleOperationError('Set equal', err);
@@ -433,7 +538,7 @@ export default function TableEditor2D({
     });
     
     values.forEach(({ x, y, value }) => {
-      handleCellChange(x, y, value * (1 + amount));
+      handleCellChange(x, y, value * (1 + amount), { suppressAlert: true });
     });
   };
 
@@ -444,11 +549,12 @@ export default function TableEditor2D({
     });
     
     values.forEach(({ x, y, value }) => {
-      handleCellChange(x, y, value * (1 - amount));
+      handleCellChange(x, y, value * (1 - amount), { suppressAlert: true });
     });
   };
 
   const handleScale = async (factor: number) => {
+    const previousValues = localZValues.map((row) => [...row]);
     try {
       const result = await invoke<TableOperationResult>('scale_cells', {
         table_name,
@@ -459,6 +565,7 @@ export default function TableEditor2D({
         setLocalZValues(result.z_values);
         onValuesChange?.(result.z_values);
         setCanUndo(true);
+        warnIfLargeChangeBatch(previousValues, result.z_values, selectedCellsCoords, 'Scale');
       }
     } catch (err) {
       handleOperationError('Scale', err);
@@ -466,6 +573,7 @@ export default function TableEditor2D({
   };
 
   const handleSmooth = async () => {
+    const previousValues = localZValues.map((row) => [...row]);
     try {
       const result = await invoke<TableOperationResult>('smooth_table', {
         table_name,
@@ -476,6 +584,7 @@ export default function TableEditor2D({
         setLocalZValues(result.z_values);
         onValuesChange?.(result.z_values);
         setCanUndo(true);
+        warnIfLargeChangeBatch(previousValues, result.z_values, selectedCellsCoords, 'Smooth');
       }
     } catch (err) {
       handleOperationError('Smooth', err);
@@ -483,6 +592,7 @@ export default function TableEditor2D({
   };
 
   const handleInterpolate = async () => {
+    const previousValues = localZValues.map((row) => [...row]);
     try {
       const result = await invoke<TableOperationResult>('interpolate_cells', {
         table_name,
@@ -492,6 +602,7 @@ export default function TableEditor2D({
         setLocalZValues(result.z_values);
         onValuesChange?.(result.z_values);
         setCanUndo(true);
+        warnIfLargeChangeBatch(previousValues, result.z_values, selectedCellsCoords, 'Interpolate');
       }
     } catch (err) {
       handleOperationError('Interpolate', err);
@@ -500,7 +611,9 @@ export default function TableEditor2D({
 
   const handleRebin = async (newXBins: number[], newYBins: number[], interpolateZ: boolean) => {
     setRebinDialog({ show: false, newXBins, newYBins });
-    
+
+    const previousValues = localZValues.map((row) => [...row]);
+
     try {
       const result = await invoke<TableOperationResult>('rebin_table', {
         table_name,
@@ -513,6 +626,7 @@ export default function TableEditor2D({
         onValuesChange?.(result.z_values);
         setCanUndo(true);
         setSelectedCells(new Set());
+        warnIfLargeChangeBatch(previousValues, result.z_values, null, 'Rebin');
       }
     } catch (err) {
       handleOperationError('Rebin', err);
@@ -520,7 +634,7 @@ export default function TableEditor2D({
   };
 
   const handleCellEditApply = (value: number) => {
-    handleCellChange(cellEditDialog.col, cellEditDialog.row, value);
+    handleCellChange(cellEditDialog.col, cellEditDialog.row, value, { operation: 'Cell edit' });
   };
 
   const handleCellDoubleClick = (x: number, y: number) => {
@@ -547,7 +661,7 @@ export default function TableEditor2D({
       if (x >= 0 && x < x_bins.length && y >= 0 && y < y_bins.length) {
         const targetKey = `${x},${y}`;
         if (!lockedCells.has(targetKey)) {
-          handleCellChange(x, y, localZValues[y][x]);
+          handleCellChange(x, y, localZValues[y][x], { suppressAlert: true });
         }
       }
     });

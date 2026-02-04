@@ -48,6 +48,28 @@ libretune/
 └── scripts/                 # Development helper scripts
 ```
 
+## Lua Scripting Feature
+
+LibreTune includes sandboxed Lua 5.4 scripting for advanced automation. The build uses **vendored Lua**, which means:
+
+- ✅ No system Lua installation required
+- ✅ Works consistently across Windows, macOS, and Linux
+- ✅ First build takes ~30-60 seconds (Lua C code compiled), subsequent builds use cache
+
+**Optional**: To use system Lua instead (faster rebuilds if already installed):
+```bash
+# Ubuntu/Debian
+sudo apt-get install liblua5.4-dev
+
+# macOS
+brew install lua@5.4
+
+# Fedora/RHEL
+sudo dnf install lua-devel
+```
+
+For details on Lua scripting implementation, see [Technical Reference: Lua Scripting](./docs/src/technical/lua-scripting.md).
+
 ## Development Commands
 
 ### Pre-Push Testing (Recommended)

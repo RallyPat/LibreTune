@@ -1,0 +1,77 @@
+.lua-console {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  height: 100%;
+  padding: 16px;
+  background: var(--bg-surface, #1b1f27);
+  color: var(--text-primary, #e6e8ec);
+}
+
+.lua-console-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.lua-console-title {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.lua-console-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.lua-btn {
+  padding: 6px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border-default, rgba(255, 255, 255, 0.2));
+  background: var(--bg-elevated, rgba(255, 255, 255, 0.08));
+  color: inherit;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.lua-btn.secondary {
+  opacity: 0.75;
+}
+
+.lua-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.lua-console-editor {
+  flex: 0 0 200px;
+  width: 100%;
+  padding: 12px;
+  background: var(--bg-input, rgba(0, 0, 0, 0.3));
+  border: 1px solid var(--border-default, rgba(255, 255, 255, 0.15));
+  border-radius: 8px;
+  color: inherit;
+  font-family: "Fira Code", "SFMono-Regular", Consolas, monospace;
+  font-size: 13px;
+  resize: vertical;
+}
+
+.lua-console-output {
+  flex: 1;
+  padding: 12px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--border-default, rgba(255, 255, 255, 0.12));
+  overflow: auto;
+}
+
+.lua-console-empty {
+  color: var(--text-muted, #9aa3af);
+  font-size: 12px;
+}
+
+.lua-console-line {
+  font-family: "Fira Code", "SFMono-Regular", Consolas, monospace;
+  font-size: 12px;
+  padding: 2px 0;
+}

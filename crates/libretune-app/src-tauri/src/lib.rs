@@ -15,13 +15,14 @@ use libretune_core::ini::{
     AdaptiveTimingConfig, CommandPart, Constant, DataType, DialogDefinition, EcuDefinition,
     Endianness, HelpTopic, Menu, MenuItem, ProtocolSettings,
 };
+use libretune_core::lua::{execute_script, LuaExecutionResult};
 use libretune_core::plugin::{
     ControllerBridge, PluginEvent, PluginInfo, PluginManager, SwingComponent,
 };
 use libretune_core::project::{
-    BranchInfo, CommitDiff, CommitInfo, ConnectionSettings, IniRepository, IniSource,
-    OnlineIniEntry, OnlineIniRepository, Project, ProjectConfig, ProjectSettings, ProjectTemplate,
-    TemplateManager, VersionControl,
+    format_commit_message, BranchInfo, CommitDiff, CommitInfo, ConnectionSettings, IniRepository,
+    IniSource, OnlineIniEntry, OnlineIniRepository, Project, ProjectConfig, ProjectSettings,
+    ProjectTemplate, TemplateManager, VersionControl,
 };
 use libretune_core::protocol::serial::list_ports;
 use libretune_core::protocol::{Connection, ConnectionConfig, ConnectionState};
@@ -556,6 +557,14 @@ struct Settings {
     key_on_threshold_rpm: f64, // RPM threshold to detect key-on (default 100)
     #[serde(default = "default_key_off_timeout")]
     key_off_timeout_sec: u32, // Seconds of zero RPM to detect key-off (default 2)
+
+    // Alert rules settings
+    #[serde(default = "default_true")]
+    alert_large_change_enabled: bool, // Warn when a cell change exceeds thresholds
+    #[serde(default = "default_alert_large_change_abs")]
+    alert_large_change_abs: f64, // Absolute change threshold
+    #[serde(default = "default_alert_large_change_percent")]
+    alert_large_change_percent: f64, // Percent change threshold
 }
 
 fn default_runtime_packet_mode() -> String {
@@ -580,6 +589,14 @@ fn default_key_on_rpm() -> f64 {
 
 fn default_key_off_timeout() -> u32 {
     2
+}
+
+fn default_alert_large_change_abs() -> f64 {
+    5.0
+}
+
+fn default_alert_large_change_percent() -> f64 {
+    10.0
 }
 
 fn default_auto_commit() -> String {
@@ -10450,6 +10467,7 @@ struct CommitInfoResponse {
     sha_short: String,
     sha: String,
     message: String,
+    annotation: Option<String>,
     author: String,
     timestamp: String,
     is_head: bool,
@@ -10461,6 +10479,7 @@ impl From<CommitInfo> for CommitInfoResponse {
             sha_short: info.sha_short,
             sha: info.sha,
             message: info.message,
+            annotation: info.annotation,
             author: info.author,
             timestamp: info.timestamp,
             is_head: info.is_head,
@@ -10521,6 +10540,7 @@ async fn git_commit(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
     message: Option<String>,
+    annotation: Option<String>,
 ) -> Result<String, String> {
     let proj_guard = state.current_project.lock().await;
     let project = proj_guard
@@ -10539,6 +10559,8 @@ async fn git_commit(
             .replace("{date}", &now.format("%Y-%m-%d").to_string())
             .replace("{time}", &now.format("%H:%M:%S").to_string())
     });
+
+    let commit_message = format_commit_message(&commit_message, annotation.as_deref());
 
     let sha = vc
         .commit(&commit_message)
@@ -11839,6 +11861,16 @@ async fn update_setting(app: tauri::AppHandle, key: String, value: String) -> Re
         "show_all_help_icons" => {
             settings.show_all_help_icons = value.parse().map_err(|_| "Invalid boolean value")?
         }
+        // Alert rules settings
+        "alert_large_change_enabled" => {
+            settings.alert_large_change_enabled = value.parse().map_err(|_| "Invalid boolean value")?
+        }
+        "alert_large_change_abs" => {
+            settings.alert_large_change_abs = value.parse().map_err(|_| "Invalid number value")?
+        }
+        "alert_large_change_percent" => {
+            settings.alert_large_change_percent = value.parse().map_err(|_| "Invalid number value")?
+        }
         "runtime_packet_mode" => {
             // Accept any string; UI should validate. Store as-is.
             settings.runtime_packet_mode = value;
@@ -11849,6 +11881,12 @@ async fn update_setting(app: tauri::AppHandle, key: String, value: String) -> Re
     save_settings(&app, &settings);
     let _ = app.emit("settings:changed", key.clone());
     Ok(())
+}
+
+/// Execute a Lua script in the sandboxed runtime
+#[tauri::command]
+async fn run_lua_script(script: String) -> Result<LuaExecutionResult, String> {
+    execute_script(&script)
 }
 
 /// Update custom heatmap color stops for a context
@@ -12421,6 +12459,7 @@ pub fn run() {
             update_setting,
             update_heatmap_custom_stops,
             update_constant_string,
+            run_lua_script,
             // Plugin commands
             check_jre,
             load_plugin,

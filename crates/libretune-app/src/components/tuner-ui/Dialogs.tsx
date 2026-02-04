@@ -494,6 +494,11 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
   const [autoRecordEnabled, setAutoRecordEnabled] = useState(false);
   const [keyOnThresholdRpm, setKeyOnThresholdRpm] = useState(100);
   const [keyOffTimeoutSec, setKeyOffTimeoutSec] = useState(2);
+
+  // Alert rules settings
+  const [alertLargeChangeEnabled, setAlertLargeChangeEnabled] = useState(true);
+  const [alertLargeChangeAbs, setAlertLargeChangeAbs] = useState(5);
+  const [alertLargeChangePercent, setAlertLargeChangePercent] = useState(10);
   
   // Project-specific settings
   const [autoConnect, setAutoConnect] = useState(false);
@@ -535,6 +540,10 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
         if (settings.auto_record_enabled !== undefined) setAutoRecordEnabled(!!settings.auto_record_enabled);
         if (settings.key_on_threshold_rpm !== undefined) setKeyOnThresholdRpm(settings.key_on_threshold_rpm);
         if (settings.key_off_timeout_sec !== undefined) setKeyOffTimeoutSec(settings.key_off_timeout_sec);
+        // Alert rules settings
+        if (settings.alert_large_change_enabled !== undefined) setAlertLargeChangeEnabled(!!settings.alert_large_change_enabled);
+        if (settings.alert_large_change_abs !== undefined) setAlertLargeChangeAbs(settings.alert_large_change_abs);
+        if (settings.alert_large_change_percent !== undefined) setAlertLargeChangePercent(settings.alert_large_change_percent);
       }).catch(console.error);
 
       // Load project-specific settings
@@ -655,6 +664,10 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
     await invoke('update_setting', { key: 'auto_record_enabled', value: autoRecordEnabled.toString() });
     await invoke('update_setting', { key: 'key_on_threshold_rpm', value: keyOnThresholdRpm.toString() });
     await invoke('update_setting', { key: 'key_off_timeout_sec', value: keyOffTimeoutSec.toString() });
+    // Update alert rules settings
+    await invoke('update_setting', { key: 'alert_large_change_enabled', value: alertLargeChangeEnabled.toString() });
+    await invoke('update_setting', { key: 'alert_large_change_abs', value: alertLargeChangeAbs.toString() });
+    await invoke('update_setting', { key: 'alert_large_change_percent', value: alertLargeChangePercent.toString() });
     
     // Update project-specific settings
     if (currentProject) {
@@ -667,7 +680,7 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
     
     onSettingsChange?.({ units: localUnits, autoBurnOnClose, indicatorColumnCount, indicatorFillEmpty, indicatorTextFit, statusBarChannels, runtimePacketMode, autoSyncGaugeRanges });
     onClose();
-  }, [localTheme, localUnits, autoBurnOnClose, statusBarChannels, indicatorColumnCount, indicatorFillEmpty, indicatorTextFit, heatmapValueScheme, heatmapChangeScheme, heatmapCoverageScheme, gaugeSnapToGrid, gaugeFreeMove, gaugeLock, autoSyncGaugeRanges, autoCommitOnSave, commitMessageFormat, runtimePacketMode, autoReconnectAfterControllerCommand, autoRecordEnabled, keyOnThresholdRpm, keyOffTimeoutSec, autoConnect, currentProject, onThemeChange, onSettingsChange, onClose]);
+  }, [localTheme, localUnits, autoBurnOnClose, statusBarChannels, indicatorColumnCount, indicatorFillEmpty, indicatorTextFit, heatmapValueScheme, heatmapChangeScheme, heatmapCoverageScheme, gaugeSnapToGrid, gaugeFreeMove, gaugeLock, autoSyncGaugeRanges, autoCommitOnSave, commitMessageFormat, runtimePacketMode, autoReconnectAfterControllerCommand, autoRecordEnabled, keyOnThresholdRpm, keyOffTimeoutSec, alertLargeChangeEnabled, alertLargeChangeAbs, alertLargeChangePercent, autoConnect, currentProject, onThemeChange, onSettingsChange, onClose]);
 
   if (!isOpen) return null;
 
@@ -1165,6 +1178,44 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
               <span>10 sec</span>
             </div>
             <span className="dialog-form-note">Time to wait below threshold before stopping recording; prevents multiple stop/start cycles during brief RPM dips</span>
+          </div>
+
+          <h3 style={{ marginTop: '1.5rem', marginBottom: '0.5rem' }}>Alert Rules</h3>
+
+          <div className="dialog-form-group">
+            <label>
+              <input
+                type="checkbox"
+                checked={alertLargeChangeEnabled}
+                onChange={(e) => setAlertLargeChangeEnabled(e.target.checked)}
+              />
+              Warn on large table changes
+            </label>
+            <span className="dialog-form-note">Shows a warning when changes exceed thresholds</span>
+          </div>
+
+          <div className="dialog-form-group">
+            <label>Absolute Change Threshold</label>
+            <input
+              type="number"
+              min="0"
+              step="0.1"
+              value={alertLargeChangeAbs}
+              onChange={(e) => setAlertLargeChangeAbs(Number(e.target.value))}
+            />
+            <span className="dialog-form-note">Warn if a cell changes by more than this amount</span>
+          </div>
+
+          <div className="dialog-form-group">
+            <label>Percent Change Threshold (%)</label>
+            <input
+              type="number"
+              min="0"
+              step="1"
+              value={alertLargeChangePercent}
+              onChange={(e) => setAlertLargeChangePercent(Number(e.target.value))}
+            />
+            <span className="dialog-form-note">Warn if a cell changes by more than this percent</span>
           </div>
         </div>
         

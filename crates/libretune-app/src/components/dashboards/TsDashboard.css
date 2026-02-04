@@ -221,6 +221,7 @@
   justify-content: center;
   overflow: hidden;
   padding: 8px;
+  min-height: 0; /* Allow flex to shrink below content size */
 }
 
 /* Dashboard container - centers dashboard and handles scaling */
@@ -378,6 +379,65 @@
 .ts-dashboard-action-btn.danger:hover {
   background: rgba(255, 107, 107, 0.15);
   border-color: rgba(255, 107, 107, 0.5);
+}
+
+.ts-dashboard-action-btn.warn {
+  color: #fbbf24;
+  border-color: rgba(251, 191, 36, 0.3);
+}
+
+.ts-dashboard-action-btn.warn:hover {
+  background: rgba(251, 191, 36, 0.15);
+  border-color: rgba(251, 191, 36, 0.5);
+}
+
+.ts-dashboard-validation {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+  padding: 10px 16px;
+  font-size: 12px;
+  color: var(--text-color, #fff);
+  flex-shrink: 0; /* Don't shrink validation panel */
+  max-height: 120px; /* Compact height - issues accessible via scrolling */
+  overflow-y: auto; /* Make scrollable if content exceeds max-height */
+  display: flex;
+  flex-direction: column;
+}
+
+.ts-dashboard-validation-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+  flex-shrink: 0; /* Keep header visible */
+}
+
+.ts-dashboard-validation-body {
+  display: grid;
+  gap: 12px;
+  overflow-y: auto; /* Scroll if too many items */
+}
+
+.ts-dashboard-validation-section h4 {
+  margin: 0 0 6px;
+  font-size: 12px;
+  color: var(--text-muted, #cbd5f5);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.ts-dashboard-validation-section ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.ts-dashboard-validation-section li {
+  margin-bottom: 4px;
+}
+
+.ts-dashboard-validation-empty {
+  color: var(--text-muted, #cbd5f5);
 }
 
 /* Management dialogs */

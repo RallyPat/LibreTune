@@ -30,6 +30,7 @@ import ConnectionMetrics from './components/layout/ConnectionMetrics';
 import TsDashboard from "./components/dashboards/TsDashboard";
 import { ToothLoggerView, CompositeLoggerView } from "./components/diagnostics";
 import { EcuConsole } from "./components/console/EcuConsole";
+import { LuaConsole } from "./components/console/LuaConsole";
 import DialogRenderer, { DialogDefinition as RendererDialogDef } from "./components/dialogs/DialogRenderer";
 import CurveEditor, { CurveData, SimpleGaugeInfo } from "./components/curves/CurveEditor";
 import HelpViewer, { HelpTopicData } from "./components/dialogs/HelpViewer";
@@ -202,7 +203,7 @@ interface PortEditorConfig {
 
 // Tab content types
 interface TabContent {
-  type: "dashboard" | "table" | "curve" | "dialog" | "portEditor" | "settings" | "project" | "autotune" | "datalog" | "tooth-logger" | "composite-logger" | "console";
+  type: "dashboard" | "table" | "curve" | "dialog" | "portEditor" | "settings" | "project" | "autotune" | "datalog" | "tooth-logger" | "composite-logger" | "console" | "lua-console";
   data?: TunerTableData | RendererDialogDef | PortEditorConfig | CurveData | string;
   gauge?: SimpleGaugeInfo | null; // For curve tabs with associated gauges
   /** Search term to highlight within the content (e.g., matching field labels in dialogs) */
@@ -1343,6 +1344,14 @@ function AppContent() {
         return;
       }
 
+      if (name === "lua-console") {
+        const newTab: Tab = { id: "lua-console", title: "Lua Console", icon: "terminal" };
+        setTabs([...tabs, newTab]);
+        setTabContents({ ...tabContents, "lua-console": { type: "lua-console" } });
+        setActiveTabId("lua-console");
+        return;
+      }
+
       // Try table first
       let tableErr: unknown = null;
       try {
@@ -1851,6 +1860,7 @@ function AppContent() {
         { id: "tooth-logger", label: "&Tooth Logger", onClick: () => openTarget("tooth-logger", "Tooth Logger"), disabled: !currentProject },
         { id: "composite-logger", label: "&Composite Logger", onClick: () => openTarget("composite-logger", "Composite Logger"), disabled: !currentProject },
         { id: "console", label: "&ECU Console", onClick: () => openTarget("console", `Console - ${ecuType}`), disabled: !currentProject || status.state !== "Connected" || !ecuType.includes("RusEFI") && !ecuType.includes("FOME") && !ecuType.includes("EpicEFI") },
+        { id: "lua-console", label: "&Lua Console", onClick: () => openTarget("lua-console", "Lua Console"), disabled: !currentProject },
         { id: "sep2", label: "", separator: true },
         { id: "compare-tables", label: "Table &Comparison", onClick: () => setTableComparisonOpen(true), disabled: !currentProject },
         { id: "performance", label: "&Performance Calculator", onClick: () => setPerformanceDialogOpen(true), disabled: !currentProject },
@@ -2219,6 +2229,8 @@ function AppContent() {
         return <CompositeLoggerView onClose={() => handleTabClose("composite-logger")} />;
       case "console":
         return <EcuConsole ecuType={ecuType} isConnected={status.state === "Connected"} />;
+      case "lua-console":
+        return <LuaConsole />;
       default:
         return null;
     }

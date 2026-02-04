@@ -253,6 +253,15 @@ check_webkit_packages() {
 install_webkit_apt() {
   log_info "Detected Debian/Ubuntu-based system"
 
+  # Install Lua 5.4 development libraries (optional but recommended)
+  # Note: libretune-core uses vendored Lua by default, so this is optional
+  log_info "Installing Lua 5.4 development libraries (optional)..."
+  if sudo apt-get install -y liblua5.4-dev 2>/dev/null; then
+    log_success "Lua 5.4 dev libraries installed"
+  else
+    log_warning "Could not install Lua 5.4 (vendored Lua will be used in builds)"
+  fi
+
   # Try to find available webkit2gtk package with automatic retry
   WEBKIT_PKG=""
 

@@ -32,6 +32,9 @@ crc32fast = { workspace = true }
 # Date/time
 chrono = { workspace = true }
 
+# UUID generation
+uuid = { workspace = true }
+
 # Random number generation (for demo mode)
 rand = { workspace = true }
 
@@ -48,6 +51,9 @@ evalexpr = "11.3"
 quick-xml = { version = "0.37", features = ["serialize"] }
 base64 = "0.22"
 
+# Lua scripting engine (sandboxed)
+mlua = { version = "0.10", features = ["lua54", "vendored"] }
+
 # Directory paths
 dirs = "5.0"
 libc = "0.2.178"
@@ -57,6 +63,9 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 
 # Git integration for tune versioning (using vendored libgit2 + bundled SSL)
 git2 = { version = "0.19", default-features = false, features = ["vendored-libgit2"] }
+
+# WebAssembly runtime for plugin system
+wasmtime = { workspace = true }
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }

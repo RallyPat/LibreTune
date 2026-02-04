@@ -39,6 +39,7 @@
 // Temporarily allow missing documentation to keep CI green while we add docs.
 #![allow(missing_docs)]
 
+pub mod action_scripting;
 pub mod autotune;
 pub mod dash;
 pub mod dashboard;
@@ -46,7 +47,11 @@ pub mod datalog;
 pub mod demo;
 pub mod ecu;
 pub mod ini;
+pub mod lua;
 pub mod plugin;
+pub mod plugin_api;
+pub mod plugin_system;
+pub mod port_editor;
 pub mod project;
 pub mod protocol;
 pub mod table_ops;

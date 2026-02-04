@@ -1546,7 +1546,7 @@ mod tests {
 
     #[test]
     fn test_adaptive_switch_to_och() {
-        let mut cfg = ConnectionConfig::default();
+        let cfg = ConnectionConfig::default();
         let mut conn = Connection::new(cfg);
         let mut proto = ProtocolSettings::default();
         proto.och_get_command = Some("O".to_string());

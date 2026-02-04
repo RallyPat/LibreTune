@@ -94,6 +94,11 @@
             "title": "Creating Dashboards",
             "path": "features/dashboards/creating",
             "children": []
+          },
+          {
+            "title": "Dashboard Validation",
+            "path": "features/dashboards/validation",
+            "children": []
           }
         ]
       },
@@ -103,8 +108,28 @@
         "children": []
       },
       {
+        "title": "Smart Recording",
+        "path": "features/smart-recording",
+        "children": []
+      },
+      {
         "title": "Data Statistics",
         "path": "features/data-statistics",
+        "children": []
+      },
+      {
+        "title": "Alert Rules",
+        "path": "features/alert-rules",
+        "children": []
+      },
+      {
+        "title": "Lua Scripting",
+        "path": "features/lua-scripting",
+        "children": []
+      },
+      {
+        "title": "Performance Calculator",
+        "path": "features/performance-calculator",
         "children": []
       },
       {
@@ -131,6 +156,11 @@
       {
         "title": "Version Control",
         "path": "projects/version-control",
+        "children": []
+      },
+      {
+        "title": "Change Annotations",
+        "path": "projects/change-annotations",
         "children": []
       },
       {
@@ -167,6 +197,47 @@
       {
         "title": "Troubleshooting",
         "path": "reference/troubleshooting",
+        "children": []
+      }
+    ]
+  },
+  {
+    "title": "Technical Reference",
+    "path": "technical/README",
+    "children": [
+      {
+        "title": "Overview",
+        "path": "technical/README",
+        "children": []
+      },
+      {
+        "title": "AutoTune Algorithm",
+        "path": "technical/autotune-algorithm",
+        "children": []
+      },
+      {
+        "title": "Table Operations",
+        "path": "technical/table-operations",
+        "children": []
+      },
+      {
+        "title": "INI Parser",
+        "path": "technical/ini-parser",
+        "children": []
+      },
+      {
+        "title": "ECU Protocol",
+        "path": "technical/ecu-protocol",
+        "children": []
+      },
+      {
+        "title": "Version Control",
+        "path": "technical/version-control",
+        "children": []
+      },
+      {
+        "title": "Lua Scripting",
+        "path": "technical/lua-scripting",
         "children": []
       }
     ]
