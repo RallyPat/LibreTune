@@ -198,6 +198,11 @@
         "title": "Troubleshooting",
         "path": "reference/troubleshooting",
         "children": []
+      },
+      {
+        "title": "Java → WASM Migration",
+        "path": "reference/java-to-wasm-migration",
+        "children": []
       }
     ]
   },

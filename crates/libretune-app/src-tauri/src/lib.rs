@@ -16,8 +16,9 @@ use libretune_core::ini::{
     Endianness, HelpTopic, Menu, MenuItem, ProtocolSettings,
 };
 use libretune_core::lua::{execute_script, LuaExecutionResult};
-use libretune_core::plugin::{
-    ControllerBridge, PluginEvent, PluginInfo, PluginManager, SwingComponent,
+use libretune_core::plugin_system::{
+    PluginConfig as WasmPluginConfig, PluginManager as WasmPluginManager,
+    PluginManifest as WasmPluginManifest,
 };
 use libretune_core::project::{
     format_commit_message, BranchInfo, CommitDiff, CommitInfo, ConnectionSettings, IniRepository,
@@ -356,10 +357,8 @@ struct AppState {
     tune_cache: Mutex<Option<TuneCache>>,
     // Demo mode - simulates a running vehicle for UI testing
     demo_mode: Mutex<bool>,
-    // TS-compatible plugin manager (lazily initialized when plugins are loaded)
-    plugin_manager: Mutex<Option<std::sync::Arc<PluginManager>>>,
-    // Controller bridge for plugin ECU access (shared with plugin_manager)
-    controller_bridge: Mutex<Option<std::sync::Arc<ControllerBridge>>>,
+    // WASM plugin manager
+    wasm_plugin_manager: Mutex<Option<WasmPluginManager>>,
     // Migration report when loading a tune from a different INI version
     migration_report: Mutex<Option<MigrationReport>>,
     // Cached output channels to avoid repeated cloning in realtime streaming loop
@@ -3316,11 +3315,6 @@ async fn start_realtime_stream(
 
                     // Feed data to AutoTune if running
                     feed_autotune_data(&app_state, &data, current_time_ms).await;
-
-                    // Forward realtime data to plugin bridge for TS-compatible plugins
-                    if let Some(ref bridge) = *app_state.controller_bridge.lock().await {
-                        bridge.update_realtime(data);
-                    }
                 }
             } else {
                 // Real ECU mode: read from connection
@@ -3414,18 +3408,6 @@ async fn start_realtime_stream(
 
                         // Feed data to AutoTune if running
                         feed_autotune_data(&app_state, &data, current_time_ms).await;
-
-                        // Forward realtime data to plugin bridge for TS-compatible plugins (only if bridge exists)
-                        // Check if bridge exists before locking to avoid unnecessary mutex contention
-                        let has_bridge = {
-                            let bridge_guard = app_state.controller_bridge.lock().await;
-                            bridge_guard.is_some()
-                        };
-                        if has_bridge {
-                            if let Some(ref bridge) = *app_state.controller_bridge.lock().await {
-                                bridge.update_realtime(data);
-                            }
-                        }
                     }
                     (Err(e), _) => {
                         let _ = app_handle.emit("realtime:error", &e);
@@ -11354,8 +11336,8 @@ mod demo_mode_tests {
             rpm_state_tracker: Mutex::new(RpmStateTracker::new()),
             // Background task for connection metrics emission (added recently)
             metrics_task: Mutex::new(None),
-            plugin_manager: Mutex::new(None),
-            controller_bridge: Mutex::new(None),
+            wasm_plugin_manager: Mutex::new(None),
+
             migration_report: Mutex::new(None),
             cached_output_channels: Mutex::new(None),
             connection_factory: Mutex::new(None),
@@ -11423,8 +11405,8 @@ mod concurrency_tests {
             demo_mode: Mutex::new(false),
             console_history: Mutex::new(Vec::new()),
             rpm_state_tracker: Mutex::new(RpmStateTracker::new()),
-            plugin_manager: Mutex::new(None),
-            controller_bridge: Mutex::new(None),
+            wasm_plugin_manager: Mutex::new(None),
+
             migration_report: Mutex::new(None),
             cached_output_channels: Mutex::new(None),
             connection_factory: Mutex::new(None),
@@ -11567,8 +11549,8 @@ signature = "Speeduino 2023-04"
             demo_mode: Mutex::new(false),
             console_history: Mutex::new(Vec::new()),
             rpm_state_tracker: Mutex::new(RpmStateTracker::new()),
-            plugin_manager: Mutex::new(None),
-            controller_bridge: Mutex::new(None),
+            wasm_plugin_manager: Mutex::new(None),
+
             migration_report: Mutex::new(None),
             cached_output_channels: Mutex::new(None),
             connection_factory: Mutex::new(None),
@@ -11631,8 +11613,8 @@ signature = "Speeduino 2023-04"
             demo_mode: Mutex::new(false),
             console_history: Mutex::new(Vec::new()),
             rpm_state_tracker: Mutex::new(RpmStateTracker::new()),
-            plugin_manager: Mutex::new(None),
-            controller_bridge: Mutex::new(None),
+            wasm_plugin_manager: Mutex::new(None),
+
             migration_report: Mutex::new(None),
             cached_output_channels: Mutex::new(None),
             connection_factory: Mutex::new(None),
@@ -11698,8 +11680,8 @@ signature = "Speeduino 2023-04"
             demo_mode: Mutex::new(false),
             console_history: Mutex::new(Vec::new()),
             rpm_state_tracker: Mutex::new(RpmStateTracker::new()),
-            plugin_manager: Mutex::new(None),
-            controller_bridge: Mutex::new(None),
+            wasm_plugin_manager: Mutex::new(None),
+
             migration_report: Mutex::new(None),
             cached_output_channels: Mutex::new(None),
             connection_factory: Mutex::new(None),
@@ -11777,8 +11759,8 @@ signature = "Speeduino 2023-04"
             demo_mode: Mutex::new(false),
             console_history: Mutex::new(Vec::new()),
             rpm_state_tracker: Mutex::new(RpmStateTracker::new()),
-            plugin_manager: Mutex::new(None),
-            controller_bridge: Mutex::new(None),
+            wasm_plugin_manager: Mutex::new(None),
+
             migration_report: Mutex::new(None),
             cached_output_channels: Mutex::new(None),
             connection_factory: Mutex::new(None),
@@ -11938,265 +11920,145 @@ async fn update_constant_string(
 }
 
 // ============================================================================
-// Plugin Commands
+// WASM Plugin Commands
 // ============================================================================
 
-/// Find Java binary, checking JAVA_HOME, PATH, and common locations
-fn find_java_binary() -> Result<PathBuf, String> {
-    // 1. Check JAVA_HOME environment variable
-    if let Ok(java_home) = std::env::var("JAVA_HOME") {
-        let java_path = PathBuf::from(&java_home).join("bin").join("java");
-        if java_path.exists() {
-            return Ok(java_path);
-        }
-    }
-
-    // 2. Check PATH using which/where command
-    #[cfg(target_os = "windows")]
-    let which_cmd = "where";
-    #[cfg(not(target_os = "windows"))]
-    let which_cmd = "which";
-
-    if let Ok(output) = std::process::Command::new(which_cmd).arg("java").output() {
-        if output.status.success() {
-            let path_str = String::from_utf8_lossy(&output.stdout);
-            let path = PathBuf::from(path_str.trim());
-            if path.exists() {
-                return Ok(path);
-            }
-        }
-    }
-
-    // 3. Check common installation locations
-    let common_locations = if cfg!(target_os = "windows") {
-        vec![
-            "C:\\Program Files\\Java\\jdk-17\\bin\\java.exe",
-            "C:\\Program Files\\Java\\jdk-11\\bin\\java.exe",
-            "C:\\Program Files\\Java\\jre-17\\bin\\java.exe",
-            "C:\\Program Files\\Java\\jre-11\\bin\\java.exe",
-        ]
-    } else if cfg!(target_os = "macos") {
-        vec![
-            "/usr/bin/java",
-            "/Library/Java/JavaVirtualMachines/temurin-17.jdk/Contents/Home/bin/java",
-            "/Library/Java/JavaVirtualMachines/temurin-11.jdk/Contents/Home/bin/java",
-        ]
-    } else {
-        vec![
-            "/usr/bin/java",
-            "/usr/lib/jvm/java-17-openjdk/bin/java",
-            "/usr/lib/jvm/java-11-openjdk/bin/java",
-        ]
-    };
-
-    for location in common_locations {
-        let path = PathBuf::from(location);
-        if path.exists() {
-            return Ok(path);
-        }
-    }
-
-    Err("Java not found. Please install JRE 11 or later and ensure JAVA_HOME is set or java is in PATH.".to_string())
+/// Serializable plugin info returned to the frontend.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct WasmPluginInfo {
+    name: String,
+    version: String,
+    description: String,
+    author: String,
+    state: String,
+    permissions: Vec<String>,
+    exec_count: u64,
 }
 
-/// Get the path to the bundled plugin-host.jar
-fn get_plugin_host_jar_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
-    // In development, use the source location
-    let dev_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("resources")
-        .join("plugin-host.jar");
-    if dev_path.exists() {
-        return Ok(dev_path);
-    }
-
-    // In production, use the bundled resources
-    let resource_path = app
-        .path()
-        .resource_dir()
-        .map_err(|e| format!("Failed to get resource dir: {}", e))?
-        .join("resources")
-        .join("plugin-host.jar");
-
-    if resource_path.exists() {
-        return Ok(resource_path);
-    }
-
-    Err(format!(
-        "plugin-host.jar not found. Checked:\n  {}\n  {}",
-        dev_path.display(),
-        resource_path.display()
-    ))
+/// Ensure the WASM plugin manager is initialized.
+fn ensure_wasm_plugin_manager(
+    _state: &AppState,
+) -> WasmPluginManager {
+    WasmPluginManager::new(WasmPluginConfig {
+        data_dir: String::new(),
+        ecu_type: String::from("Unknown"),
+        libretune_version: String::from(env!("CARGO_PKG_VERSION")),
+    })
 }
 
-/// Initialize the plugin manager lazily (called on first plugin load)
-async fn ensure_plugin_manager_initialized(
-    state: &AppState,
-    app: &tauri::AppHandle,
-) -> Result<std::sync::Arc<PluginManager>, String> {
-    let mut pm_guard = state.plugin_manager.lock().await;
-
-    // Already initialized?
-    if let Some(ref pm) = *pm_guard {
-        return Ok(pm.clone());
-    }
-
-    // Find Java binary
-    let _java_path = find_java_binary()?;
-
-    // Get plugin-host.jar path
-    let jar_path = get_plugin_host_jar_path(app)?;
-
-    // Create controller bridge with shared references to definition and tune
-    // For now, create with empty Arc<RwLock> - we'll update them when ECU connects
-    let definition = std::sync::Arc::new(std::sync::RwLock::new(None));
-    let tune = std::sync::Arc::new(std::sync::RwLock::new(None));
-    let bridge = std::sync::Arc::new(ControllerBridge::new(definition, tune));
-
-    // Store bridge for realtime data updates
-    *state.controller_bridge.lock().await = Some(bridge.clone());
-
-    // Create plugin manager
-    let pm = std::sync::Arc::new(PluginManager::new(jar_path, bridge));
-
-    // Start the JVM host
-    pm.start()
-        .map_err(|e| format!("Failed to start plugin host: {}", e))?;
-
-    // Store in state
-    *pm_guard = Some(pm.clone());
-
-    Ok(pm)
-}
-
-/// Check if Java Runtime Environment is available.
-///
-/// Searches for java in JAVA_HOME, PATH, and common installation locations.
-/// Required for loading TunerStudio-compatible plugins.
-///
-/// Returns: Java version string on success
-#[tauri::command]
-fn check_jre() -> Result<String, String> {
-    find_java_binary()?;
-
-    // Get version info
-    let output = std::process::Command::new("java")
-        .arg("-version")
-        .output()
-        .map_err(|e| format!("Failed to run java: {}", e))?;
-
-    // Java prints version to stderr
-    let version = String::from_utf8_lossy(&output.stderr);
-    if output.status.success() || version.contains("version") {
-        Ok(version.lines().next().unwrap_or("Unknown").to_string())
-    } else {
-        Err("Java not found. Please install JRE 11 or later.".to_string())
-    }
-}
-
-/// Load a TunerStudio-compatible plugin from a JAR file.
-///
-/// Starts the JVM if not already running, then loads the plugin.
-/// The plugin must implement the standard TS plugin interface.
+/// Load a WASM plugin from a .wasm file.
 ///
 /// # Arguments
-/// * `jar_path` - Path to the plugin JAR file
+/// * `path` - Path to the .wasm plugin file
+/// * `manifest_json` - JSON string with plugin manifest (name, version, description, author, permissions)
 ///
-/// Returns: PluginInfo with plugin metadata
+/// Returns: Plugin name on success
 #[tauri::command]
-async fn load_plugin(
-    jar_path: String,
+async fn load_wasm_plugin(
+    path: String,
+    manifest_json: String,
     state: tauri::State<'_, AppState>,
-    app: tauri::AppHandle,
-) -> Result<PluginInfo, String> {
-    // Validate JAR exists
-    let path = std::path::Path::new(&jar_path);
-    if !path.exists() {
-        return Err(format!("JAR file not found: {}", jar_path));
+) -> Result<String, String> {
+    let manifest: WasmPluginManifest = serde_json::from_str(&manifest_json)
+        .map_err(|e| format!("Invalid plugin manifest: {}", e))?;
+
+    let wasm_path = std::path::Path::new(&path);
+    if !wasm_path.exists() {
+        return Err(format!("WASM file not found: {}", path));
     }
 
-    if path.extension().map(|e| e.to_ascii_lowercase()) != Some("jar".into()) {
-        return Err("File must be a JAR file".to_string());
-    }
+    let mut pm_guard = state.wasm_plugin_manager.lock().await;
+    let pm = pm_guard.get_or_insert_with(|| ensure_wasm_plugin_manager(&state));
 
-    // Ensure plugin manager is initialized (starts JVM if needed)
-    let pm = ensure_plugin_manager_initialized(&state, &app).await?;
-
-    // Load the plugin via JVM host
-    let info = pm.load_plugin(path).await?;
-
-    Ok(info)
+    let name = pm.load_plugin(manifest, wasm_path)?;
+    Ok(name)
 }
 
-/// Unload a plugin and release its resources.
-///
-/// # Arguments
-/// * `plugin_id` - The unique identifier of the plugin to unload
-///
-/// Returns: Nothing on success
+/// Unload a WASM plugin by name.
 #[tauri::command]
-async fn unload_plugin(plugin_id: String, state: tauri::State<'_, AppState>) -> Result<(), String> {
-    let pm_guard = state.plugin_manager.lock().await;
-    let pm = pm_guard.as_ref().ok_or("Plugin manager not initialized")?;
-
-    pm.unload_plugin(&plugin_id).await?;
-
-    Ok(())
-}
-
-/// List all currently loaded plugins.
-///
-/// Returns: Vector of PluginInfo for each loaded plugin
-#[tauri::command]
-async fn list_plugins(state: tauri::State<'_, AppState>) -> Result<Vec<PluginInfo>, String> {
-    let pm_guard = state.plugin_manager.lock().await;
-
-    match pm_guard.as_ref() {
-        Some(pm) => Ok(pm.list_plugins()),
-        None => Ok(vec![]), // No plugins loaded yet
-    }
-}
-
-/// Get the UI component tree for a plugin.
-///
-/// Returns the Swing component hierarchy that represents the plugin's
-/// user interface, converted to a serializable format.
-///
-/// # Arguments
-/// * `plugin_id` - The unique identifier of the plugin
-///
-/// Returns: Optional SwingComponent tree
-#[tauri::command]
-async fn get_plugin_ui(
-    plugin_id: String,
-    state: tauri::State<'_, AppState>,
-) -> Result<Option<SwingComponent>, String> {
-    let pm_guard = state.plugin_manager.lock().await;
-    let pm = pm_guard.as_ref().ok_or("Plugin manager not initialized")?;
-
-    Ok(pm.get_plugin_ui(&plugin_id))
-}
-
-/// Send an event to a loaded plugin.
-///
-/// Forwards UI events (clicks, key presses, etc.) to the plugin.
-///
-/// # Arguments
-/// * `plugin_id` - The unique identifier of the plugin
-/// * `event` - The event to send
-///
-/// Returns: Nothing on success
-#[tauri::command]
-async fn send_plugin_event(
-    plugin_id: String,
-    event: PluginEvent,
+async fn unload_wasm_plugin(
+    name: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
-    let pm_guard = state.plugin_manager.lock().await;
+    let mut pm_guard = state.wasm_plugin_manager.lock().await;
+    let pm = pm_guard.as_mut().ok_or("Plugin manager not initialized")?;
+    pm.unload_plugin(&name)
+}
+
+/// List all loaded WASM plugins with their info.
+#[tauri::command]
+async fn list_wasm_plugins(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<WasmPluginInfo>, String> {
+    let pm_guard = state.wasm_plugin_manager.lock().await;
+
+    match pm_guard.as_ref() {
+        Some(pm) => {
+            let list = pm.list_plugins();
+            Ok(list.iter().map(|(name, stats)| {
+                // Try to get the manifest for additional info
+                let (version, description, author, permissions) = if let Some(plugin) = pm.get_plugin(name) {
+                    let m = plugin.manifest();
+                    (
+                        m.version.clone(),
+                        m.description.clone(),
+                        m.author.clone(),
+                        m.permissions.iter().map(|p| format!("{:?}", p)).collect(),
+                    )
+                } else {
+                    (String::new(), String::new(), String::new(), vec![])
+                };
+
+                WasmPluginInfo {
+                    name: name.clone(),
+                    version,
+                    description,
+                    author,
+                    state: format!("{:?}", stats.state),
+                    permissions,
+                    exec_count: stats.exec_count,
+                }
+            }).collect())
+        }
+        None => Ok(vec![]),
+    }
+}
+
+/// Execute a WASM plugin by name.
+#[tauri::command]
+async fn execute_wasm_plugin(
+    name: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<u64, String> {
+    let mut pm_guard = state.wasm_plugin_manager.lock().await;
+    let pm = pm_guard.as_mut().ok_or("Plugin manager not initialized")?;
+    pm.execute_plugin(&name)
+}
+
+/// Get info about a specific WASM plugin.
+#[tauri::command]
+async fn get_wasm_plugin_info(
+    name: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<WasmPluginInfo, String> {
+    let pm_guard = state.wasm_plugin_manager.lock().await;
     let pm = pm_guard.as_ref().ok_or("Plugin manager not initialized")?;
 
-    pm.send_plugin_event(&plugin_id, event).await?;
+    let plugin = pm.get_plugin(&name)
+        .ok_or_else(|| format!("Plugin '{}' not found", name))?;
 
-    Ok(())
+    let stats = plugin.stats();
+    let manifest = plugin.manifest();
+
+    Ok(WasmPluginInfo {
+        name: manifest.name.clone(),
+        version: manifest.version.clone(),
+        description: manifest.description.clone(),
+        author: manifest.author.clone(),
+        state: format!("{:?}", stats.state),
+        permissions: manifest.permissions.iter().map(|p| format!("{:?}", p)).collect(),
+        exec_count: stats.exec_count,
+    })
 }
 
 /// Use the project's saved tune file, discarding any ECU data.
@@ -12283,8 +12145,8 @@ pub fn run() {
             demo_mode: Mutex::new(false),
             console_history: Mutex::new(Vec::new()),
             rpm_state_tracker: Mutex::new(RpmStateTracker::new()),
-            plugin_manager: Mutex::new(None),
-            controller_bridge: Mutex::new(None),
+            wasm_plugin_manager: Mutex::new(None),
+
             migration_report: Mutex::new(None),
             connection_factory: Mutex::new(None),
             cached_output_channels: Mutex::new(None),
@@ -12460,13 +12322,12 @@ pub fn run() {
             update_heatmap_custom_stops,
             update_constant_string,
             run_lua_script,
-            // Plugin commands
-            check_jre,
-            load_plugin,
-            unload_plugin,
-            list_plugins,
-            get_plugin_ui,
-            send_plugin_event
+            // WASM Plugin commands
+            load_wasm_plugin,
+            unload_wasm_plugin,
+            list_wasm_plugins,
+            execute_wasm_plugin,
+            get_wasm_plugin_info
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

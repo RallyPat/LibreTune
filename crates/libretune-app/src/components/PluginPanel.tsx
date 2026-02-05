@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import "./PluginPanel.css";
@@ -7,7 +7,8 @@ interface Plugin {
   name: string;
   version: string;
   description: string;
-  state: "loaded" | "ready" | "running" | "disabled";
+  author: string;
+  state: string;
   permissions: string[];
   exec_count: number;
 }
@@ -26,7 +27,7 @@ export const PluginPanel: React.FC<PluginPanelProps> = ({ isConnected }) => {
   const loadPlugins = useCallback(async () => {
     try {
       setLoading(true);
-      const list: Plugin[] = await invoke("get_plugins");
+      const list: Plugin[] = await invoke("list_wasm_plugins");
       setPlugins(list);
     } catch (error) {
       console.error("Failed to load plugins:", error);
@@ -34,6 +35,11 @@ export const PluginPanel: React.FC<PluginPanelProps> = ({ isConnected }) => {
       setLoading(false);
     }
   }, []);
+
+  // Load on mount
+  useEffect(() => {
+    loadPlugins();
+  }, [loadPlugins]);
 
   // Load plugin from file
   const handleLoadPlugin = useCallback(async () => {
@@ -46,7 +52,16 @@ export const PluginPanel: React.FC<PluginPanelProps> = ({ isConnected }) => {
       });
 
       if (files && !Array.isArray(files)) {
-        await invoke("load_plugin", { path: files });
+        // Create a default manifest for the plugin based on filename
+        const filename = (files as string).split("/").pop()?.split("\\").pop()?.replace(".wasm", "") || "unknown";
+        const manifest = JSON.stringify({
+          name: filename,
+          version: "1.0.0",
+          description: `Plugin loaded from ${filename}.wasm`,
+          author: "Unknown",
+          permissions: ["ReadTables"],
+        });
+        await invoke("load_wasm_plugin", { path: files, manifestJson: manifest });
         await loadPlugins();
       }
     } catch (error) {
@@ -58,7 +73,7 @@ export const PluginPanel: React.FC<PluginPanelProps> = ({ isConnected }) => {
   const handleUnloadPlugin = useCallback(
     async (name: string) => {
       try {
-        await invoke("unload_plugin", { name });
+        await invoke("unload_wasm_plugin", { name });
         await loadPlugins();
         setSelectedPlugin(null);
       } catch (error) {
@@ -71,7 +86,8 @@ export const PluginPanel: React.FC<PluginPanelProps> = ({ isConnected }) => {
   // Execute plugin
   const handleExecutePlugin = useCallback(async (name: string) => {
     try {
-      await invoke("execute_plugin", { name });
+      await invoke("execute_wasm_plugin", { name });
+      await loadPlugins();
     } catch (error) {
       console.error("Failed to execute plugin:", error);
     }
@@ -89,10 +105,9 @@ export const PluginPanel: React.FC<PluginPanelProps> = ({ isConnected }) => {
   };
 
   // Get state color
-  const getStateColor = (
-    state: "loaded" | "ready" | "running" | "disabled"
-  ) => {
-    switch (state) {
+  const getStateColor = (state: string) => {
+    const s = state.toLowerCase();
+    switch (s) {
       case "ready":
         return "#4ade80"; // Green
       case "running":
@@ -100,7 +115,10 @@ export const PluginPanel: React.FC<PluginPanelProps> = ({ isConnected }) => {
       case "loaded":
         return "#fbbf24"; // Amber
       case "disabled":
+      case "unloading":
         return "#ef4444"; // Red
+      default:
+        return "#6b7280"; // Gray
     }
   };
 

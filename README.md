@@ -24,6 +24,17 @@ Modern, open-source ECU tuning software for EpicEFI, Speeduino, rusEFI, and othe
 
 ## Please note that this project is still very early days - these notes are largely agentically written, and may not be 100% accurate at this time.  We welcome public contribution, and want this to be a thriving publically developed effort. 
 
+## ⚠️ Java Plugin System Deprecated
+
+**As of February 4, 2026**, the Java/JVM plugin system (for TunerStudio JAR compatibility) has been deprecated in favor of LibreTune's native WASM plugin architecture. 
+
+- **UI Access Disabled**: The "Plugins..." menu item has been removed
+- **Grace Period**: 2-4 releases (~6-12 months) before complete removal
+- **Migration Path**: Plugin developers should migrate to WASM (see `DEPRECATION_NOTICE.md`)
+- **WASM Plugins**: Native plugin system with sandboxing, permissions, no JRE dependency
+
+For full details, see [DEPRECATION_NOTICE.md](DEPRECATION_NOTICE.md).
+
 ## Features
 
 ### Core Functionality

@@ -232,8 +232,9 @@ Based on analysis of common ECU tuning software patterns:
 [x] Implement 3D table with react-three-fiber for better visualization - Enhanced with live cursor, trail line, cell grid overlay
 [x] Add data logging/playback features - Implemented DataLogView with CSV import, playback controls
 [x] All gauge types implemented (13/13) - RoundGauge, RoundDashedGauge, FuelMeter, Tachometer added
-[ ] Implement action scripting engine
-[ ] Add plugin system for extensibility
+[x] Implement action scripting engine - COMPLETED Sprint 3 (Feb 4, 2026)
+[x] Add plugin system for extensibility - COMPLETED Sprint 3 (WASM plugins with wasmtime)
+[ ] **DEPRECATED**: Java/JVM plugin system (disabled Feb 4, 2026, see DEPRECATION_NOTICE.md)
 [x] Add user manual/help system - COMPLETED: mdBook user manual, UserManualViewer component
 [x] Implement project templates - COMPLETED Jan 12, 2026 (3 built-in templates: Speeduino, rusEFI, epicEFI)
 [x] Add tune comparison/diff view - Implemented compare_tables command
@@ -1221,6 +1222,88 @@ This preserves only essential environment variables (PATH, HOME, DISPLAY) and re
   - ✅ Proper TOC integration for navigation sidebar
   - ✅ Dual documentation maintained (in-app + static website)
   - ✅ Ready for next release with complete feature coverage
+
+### Java Plugin System Deprecation - Completed Feb 4, 2026
+- **Overall Task**: Deprecate Java/JVM plugin system in favor of native WASM plugin system (Sprint 3)
+- **Status**: Step 1 Complete - UI disabled, deprecation notices added, grace period begins
+- **Timeline**: 2-4 releases (6-12 months) before complete removal
+
+- **Step 1 Implementation (Feb 4, 2026)**:
+  1. **Created** (`DEPRECATION_NOTICE.md`):
+     - Comprehensive 400-line deprecation announcement
+     - Timeline: Feb 4, 2026 → Grace period → Removal (TBD)
+     - Migration guide preview (Java → WASM)
+     - Community feedback request
+     - FAQ section addressing user concerns
+     - Technical details on affected components (~5,100 lines)
+  
+  2. **Updated** (`App.tsx`):
+     - Commented out "Plugins..." menu item in Tools menu
+     - Added deprecation comment with reference to DEPRECATION_NOTICE.md
+     - Users cannot access Java plugin UI in new builds
+  
+  3. **Updated** (`lib.rs`):
+     - Added deprecation warnings to `load_plugin()` command
+     - Added deprecation warnings to `unload_plugin()` command
+     - Added deprecation warnings to `get_plugin_ui()` command
+     - All Java plugin commands now log ⚠️ warnings to stderr
+  
+  4. **Updated** (`AGENTS.md`):
+     - Marked "Add plugin system" as COMPLETED (WASM system)
+     - Added "Java/JVM plugin system" as DEPRECATED entry
+     - This section documents the deprecation process
+
+- **Affected Components** (~5,100 lines total):
+  - **Java Source**: 19 files (~2,000 lines)
+    - `plugin-host/src/main/java/com/libretune/pluginhost/` (8 files)
+    - `plugin-host/src/main/java/com/tunerstudio/plugin/api/` (11 stubs)
+  - **Rust Backend**: 4 files (~1,042 lines)
+    - `src/plugin/{mod.rs,manager.rs,bridge.rs,types.rs}`
+  - **TypeScript Frontend**: 7 files (~1,878 lines)
+    - `src/components/plugin/` (PluginPanel, SwingRenderer, EventBridge, etc.)
+  - **Tauri Commands**: 8 commands (~192 lines)
+  - **Build System**: Gradle files, bundled JAR resources
+
+- **Rationale**:
+  - **Maintenance Burden**: Separate Java codebase, Gradle build, JRE detection
+  - **Security Concerns**: Full JVM permissions, no sandboxing, no resource limits
+  - **External Dependency**: Requires JRE 11+ on user systems
+  - **Architectural Redundancy**: WASM plugin system provides superior isolation
+  - **User Confusion**: Two competing plugin systems with no clear guidance
+
+- **WASM Plugin System** (Sprint 3 - Active):
+  - Location: `crates/libretune-core/src/{plugin_system.rs,plugin_api.rs}`
+  - Features: Permission model, sandboxing, no external dependencies
+  - Tests: 37 unit tests (18 plugin_system + 19 plugin_api)
+  - Documentation: SPRINT_3_SUMMARY.md (comprehensive implementation guide)
+  - UI: PluginPanel.tsx (250+ lines, glass-card design)
+
+- **Next Steps** (Completed Steps 1-3, Feb 4-5, 2026):
+  - [x] **Step 1**: Add deprecation notices and disable UI (Feb 4, 2026)
+  - [x] **Step 2**: Create migration guide documentation (Feb 5, 2026)
+  - [x] **Step 3**: Update documentation indices (Feb 5, 2026)
+  - [ ] **Step 4**: Grace period monitoring (ongoing, 2-4 releases)
+  - [ ] **Step 5**: Remove all Java plugin code after grace period (~5,100 lines)
+
+- **Community Impact**:
+  - **Unknown**: No telemetry on Java plugin usage
+  - **Risk**: Users may rely on TunerStudio JAR plugins
+  - **Mitigation**: Grace period, migration guide, example WASM plugins (Sprint 4)
+
+- **Documentation Status**:
+  - ✅ DEPRECATION_NOTICE.md created (comprehensive, 400+ lines)
+  - ✅ README.md updated with deprecation notice
+  - ✅ Migration guide created (docs/src/reference/java-to-wasm-migration.md)
+  - ✅ Documentation indices updated (SUMMARY.md + toc.json)
+  - ✅ Dual documentation system synchronized (docs/src + public/manual)
+  - ⏳ User-facing announcement (website/forum TBD)
+
+- **Code Status**:
+  - ✅ UI disabled (menu item commented out)
+  - ✅ Backend warnings added (stderr logging)
+  - ✅ AGENTS.md updated (this section)
+  - ✅ All code still functional (but deprecated)
+  - ⏳ Removal scheduled for after grace period (Steps 4-5)
 
 ## Notes
 - The project is NOT a git repository currently

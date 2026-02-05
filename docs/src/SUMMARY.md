@@ -48,6 +48,7 @@
 - [INI File Format](./reference/ini-format.md)
 - [Keyboard Shortcuts](./reference/shortcuts.md)
 - [Troubleshooting](./reference/troubleshooting.md)
+- [Java → WASM Migration](./reference/java-to-wasm-migration.md)
 
 # Technical Reference
 

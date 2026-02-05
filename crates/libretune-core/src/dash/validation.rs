@@ -329,7 +329,6 @@ fn rectangles_overlap(a: Rect, b: Rect) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dash::{GaugePainter, TsColor};
 
     #[test]
     fn test_empty_dashboard_error() {

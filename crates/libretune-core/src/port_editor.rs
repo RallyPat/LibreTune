@@ -171,7 +171,7 @@ impl PortEditorConfig {
             if assignment.enabled {
                 pin_usage
                     .entry(assignment.pin_id.clone())
-                    .or_insert_with(Vec::new)
+                    .or_default()
                     .push(assignment.output.name());
             }
         }
@@ -208,7 +208,7 @@ impl PortEditorConfig {
 
         for assignment in &self.assignments {
             let category = assignment.output.category().to_string();
-            grouped.entry(category).or_insert_with(Vec::new).push(assignment.clone());
+            grouped.entry(category).or_default().push(assignment.clone());
         }
 
         grouped

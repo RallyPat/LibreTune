@@ -48,7 +48,6 @@ pub mod demo;
 pub mod ecu;
 pub mod ini;
 pub mod lua;
-pub mod plugin;
 pub mod plugin_api;
 pub mod plugin_system;
 pub mod port_editor;

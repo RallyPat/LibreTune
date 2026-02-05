@@ -69,7 +69,6 @@ pub fn write_csv<P: AsRef<Path>>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::Duration;
 
     #[test]
     fn test_format_detection() {

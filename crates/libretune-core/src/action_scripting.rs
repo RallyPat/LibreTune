@@ -89,6 +89,15 @@ impl ActionRecorder {
             current_recording: None,
         }
     }
+}
+
+impl Default for ActionRecorder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ActionRecorder {
 
     /// Start recording a new action set
     pub fn start_recording(

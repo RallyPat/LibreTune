@@ -46,7 +46,7 @@ import MigrationReportDialog from "./components/dialogs/MigrationReportDialog";
 import TuneHistoryPanel from "./components/TuneHistoryPanel";
 import ErrorDetailsDialog, { useErrorDialog } from "./components/dialogs/ErrorDetailsDialog";
 import ErrorBoundary from "./components/common/ErrorBoundary";
-import { PluginPanel } from "./plugin";
+import { PluginPanel } from "./components/PluginPanel";
 import { useLoading } from "./components/LoadingContext";
 import { useToast } from "./components/ToastContext";
 import "./styles";
@@ -375,7 +375,7 @@ function AppContent() {
   // Migration report dialog state (shown when loading a tune from different INI version)
   const [migrationReportOpen, setMigrationReportOpen] = useState(false);
   
-  // Plugin panel state
+  // WASM Plugin panel state
   const [pluginPanelOpen, setPluginPanelOpen] = useState(false);
   
   // Sync status tracking (for partial sync warning)
@@ -2499,7 +2499,7 @@ function AppContent() {
         }}
       />
       
-      {/* Plugin Panel Dialog */}
+      {/* WASM Plugin Panel Dialog */}
       {pluginPanelOpen && (
         <div className="dialog-overlay" onClick={() => setPluginPanelOpen(false)}>
           <div 
@@ -2507,7 +2507,7 @@ function AppContent() {
             onClick={(e) => e.stopPropagation()}
             style={{ width: '900px', maxWidth: '95vw', height: '600px', maxHeight: '85vh' }}
           >
-            <PluginPanel onClose={() => setPluginPanelOpen(false)} />
+            <PluginPanel isConnected={status.state === "Connected"} />
           </div>
         </div>
       )}
