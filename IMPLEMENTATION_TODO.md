@@ -1,3 +1,9 @@
+# ⚠️ ARCHIVED: LibreTune Implementation TODO
+
+> **Status**: This document is a historical reference. LibreTune Sprint 4 (Quality & Polish) was completed on February 5, 2026. All items in this document have been implemented or superseded by newer features. See [AGENTS.md](AGENTS.md) for current project status and [SPRINT_3_SUMMARY.md](SPRINT_3_SUMMARY.md) for recent feature completions.
+
+---
+
 # LibreTune Implementation TODO
 
 ## Phase 1: Backend (Rust Core) - COMPLETED

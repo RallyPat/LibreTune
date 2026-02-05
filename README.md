@@ -35,6 +35,19 @@ Modern, open-source ECU tuning software for EpicEFI, Speeduino, rusEFI, and othe
 
 For full details, see [DEPRECATION_NOTICE.md](DEPRECATION_NOTICE.md).
 
+## WASM Plugin System
+
+LibreTune's modern **WebAssembly (WASM) plugin system** provides a secure, sandboxed environment for extending functionality:
+
+- **No External Dependencies**: Plugins run in `wasmtime` sandbox, no JRE or runtime required
+- **Permission Model**: Plugins declare required permissions (tune access, ECU communication, logging)
+- **Stable Host API**: Well-defined Rust interfaces for tune reading/writing, parameter access, ECU commands
+- **Plugin Lifecycle**: Plugins load on demand, unload cleanly, no process overhead
+- **Developer-Friendly**: Write plugins in Rust, C/C++, or any WASM-compatible language
+- **Security by Default**: Sandboxed execution prevents malicious or buggy plugins from crashing the app
+
+See [docs/src/technical/plugin-system.md](docs/src/technical/plugin-system.md) for complete plugin architecture, host functions, and examples.
+
 ## Features
 
 ### Core Functionality
@@ -86,6 +99,19 @@ For full details, see [DEPRECATION_NOTICE.md](DEPRECATION_NOTICE.md).
 - **Reset to Defaults**: Restore all values to INI defaults
 - **Restore Points**: Create, load, and manage tune backups
 - **TunerStudio Import**: Import existing TunerStudio projects
+
+### Action Scripting
+- **Record Actions**: Automatic capture of all table edits and constant adjustments
+- **Replay Scripts**: Execute recorded actions on new tunes or ECUs
+- **Export/Import**: Share action scripts as JSON for collaboration
+- **Conditional Actions**: Execute actions based on constant values
+- **Baseline Templates**: Apply proven configurations instantly
+
+### Hardware Configuration
+- **Port Editor**: Visual pin assignment for digital outputs, injectors, ignition coils
+- **Conflict Detection**: Automatic detection of pin collisions or invalid assignments
+- **Per-ECU Configuration**: Save assignments per project with INI compatibility
+- **Hardware Pinout**: Grid view of available pins organized by function
 
 ### Unit Preferences
 - **Temperature**: °C, °F, or Kelvin
