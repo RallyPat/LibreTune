@@ -4077,10 +4077,22 @@ async fn get_port_editor(
 ) -> Result<libretune_core::ini::PortEditorConfig, String> {
     let def_guard = state.definition.lock().await;
     let def = def_guard.as_ref().ok_or("Definition not loaded")?;
-    def.port_editors
-        .get(&name)
-        .cloned()
-        .ok_or_else(|| format!("PortEditor {} not found", name))
+    
+    // First try to get from INI definition
+    if let Some(config) = def.port_editors.get(&name) {
+        return Ok(config.clone());
+    }
+    
+    // For built-in std_port_edit, provide a default if not explicitly defined
+    if name == "std_port_edit" {
+        return Ok(libretune_core::ini::PortEditorConfig {
+            name: "std_port_edit".to_string(),
+            label: "Output Port Settings".to_string(),
+            enable_condition: None,
+        });
+    }
+    
+    Err(format!("PortEditor {} not found", name))
 }
 
 /// Retrieves saved port editor assignments for the current project.
