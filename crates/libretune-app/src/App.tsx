@@ -1506,14 +1506,6 @@ function AppContent() {
           });
           setActiveTabId("dashboard");
           break;
-        case "std_ms2gentherm":
-          // Thermistor table generator wizard
-          showToast("Thermistor Table Generator - coming soon! This will calculate calibration tables from temperature/resistance pairs.", "info");
-          break;
-        case "std_thermfactor":
-          // Thermistor factor calculator
-          showToast("Thermistor Factor Calculator - coming soon! This will compute Steinhart-Hart coefficients.", "info");
-          break;
         case "std_separator":
           // Separator - no action needed
           break;
@@ -1551,23 +1543,6 @@ function AppContent() {
   );
 
   // Call a stub backend command - shows "coming soon" toast on expected error
-  const invokeStubFeature = useCallback(
-    async (command: string, featureName: string, args?: Record<string, unknown>) => {
-      try {
-        await invoke(command, args);
-      } catch (err) {
-        // Expected "not yet implemented" errors show as info toast
-        const errMsg = String(err);
-        if (errMsg.includes("not yet implemented")) {
-          showToast(`${featureName} - coming soon!`, "info");
-        } else {
-          showToast(`${featureName} failed: ${errMsg}`, "error");
-        }
-      }
-    },
-    [showToast]
-  );
-
   // Tab handlers
   const handleTabSelect = useCallback((tabId: string) => {
     setActiveTabId(tabId);
@@ -1922,7 +1897,7 @@ function AppContent() {
     } else {
       return [fileMenu, viewMenu, helpMenu];
     }
-  }, [backendMenus, theme, sidebarVisible, status.state, openTarget, handleStdTarget, openHelpTopic, currentProject, invokeStubFeature, showToast]);
+  }, [backendMenus, theme, sidebarVisible, status.state, openTarget, handleStdTarget, openHelpTopic, currentProject, showToast]);
 
   // Toolbar items
   const toolbarItems: ToolbarItem[] = useMemo(
@@ -2208,7 +2183,7 @@ function AppContent() {
             <h2>{(content.data as PortEditorConfig)?.label || "Port Editor"}</h2>
             <p>Port editor for: {(content.data as PortEditorConfig)?.name || "unknown"}</p>
             <p style={{ color: 'var(--text-muted)', marginTop: 8 }}>
-              <em>Port editor UI is not yet implemented. This feature allows configuring ECU pin assignments.</em>
+              <em>Port editor UI coming soon in next release. This will allow configuring ECU pin assignments and output options.</em>
             </p>
           </div>
         );

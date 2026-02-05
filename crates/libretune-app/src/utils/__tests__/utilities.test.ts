@@ -138,7 +138,7 @@ describe('Debounce Helper', () => {
   it('should debounce function calls', (done) => {
     let callCount = 0;
     const debounce = (fn: () => void, delay: number) => {
-      let timeoutId: NodeJS.Timeout;
+      let timeoutId: ReturnType<typeof setTimeout>;
       return () => {
         clearTimeout(timeoutId);
         timeoutId = setTimeout(fn, delay);

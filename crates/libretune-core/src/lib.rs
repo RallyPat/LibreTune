@@ -36,7 +36,7 @@
 //! println!("RPM: {}", data.get("rpm")?);
 //! ```
 
-// Temporarily allow missing documentation to keep CI green while we add docs.
+// Allow missing docs on internal/test modules
 #![allow(missing_docs)]
 
 pub mod action_scripting;
