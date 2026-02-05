@@ -46,6 +46,24 @@ struct BuildInfo {
     build_id: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PortEditorAssignment {
+    id: String,
+    name: String,
+    physical_pin: String,
+    function: String,
+    channel: u32,
+    inverted: bool,
+    pullup: bool,
+    description: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+struct PortEditorStore {
+    assignments: HashMap<String, Vec<PortEditorAssignment>>,
+}
+
 /// Parse a runtime packet mode string into enum
 fn parse_runtime_packet_mode(mode: &str) -> libretune_core::protocol::RuntimePacketMode {
     use libretune_core::protocol::RuntimePacketMode as Rpm;
@@ -84,6 +102,34 @@ fn get_settings_path(app: &tauri::AppHandle) -> PathBuf {
 /// Get the dashboards directory (cross-platform)
 fn get_dashboards_dir(app: &tauri::AppHandle) -> PathBuf {
     get_app_data_dir(app).join("dashboards")
+}
+
+fn get_port_editor_store_path(project: &Project) -> PathBuf {
+    project.path.join("projectCfg").join("port_editor.json")
+}
+
+fn load_port_editor_store(project: &Project) -> Result<PortEditorStore, String> {
+    let path = get_port_editor_store_path(project);
+    if !path.exists() {
+        return Ok(PortEditorStore::default());
+    }
+    let content = std::fs::read_to_string(&path)
+        .map_err(|e| format!("Failed to read port editor store: {}", e))?;
+    serde_json::from_str(&content)
+        .map_err(|e| format!("Failed to parse port editor store: {}", e))
+}
+
+fn save_port_editor_store(project: &Project, store: &PortEditorStore) -> Result<(), String> {
+    let path = get_port_editor_store_path(project);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create port editor directory: {}", e))?;
+    }
+    let json = serde_json::to_string_pretty(store)
+        .map_err(|e| format!("Failed to serialize port editor store: {}", e))?;
+    std::fs::write(&path, json)
+        .map_err(|e| format!("Failed to write port editor store: {}", e))?;
+    Ok(())
 }
 
 /// Get application build information (version + nightly build ID).
@@ -4035,6 +4081,38 @@ async fn get_port_editor(
         .get(&name)
         .cloned()
         .ok_or_else(|| format!("PortEditor {} not found", name))
+}
+
+/// Retrieves saved port editor assignments for the current project.
+#[tauri::command]
+async fn get_port_editor_assignments(
+    state: tauri::State<'_, AppState>,
+    name: String,
+) -> Result<Vec<PortEditorAssignment>, String> {
+    let proj_guard = state.current_project.lock().await;
+    let project = proj_guard
+        .as_ref()
+        .ok_or_else(|| "No project open".to_string())?;
+
+    let store = load_port_editor_store(project)?;
+    Ok(store.assignments.get(&name).cloned().unwrap_or_default())
+}
+
+/// Saves port editor assignments for the current project.
+#[tauri::command]
+async fn save_port_editor_assignments(
+    state: tauri::State<'_, AppState>,
+    name: String,
+    assignments: Vec<PortEditorAssignment>,
+) -> Result<(), String> {
+    let proj_guard = state.current_project.lock().await;
+    let project = proj_guard
+        .as_ref()
+        .ok_or_else(|| "No project open".to_string())?;
+
+    let mut store = load_port_editor_store(project)?;
+    store.assignments.insert(name, assignments);
+    save_port_editor_store(project, &store)
 }
 
 /// Retrieves a help topic from the INI file.
@@ -12186,6 +12264,8 @@ pub fn run() {
             get_dialog_definition,
             get_indicator_panel,
             get_port_editor,
+            get_port_editor_assignments,
+            save_port_editor_assignments,
             // INI / protocol defaults
             get_protocol_defaults,
             get_protocol_capabilities,

@@ -47,6 +47,7 @@ import TuneHistoryPanel from "./components/TuneHistoryPanel";
 import ErrorDetailsDialog, { useErrorDialog } from "./components/dialogs/ErrorDetailsDialog";
 import ErrorBoundary from "./components/common/ErrorBoundary";
 import { PluginPanel } from "./components/PluginPanel";
+import PortEditor, { PinConfig } from "./components/hardware/PortEditor";
 import { useLoading } from "./components/LoadingContext";
 import { useToast } from "./components/ToastContext";
 import "./styles";
@@ -239,6 +240,8 @@ function AppContent() {
   const [iniDefaults, setIniDefaults] = useState<ProtocolDefaults | null>(null);
   const [baudUserSet, setBaudUserSet] = useState(false);
   const [timeoutUserSet, setTimeoutUserSet] = useState(false);
+
+  const [portEditorAssignments, setPortEditorAssignments] = useState<Record<string, PinConfig[]>>({});
 
   // Runtime packet mode defaults
   const [defaultRuntimePacketMode, setDefaultRuntimePacketMode] = useState<'Auto'|'ForceBurst'|'ForceOCH'|'Disabled'>('Auto');
@@ -1453,6 +1456,14 @@ function AppContent() {
         console.log("[openTarget] Trying as portEditor:", name);
         const portEditor = await invoke<{ name: string; label: string; enable_condition?: string }>("get_port_editor", { name });
         console.log("[openTarget] PortEditor found:", portEditor);
+
+        try {
+          const assignments = await invoke<PinConfig[]>("get_port_editor_assignments", { name: portEditor.name });
+          setPortEditorAssignments(prev => ({ ...prev, [portEditor.name]: assignments }));
+        } catch (assignErr) {
+          console.warn("[openTarget] Failed to load port editor assignments:", assignErr);
+          showToast("Failed to load saved port assignments", "warning");
+        }
         
         // Format title as "Menu Label (ini_name)" when menu label is available
         const displayTitle = title && title !== name
@@ -1505,6 +1516,10 @@ function AppContent() {
             return { ...prev, dashboard: { type: "dashboard" } };
           });
           setActiveTabId("dashboard");
+          break;
+        case "std_port_edit":
+          // Open port editor with matching name from INI [PortEditor] section
+          openTarget(target, label);
           break;
         case "std_separator":
           // Separator - no action needed
@@ -2177,16 +2192,31 @@ function AppContent() {
             }}
           />
         );
-      case "portEditor":
+      case "portEditor": {
+        const portEditorMeta = content.data as PortEditorConfig | undefined;
+        if (!portEditorMeta) return null;
         return (
-          <div className="port-editor-placeholder" style={{ padding: 24 }}>
-            <h2>{(content.data as PortEditorConfig)?.label || "Port Editor"}</h2>
-            <p>Port editor for: {(content.data as PortEditorConfig)?.name || "unknown"}</p>
-            <p style={{ color: 'var(--text-muted)', marginTop: 8 }}>
-              <em>Port editor UI coming soon in next release. This will allow configuring ECU pin assignments and output options.</em>
-            </p>
-          </div>
+          <PortEditor
+            ecuType={ecuType}
+            title={portEditorMeta.label || "Port Editor"}
+            initialConfig={portEditorAssignments[portEditorMeta.name] || []}
+            onSave={async (config) => {
+              try {
+                await invoke("save_port_editor_assignments", {
+                  name: portEditorMeta.name,
+                  assignments: config,
+                });
+                setPortEditorAssignments(prev => ({ ...prev, [portEditorMeta.name]: config }));
+                showToast("Port assignments saved", "success");
+              } catch (err) {
+                console.error("Failed to save port editor assignments:", err);
+                showToast("Failed to save port assignments", "error");
+              }
+            }}
+            onCancel={() => activeTabId && handleTabClose(activeTabId)}
+          />
         );
+      }
       case "settings":
         return <SettingsView />;
       case "autotune":

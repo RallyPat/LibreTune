@@ -13,7 +13,7 @@
  * or dropdown selection for each function.
  */
 
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useEffect } from 'react';
 import {
   Cpu,
   Zap,
@@ -31,7 +31,7 @@ import {
 import './PortEditor.css';
 
 // Pin function types
-type PinFunction = 
+export type PinFunction = 
   | 'injector'
   | 'ignition'
   | 'aux_output'
@@ -42,7 +42,7 @@ type PinFunction =
   | 'unused';
 
 // Pin configuration
-interface PinConfig {
+export interface PinConfig {
   id: string;
   name: string;
   physicalPin: string;
@@ -64,6 +64,7 @@ interface HardwarePin {
 
 interface PortEditorProps {
   ecuType?: string;
+  title?: string;
   initialConfig?: PinConfig[];
   onSave?: (config: PinConfig[]) => void;
   onCancel?: () => void;
@@ -184,6 +185,7 @@ function getFunctionColor(func: PinFunction): string {
 
 export default function PortEditor({
   ecuType = 'Generic ECU',
+  title,
   initialConfig = [],
   onSave,
   onCancel,
@@ -196,7 +198,7 @@ export default function PortEditor({
   const [hasChanges, setHasChanges] = useState(false);
 
   // Initialize assignments from initial config
-  useState(() => {
+  useEffect(() => {
     if (initialConfig.length > 0) {
       const map = new Map<string, string>();
       initialConfig.forEach(pin => {
@@ -208,8 +210,12 @@ export default function PortEditor({
         }
       });
       setAssignments(map);
+      setHasChanges(false);
+    } else {
+      setAssignments(new Map());
+      setHasChanges(false);
     }
-  });
+  }, [initialConfig]);
 
   // Group functions by type
   const functionGroups = useMemo(() => [
@@ -348,7 +354,7 @@ export default function PortEditor({
         <div className="header-title">
           <Cpu size={24} />
           <div>
-            <h2>Pin Configuration</h2>
+            <h2>{title || 'Pin Configuration'}</h2>
             <span className="ecu-type">{ecuType}</span>
           </div>
         </div>
@@ -611,7 +617,7 @@ export default function PortEditor({
             <span className="saved"><Check size={14} /> Configuration saved</span>
           )}
         </div>
-        <button className="btn-cancel" onClick={onCancel}>
+        <button className="btn-cancel" onClick={() => onCancel?.()}>
           Cancel
         </button>
       </div>
