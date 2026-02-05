@@ -33,6 +33,8 @@
 - [Performance Calculator](./features/performance-calculator.md)
 - [Diagnostic Loggers](./features/diagnostic-loggers.md)
 - [Tools](./features/tools.md)
+- [Hardware Configuration](./technical/port-editor.md)
+- [Action Scripting](./reference/action-scripting.md)
 
 # Project Management
 
@@ -59,6 +61,8 @@
 - [ECU Protocol](./technical/ecu-protocol.md)
 - [Version Control](./technical/version-control.md)
 - [Lua Scripting](./technical/lua-scripting.md)
+- [Plugin System](./technical/plugin-system.md)
+- [Port Editor](./technical/port-editor.md)
 
 # FAQ
 

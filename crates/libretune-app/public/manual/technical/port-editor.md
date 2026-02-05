@@ -14,7 +14,9 @@ The Port Editor lets you:
 
 ## Opening Port Editor
 
-The port editor is accessed through the menu, typically under **Tools** → **Programmable Ports** or **Hardware** → **Port Configuration**. The exact menu path depends on your ECU's INI definition.
+The port editor is accessed through the **Setup** menu → **Programmable Ports**. 
+
+**Note**: The exact menu path depends on your ECU's INI definition. Most ECUs place it under Setup, but some may have it under Tools or Hardware. The `std_port_edit` feature is built-in and will work if your INI file has a `subMenu = std_port_edit, "Label"` entry in the `[Menu]` section.
 
 ## User Interface
 
@@ -153,13 +155,14 @@ Same as naturally aspirated, but may include:
 ### Port editor doesn't open
 
 **Cause**: 
-- No `[PortEditor]` section in the INI file
-- INI doesn't support port configuration for this ECU
+- Menu item "Programmable Ports" is not in your INI's `[Menu]` section
+- INI version doesn't include the port editor feature
 
 **Solution**:
-- Not all ECUs require port configuration
-- Some may have fixed pin assignments
-- Check your ECU documentation or INI file comments
+- Check that your INI has: `subMenu = std_port_edit, "Programmable Ports"` in the `[Menu]` section
+- If not present, you may need to upgrade your ECU firmware or INI definition
+- Not all ECUs support port configuration
+- Check your ECU documentation for supported features
 
 ### Changes not persisting
 

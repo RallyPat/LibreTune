@@ -141,6 +141,16 @@
         "title": "Tools",
         "path": "features/tools",
         "children": []
+      },
+      {
+        "title": "Hardware Configuration",
+        "path": "technical/port-editor",
+        "children": []
+      },
+      {
+        "title": "Action Scripting",
+        "path": "reference/action-scripting",
+        "children": []
       }
     ]
   },
@@ -203,6 +213,11 @@
         "title": "Java → WASM Migration",
         "path": "reference/java-to-wasm-migration",
         "children": []
+      },
+      {
+        "title": "Action Scripting",
+        "path": "reference/action-scripting",
+        "children": []
       }
     ]
   },
@@ -243,6 +258,16 @@
       {
         "title": "Lua Scripting",
         "path": "technical/lua-scripting",
+        "children": []
+      },
+      {
+        "title": "Plugin System",
+        "path": "technical/plugin-system",
+        "children": []
+      },
+      {
+        "title": "Port Editor",
+        "path": "technical/port-editor",
         "children": []
       }
     ]
