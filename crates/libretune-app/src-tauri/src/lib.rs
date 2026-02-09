@@ -11711,6 +11711,7 @@ mod demo_mode_tests {
             evaluator: Mutex::new(None),
             cached_output_channels: Mutex::new(None),
             connection_factory: Mutex::new(None),
+            math_channels: Mutex::new(Vec::new()),
         };
 
         let dev_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -11781,6 +11782,7 @@ mod concurrency_tests {
             evaluator: Mutex::new(None),
             cached_output_channels: Mutex::new(None),
             connection_factory: Mutex::new(None),
+            math_channels: Mutex::new(Vec::new()),
         });
 
         // Simulate execute_controller_command pattern: lock def -> sleep -> lock conn
@@ -11926,6 +11928,7 @@ signature = "Speeduino 2023-04"
             evaluator: Mutex::new(None),
             cached_output_channels: Mutex::new(None),
             connection_factory: Mutex::new(None),
+            math_channels: Mutex::new(Vec::new()),
         };
 
         let matches = find_matching_inis_from_state(&state, "Speeduino 2023-05").await;
@@ -11991,6 +11994,7 @@ signature = "Speeduino 2023-04"
             evaluator: Mutex::new(None),
             cached_output_channels: Mutex::new(None),
             connection_factory: Mutex::new(None),
+            math_channels: Mutex::new(Vec::new()),
         };
 
         let matches = find_matching_inis_from_state(&state, "Speeduino 2023-05").await;
@@ -12059,6 +12063,7 @@ signature = "Speeduino 2023-04"
             evaluator: Mutex::new(None),
             cached_output_channels: Mutex::new(None),
             connection_factory: Mutex::new(None),
+            math_channels: Mutex::new(Vec::new()),
         };
 
         // Partial match case
@@ -12139,6 +12144,7 @@ signature = "Speeduino 2023-04"
             evaluator: Mutex::new(None),
             cached_output_channels: Mutex::new(None),
             connection_factory: Mutex::new(None),
+            math_channels: Mutex::new(Vec::new()),
         };
 
         // Install factory returning a partial matching signature
