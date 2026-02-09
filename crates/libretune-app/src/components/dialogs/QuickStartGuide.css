@@ -1,0 +1,336 @@
+.quick-start-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+  backdrop-filter: blur(4px);
+  animation: fadeIn 0.3s ease-out;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.quick-start-dialog {
+  background: var(--surface-elevated);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5),
+              inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  padding: 0;
+  max-width: 800px;
+  width: 90%;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  animation: slideUp 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(30px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.quick-start-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 24px 32px;
+  border-bottom: 1px solid var(--border-color);
+  position: relative;
+}
+
+.quick-start-icon {
+  font-size: 40px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.quick-start-title-block h2 {
+  margin: 0 0 4px 0;
+  font-size: 24px;
+  font-weight: 600;
+  color: var(--text-primary);
+  letter-spacing: -0.5px;
+}
+
+.quick-start-title-block p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.quick-start-close {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  width: 32px;
+  height: 32px;
+  border: none;
+  background: transparent;
+  font-size: 24px;
+  cursor: pointer;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  transition: all 0.2s ease;
+  padding: 0;
+}
+
+.quick-start-close:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+.quick-start-close:focus-visible {
+  outline: 2px solid var(--accent-color);
+  outline-offset: 2px;
+}
+
+.quick-start-progress-bar {
+  height: 4px;
+  background: var(--surface-hover);
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background: var(--accent-color);
+  transition: width 0.3s ease;
+  box-shadow: 0 0 10px var(--accent-color);
+}
+
+.quick-start-content {
+  flex: 1;
+  padding: 32px;
+  overflow-y: auto;
+  color: var(--text-primary);
+}
+
+.instructions-section h3 {
+  margin: 0 0 16px 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.instructions-list {
+  margin: 0;
+  padding: 0 0 0 20px;
+  list-style: none;
+  counter-reset: step-counter;
+}
+
+.instructions-list li {
+  margin: 0 0 12px 0;
+  padding-left: 24px;
+  position: relative;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text-primary);
+  counter-increment: step-counter;
+}
+
+.instructions-list li::before {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 20px;
+  height: 20px;
+  background: var(--accent-color);
+  color: white;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: bold;
+  content: counter(step-counter);
+}
+
+.tips-section {
+  margin-top: 24px;
+  padding: 16px;
+  background: var(--surface-hover);
+  border-left: 4px solid var(--accent-color);
+  border-radius: 6px;
+}
+
+.tips-section h4 {
+  margin: 0 0 12px 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.tips-list {
+  margin: 0;
+  padding: 0 0 0 20px;
+  list-style: disc;
+}
+
+.tips-list li {
+  margin: 0 0 8px 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.tips-list li:last-child {
+  margin-bottom: 0;
+}
+
+.quick-start-footer {
+  padding: 24px 32px;
+  border-top: 1px solid var(--border-color);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+}
+
+.step-indicator {
+  font-size: 13px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.quick-start-controls {
+  display: flex;
+  gap: 12px;
+}
+
+.quick-start-btn {
+  padding: 10px 20px;
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.quick-start-btn-primary {
+  background: var(--accent-color);
+  color: white;
+  flex: 1;
+  min-width: 120px;
+}
+
+.quick-start-btn-primary:hover:not(:disabled) {
+  background: var(--accent-color-hover, color-mix(in srgb, var(--accent-color) 90%, black));
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+.quick-start-btn-primary:focus-visible {
+  outline: 2px solid var(--accent-color);
+  outline-offset: 2px;
+}
+
+.quick-start-btn-secondary {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+  flex: 0 1 auto;
+}
+
+.quick-start-btn-secondary:hover:not(:disabled) {
+  background: var(--surface-active);
+  transform: translateY(-2px);
+}
+
+.quick-start-btn-secondary:focus-visible {
+  outline: 2px solid var(--accent-color);
+  outline-offset: 2px;
+}
+
+.quick-start-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Scrollbar styling */
+.quick-start-content::-webkit-scrollbar {
+  width: 8px;
+}
+
+.quick-start-content::-webkit-scrollbar-track {
+  background: var(--surface-hover);
+  border-radius: 4px;
+}
+
+.quick-start-content::-webkit-scrollbar-thumb {
+  background: var(--accent-color);
+  border-radius: 4px;
+}
+
+.quick-start-content::-webkit-scrollbar-thumb:hover {
+  background: var(--accent-color-hover, color-mix(in srgb, var(--accent-color) 90%, black));
+}
+
+/* Responsive design */
+@media (max-width: 800px) {
+  .quick-start-dialog {
+    width: 95%;
+    max-height: 90vh;
+  }
+
+  .quick-start-header {
+    padding: 20px 24px;
+    gap: 12px;
+  }
+
+  .quick-start-icon {
+    font-size: 32px;
+  }
+
+  .quick-start-title-block h2 {
+    font-size: 20px;
+  }
+
+  .quick-start-content {
+    padding: 24px;
+  }
+
+  .instructions-list li {
+    font-size: 13px;
+  }
+
+  .quick-start-footer {
+    padding: 20px 24px;
+    flex-direction: column;
+  }
+
+  .step-indicator {
+    width: 100%;
+    text-align: center;
+  }
+
+  .quick-start-controls {
+    width: 100%;
+  }
+
+  .quick-start-btn {
+    flex: 1;
+  }
+}

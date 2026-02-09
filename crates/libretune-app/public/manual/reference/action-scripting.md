@@ -17,44 +17,50 @@ This is useful for:
 - Sharing tuning methodologies with team members
 - Automating repetitive adjustments
 
+## INI-Driven Availability
+
+Action Scripting is strictly driven by the loaded ECU INI definition:
+
+- **Tables**: Actions only appear and execute for tables defined in `[TableEditor]` or `[CurveEditor]`.
+- **Constants**: Actions only apply to constants defined in `[Constants]` (and `[ConstantsExtensions]`).
+- **ECU Commands**: Raw command actions are only available if the INI defines `[ControllerCommands]`.
+
+If a tune does not provide a section or entity, related actions are hidden or skipped rather than guessed or synthesized.
+
 ## Action Types
+
+The Action Engine supports the following atomic operations. All actions are validated against the currently loaded INI definition before execution.
 
 ### Table Operations
 
 | Action | Description | Parameters |
 |--------|-------------|------------|
-| `SetTableCell` | Set a single table cell value | `table: string`, `x: u32`, `y: u32`, `value: f64` |
-| `SetTableRange` | Set multiple cells in a range | `table: string`, `x_start: u32`, `y_start: u32`, `x_end: u32`, `y_end: u32`, `value: f64` |
-| `SetTableRow` | Set all cells in a row | `table: string`, `y: u32`, `values: Vec<f64>` |
-| `SetTableColumn` | Set all cells in a column | `table: string`, `x: u32`, `values: Vec<f64>` |
-| `ScaleTableRange` | Multiply range by factor | `table: string`, `x_start: u32`, `y_start: u32`, `x_end: u32`, `y_end: u32`, `factor: f64` |
-| `InterpolateCells` | Bilinear interpolation | `table: string`, `x1: u32`, `y1: u32`, `x2: u32`, `y2: u32` |
-| `SmoothTableRange` | Gaussian smoothing | `table: string`, `x_start: u32`, `y_start: u32`, `x_end: u32`, `y_end: u32`, `kernel_size: u32` |
+| `TableEdit` | Modify a single cell | `table_name: string`, `x_index: usize`, `y_index: usize`, `new_value: f64`, `old_value: Option<f64>` |
+| `BulkOperation` | Apply operation to multiple cells | `operation: string` (set, scale, smooth, offset, interpolate, rebin), `table_name: string`, `cells: Vec<(usize, usize)>`, `parameters: Map<String, f64>` |
 
 ### Constant Adjustments
 
 | Action | Description | Parameters |
 |--------|-------------|------------|
-| `SetConstant` | Set scalar constant | `name: string`, `value: f64` |
-| `IncrementConstant` | Add value to constant | `name: string`, `delta: f64` |
-| `SetConstantBits` | Set bit flags | `name: string`, `bits: Vec<(u32, bool)>` |
-| `SetConstantString` | Set string constant | `name: string`, `value: string` |
+| `ConstantChange` | Modify a scalar constant | `constant_name: string`, `new_value: f64`, `old_value: Option<f64>` |
 
 ### ECU Commands
 
 | Action | Description | Parameters |
 |--------|-------------|------------|
-| `SendCommand` | Send raw ECU command | `command: string` |
-| `WriteToECU` | Burn current tune to ECU | `burn_controller: bool` |
-| `ReadFromECU` | Sync ECU data to tune | (no parameters) |
+| `SendCommand` | Execute an INI-defined controller command | `command: string` |
+| `Pause` | Wait for a specified duration | `duration_ms: u32` |
+| `ExecuteLuaScript` | Run a custom Lua script snippet | `script: string` |
 
-### Meta Actions
+## Validation Logic
 
-| Action | Description | Parameters |
-|--------|-------------|------------|
-| `Label` | Named checkpoint | `text: string` |
-| `Delay` | Wait N milliseconds | `duration_ms: u32` |
-| `Conditional` | Execute if condition true | `condition: string`, `actions: Vec<Action>` |
+Before an action set is executed, the `validate_action_set` function checks:
+1.  **Table Existence**: Ensures `table_name` exists in `[TableEditor]`.
+2.  **Constant Existence**: Ensures `constant_name` exists in `[Constants]`.
+3.  **Command Validity**: Ensures `command` in `SendCommand` is defined in `[ControllerCommands]` of the INI.
+4.  **Value Safety**: Checks for NaN or infinite values.
+
+If any check fails, the execution is aborted to prevent indeterminate ECU states.
 
 ## Recording Actions
 
@@ -130,6 +136,8 @@ Actions can have conditions:
 ```
 
 If the condition is false, the action is skipped.
+
+Conditions only reference constants or channels that exist in the loaded INI. If a referenced item does not exist, the condition evaluates to false.
 
 ## Action Script Format
 

@@ -5,6 +5,11 @@ import { openUrl } from '@tauri-apps/plugin-opener';
 import { HeatmapScheme, getAvailableSchemes } from '../../utils/heatmapColors';
 import { useUnitPreferences } from '../../utils/useUnitPreferences';
 import { TemperatureUnit, PressureUnit, AfrUnit, SpeedUnit, FuelType, STOICH_AFR } from '../../utils/unitConversions';
+import { createFocusTrap, focusFirstElement } from '../../utils/focusManagement';
+import HotkeyEditor from '../dialogs/HotkeyEditor';
+import ThemePicker from '../dialogs/ThemePicker';
+import StatusBarChannelSelector from '../dialogs/StatusBarChannelSelector';
+import { ThemeName } from '../../themes';
 import './Dialogs.css';
 import ConnectionMetrics from '../layout/ConnectionMetrics';
 
@@ -503,6 +508,13 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
   // Project-specific settings
   const [autoConnect, setAutoConnect] = useState(false);
   
+  // Settings dialog tabs
+  const [currentTab, setCurrentTab] = useState<'general' | 'hotkeys'>('general');
+  
+  // Hotkey bindings
+  const [hotkeyBindings, setHotkeyBindings] = useState<Record<string, string>>({});
+  const [hotkeysLoading, setHotkeysLoading] = useState(false);
+  
   // Unit preferences from context
   const unitPrefs = useUnitPreferences();
   
@@ -546,6 +558,13 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
         if (settings.alert_large_change_percent !== undefined) setAlertLargeChangePercent(settings.alert_large_change_percent);
       }).catch(console.error);
 
+      // Load hotkey bindings
+      setHotkeysLoading(true);
+      invoke<Record<string, string>>('get_hotkey_bindings')
+        .then(setHotkeyBindings)
+        .catch(console.error)
+        .finally(() => setHotkeysLoading(false));
+
       // Load project-specific settings
       if (currentProject) {
         setAutoConnect(currentProject.connection.auto_connect);
@@ -572,6 +591,31 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
         .catch(console.error);
     }
   }, [theme, isOpen, currentProject]);
+
+  // Focus management for keyboard navigation
+  useEffect(() => {
+    if (!isOpen) return;
+
+    // Focus first input when dialog opens
+    focusFirstElement('.dialog');
+    
+    // Create focus trap to keep Tab within the dialog
+    const cleanupFocusTrap = createFocusTrap('.dialog');
+
+    // Handle Escape key to close dialog
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !e.defaultPrevented) {
+        e.preventDefault();
+        onClose();
+      }
+    };
+    document.addEventListener('keydown', handleEscape);
+
+    return () => {
+      cleanupFocusTrap();
+      document.removeEventListener('keydown', handleEscape);
+    };
+  }, [isOpen, onClose]);
 
   const handleDemoToggle = useCallback(async (enabled: boolean) => {
     setDemoLoading(true);
@@ -669,6 +713,13 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
     await invoke('update_setting', { key: 'alert_large_change_abs', value: alertLargeChangeAbs.toString() });
     await invoke('update_setting', { key: 'alert_large_change_percent', value: alertLargeChangePercent.toString() });
     
+    // Update hotkey bindings
+    try {
+      await invoke('save_hotkey_bindings', { bindings: hotkeyBindings });
+    } catch (e) {
+      console.error('Failed to save hotkey bindings:', e);
+    }
+    
     // Update project-specific settings
     if (currentProject) {
       try {
@@ -680,31 +731,65 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
     
     onSettingsChange?.({ units: localUnits, autoBurnOnClose, indicatorColumnCount, indicatorFillEmpty, indicatorTextFit, statusBarChannels, runtimePacketMode, autoSyncGaugeRanges });
     onClose();
-  }, [localTheme, localUnits, autoBurnOnClose, statusBarChannels, indicatorColumnCount, indicatorFillEmpty, indicatorTextFit, heatmapValueScheme, heatmapChangeScheme, heatmapCoverageScheme, gaugeSnapToGrid, gaugeFreeMove, gaugeLock, autoSyncGaugeRanges, autoCommitOnSave, commitMessageFormat, runtimePacketMode, autoReconnectAfterControllerCommand, autoRecordEnabled, keyOnThresholdRpm, keyOffTimeoutSec, alertLargeChangeEnabled, alertLargeChangeAbs, alertLargeChangePercent, autoConnect, currentProject, onThemeChange, onSettingsChange, onClose]);
+  }, [localTheme, localUnits, autoBurnOnClose, statusBarChannels, indicatorColumnCount, indicatorFillEmpty, indicatorTextFit, heatmapValueScheme, heatmapChangeScheme, heatmapCoverageScheme, gaugeSnapToGrid, gaugeFreeMove, gaugeLock, autoSyncGaugeRanges, autoCommitOnSave, commitMessageFormat, runtimePacketMode, autoReconnectAfterControllerCommand, autoRecordEnabled, keyOnThresholdRpm, keyOffTimeoutSec, alertLargeChangeEnabled, alertLargeChangeAbs, alertLargeChangePercent, hotkeyBindings, autoConnect, currentProject, onThemeChange, onSettingsChange, onClose]);
 
   if (!isOpen) return null;
 
   return (
     <div className="dialog-overlay" onClick={onClose}>
-      <div className="dialog" onClick={(e) => e.stopPropagation()}>
+      <div 
+        className="dialog" 
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="settings-dialog-title"
+      >
         <div className="dialog-header">
-          <h2>Settings</h2>
-          <button className="dialog-close" onClick={onClose}>×</button>
+          <h2 id="settings-dialog-title">Settings</h2>
+          <button 
+            className="dialog-close" 
+            onClick={onClose}
+            aria-label="Close settings dialog"
+            title="Close (Escape)"
+          >
+            ×
+          </button>
+        </div>
+        
+        {/* Tab Navigation */}
+        <div className="dialog-tabs" role="tablist">
+          <button 
+            className={`dialog-tab ${currentTab === 'general' ? 'active' : ''}`}
+            onClick={() => setCurrentTab('general')}
+            role="tab"
+            id="general-tab"
+            aria-selected={currentTab === 'general'}
+            aria-controls="general-panel"
+          >
+            General
+          </button>
+          <button 
+            className={`dialog-tab ${currentTab === 'hotkeys' ? 'active' : ''}`}
+            onClick={() => setCurrentTab('hotkeys')}
+            role="tab"
+            id="hotkeys-tab"
+            aria-selected={currentTab === 'hotkeys'}
+            aria-controls="hotkeys-panel"
+          >
+            Keyboard Shortcuts
+          </button>
         </div>
         
         <div className="dialog-content">
-          <div className="dialog-form-group">
-            <label>Theme</label>
-            <select 
-              value={localTheme} 
-              onChange={(e) => setLocalTheme(e.target.value)}
-            >
-              <option value="dark">Dark</option>
-              <option value="light">Light</option>
-              <option value="midnight">Midnight</option>
-              <option value="carbon">Carbon</option>
-            </select>
-          </div>
+          {currentTab === 'general' && (
+            <div className="dialog-tab-content" id="general-panel" role="tabpanel" aria-labelledby="general-tab">
+              <div className="dialog-form-group">
+                <label>Theme</label>
+                <ThemePicker 
+                  selectedTheme={localTheme as ThemeName} 
+                  onChange={(theme) => setLocalTheme(theme)}
+                />
+              </div>
           
           <div className="dialog-form-group">
             <label>Units Preset</label>
@@ -861,72 +946,13 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
           <h3 style={{ marginTop: '1.5rem', marginBottom: '0.5rem' }}>Status Bar</h3>
           
           <div className="dialog-form-group">
-            <label>Channels to Display (max 8)</label>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-              {/* Selected channels with remove buttons */}
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem', minHeight: '2rem', padding: '0.5rem', backgroundColor: 'var(--bg-secondary)', borderRadius: '4px', border: '1px solid var(--border-color)' }}>
-                {statusBarChannels.length === 0 ? (
-                  <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Using default channels from ECU definition</span>
-                ) : (
-                  statusBarChannels.map((channel, idx) => (
-                    <span key={channel} style={{ 
-                      display: 'inline-flex', 
-                      alignItems: 'center', 
-                      gap: '0.25rem',
-                      padding: '0.25rem 0.5rem',
-                      backgroundColor: 'var(--accent-color)',
-                      color: '#fff',
-                      borderRadius: '3px',
-                      fontSize: '0.85rem'
-                    }}>
-                      {channel}
-                      <button 
-                        onClick={() => setStatusBarChannels(prev => prev.filter((_, i) => i !== idx))}
-                        style={{ 
-                          background: 'none', 
-                          border: 'none', 
-                          color: '#fff', 
-                          cursor: 'pointer',
-                          padding: '0 0.25rem',
-                          fontSize: '1rem',
-                          lineHeight: 1
-                        }}
-                      >×</button>
-                    </span>
-                  ))
-                )}
-              </div>
-              {/* Add channel dropdown */}
-              <select
-                value=""
-                onChange={(e) => {
-                  if (e.target.value && statusBarChannels.length < 8 && !statusBarChannels.includes(e.target.value)) {
-                    setStatusBarChannels(prev => [...prev, e.target.value]);
-                  } else if (statusBarChannels.length >= 8) {
-                    alert('Maximum 8 channels allowed in status bar');
-                  }
-                }}
-                style={{ padding: '0.5rem' }}
-              >
-                <option value="">+ Add channel...</option>
-                {availableChannels
-                  .filter(ch => !statusBarChannels.includes(ch))
-                  .sort()
-                  .map(ch => (
-                    <option key={ch} value={ch}>{ch}</option>
-                  ))
-                }
-              </select>
-              {statusBarChannels.length > 0 && (
-                <button 
-                  onClick={() => setStatusBarChannels([])}
-                  style={{ alignSelf: 'flex-start', padding: '0.25rem 0.5rem', fontSize: '0.85rem' }}
-                >
-                  Reset to Defaults
-                </button>
-              )}
-            </div>
-            <span className="dialog-form-note">Select which realtime channels appear in the status bar. Leave empty for auto-detection from ECU definition.</span>
+            <StatusBarChannelSelector 
+              selectedChannels={statusBarChannels}
+              availableChannels={availableChannels}
+              onChannelsChange={setStatusBarChannels}
+              maxChannels={64}
+            />
+            <span className="dialog-form-note">Select which realtime channels appear in the status bar. Use drag-drop to reorder, or leave empty for auto-detection from ECU definition.</span>
           </div>
 
           {currentProject && (
@@ -1217,6 +1243,21 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
             />
             <span className="dialog-form-note">Warn if a cell changes by more than this percent</span>
           </div>
+            </div>
+          )}
+
+          {currentTab === 'hotkeys' && (
+            <div className="dialog-tab-content" id="hotkeys-panel" role="tabpanel" aria-labelledby="hotkeys-tab">
+              {hotkeysLoading ? (
+                <div className="dialog-loading">Loading keyboard shortcuts...</div>
+              ) : (
+                <HotkeyEditor 
+                  bindings={hotkeyBindings}
+                  onChange={setHotkeyBindings}
+                />
+              )}
+            </div>
+          )}
         </div>
         
         <div className="dialog-footer">

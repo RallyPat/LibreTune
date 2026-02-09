@@ -25,6 +25,7 @@
   - [Customizing Gauges](./features/dashboards/customizing.md)
   - [Creating Dashboards](./features/dashboards/creating.md)
   - [Dashboard Validation](./features/dashboards/validation.md)
+- [Math Channels](./features/math-channels.md)
 - [Data Logging](./features/datalog.md)
 - [Smart Recording](./features/smart-recording.md)
 - [Data Statistics](./features/data-statistics.md)

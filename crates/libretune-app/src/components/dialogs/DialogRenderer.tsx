@@ -289,7 +289,7 @@ function DialogField({
         <label>
           {displayLabel}
           {(showAllHelpIcons || constant.help) && (
-            <span className="help-icon" title={constant.help || 'Click for info'} onClick={handleFocus} tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && handleFocus()}>
+            <span className="help-icon" title={constant.help || 'Click for info'} onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleFocus(); }} tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && handleFocus()}>
               <HelpCircle size={16} />
             </span>
           )}
@@ -391,7 +391,7 @@ function DialogField({
             />
             {displayLabel}: {uncheckedLabel} / {checkedLabel}
             {(showAllHelpIcons || constant.help) && (
-              <span className="help-icon" title={constant.help || 'Click for info'} onClick={handleFocus} tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && handleFocus()}>
+              <span className="help-icon" title={constant.help || 'Click for info'} onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleFocus(); }} tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && handleFocus()}>
                 <HelpCircle size={16} />
               </span>
             )}
@@ -412,7 +412,7 @@ function DialogField({
         <label>
           {displayLabel}
           {(showAllHelpIcons || constant.help) && (
-            <span className="help-icon" title={constant.help || 'Click for info'} onClick={handleFocus} tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && handleFocus()}>
+            <span className="help-icon" title={constant.help || 'Click for info'} onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleFocus(); }} tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && handleFocus()}>
               <HelpCircle size={16} />
             </span>
           )}
@@ -483,7 +483,7 @@ function DialogField({
       <label>
         {displayLabel}
         {(showAllHelpIcons || constant.help) && (
-          <span className="help-icon" title={constant.help || 'Click for info'} onClick={handleFocus} tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && handleFocus()}>
+          <span className="help-icon" title={constant.help || 'Click for info'} onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleFocus(); }} tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && handleFocus()}>
             <HelpCircle size={16} />
           </span>
         )}

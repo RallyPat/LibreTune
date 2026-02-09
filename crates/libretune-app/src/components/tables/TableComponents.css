@@ -129,10 +129,37 @@
 .table-editor-2d .axis-bin-label {
   width: 3rem;
   height: 1.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   font-size: 0.8rem;
   text-align: center;
   border: 1px solid var(--border);
   background: var(--surface);
+  color: var(--text-primary);
+  cursor: pointer;
+  user-select: none;
+  transition: all 0.1s ease;
+}
+
+.table-editor-2d .axis-bin-label:hover {
+  background: var(--surface-bright);
+  border-color: var(--border-hover);
+}
+
+.table-editor-2d .axis-bin-label.selected {
+  background: var(--primary);
+  border-color: var(--primary-border);
+  color: white;
+  font-weight: bold;
+}
+
+/* Use specific input styling when in editing mode */
+input.table-editor-2d .axis-bin-label,
+.table-editor-2d .axis-bin-label.editing {
+  display: inline-block;
+  cursor: text;
+  background: var(--surface-bright);
   color: var(--text-primary);
 }
 
@@ -328,4 +355,101 @@
 
 .table-editor-2d .scale-apply-btn:hover {
   background: var(--primary-light);
+}
+
+/* Enhanced Context Menu Styles */
+.table-editor-2d .context-menu-title {
+  font-weight: 600;
+  font-size: 0.9em;
+  color: var(--text-primary);
+}
+
+.table-editor-2d .context-menu-subtitle {
+  font-size: 0.8em;
+  color: var(--text-muted);
+}
+
+.table-editor-2d .input-section {
+  padding: 0.5rem;
+  background: var(--surface-dim);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+.table-editor-2d .input-mode-tabs {
+  display: flex;
+  margin-bottom: 0.5rem;
+  background: var(--surface);
+  border-radius: 4px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+
+.table-editor-2d .tab-btn {
+  flex: 1;
+  padding: 4px;
+  background: transparent;
+  border: none;
+  font-size: 0.8em;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.table-editor-2d .tab-btn.active {
+  background: var(--primary);
+  color: white;
+}
+
+.table-editor-2d .input-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.table-editor-2d .operator {
+  font-weight: bold;
+  color: var(--text-muted);
+  width: 12px;
+  text-align: center;
+}
+
+.table-editor-2d .input-row input {
+  flex: 1;
+  width: 60px;
+  padding: 4px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-primary);
+  text-align: center;
+}
+
+.table-editor-2d .apply-btn {
+  padding: 4px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.8em;
+  color: var(--text-primary);
+  transition: all 0.2s;
+}
+
+.table-editor-2d .apply-btn:hover {
+  background: var(--primary);
+  color: white;
+  border-color: var(--primary);
+}
+
+.table-editor-2d .context-menu-item .icon {
+  margin-right: 8px;
+  min-width: 16px;
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 1.1em;
+}
+
+.table-editor-2d .context-menu-item:hover .icon {
+  color: var(--text-primary);
 }

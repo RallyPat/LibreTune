@@ -109,7 +109,7 @@ mod tests {
             },
         };
 
-        let result = ActionPlayer::validate_action_set(&set);
+        let result = ActionPlayer::validate_action_set(&set, None);
         assert!(result.is_ok());
     }
 
@@ -138,7 +138,7 @@ mod tests {
             },
         };
 
-        let result = ActionPlayer::validate_action_set(&set);
+        let result = ActionPlayer::validate_action_set(&set, None);
         assert!(result.is_err());
     }
 

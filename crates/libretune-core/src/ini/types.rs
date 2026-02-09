@@ -97,6 +97,33 @@ impl EcuType {
     }
 }
 
+/// INI-driven feature capabilities derived from the loaded ECU definition.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct IniCapabilities {
+    pub has_constants: bool,
+    pub has_output_channels: bool,
+    pub has_tables: bool,
+    pub has_curves: bool,
+    pub has_gauges: bool,
+    pub has_frontpage: bool,
+    pub has_dialogs: bool,
+    pub has_help_topics: bool,
+    pub has_setting_groups: bool,
+    pub has_pc_variables: bool,
+    pub has_default_values: bool,
+    pub has_datalog_entries: bool,
+    pub has_datalog_views: bool,
+    pub has_logger_definitions: bool,
+    pub has_controller_commands: bool,
+    pub has_port_editors: bool,
+    pub has_reference_tables: bool,
+    pub has_key_actions: bool,
+    pub has_ve_analyze: bool,
+    pub has_wue_analyze: bool,
+    pub has_gamma_e: bool,
+    pub supports_console: bool,
+}
+
 /// Data types supported by ECU constants
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DataType {

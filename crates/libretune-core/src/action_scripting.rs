@@ -6,6 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use crate::ini::EcuDefinition;
 
 /// Represents a single tuning action that can be recorded and replayed
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -41,6 +42,10 @@ pub enum Action {
     /// Pause/delay during playback (in milliseconds)
     Pause {
         duration_ms: u32,
+    },
+    /// Send a controller command (e.g. "burn", "reset")
+    SendCommand {
+        command: String,
     },
 }
 
@@ -184,7 +189,7 @@ impl ActionPlayer {
     /// 
     /// This is a simulated execution that validates actions.
     /// Actual execution requires integration with the ECU communication layer.
-    pub fn validate_action_set(action_set: &ActionSet) -> Result<Vec<String>, Vec<String>> {
+    pub fn validate_action_set(action_set: &ActionSet, def: Option<&EcuDefinition>) -> Result<Vec<String>, Vec<String>> {
         let mut warnings = Vec::new();
         let mut errors = Vec::new();
 
@@ -197,6 +202,11 @@ impl ActionPlayer {
                     if new_value.is_nan() || new_value.is_infinite() {
                         errors.push(format!("Action {}: Invalid value {}", idx, new_value));
                     }
+                    if let Some(d) = def {
+                        if !d.tables.contains_key(table_name) && !d.table_map_to_name.contains_key(table_name) {
+                            errors.push(format!("Action {}: Table '{}' not found in ECU definition", idx, table_name));
+                        }
+                    }
                 }
                 Action::ConstantChange { constant_name, new_value, .. } => {
                     if constant_name.is_empty() {
@@ -205,6 +215,11 @@ impl ActionPlayer {
                     if new_value.is_nan() || new_value.is_infinite() {
                         errors.push(format!("Action {}: Invalid value {}", idx, new_value));
                     }
+                    if let Some(d) = def {
+                        if !d.constants.contains_key(constant_name) {
+                            errors.push(format!("Action {}: Constant '{}' not found in ECU definition", idx, constant_name));
+                        }
+                    }
                 }
                 Action::BulkOperation { operation, table_name, cells, parameters, .. } => {
                     if table_name.is_empty() {
@@ -212,6 +227,11 @@ impl ActionPlayer {
                     }
                     if cells.is_empty() {
                         warnings.push(format!("Action {}: No cells selected for {}", idx, operation));
+                    }
+                    if let Some(d) = def {
+                        if !d.tables.contains_key(table_name) && !d.table_map_to_name.contains_key(table_name) {
+                            errors.push(format!("Action {}: Table '{}' not found in ECU definition", idx, table_name));
+                        }
                     }
                     match operation.as_str() {
                         "scale" => {
@@ -237,6 +257,15 @@ impl ActionPlayer {
                         warnings.push(format!("Action {}: Zero-duration pause", idx));
                     }
                 }
+                Action::SendCommand { command } => {
+                    if command.is_empty() {
+                        errors.push(format!("Action {}: Empty command", idx));
+                    } else if let Some(d) = def {
+                        if !d.controller_commands.contains_key(command) {
+                            errors.push(format!("Action {}: Command '{}' not supported by ECU definition", idx, command));
+                        }
+                    }
+                }
             }
         }
 
@@ -260,6 +289,7 @@ impl ActionPlayer {
                 Action::BulkOperation { .. } => "BulkOperation",
                 Action::ExecuteLuaScript { .. } => "ExecuteLuaScript",
                 Action::Pause { .. } => "Pause",
+                Action::SendCommand { .. } => "SendCommand",
             };
             *counts.entry(action_type).or_insert(0) += 1;
         }
@@ -353,7 +383,7 @@ mod tests {
             },
         };
 
-        let result = ActionPlayer::validate_action_set(&set);
+        let result = ActionPlayer::validate_action_set(&set, None);
         assert!(result.is_ok());
     }
 
@@ -378,7 +408,7 @@ mod tests {
             },
         };
 
-        let result = ActionPlayer::validate_action_set(&set);
+        let result = ActionPlayer::validate_action_set(&set, None);
         assert!(result.is_err());
     }
 

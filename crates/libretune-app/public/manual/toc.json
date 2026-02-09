@@ -103,6 +103,11 @@
         ]
       },
       {
+        "title": "Math Channels",
+        "path": "features/math-channels",
+        "children": []
+      },
+      {
         "title": "Data Logging",
         "path": "features/datalog",
         "children": []
@@ -212,11 +217,6 @@
       {
         "title": "Java → WASM Migration",
         "path": "reference/java-to-wasm-migration",
-        "children": []
-      },
-      {
-        "title": "Action Scripting",
-        "path": "reference/action-scripting",
         "children": []
       }
     ]

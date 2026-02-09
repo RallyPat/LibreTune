@@ -24,7 +24,7 @@ pub use error::IniError;
 pub use gauges::GaugeConfig;
 pub use inc_tables::{IncTable, IncTableCache};
 pub use output_channels::OutputChannel;
-pub use tables::{CurveDefinition, TableDefinition};
+pub use tables::{CurveDefinition, TableDefinition, TableType};
 pub use types::*;
 
 use std::collections::HashMap;
@@ -301,6 +301,34 @@ impl EcuDefinition {
             hash: self.compute_structural_hash(),
             spec_version: self.ini_spec_version.clone(),
             saved_at: chrono::Utc::now().to_rfc3339(),
+        }
+    }
+
+    /// Derive INI-driven feature capabilities for UI gating.
+    pub fn capabilities(&self) -> IniCapabilities {
+        IniCapabilities {
+            has_constants: !self.constants.is_empty(),
+            has_output_channels: !self.output_channels.is_empty(),
+            has_tables: !self.tables.is_empty(),
+            has_curves: !self.curves.is_empty(),
+            has_gauges: !self.gauges.is_empty(),
+            has_frontpage: self.frontpage.is_some(),
+            has_dialogs: !self.dialogs.is_empty(),
+            has_help_topics: !self.help_topics.is_empty(),
+            has_setting_groups: !self.setting_groups.is_empty(),
+            has_pc_variables: !self.pc_variables.is_empty(),
+            has_default_values: !self.default_values.is_empty(),
+            has_datalog_entries: !self.datalog_entries.is_empty(),
+            has_datalog_views: !self.datalog_views.is_empty(),
+            has_logger_definitions: !self.logger_definitions.is_empty(),
+            has_controller_commands: !self.controller_commands.is_empty(),
+            has_port_editors: !self.port_editors.is_empty(),
+            has_reference_tables: !self.reference_tables.is_empty(),
+            has_key_actions: !self.key_actions.is_empty(),
+            has_ve_analyze: self.ve_analyze.is_some(),
+            has_wue_analyze: self.wue_analyze.is_some(),
+            has_gamma_e: self.gamma_e.is_some(),
+            supports_console: self.ecu_type.supports_console() && !self.controller_commands.is_empty(),
         }
     }
 }

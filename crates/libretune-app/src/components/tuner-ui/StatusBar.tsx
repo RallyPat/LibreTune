@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react';
 import { StatusItem } from './TunerLayout';
 import './StatusBar.css';
 
@@ -9,6 +10,41 @@ interface StatusBarProps {
 }
 
 export function StatusBar({ items, connected, ecuName }: StatusBarProps) {
+  const [currentPage, setCurrentPage] = useState(0);
+  const itemsPerPage = 6;
+
+  // Get center items (channel indicators)
+  const centerItems = items.filter((item) => item.align === 'center' || !item.align);
+  const rightItems = items.filter((item) => item.align === 'right');
+
+  // Calculate pagination for center items
+  const totalPages = Math.ceil(centerItems.length / itemsPerPage);
+  const safeCurrentPage = totalPages > 0 ? Math.min(currentPage, totalPages - 1) : 0;
+  const visibleItems = centerItems.slice(
+    safeCurrentPage * itemsPerPage,
+    (safeCurrentPage + 1) * itemsPerPage
+  );
+
+  // Keyboard shortcuts for pagination
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (!e.altKey) return;
+      
+      if (e.key === '>' || e.key === '.') {
+        // Alt+> to next page
+        e.preventDefault();
+        setCurrentPage((p) => (p + 1) % (totalPages || 1));
+      } else if (e.key === '<' || e.key === ',') {
+        // Alt+< to previous page
+        e.preventDefault();
+        setCurrentPage((p) => (p - 1 + (totalPages || 1)) % (totalPages || 1));
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [totalPages]);
+
   return (
     <div className="statusbar">
       {/* Connection status (always on left) */}
@@ -19,22 +55,54 @@ export function StatusBar({ items, connected, ecuName }: StatusBarProps) {
         </div>
       </div>
 
-      {/* Center items */}
+      {/* Center items with pagination */}
       <div className="statusbar-section statusbar-section-center">
-        {items
-          .filter((item) => item.align === 'center' || !item.align)
-          .map((item) => (
-            <StatusBarItem key={item.id} item={item} />
-          ))}
+        {centerItems.length > 0 ? (
+          <>
+            {/* Pagination previous button */}
+            {totalPages > 1 && (
+              <button
+                className="pagination-btn pagination-prev"
+                onClick={() => setCurrentPage((p) => (p - 1 + totalPages) % totalPages)}
+                title="Previous page (Alt+<)"
+                aria-label="Previous status page"
+              >
+                ‹
+              </button>
+            )}
+
+            {/* Visible items */}
+            {visibleItems.map((item) => (
+              <StatusBarItem key={item.id} item={item} />
+            ))}
+
+            {/* Pagination next button */}
+            {totalPages > 1 && (
+              <button
+                className="pagination-btn pagination-next"
+                onClick={() => setCurrentPage((p) => (p + 1) % totalPages)}
+                title="Next page (Alt+>)"
+                aria-label="Next status page"
+              >
+                ›
+              </button>
+            )}
+
+            {/* Page indicator */}
+            {totalPages > 1 && (
+              <span className="pagination-indicator" title="Current page">
+                {safeCurrentPage + 1}/{totalPages}
+              </span>
+            )}
+          </>
+        ) : null}
       </div>
 
       {/* Right items */}
       <div className="statusbar-section statusbar-section-right">
-        {items
-          .filter((item) => item.align === 'right')
-          .map((item) => (
-            <StatusBarItem key={item.id} item={item} />
-          ))}
+        {rightItems.map((item) => (
+          <StatusBarItem key={item.id} item={item} />
+        ))}
       </div>
     </div>
   );

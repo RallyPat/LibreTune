@@ -13,7 +13,7 @@ use libretune_core::datalog::DataLogger;
 use libretune_core::demo::DemoSimulator;
 use libretune_core::ini::{
     AdaptiveTimingConfig, CommandPart, Constant, DataType, DialogDefinition, EcuDefinition,
-    Endianness, HelpTopic, Menu, MenuItem, ProtocolSettings,
+    Endianness, HelpTopic, IniCapabilities, Menu, MenuItem, ProtocolSettings, VeAnalyzeConfig,
 };
 use libretune_core::lua::{execute_script, LuaExecutionResult};
 use libretune_core::plugin_system::{
@@ -22,11 +22,13 @@ use libretune_core::plugin_system::{
 };
 use libretune_core::project::{
     format_commit_message, BranchInfo, CommitDiff, CommitInfo, ConnectionSettings, IniRepository,
-    IniSource, OnlineIniEntry, OnlineIniRepository, Project, ProjectConfig, ProjectSettings,
-    ProjectTemplate, TemplateManager, VersionControl,
+    IniSource, load_math_channels, save_math_channels, OnlineIniEntry, OnlineIniRepository, Project,
+    ProjectConfig, ProjectSettings, ProjectTemplate, TemplateManager, UserMathChannel,
+    VersionControl,
 };
 use libretune_core::protocol::serial::list_ports;
 use libretune_core::protocol::{Connection, ConnectionConfig, ConnectionState};
+use libretune_core::realtime::Evaluator;
 use libretune_core::table_ops;
 use libretune_core::tune::{
     ConstantManifestEntry, IniMetadata, MigrationReport, PageState, TuneCache, TuneFile, TuneValue,
@@ -326,9 +328,8 @@ type ConnectionFactory = dyn Fn(ConnectionConfig, Option<ProtocolSettings>, Endi
 
 /// Tracks RPM state for key-on/off detection
 struct RpmStateTracker {
-    last_rpm: f64,
-    last_state_change_time: std::time::Instant,
-    current_state: RpmState, // "on" or "off"
+    current_state: RpmState,
+    pending_off_start: Option<std::time::Instant>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -340,38 +341,50 @@ enum RpmState {
 impl RpmStateTracker {
     fn new() -> Self {
         Self {
-            last_rpm: 0.0,
-            last_state_change_time: std::time::Instant::now(),
             current_state: RpmState::Off,
+            pending_off_start: None,
         }
     }
 
     /// Update RPM and check for state transitions
     /// Returns Some(new_state) if state changed, None otherwise
     fn update(&mut self, rpm: f64, threshold_rpm: f64, timeout_sec: u32) -> Option<RpmState> {
-        let should_be_on = rpm >= threshold_rpm;
-        let new_state = if should_be_on {
-            RpmState::On
-        } else {
-            RpmState::Off
-        };
+        let rpm_above_threshold = rpm >= threshold_rpm;
 
-        // Check if state transition occurred
-        if new_state != self.current_state {
-            let time_in_state = self.last_state_change_time.elapsed().as_secs();
-
-            // Debounce: only transition if we've been in this state for the timeout duration
-            if (new_state == RpmState::Off && time_in_state >= timeout_sec as u64)
-                || new_state == RpmState::On
-            {
-                self.current_state = new_state;
-                self.last_state_change_time = std::time::Instant::now();
-                self.last_rpm = rpm;
-                return Some(new_state);
+        match self.current_state {
+            RpmState::Off => {
+                if rpm_above_threshold {
+                    // Engine started: Turn ON immediately
+                    self.current_state = RpmState::On;
+                    self.pending_off_start = None;
+                    return Some(RpmState::On);
+                }
+            }
+            RpmState::On => {
+                if rpm_above_threshold {
+                    // Engine running above threshold: reset any pending off timer
+                    self.pending_off_start = None;
+                } else {
+                    // RPM dropped below threshold
+                    match self.pending_off_start {
+                        None => {
+                            // Start the timeout timer
+                            self.pending_off_start = Some(std::time::Instant::now());
+                        }
+                        Some(start_time) => {
+                            // Check if we've been below threshold longer than timeout
+                            if start_time.elapsed().as_secs() >= timeout_sec as u64 {
+                                // Timeout exceeded: Turn OFF
+                                self.current_state = RpmState::Off;
+                                self.pending_off_start = None;
+                                return Some(RpmState::Off);
+                            }
+                        }
+                    }
+                }
             }
         }
 
-        self.last_rpm = rpm;
         None
     }
 }
@@ -407,6 +420,8 @@ struct AppState {
     wasm_plugin_manager: Mutex<Option<WasmPluginManager>>,
     // Migration report when loading a tune from a different INI version
     migration_report: Mutex<Option<MigrationReport>>,
+    // Math Channel Evaluator
+    evaluator: Mutex<Option<Evaluator>>,
     // Cached output channels to avoid repeated cloning in realtime streaming loop
     // This is an Arc-wrapped copy that is updated whenever definition is loaded/changed
     cached_output_channels: Mutex<Option<Arc<HashMap<String, libretune_core::ini::OutputChannel>>>>,
@@ -414,6 +429,8 @@ struct AppState {
     console_history: Mutex<Vec<String>>,
     // RPM state tracker for key-on/off detection
     rpm_state_tracker: Mutex<RpmStateTracker>,
+    // User-Defined Math Channels
+    math_channels: Mutex<Vec<UserMathChannel>>,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -566,6 +583,12 @@ struct Settings {
     #[serde(default = "default_true")]
     show_all_help_icons: bool, // Show help icons on all fields (true) or only fields with descriptions (false)
 
+    // Session persistence
+    #[serde(default)]
+    last_project_path: Option<String>,
+    #[serde(default)]
+    last_active_tab: Option<String>,
+
     // Heatmap color scheme settings
     #[serde(default = "default_heatmap_scheme")]
     heatmap_value_scheme: String, // Scheme for VE/timing tables
@@ -610,6 +633,14 @@ struct Settings {
     alert_large_change_abs: f64, // Absolute change threshold
     #[serde(default = "default_alert_large_change_percent")]
     alert_large_change_percent: f64, // Percent change threshold
+
+    // Keyboard shortcut customization (mapping from action to key binding)
+    #[serde(default)]
+    hotkey_bindings: HashMap<String, String>, // e.g., {"table.setEqual": "=", "table.smooth": "s"}
+
+    // Onboarding state
+    #[serde(default = "default_false")]
+    onboarding_completed: bool, // Track if user has completed onboarding
 }
 
 fn default_runtime_packet_mode() -> String {
@@ -1171,6 +1202,12 @@ async fn load_ini(
             let mut channels_cache_guard = state.cached_output_channels.lock().await;
             *channels_cache_guard = Some(Arc::new(def_clone.output_channels.clone()));
             drop(channels_cache_guard);
+
+            // Initialize Math Channel Evaluator
+            let evaluator = Evaluator::new(&def_clone);
+            let mut evaluator_guard = state.evaluator.lock().await;
+            *evaluator_guard = Some(evaluator);
+            drop(evaluator_guard);
 
             // Initialize TuneCache from new definition
             let cache = TuneCache::from_definition(&def_clone);
@@ -2445,6 +2482,26 @@ async fn get_protocol_capabilities(
     })
 }
 
+/// Return the parsed [VeAnalyze] configuration if present.
+#[tauri::command]
+async fn get_ve_analyze_config(
+    state: tauri::State<'_, AppState>,
+) -> Result<Option<VeAnalyzeConfig>, String> {
+    let def_guard = state.definition.lock().await;
+    let def = def_guard.as_ref().ok_or("Definition not loaded")?;
+    Ok(def.ve_analyze.clone())
+}
+
+/// Return INI-derived feature capabilities for UI gating.
+#[tauri::command]
+async fn get_ini_capabilities(
+    state: tauri::State<'_, AppState>,
+) -> Result<IniCapabilities, String> {
+    let def_guard = state.definition.lock().await;
+    let def = def_guard.as_ref().ok_or("Definition not loaded")?;
+    Ok(def.capabilities())
+}
+
 /// Status of the tune cache for UI display
 #[derive(Serialize)]
 struct TuneCacheStatus {
@@ -3072,25 +3129,32 @@ async fn get_realtime_data(
         conn.get_realtime_data().map_err(|e| e.to_string())?
     };
 
-    // Two-pass approach for computed channels using the Arc reference:
-    // Pass 1: Parse all non-computed channels
-    let mut data = HashMap::new();
-    let mut computed_channels = Vec::new();
+    // Use Evaluator if available, otherwise fallback (should exist if INI loaded)
+    let evaluator_guard = state.evaluator.lock().await;
 
-    for (name, channel) in channels_arc.iter() {
-        if channel.is_computed() {
-            computed_channels.push((name.clone(), channel.clone()));
-        } else if let Some(val) = channel.parse(&raw_data, endianness) {
-            data.insert(name.clone(), val);
+    let data = if let Some(evaluator) = &*evaluator_guard {
+        let def_guard = state.definition.lock().await;
+        if let Some(def) = &*def_guard {
+            evaluator.process(&raw_data, def)
+        } else {
+            // Fallback if definition locking fails
+            return Err("Definition missing during evaluation".to_string());
         }
-    }
-
-    // Pass 2: Evaluate computed channels using parsed values as context
-    for (name, channel) in computed_channels {
-        if let Some(val) = channel.parse_with_context(&raw_data, endianness, &data) {
-            data.insert(name, val);
+    } else {
+        // Fallback: Manual parsing (basic channels only) if Evaluator not available
+        let mut results = HashMap::new();
+        
+        // First pass: Parse all raw channels
+        for (name, channel) in channels_arc.iter() {
+             if !channel.is_computed() {
+                 if let Some(val) = channel.parse(&raw_data, endianness) {
+                     results.insert(name.clone(), val);
+                 }
+             }
         }
-    }
+        
+        results
+    };
 
     Ok(data)
 }
@@ -3331,7 +3395,23 @@ async fn start_realtime_stream(
 
                 if let Some(ref mut sim) = demo_simulator {
                     let elapsed_ms = start_time.elapsed().as_millis() as u64;
-                    let data = sim.update(elapsed_ms);
+                    let mut data = sim.update(elapsed_ms);
+
+                    // User Math Channels Evaluation (Demo)
+                    {
+                        let mut channels_guard = app_state.math_channels.lock().await;
+                        for channel in channels_guard.iter_mut() {
+                            if channel.cached_ast.is_none() {
+                                let _ = channel.compile();
+                            }
+                            if let Some(expr) = &channel.cached_ast {
+                                if let Ok(val) = libretune_core::ini::expression::evaluate_simple(expr, &data) {
+                                    data.insert(channel.name.clone(), val.as_f64());
+                                }
+                            }
+                        }
+                    }
+
                     let _ = app_handle.emit("realtime:update", &data);
 
                     // Check for RPM state transitions (key-on/off detection)
@@ -3422,6 +3502,21 @@ async fn start_realtime_stream(
                         for (name, channel) in computed_channels {
                             if let Some(val) = channel.parse_with_context(&raw, endianness, &data) {
                                 data.insert(name, val);
+                            }
+                        }
+
+                        // Pass 3: User Math Channels Evaluation
+                        {
+                            let mut channels_guard = app_state.math_channels.lock().await;
+                            for channel in channels_guard.iter_mut() {
+                                if channel.cached_ast.is_none() {
+                                    let _ = channel.compile();
+                                }
+                                if let Some(expr) = &channel.cached_ast {
+                                    if let Ok(val) = libretune_core::ini::expression::evaluate_simple(expr, &data) {
+                                        data.insert(channel.name.clone(), val.as_f64());
+                                    }
+                                }
                             }
                         }
 
@@ -3701,6 +3796,18 @@ async fn get_available_channels(
             translate: ch.translate,
         })
         .collect();
+
+    // Append user math channels
+    let math_channels_guard = state.math_channels.lock().await;
+    for ch in math_channels_guard.iter() {
+        channels.push(ChannelInfo {
+            name: ch.name.clone(),
+            label: Some(ch.name.clone()),
+            units: ch.units.clone(),
+            scale: 1.0,
+            translate: 0.0,
+        });
+    }
 
     // Sort by name for consistent ordering
     channels.sort_by(|a, b| a.name.cmp(&b.name));
@@ -6098,6 +6205,84 @@ async fn rebin_table(
         x_bins: result.x_bins,
         y_bins: result.y_bins,
         z_values: result.z_values,
+        ..table_data
+    })
+}
+
+#[tauri::command]
+async fn interpolate_linear(
+    state: tauri::State<'_, AppState>,
+    table_name: String,
+    selected_cells: Vec<(usize, usize)>,
+    axis: String,
+) -> Result<TableData, String> {
+    let axis_enum = match axis.to_lowercase().as_str() {
+        "row" => table_ops::InterpolationAxis::Row,
+        "col" => table_ops::InterpolationAxis::Col,
+        _ => return Err("Invalid interpolation axis".to_string()),
+    };
+
+    let table_data = get_table_data_internal(&state, &table_name).await?;
+    let new_z_values = table_ops::interpolate_linear(
+        &table_data.z_values,
+        selected_cells,
+        axis_enum,
+    );
+
+    update_table_z_values_internal(&state, &table_name, new_z_values.clone()).await?;
+
+    Ok(TableData {
+        z_values: new_z_values,
+        ..table_data
+    })
+}
+
+#[tauri::command]
+async fn add_offset(
+    state: tauri::State<'_, AppState>,
+    table_name: String,
+    selected_cells: Vec<(usize, usize)>,
+    offset: f64,
+) -> Result<TableData, String> {
+    let table_data = get_table_data_internal(&state, &table_name).await?;
+    let new_z_values = table_ops::add_offset(
+        &table_data.z_values,
+        selected_cells,
+        offset,
+    );
+
+    update_table_z_values_internal(&state, &table_name, new_z_values.clone()).await?;
+
+    Ok(TableData {
+        z_values: new_z_values,
+        ..table_data
+    })
+}
+
+#[tauri::command]
+async fn fill_region(
+    state: tauri::State<'_, AppState>,
+    table_name: String,
+    selected_cells: Vec<(usize, usize)>,
+    direction: String,
+) -> Result<TableData, String> {
+    let dir_enum = match direction.to_lowercase().as_str() {
+        "right" => table_ops::FillDirection::Right,
+        "down" => table_ops::FillDirection::Down,
+        _ => return Err("Invalid fill direction".to_string()),
+    };
+
+    let table_data = get_table_data_internal(&state, &table_name).await?;
+    let new_z_values = table_ops::fill_region(
+        &table_data.z_values,
+        selected_cells,
+        dir_enum,
+    );
+
+    update_table_z_values_internal(&state, &table_name, new_z_values.clone()).await?;
+
+    Ok(TableData {
+        z_values: new_z_values,
         ..table_data
     })
 }
@@ -9557,6 +9742,32 @@ async fn open_project(
     eprintln!("[INFO] INI signature: '{}'", def.signature);
     eprintln!("[INFO] INI has {} constants", def.constants.len());
 
+    // Save as last opened project
+    {
+        let mut settings = load_settings(&app);
+        if settings.last_project_path.as_deref() != Some(&path) {
+            settings.last_project_path = Some(path.clone());
+            save_settings(&app, &settings);
+        }
+    }
+
+    // Load user math channels
+    let math_channels_path = project.path.join("math_channels.json");
+    let channels = match load_math_channels(&math_channels_path) {
+        Ok(c) => {
+            eprintln!("[INFO] Loaded {} math channels", c.len());
+            c
+        },
+        Err(e) => {
+            // It's normal for this to not exist in new projects
+            if math_channels_path.exists() {
+                 eprintln!("[WARN] Failed to load math_channels.json: {}", e);
+            }
+            Vec::new()
+        }
+    };
+    *state.math_channels.lock().await = channels;
+
     let response = CurrentProjectInfo {
         name: project.config.name.clone(),
         path: project.path.to_string_lossy().to_string(),
@@ -10831,6 +11042,74 @@ async fn git_has_changes(state: tauri::State<'_, AppState>) -> Result<bool, Stri
 }
 
 // =====================================================
+// Math Channel Commands
+// =====================================================
+
+#[tauri::command]
+async fn get_math_channels(state: tauri::State<'_, AppState>) -> Result<Vec<UserMathChannel>, String> {
+    Ok(state.math_channels.lock().await.clone())
+}
+
+#[tauri::command]
+async fn set_math_channel(
+    state: tauri::State<'_, AppState>,
+    mut channel: UserMathChannel,
+) -> Result<(), String> {
+    // Validate first
+    channel.compile().map_err(|e| format!("Invalid expression: {}", e))?;
+
+    let mut channels = state.math_channels.lock().await;
+    
+    // Check if updating existing
+    if let Some(existing) = channels.iter_mut().find(|c| c.name == channel.name) {
+        *existing = channel;
+    } else {
+        channels.push(channel);
+    }
+    
+    // Auto-save if project open
+    let project = state.current_project.lock().await;
+    if let Some(ref proj) = *project {
+        let path = proj.path.join("math_channels.json");
+        save_math_channels(&path, &channels)?;
+    }
+    
+    Ok(())
+}
+
+#[tauri::command]
+async fn delete_math_channel(
+    state: tauri::State<'_, AppState>,
+    name: String,
+) -> Result<(), String> {
+    let mut channels = state.math_channels.lock().await;
+    let initial_len = channels.len();
+    channels.retain(|c| c.name != name);
+    
+    if channels.len() == initial_len {
+        return Err(format!("Channel '{}' not found", name));
+    }
+    
+    // Auto-save
+    let project = state.current_project.lock().await;
+    if let Some(ref proj) = *project {
+        let path = proj.path.join("math_channels.json");
+        save_math_channels(&path, &channels)?;
+    }
+    
+    Ok(())
+}
+
+#[tauri::command]
+async fn validate_math_expression(expr: String) -> Result<String, String> {
+    let mut parser = libretune_core::ini::expression::Parser::new(&expr);
+    match parser.parse() {
+        Ok(_) => Ok("Valid expression".to_string()),
+        Err(e) => Err(e),
+    }
+}
+
+// =====================================================
 // Project Template Commands
 // =====================================================
 
@@ -11429,6 +11708,7 @@ mod demo_mode_tests {
             wasm_plugin_manager: Mutex::new(None),
 
             migration_report: Mutex::new(None),
+            evaluator: Mutex::new(None),
             cached_output_channels: Mutex::new(None),
             connection_factory: Mutex::new(None),
         };
@@ -11498,6 +11778,7 @@ mod concurrency_tests {
             wasm_plugin_manager: Mutex::new(None),
 
             migration_report: Mutex::new(None),
+            evaluator: Mutex::new(None),
             cached_output_channels: Mutex::new(None),
             connection_factory: Mutex::new(None),
         });
@@ -11642,6 +11923,7 @@ signature = "Speeduino 2023-04"
             wasm_plugin_manager: Mutex::new(None),
 
             migration_report: Mutex::new(None),
+            evaluator: Mutex::new(None),
             cached_output_channels: Mutex::new(None),
             connection_factory: Mutex::new(None),
         };
@@ -11706,6 +11988,7 @@ signature = "Speeduino 2023-04"
             wasm_plugin_manager: Mutex::new(None),
 
             migration_report: Mutex::new(None),
+            evaluator: Mutex::new(None),
             cached_output_channels: Mutex::new(None),
             connection_factory: Mutex::new(None),
         };
@@ -11773,6 +12056,7 @@ signature = "Speeduino 2023-04"
             wasm_plugin_manager: Mutex::new(None),
 
             migration_report: Mutex::new(None),
+            evaluator: Mutex::new(None),
             cached_output_channels: Mutex::new(None),
             connection_factory: Mutex::new(None),
         };
@@ -11852,6 +12136,7 @@ signature = "Speeduino 2023-04"
             wasm_plugin_manager: Mutex::new(None),
 
             migration_report: Mutex::new(None),
+            evaluator: Mutex::new(None),
             cached_output_channels: Mutex::new(None),
             connection_factory: Mutex::new(None),
         };
@@ -11947,6 +12232,16 @@ async fn update_setting(app: tauri::AppHandle, key: String, value: String) -> Re
             // Accept any string; UI should validate. Store as-is.
             settings.runtime_packet_mode = value;
         }
+        "onboarding_completed" => {
+            settings.onboarding_completed = value.parse().map_err(|_| "Invalid boolean value")?
+        }
+        // Session persistence
+        "last_project_path" => {
+            settings.last_project_path = if value.is_empty() { None } else { Some(value) }
+        }
+        "last_active_tab" => {
+            settings.last_active_tab = if value.is_empty() { None } else { Some(value) }
+        }
         _ => return Err(format!("Unknown setting: {}", key)),
     }
 
@@ -12007,6 +12302,49 @@ async fn update_constant_string(
     eprintln!("Updated string constant '{}' to: '{}'", name, value);
 
     Ok(())
+}
+
+/// Get current hotkey bindings from settings
+///
+/// Returns: HashMap of action names to keyboard shortcuts
+#[tauri::command]
+async fn get_hotkey_bindings(app: tauri::AppHandle) -> Result<HashMap<String, String>, String> {
+    let settings = load_settings(&app);
+    Ok(settings.hotkey_bindings.clone())
+}
+
+/// Save hotkey bindings to settings
+///
+/// # Arguments
+/// * `bindings` - HashMap of action names to keyboard shortcuts (e.g., {"table.setEqual": "="})
+///
+/// Returns: Nothing on success
+#[tauri::command]
+async fn save_hotkey_bindings(
+    app: tauri::AppHandle,
+    bindings: HashMap<String, String>,
+) -> Result<(), String> {
+    let mut settings = load_settings(&app);
+    settings.hotkey_bindings = bindings;
+    save_settings(&app, &settings);
+    let _ = app.emit("settings:hotkeys_changed", ());
+    Ok(())
+}
+
+/// Mark onboarding as completed
+#[tauri::command]
+async fn mark_onboarding_completed(app: tauri::AppHandle) -> Result<(), String> {
+    let mut settings = load_settings(&app);
+    settings.onboarding_completed = true;
+    save_settings(&app, &settings);
+    Ok(())
+}
+
+/// Check if onboarding has been completed
+#[tauri::command]
+async fn is_onboarding_completed(app: tauri::AppHandle) -> Result<bool, String> {
+    let settings = load_settings(&app);
+    Ok(settings.onboarding_completed)
 }
 
 // ============================================================================
@@ -12238,8 +12576,10 @@ pub fn run() {
             wasm_plugin_manager: Mutex::new(None),
 
             migration_report: Mutex::new(None),
+            evaluator: Mutex::new(None),
             connection_factory: Mutex::new(None),
             cached_output_channels: Mutex::new(None),
+            math_channels: Mutex::new(Vec::new()),
         })
         .invoke_handler(tauri::generate_handler![
             get_serial_ports,
@@ -12278,9 +12618,16 @@ pub fn run() {
             get_port_editor,
             get_port_editor_assignments,
             save_port_editor_assignments,
+            // Math Channels
+            get_math_channels,
+            set_math_channel,
+            delete_math_channel,
+            validate_math_expression,
             // INI / protocol defaults
             get_protocol_defaults,
             get_protocol_capabilities,
+            get_ini_capabilities,
+            get_ve_analyze_config,
             get_help_topic,
             get_build_info,
             get_constant,
@@ -12301,6 +12648,9 @@ pub fn run() {
             rebin_table,
             smooth_table,
             interpolate_cells,
+            interpolate_linear,
+            add_offset,
+            fill_region,
             scale_cells,
             set_cells_equal,
             save_dashboard_layout,
@@ -12411,6 +12761,10 @@ pub fn run() {
             // Settings commands
             get_settings,
             update_setting,
+            get_hotkey_bindings,
+            save_hotkey_bindings,
+            mark_onboarding_completed,
+            is_onboarding_completed,
             update_heatmap_custom_stops,
             update_constant_string,
             run_lua_script,

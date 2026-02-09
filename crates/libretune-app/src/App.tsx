@@ -2,8 +2,9 @@ import { useState, useEffect, useMemo, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
-import { open, save } from "@tauri-apps/plugin-dialog";
+import { open } from "@tauri-apps/plugin-dialog";
 import { ThemeProvider, useTheme, ThemeName, THEME_INFO } from "./themes";
+import { initializeHotkeyManager } from "./services/hotkeyService";
 import { useRealtimeStore, useChannels } from "./stores/realtimeStore";
 import {
   TunerLayout,
@@ -27,6 +28,7 @@ import {
   DataLogView,
 } from "./components/tuner-ui";
 import ConnectionMetrics from './components/layout/ConnectionMetrics';
+import OnboardingDialog from './components/dialogs/OnboardingDialog';
 import TsDashboard from "./components/dashboards/TsDashboard";
 import { ToothLoggerView, CompositeLoggerView } from "./components/diagnostics";
 import { EcuConsole } from "./components/console/EcuConsole";
@@ -42,6 +44,7 @@ import TableComparisonDialog from "./components/dialogs/TableComparisonDialog";
 import PerformanceFieldsDialog from "./components/dialogs/PerformanceFieldsDialog";
 import RestorePointsDialog from "./components/dialogs/RestorePointsDialog";
 import ImportProjectWizard from "./components/dialogs/ImportProjectWizard";
+import MathChannelsDialog from "./components/dialogs/MathChannelsDialog";
 import MigrationReportDialog from "./components/dialogs/MigrationReportDialog";
 import TuneHistoryPanel from "./components/TuneHistoryPanel";
 import ErrorDetailsDialog, { useErrorDialog } from "./components/dialogs/ErrorDetailsDialog";
@@ -91,6 +94,31 @@ interface CurrentProject {
     baud_rate: number;
     auto_connect: boolean;
   };
+}
+
+interface IniCapabilities {
+  has_constants: boolean;
+  has_output_channels: boolean;
+  has_tables: boolean;
+  has_curves: boolean;
+  has_gauges: boolean;
+  has_frontpage: boolean;
+  has_dialogs: boolean;
+  has_help_topics: boolean;
+  has_setting_groups: boolean;
+  has_pc_variables: boolean;
+  has_default_values: boolean;
+  has_datalog_entries: boolean;
+  has_datalog_views: boolean;
+  has_logger_definitions: boolean;
+  has_controller_commands: boolean;
+  has_port_editors: boolean;
+  has_reference_tables: boolean;
+  has_key_actions: boolean;
+  has_ve_analyze: boolean;
+  has_wue_analyze: boolean;
+  has_gamma_e: boolean;
+  supports_console: boolean;
 }
 
 interface ProjectInfo {
@@ -238,6 +266,7 @@ function AppContent() {
 
   // INI-derived defaults
   const [iniDefaults, setIniDefaults] = useState<ProtocolDefaults | null>(null);
+  const [iniCapabilities, setIniCapabilities] = useState<IniCapabilities | null>(null);
   const [baudUserSet, setBaudUserSet] = useState(false);
   const [timeoutUserSet, setTimeoutUserSet] = useState(false);
 
@@ -265,7 +294,10 @@ function AppContent() {
 
   // Fetch INI protocol defaults when a definition is loaded
   useEffect(() => {
-    if (!status.has_definition) return;
+    if (!status.has_definition) {
+      setIniCapabilities(null);
+      return;
+    }
     // Only fetch defaults when running inside Tauri
     const inTauri = !!(window as any).__TAURI_INTERNALS__;
     if (!inTauri) return;
@@ -308,6 +340,15 @@ function AppContent() {
       } catch (e) {
         console.warn('get_available_channels failed:', e);
       }
+
+      // Fetch INI-driven capability map for feature gating
+      try {
+        const caps = await invoke<IniCapabilities>('get_ini_capabilities');
+        setIniCapabilities(caps);
+      } catch (e) {
+        console.warn('get_ini_capabilities failed:', e);
+        setIniCapabilities(null);
+      }
     })();
   }, [status.has_definition]);
 
@@ -340,6 +381,7 @@ function AppContent() {
   const [burnDialogOpen, setBurnDialogOpen] = useState(false);
   const [newTuneDialogOpen, setNewTuneDialogOpen] = useState(false);
   const [settingsDialogOpen, setSettingsDialogOpen] = useState(false);
+  const [mathChannelsDialogOpen, setMathChannelsDialogOpen] = useState(false);
   const [aboutDialogOpen, setAboutDialogOpen] = useState(false);
   const [connectionDialogOpen, setConnectionDialogOpen] = useState(false);
   const [connecting, setConnecting] = useState(false);
@@ -384,6 +426,9 @@ function AppContent() {
   // Sync status tracking (for partial sync warning)
   const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);
 
+  // Onboarding state
+  const [onboardingOpen, setOnboardingOpen] = useState(false);
+
   // Settings state
   const [unitsSystem, setUnitsSystem] = useState<'metric'|'imperial'>('metric');
   const [autoBurnOnClose, setAutoBurnOnClose] = useState(false);
@@ -413,6 +458,14 @@ function AppContent() {
     }
   }, [isTauri]);
 
+  // Persist active tab state
+  useEffect(() => {
+    if (activeTabId && currentProject) {
+      invoke("update_setting", { key: "last_active_tab", value: activeTabId })
+        .catch(e => console.warn("Failed to save last_active_tab", e));
+    }
+  }, [activeTabId, currentProject]);
+
   async function initializeApp() {
     showLoading("Initializing LibreTune...");
     try {
@@ -428,26 +481,48 @@ function AppContent() {
       setAvailableProjects(projects);
       
       // Load settings
+      let settings: any = {};
       try {
-        const settings = await invoke<{ 
-          units_system?: string; 
-          auto_burn_on_close?: boolean;
-          indicator_column_count?: string;
-          indicator_fill_empty?: boolean;
-          indicator_text_fit?: string;
-        }>("get_settings");
+        settings = await invoke("get_settings");
         if (settings.units_system) setUnitsSystem(settings.units_system as 'metric' | 'imperial');
         if (settings.auto_burn_on_close !== undefined) setAutoBurnOnClose(settings.auto_burn_on_close);
-        // Legacy dashboard settings (removed with TabbedDashboard)
-        // if (settings.indicator_column_count) { ... }
-        // if (settings.indicator_fill_empty !== undefined) { ... }
-        // if (settings.indicator_text_fit) { ... }
+        if (settings.status_bar_channels) setStatusBarChannels(settings.status_bar_channels);
       } catch (e) {
         console.warn("Failed to load settings:", e);
       }
       
-      // Check if there's already a project open (from previous session)
-      const project = await invoke<CurrentProject | null>("get_current_project");
+      // Load custom hotkey bindings
+      try {
+        await initializeHotkeyManager();
+      } catch (e) {
+        console.warn("Failed to load hotkey bindings:", e);
+      }
+      
+      // Check if onboarding has been completed
+      try {
+        const onboardingCompleted = await invoke<boolean>("is_onboarding_completed");
+        if (!onboardingCompleted) {
+          setOnboardingOpen(true);
+        }
+      } catch (e) {
+        console.warn("Failed to check onboarding status:", e);
+        // If we can't check, show onboarding (safer default)
+        setOnboardingOpen(true);
+      }
+      
+      // Check if there's already a project open (backend memory)
+      let project = await invoke<CurrentProject | null>("get_current_project");
+
+      // If no project in memory, try restoring last opened project from settings
+      if (!project && settings.last_project_path) {
+        try {
+          console.log("Restoring last project:", settings.last_project_path);
+          project = await invoke<CurrentProject>("open_project", { path: settings.last_project_path });
+        } catch (e) {
+          console.warn("Failed to restore last project:", e);
+        }
+      }
+      
       if (project) {
         setCurrentProject(project);
         try {
@@ -455,10 +530,48 @@ function AppContent() {
           const values = await fetchConstants();
           await fetchMenuTree(values);
           
-          // Initialize dashboard tab
-          setTabs([{ id: "dashboard", title: "Dashboard", icon: "dashboard", closable: false }]);
-          setTabContents({ dashboard: { type: "dashboard" } });
-          setActiveTabId("dashboard");
+          let restored = false;
+          // Dashboard base is always needed
+          const dashTab = { id: "dashboard", title: "Dashboard", icon: "dashboard", closable: false };
+
+          if (settings.last_active_tab && settings.last_active_tab !== "dashboard") {
+             const tabId = settings.last_active_tab;
+             try {
+                if (tabId.startsWith("table:") || !tabId.includes(":")) {
+                   const tableName = tabId.replace("table:", "");
+                   // Manually fetch data to reconstruct tab state
+                   const data = await invoke<BackendTableData>("get_table_data", { tableName });
+                   const tableData = toTunerTableData(data);
+                   
+                   setTabs([dashTab, { id: tableName, title: data.title || tableName, icon: "table" }]);
+                   setTabContents({ 
+                     dashboard: { type: "dashboard" },
+                     [tableName]: { type: "table", data: tableData }
+                   });
+                   setActiveTabId(tableName);
+                   restored = true;
+                } else if (tabId === "console" || tabId === "datalog" || tabId === "autotune") {
+                   const icon = tabId === "console" ? "terminal" : (tabId === "autotune" ? "autotune" : "datalog");
+                   const title = tabId === "console" ? "ECU Console" : (tabId === "autotune" ? "AutoTune" : "Data Logging");
+                   setTabs([dashTab, { id: tabId, title, icon }]);
+                   const contentData = tabId === "autotune" ? { type: "autotune", data: "" } : { type: tabId as any };
+                   setTabContents({ 
+                     dashboard: { type: "dashboard" },
+                     [tabId]: contentData as any
+                   });
+                   setActiveTabId(tabId);
+                   restored = true;
+                }
+             } catch (restoreErr) {
+                console.warn("Failed to restore tab:", restoreErr);
+             }
+          }
+
+          if (!restored) {
+            setTabs([dashTab]);
+            setTabContents({ dashboard: { type: "dashboard" } });
+            setActiveTabId("dashboard");
+          }
         } catch (menuError) {
           console.error("Failed to load menus:", menuError);
           showToast("Menu loading failed. Some features may be unavailable.", "warning");
@@ -1176,6 +1289,29 @@ function AppContent() {
     };
   }
 
+  async function initializeDefaultTabs() {
+    let caps = iniCapabilities;
+    if (!caps) {
+      try {
+        caps = await invoke<IniCapabilities>('get_ini_capabilities');
+        setIniCapabilities(caps);
+      } catch (e) {
+        console.warn('get_ini_capabilities failed during tab init:', e);
+      }
+    }
+
+    const allowDashboard = caps?.has_frontpage || caps?.has_gauges;
+    if (allowDashboard) {
+      setTabs([{ id: "dashboard", title: "Dashboard", icon: "dashboard", closable: false }]);
+      setTabContents({ dashboard: { type: "dashboard" } });
+      setActiveTabId("dashboard");
+    } else {
+      setTabs([]);
+      setTabContents({});
+      setActiveTabId(null);
+    }
+  }
+
   // Project management functions
   async function createProject(name: string, iniId: string, tunePath?: string) {
     try {
@@ -1196,11 +1332,8 @@ function AppContent() {
         // Refresh menus for the new project
         const values = await fetchConstants();
         await fetchMenuTree(values);
-        
-        // Initialize dashboard tab
-        setTabs([{ id: "dashboard", title: "Dashboard", icon: "dashboard", closable: false }]);
-        setTabContents({ dashboard: { type: "dashboard" } });
-        setActiveTabId("dashboard");
+
+        await initializeDefaultTabs();
         
         // Refresh projects list
         const projects = await invoke<ProjectInfo[]>("list_projects");
@@ -1242,11 +1375,8 @@ function AppContent() {
         // Refresh menus for the project
         const values = await fetchConstants();
         await fetchMenuTree(values);
-        
-        // Reset tabs to dashboard
-        setTabs([{ id: "dashboard", title: "Dashboard", icon: "dashboard", closable: false }]);
-        setTabContents({ dashboard: { type: "dashboard" } });
-        setActiveTabId("dashboard");
+
+        await initializeDefaultTabs();
       } catch (menuError) {
         console.error("Failed to load menus:", menuError);
         showToast("Project opened but menu loading failed. Some features may be unavailable.", "warning");
@@ -1340,6 +1470,10 @@ function AppContent() {
       }
 
       if (name === "datalog") {
+        if (!iniCapabilities?.has_datalog_entries && !iniCapabilities?.has_output_channels) {
+          showToast("Data Logging is not available for this ECU definition.", "warning");
+          return;
+        }
         const newTab: Tab = { id: "datalog", title: "Data Logging", icon: "datalog" };
         setTabs([...tabs, newTab]);
         setTabContents({ ...tabContents, datalog: { type: "datalog" } });
@@ -1347,11 +1481,20 @@ function AppContent() {
         return;
       }
 
-      if (name === "lua-console") {
-        const newTab: Tab = { id: "lua-console", title: "Lua Console", icon: "terminal" };
+      if (name === "console") {
+        if (!iniCapabilities?.supports_console) {
+          showToast("ECU Console is not available for this ECU definition.", "warning");
+          return;
+        }
+        const newTab: Tab = { id: "console", title: title || "ECU Console", icon: "terminal" };
         setTabs([...tabs, newTab]);
-        setTabContents({ ...tabContents, "lua-console": { type: "lua-console" } });
-        setActiveTabId("lua-console");
+        setTabContents({ ...tabContents, console: { type: "console" } });
+        setActiveTabId("console");
+        return;
+      }
+
+      if (name === "lua-console") {
+        showToast("Lua Console is not available for this ECU definition.", "warning");
         return;
       }
 
@@ -1496,7 +1639,7 @@ function AppContent() {
         }
       }
     },
-    [tabs, tabContents, showToast]
+    [tabs, tabContents, iniCapabilities, showToast]
   );
 
   // Handle standard built-in targets (std_*)
@@ -1506,6 +1649,10 @@ function AppContent() {
       
       switch (target) {
         case "std_realtime":
+          if (!iniCapabilities?.has_frontpage && !iniCapabilities?.has_gauges) {
+            showToast("Realtime dashboard is not available for this ECU definition.", "warning");
+            return;
+          }
           // Open the realtime dashboard - create tab if it doesn't exist
           setTabs(prev => {
             if (prev.find(t => t.id === "dashboard")) return prev;
@@ -1518,6 +1665,10 @@ function AppContent() {
           setActiveTabId("dashboard");
           break;
         case "std_port_edit":
+          if (!iniCapabilities?.has_port_editors) {
+            showToast("Port Editor is not available for this ECU definition.", "warning");
+            return;
+          }
           // Open port editor with matching name from INI [PortEditor] section
           openTarget(target, label);
           break;
@@ -1530,7 +1681,7 @@ function AppContent() {
           openTarget(target, label);
       }
     },
-    [openTarget, showToast]
+    [iniCapabilities, openTarget, showToast]
   );
 
   // Open help topic in a viewer
@@ -1840,56 +1991,50 @@ function AppContent() {
       items: convertMenuItems(menu.items, menu.name),
     }));
 
+    const toolItems: TunerMenuItem["items"] = [];
+    const caps = iniCapabilities;
+
+    toolItems.push({ id: "autotune", label: "&AutoTune", onClick: () => openTarget("autotune", "AutoTune"), disabled: !currentProject });
+    if (caps?.has_datalog_entries || caps?.has_output_channels) {
+      toolItems.push({ id: "datalog", label: "&Data Logging", onClick: () => openTarget("datalog", "Data Logging"), disabled: !currentProject });
+    }
+    if (caps?.has_logger_definitions) {
+      if (toolItems.length > 0) {
+        toolItems.push({ id: "sep1", label: "", separator: true });
+      }
+      toolItems.push(
+        { id: "tooth-logger", label: "&Tooth Logger", onClick: () => openTarget("tooth-logger", "Tooth Logger"), disabled: !currentProject },
+        { id: "composite-logger", label: "&Composite Logger", onClick: () => openTarget("composite-logger", "Composite Logger"), disabled: !currentProject }
+      );
+    }
+    if (caps?.supports_console) {
+      if (toolItems.length > 0) {
+        toolItems.push({ id: "sep2", label: "", separator: true });
+      }
+      toolItems.push({
+        id: "console",
+        label: "&ECU Console",
+        onClick: () => openTarget("console", `Console - ${ecuType}`),
+        disabled: !currentProject || status.state !== "Connected",
+      });
+    }
+    if (toolItems.length > 0) {
+      toolItems.push({ id: "sep3", label: "", separator: true });
+    }
+    toolItems.push({ id: "compare-tables", label: "Table &Compare", onClick: () => setTableComparisonOpen(true), disabled: !currentProject });
+    toolItems.push({ id: "math-channels", label: "&Math Channels...", onClick: () => setMathChannelsDialogOpen(true), disabled: !currentProject });
+    toolItems.push({ id: "sep4", label: "", separator: true });
+    toolItems.push(
+      // { id: "plugins", label: "&Plugins...", onClick: () => setPluginPanelOpen(true) },
+      // Plugins disabled (Deprecated) - see DEPRECATION_NOTICE.md
+      { id: "connection", label: "&ECU Connection...", onClick: () => setConnectionDialogOpen(true) },
+      { id: "settings", label: "&Settings...", onClick: () => setSettingsDialogOpen(true) }
+    );
+
     const toolsMenu: TunerMenuItem = {
       id: "tools",
       label: "&Tools",
-      items: [
-        { id: "autotune", label: "&AutoTune", onClick: () => openTarget("autotune", "AutoTune"), disabled: !currentProject },
-        { id: "datalog", label: "&Data Logging", onClick: () => openTarget("datalog", "Data Logging"), disabled: !currentProject },
-        { id: "sep1", label: "", separator: true },
-        { id: "tooth-logger", label: "&Tooth Logger", onClick: () => openTarget("tooth-logger", "Tooth Logger"), disabled: !currentProject },
-        { id: "composite-logger", label: "&Composite Logger", onClick: () => openTarget("composite-logger", "Composite Logger"), disabled: !currentProject },
-        { id: "console", label: "&ECU Console", onClick: () => openTarget("console", `Console - ${ecuType}`), disabled: !currentProject || status.state !== "Connected" || !ecuType.includes("RusEFI") && !ecuType.includes("FOME") && !ecuType.includes("EpicEFI") },
-        { id: "lua-console", label: "&Lua Console", onClick: () => openTarget("lua-console", "Lua Console"), disabled: !currentProject },
-        { id: "sep2", label: "", separator: true },
-        { id: "compare-tables", label: "Table &Comparison", onClick: () => setTableComparisonOpen(true), disabled: !currentProject },
-        { id: "performance", label: "&Performance Calculator", onClick: () => setPerformanceDialogOpen(true), disabled: !currentProject },
-        { id: "export-csv", label: "&Export Tune as CSV", onClick: async () => {
-          try {
-            const filePath = await save({
-              title: "Export Tune as CSV",
-              filters: [{ name: "CSV Files", extensions: ["csv"] }],
-              defaultPath: "tune_export.csv",
-            });
-            if (filePath) {
-              const count = await invoke<number>("export_tune_as_csv", { path: filePath });
-              showToast(`Exported ${count} values to CSV`, "success");
-            }
-          } catch (err) {
-            showToast(`Export failed: ${err}`, "error");
-          }
-        }, disabled: !currentProject },
-        { id: "import-csv", label: "&Import Tune from CSV", onClick: async () => {
-          try {
-            const filePath = await open({
-              title: "Import Tune from CSV",
-              filters: [{ name: "CSV Files", extensions: ["csv"] }],
-              multiple: false,
-            });
-            if (filePath && typeof filePath === "string") {
-              const count = await invoke<number>("import_tune_from_csv", { path: filePath });
-              showToast(`Imported ${count} values from CSV`, "success");
-            }
-          } catch (err) {
-            showToast(`Import failed: ${err}`, "error");
-          }
-        }, disabled: !currentProject },
-        { id: "sep3", label: "", separator: true },
-        { id: "plugins", label: "&Plugins...", onClick: () => setPluginPanelOpen(true) },
-        { id: "sep4", label: "", separator: true },
-        { id: "connection", label: "&ECU Connection...", onClick: () => setConnectionDialogOpen(true) },
-        { id: "settings", label: "&Settings...", onClick: () => setSettingsDialogOpen(true) },
-      ],
+      items: toolItems,
     };
 
     const helpMenu: TunerMenuItem = {
@@ -1912,11 +2057,11 @@ function AppContent() {
     } else {
       return [fileMenu, viewMenu, helpMenu];
     }
-  }, [backendMenus, theme, sidebarVisible, status.state, openTarget, handleStdTarget, openHelpTopic, currentProject, showToast]);
+  }, [backendMenus, theme, sidebarVisible, status.state, ecuType, iniCapabilities, openTarget, handleStdTarget, openHelpTopic, currentProject, showToast]);
 
   // Toolbar items
-  const toolbarItems: ToolbarItem[] = useMemo(
-    () => [
+  const toolbarItems: ToolbarItem[] = useMemo(() => {
+    const items: ToolbarItem[] = [
       { id: "open", icon: "open", tooltip: "Open Tune", onClick: () => setLoadDialogOpen(true) },
       { id: "save", icon: "save", tooltip: "Save Tune", onClick: () => setSaveDialogOpen(true), disabled: !status.has_definition },
       { id: "burn", icon: "burn", tooltip: "Burn to ECU", onClick: () => setBurnDialogOpen(true), disabled: status.state !== "Connected" },
@@ -1940,32 +2085,44 @@ function AppContent() {
           </div>
         )
       },
-      { id: "realtime", icon: "realtime", tooltip: "Realtime Dashboard", onClick: () => setActiveTabId("dashboard") },
-      { id: "sep2", icon: "", tooltip: "", separator: true },
-      {
-        id: "log-start",
-        icon: isLogging ? "log-stop" : "log-start",
-        tooltip: isLogging ? "Stop Logging" : "Start Logging",
-        active: isLogging,
-        onClick: async () => {
-          try {
-            if (isLogging) {
-              await invoke('stop_logging');
-              setIsLogging(false);
-            } else {
-              await invoke('start_logging', { sampleRate: 10 });
-              setIsLogging(true);
+    ];
+
+    if (iniCapabilities?.has_frontpage || iniCapabilities?.has_gauges) {
+      items.push({ id: "realtime", icon: "realtime", tooltip: "Realtime Dashboard", onClick: () => setActiveTabId("dashboard") });
+    }
+
+    if (iniCapabilities?.has_datalog_entries || iniCapabilities?.has_output_channels) {
+      items.push(
+        { id: "sep2", icon: "", tooltip: "", separator: true },
+        {
+          id: "log-start",
+          icon: isLogging ? "log-stop" : "log-start",
+          tooltip: isLogging ? "Stop Logging" : "Start Logging",
+          active: isLogging,
+          onClick: async () => {
+            try {
+              if (isLogging) {
+                await invoke('stop_logging');
+                setIsLogging(false);
+              } else {
+                await invoke('start_logging', { sampleRate: 10 });
+                setIsLogging(true);
+              }
+            } catch (err) {
+              console.error('Logging toggle failed:', err);
             }
-          } catch (err) {
-            console.error('Logging toggle failed:', err);
-          }
-        },
-      },
+          },
+        }
+      );
+    }
+
+    items.push(
       { id: "sep3", icon: "", tooltip: "", separator: true },
-      { id: "settings", icon: "settings", tooltip: "Settings", onClick: () => setSettingsDialogOpen(true) },
-    ],
-    [status, isLogging]
-  );
+      { id: "settings", icon: "settings", tooltip: "Settings", onClick: () => setSettingsDialogOpen(true) }
+    );
+
+    return items;
+  }, [status, isLogging, iniCapabilities, connectionRuntimePacketMode, defaultRuntimePacketMode]);
 
   // Build sidebar tree from menus - recursively handle SubMenus (e.g., LUA, GDI groups)
   const buildSidebarItems = useCallback((items: BackendMenuItem[], prefix: string): (SidebarNode & { itemType?: string })[] => {
@@ -2304,6 +2461,9 @@ function AppContent() {
           // if (settings.indicatorTextFit) { ... }
         }}
       />
+      {mathChannelsDialogOpen && (
+        <MathChannelsDialog onClose={() => setMathChannelsDialogOpen(false)} />
+      )}
       <AboutDialog 
         isOpen={aboutDialogOpen} 
         onClose={() => setAboutDialogOpen(false)} 
@@ -2501,6 +2661,20 @@ function AppContent() {
         onClose={() => setMigrationReportOpen(false)}
         onProceed={() => {
           console.log("User proceeding with migration");
+        }}
+      />
+      
+      {/* Onboarding Dialog - shown on first run */}
+      <OnboardingDialog
+        isOpen={onboardingOpen}
+        onClose={() => setOnboardingOpen(false)}
+        onComplete={async () => {
+          try {
+            await invoke("mark_onboarding_completed");
+          } catch (e) {
+            console.error("Failed to mark onboarding as completed:", e);
+          }
+          setOnboardingOpen(false);
         }}
       />
       

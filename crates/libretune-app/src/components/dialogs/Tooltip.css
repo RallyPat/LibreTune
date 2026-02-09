@@ -1,0 +1,105 @@
+.tooltip-trigger {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tooltip {
+  position: fixed;
+  z-index: 9999;
+  background: var(--surface-elevated);
+  color: var(--text-primary);
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  line-height: 1.4;
+  white-space: nowrap;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3),
+              inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  pointer-events: none;
+  border: 1px solid var(--border-color);
+  animation: tooltipFadeIn 0.2s ease-out;
+  max-width: 300px;
+  white-space: normal;
+}
+
+@keyframes tooltipFadeIn {
+  from {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Arrow positioning */
+.tooltip::before {
+  content: '';
+  position: absolute;
+  width: 6px;
+  height: 6px;
+  background: var(--surface-elevated);
+  border: 1px solid var(--border-color);
+  transform: rotate(45deg);
+}
+
+.tooltip-top::before {
+  bottom: -4px;
+  left: 50%;
+  transform: translateX(-50%) rotate(45deg);
+}
+
+.tooltip-bottom::before {
+  top: -4px;
+  left: 50%;
+  transform: translateX(-50%) rotate(45deg);
+}
+
+.tooltip-left::before {
+  right: -4px;
+  top: 50%;
+  transform: translateY(-50%) rotate(45deg);
+}
+
+.tooltip-right::before {
+  left: -4px;
+  top: 50%;
+  transform: translateY(-50%) rotate(45deg);
+}
+
+/* Dark theme specific */
+:root[data-theme="dark"] .tooltip {
+  background: #1a1a1a;
+  border-color: #333;
+}
+
+:root[data-theme="dark"] .tooltip::before {
+  background: #1a1a1a;
+  border-color: #333;
+}
+
+/* Light theme specific */
+:root[data-theme="light"] .tooltip {
+  background: #ffffff;
+  color: #1a1a1a;
+  border-color: #ddd;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15),
+              inset 0 1px 0 rgba(255, 255, 255, 0.5);
+}
+
+:root[data-theme="light"] .tooltip::before {
+  background: #ffffff;
+  border-color: #ddd;
+}
+
+/* Responsive */
+@media (max-width: 600px) {
+  .tooltip {
+    font-size: 12px;
+    padding: 6px 10px;
+    max-width: 250px;
+  }
+}

@@ -66,10 +66,17 @@ body {
 a {
   color: var(--text-link);
   text-decoration: none;
+  transition: all var(--transition-fast);
 }
 
 a:hover {
   text-decoration: underline;
+}
+
+a:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
+  border-radius: 2px;
 }
 
 /* Buttons - base reset */
@@ -80,6 +87,12 @@ button {
   background: none;
   cursor: pointer;
   color: inherit;
+  transition: all var(--transition-fast);
+}
+
+button:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
 }
 
 button:disabled {

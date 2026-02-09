@@ -376,7 +376,7 @@ export default function PopOutWindow() {
       case 'autotune':
         return (
           <AutoTune
-            tableName={(popOutData.data as string) || 'veTable1'}
+            tableName={(popOutData.data as string) || ''}
             onClose={handleClose}
           />
         );

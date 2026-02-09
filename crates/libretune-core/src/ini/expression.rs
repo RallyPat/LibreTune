@@ -75,6 +75,7 @@ pub enum Expr {
     Literal(Value),
     Variable(String),
     Binary(Box<Expr>, BinOp, Box<Expr>),
+    Ternary(Box<Expr>, Box<Expr>, Box<Expr>),
     Unary(UnaryOp, Box<Expr>),
     FunctionCall(String, Vec<Expr>), // function name, arguments
 }
@@ -114,6 +115,8 @@ enum Token {
     LParen,
     RParen,
     Comma,
+    Question,
+    Colon,
 }
 
 impl<'a> Parser<'a> {
@@ -127,7 +130,21 @@ impl<'a> Parser<'a> {
     }
 
     pub fn parse(&mut self) -> Result<Expr, String> {
-        self.parse_logical_or()
+        self.parse_conditional()
+    }
+
+    fn parse_conditional(&mut self) -> Result<Expr, String> {
+        let node = self.parse_logical_or()?;
+        if self.match_token(Token::Question) {
+            let true_expr = self.parse()?;
+            if !self.match_token(Token::Colon) {
+                return Err("Expected ':' in ternary expression".to_string());
+            }
+            let false_expr = self.parse()?;
+            Ok(Expr::Ternary(Box::new(node), Box::new(true_expr), Box::new(false_expr)))
+        } else {
+            Ok(node)
+        }
     }
 
     fn parse_logical_or(&mut self) -> Result<Expr, String> {
@@ -360,6 +377,8 @@ fn lex(input: &str) -> Vec<Token> {
             '(' => tokens.push(Token::LParen),
             ')' => tokens.push(Token::RParen),
             ',' => tokens.push(Token::Comma),
+            '?' => tokens.push(Token::Question),
+            ':' => tokens.push(Token::Colon),
             '+' => tokens.push(Token::Plus),
             '-' => tokens.push(Token::Minus),
             '*' => tokens.push(Token::Star),
@@ -965,6 +984,14 @@ pub fn evaluate(
                 UnaryOp::Neg => Ok(Value::Number(-val.as_f64())),
                 UnaryOp::Not => Ok(Value::Bool(!val.as_bool())),
                 UnaryOp::BitNot => Ok(Value::Number(!(val.as_f64() as i64) as f64)),
+            }
+        }
+        Expr::Ternary(cond, true_expr, false_expr) => {
+            let val = evaluate(cond, context, string_context)?;
+            if val.as_bool() {
+                evaluate(true_expr, context, string_context)
+            } else {
+                evaluate(false_expr, context, string_context)
             }
         }
         Expr::Binary(left, op, right) => {

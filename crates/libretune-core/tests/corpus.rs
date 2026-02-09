@@ -184,6 +184,102 @@ fn test_speeduino_ini_fields() {
     }
 }
 
+/// Validate that IniCapabilities reflects the parsed INI content.
+#[test]
+fn test_ini_capabilities_consistency() {
+    let corpus_path = corpus_dir();
+    if !corpus_path.exists() {
+        println!("Corpus directory not found, skipping test");
+        return;
+    }
+
+    let mut samples: Vec<PathBuf> = Vec::new();
+
+    // Speeduino sample
+    if let Some(path) = fs::read_dir(&corpus_path)
+        .expect("Failed to read corpus")
+        .filter_map(|e| e.ok())
+        .find(|e| {
+            let name = e.file_name().to_string_lossy().to_lowercase();
+            name.contains("speeduino")
+        })
+        .map(|e| e.path())
+    {
+        samples.push(path);
+    }
+
+    // rusEFI sample (exclude FOME/epicEFI)
+    if let Some(path) = fs::read_dir(&corpus_path)
+        .expect("Failed to read corpus")
+        .filter_map(|e| e.ok())
+        .find(|e| {
+            let name = e.file_name().to_string_lossy().to_string();
+            name.starts_with("rusEFI")
+                && !name.contains("FOME")
+                && !name.contains("epicECU")
+                && !name.contains("epicEFI")
+        })
+        .map(|e| e.path())
+    {
+        samples.push(path);
+    }
+
+    // FOME sample
+    if let Some(path) = fs::read_dir(&corpus_path)
+        .expect("Failed to read corpus")
+        .filter_map(|e| e.ok())
+        .find(|e| e.file_name().to_string_lossy().contains("FOME"))
+        .map(|e| e.path())
+    {
+        samples.push(path);
+    }
+
+    // MegaSquirt sample
+    if let Some(path) = fs::read_dir(&corpus_path)
+        .expect("Failed to read corpus")
+        .filter_map(|e| e.ok())
+        .find(|e| {
+            let name = e.file_name().to_string_lossy().to_lowercase();
+            name.starts_with("ms2") || name.starts_with("ms3")
+        })
+        .map(|e| e.path())
+    {
+        samples.push(path);
+    }
+
+    assert!(!samples.is_empty(), "No sample INI files found in corpus");
+
+    for path in samples {
+        let filename = path.file_name().unwrap().to_string_lossy();
+        let def = EcuDefinition::from_file(&path)
+            .expect(&format!("Should parse INI: {}", filename));
+        let caps = def.capabilities();
+
+        assert_eq!(caps.has_constants, !def.constants.is_empty());
+        assert_eq!(caps.has_output_channels, !def.output_channels.is_empty());
+        assert_eq!(caps.has_tables, !def.tables.is_empty());
+        assert_eq!(caps.has_curves, !def.curves.is_empty());
+        assert_eq!(caps.has_gauges, !def.gauges.is_empty());
+        assert_eq!(caps.has_frontpage, def.frontpage.is_some());
+        assert_eq!(caps.has_dialogs, !def.dialogs.is_empty());
+        assert_eq!(caps.has_help_topics, !def.help_topics.is_empty());
+        assert_eq!(caps.has_setting_groups, !def.setting_groups.is_empty());
+        assert_eq!(caps.has_pc_variables, !def.pc_variables.is_empty());
+        assert_eq!(caps.has_default_values, !def.default_values.is_empty());
+        assert_eq!(caps.has_datalog_entries, !def.datalog_entries.is_empty());
+        assert_eq!(caps.has_datalog_views, !def.datalog_views.is_empty());
+        assert_eq!(caps.has_logger_definitions, !def.logger_definitions.is_empty());
+        assert_eq!(caps.has_controller_commands, !def.controller_commands.is_empty());
+        assert_eq!(caps.has_port_editors, !def.port_editors.is_empty());
+        assert_eq!(caps.has_reference_tables, !def.reference_tables.is_empty());
+        assert_eq!(caps.has_key_actions, !def.key_actions.is_empty());
+        assert_eq!(caps.has_ve_analyze, def.ve_analyze.is_some());
+        assert_eq!(caps.has_wue_analyze, def.wue_analyze.is_some());
+        assert_eq!(caps.has_gamma_e, def.gamma_e.is_some());
+        assert_eq!(caps.supports_console, def.ecu_type.supports_console() && !def.controller_commands.is_empty());
+    }
+}
+
 /// Test that FOME INI files parse correctly and have expected fields
 /// FOME is a separate project from rusEFI with its own firmware
 #[test]

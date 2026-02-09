@@ -151,11 +151,19 @@ interface AutoTuneProps {
   onClose?: () => void;
 }
 
+interface VeAnalyzeConfig {
+  ve_table_name: string;
+  target_table_name: string;
+  lambda_channel: string;
+  ego_correction_channel: string;
+  lambda_target_tables: string[];
+}
+
 // =============================================================================
 // AutoTune Component
 // =============================================================================
 
-export function AutoTune({ tableName: initialTableName = 'veTable1', onClose }: AutoTuneProps) {
+export function AutoTune({ tableName: initialTableName = '', onClose }: AutoTuneProps) {
   // State
   const [isRunning, setIsRunning] = useState(false);
   const [selectedTable, setSelectedTable] = useState(initialTableName);
@@ -166,6 +174,7 @@ export function AutoTune({ tableName: initialTableName = 'veTable1', onClose }: 
   const [tableData, setTableData] = useState<TableData | null>(null);
   const [_referenceData, setReferenceData] = useState<TableData | null>(null);
   const [heatmapData, setHeatmapData] = useState<HeatmapEntry[]>([]);
+  const [veAnalyzeConfig, setVeAnalyzeConfig] = useState<VeAnalyzeConfig | null>(null);
   const [lockedCells, setLockedCells] = useState<Set<string>>(new Set());
   const [selectedCells, _setSelectedCells] = useState<Set<string>>(new Set());
   const [currentCell, _setCurrentCell] = useState<{ x: number; y: number } | null>(null);
@@ -208,56 +217,59 @@ export function AutoTune({ tableName: initialTableName = 'veTable1', onClose }: 
     return lower.includes('maf') || lower.includes('airmass') || lower.includes('airflow');
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadVeAnalyze = async () => {
+      try {
+        const config = await invoke<VeAnalyzeConfig | null>('get_ve_analyze_config');
+        if (!cancelled) {
+          setVeAnalyzeConfig(config);
+          if (config?.ve_table_name && !initialTableName) {
+            setSelectedTable(config.ve_table_name);
+          }
+        }
+      } catch (e) {
+        if (!cancelled) {
+          console.warn('get_ve_analyze_config failed:', e);
+          setVeAnalyzeConfig(null);
+        }
+      }
+    };
+
+    loadVeAnalyze();
+    return () => {
+      cancelled = true;
+    };
+  }, [initialTableName]);
+
   const loadAvailableTables = useCallback(async () => {
     try {
       const tables = await invoke<TableInfo[]>('get_tables');
-      
-      // Sort: prioritize MAF or VE/fuel tables first, then alphabetically
-      const priorityKeywords =
-        loadSource === 'maf'
-          ? ['maf', 'airmass', 'airflow', 'fuel']
-          : ['ve', 'fuel', 'afr', 'lambda'];
-      const isPriorityTable = (t: TableInfo) =>
-        priorityKeywords.some(
-          (kw) => t.name.toLowerCase().includes(kw) || t.title.toLowerCase().includes(kw)
-        );
+      setAvailableTables(tables);
 
-      const sorted = [...tables].sort((a, b) => {
-        const aIsPriority = isPriorityTable(a);
-        const bIsPriority = isPriorityTable(b);
-        if (aIsPriority && !bIsPriority) return -1;
-        if (!aIsPriority && bIsPriority) return 1;
-        return a.title.localeCompare(b.title);
-      });
-      setAvailableTables(sorted);
-      
-      // Auto-select VE table if current selection not found
-      const currentExists = sorted.some(t => t.name === selectedTable);
-      if (!currentExists && sorted.length > 0) {
-        const primaryNames =
-          loadSource === 'maf'
-            ? ['mafTableTbl', 'mafTable1Tbl', 'mafTable1', 'mafTable']
-            : ['veTableTbl', 'veTable1Tbl', 'veTable1', 'veTable', 'fuelTableTbl'];
-        const primaryTable =
-          sorted.find((t) => primaryNames.includes(t.name)) ||
-          (loadSource === 'maf'
-            ? sorted.find((t) => t.title.toLowerCase().includes('maf'))
-            : sorted.find((t) => t.title.toLowerCase().includes('ve table'))) ||
-          sorted[0]; // Fallback to first (priority-related due to sorting)
-        if (primaryTable) {
-          setSelectedTable(primaryTable.name);
-        }
+      // Auto-select from INI-defined VeAnalyze config if current selection not found
+      const currentExists = tables.some((t) => t.name === selectedTable);
+      if (!currentExists && tables.length > 0) {
+        const preferred = veAnalyzeConfig?.ve_table_name
+          ? tables.find((t) => t.name === veAnalyzeConfig.ve_table_name)
+          : null;
+        const fallback = preferred || tables[0];
+        setSelectedTable(fallback.name);
       }
 
-      if (!secondaryTable && sorted.length > 1) {
-        const fallbackSecondary = sorted.find((t) => t.name !== selectedTable) || sorted[0];
+      if (!secondaryTable && tables.length > 1) {
+        const preferredSecondary = veAnalyzeConfig?.lambda_target_tables
+          ?.map((name) => tables.find((t) => t.name === name))
+          .find((t) => t && t.name !== selectedTable);
+        const fallbackSecondary = preferredSecondary || tables.find((t) => t.name !== selectedTable) || tables[0];
         setSecondaryTable(fallbackSecondary.name);
       }
     } catch (e) {
       console.error('Failed to load available tables:', e);
       setError('Failed to load tables: ' + e);
     }
-  }, [loadSource, selectedTable, secondaryTable]);
+  }, [selectedTable, secondaryTable, veAnalyzeConfig]);
 
   const activeTable = useMemo(() => {
     if (activeView === 'secondary' && secondaryTableEnabled && secondaryTable) {

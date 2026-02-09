@@ -264,6 +264,8 @@ Based on analysis of common ECU tuning software patterns:
 [x] Reset tune to defaults - Implemented reset_tune_to_defaults command
 [x] Tooth logger (Speeduino/rusEFI/MS2) - Backend + ToothLoggerView.tsx
 [x] Composite logger (Speeduino/rusEFI/MS2) - Backend + CompositeLoggerView.tsx
+[x] Action Engine Enforcement (validation against INI) - COMPLETED Feb 8, 2026
+[x] Math Channels / Expression Engine - Backend COMPLETED Feb 8, 2026
 [ ] rusEFI console support (text-based command interface) - COMPLETED Feb 1-2, 2026
   - [x] ECU type detection (Speeduino, RusEFI, FOME, EpicEFI, MS2, MS3)
   - [x] Console command pass-through protocol (Step 3 - connection.rs)
@@ -273,6 +275,15 @@ Based on analysis of common ECU tuning software patterns:
   - [x] App integration and menu items (Step 7 - App.tsx)
 
 ## Recent Changes (Session History)
+
+### Sprint 5 - Advanced Table Editing (Part 2) - Active Feb 9, 2026
+- **Feature**: Excel-style Row/Column Selection and Header Editing
+- **Goal**: Make table headers interactive selection tools (click to select row/col) instead of static inputs, while preserving ability to edit bins via double-click.
+- **Plan**:
+  - Refactor `TableGrid.tsx` axis headers to use View/Edit modes.
+  - Implement `headerDragStart` state for multi-row/col selection.
+  - Add visual feedback for selected headers.
+  - Ensure compatibility with existing `selectionRange` logic.
 
 ### rusEFI Console Support - Completed Feb 1-2, 2026
 - **Overall Feature**: Text-based console interface for rusEFI/FOME/epicEFI ECUs with intelligent command/response handling and FOME optimization support

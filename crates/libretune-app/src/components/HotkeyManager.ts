@@ -3,6 +3,8 @@
 //! Manages global keyboard shortcuts for table editing, dialogs, and navigation.
 //! Based on standard ECU tuning software keyboard shortcuts.
 
+import { invoke } from "@tauri-apps/api/core";
+
 export interface Hotkey {
   keys: string;
   description: string;
@@ -10,10 +12,24 @@ export interface Hotkey {
 
 export class HotkeyManager {
   private shortcuts: Record<string, Hotkey>;
+  private customBindings: Record<string, string> = {};
   
   constructor() {
     this.shortcuts = {};
     this.initializeShortcuts();
+  }
+  
+  /**
+   * Load custom hotkey bindings from storage.
+   * Call this after constructing the manager.
+   */
+  async loadCustomBindings(): Promise<void> {
+    try {
+      this.customBindings = await invoke<Record<string, string>>('get_hotkey_bindings');
+    } catch (error) {
+      console.warn('Failed to load custom hotkey bindings:', error);
+      this.customBindings = {};
+    }
   }
   
   private initializeShortcuts(): void {
@@ -140,7 +156,37 @@ export class HotkeyManager {
     return this.shortcuts[keys];
   }
   
+  /**
+   * Get the effective key binding for an action.
+   * Returns custom binding if set, otherwise returns the action ID as default.
+   * 
+   * @param actionId - The action identifier (e.g., 'table.navigateUp')
+   * @returns The key binding (e.g., 'ArrowUp')
+   */
+  public getBindingForAction(actionId: string): string {
+    return this.customBindings[actionId] || '';
+  }
+  
+  /**
+   * Check if a key combination matches an action's binding.
+   * 
+   * @param actionId - The action identifier
+   * @param keyCombo - The key combination from keyboard event (e.g., 'ArrowUp')
+   * @returns true if the key matches the bound shortcut for this action
+   */
+  public matchesBinding(actionId: string, keyCombo: string): boolean {
+    const bound = this.getBindingForAction(actionId);
+    return bound === keyCombo;
+  }
+  
   public getAllShortcuts(): Record<string, Hotkey> {
     return { ...this.shortcuts };
+  }
+  
+  /**
+   * Get all custom bindings.
+   */
+  public getCustomBindings(): Record<string, string> {
+    return { ...this.customBindings };
   }
 }

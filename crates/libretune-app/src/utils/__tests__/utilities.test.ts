@@ -135,7 +135,7 @@ describe('Object Path Navigation', () => {
 });
 
 describe('Debounce Helper', () => {
-  it('should debounce function calls', (done) => {
+  it('should debounce function calls', async () => {
     let callCount = 0;
     const debounce = (fn: () => void, delay: number) => {
       let timeoutId: ReturnType<typeof setTimeout>;
@@ -154,10 +154,8 @@ describe('Debounce Helper', () => {
     
     expect(callCount).toBe(0);
     
-    setTimeout(() => {
-      expect(callCount).toBe(1);
-      done();
-    }, 100);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(callCount).toBe(1);
   });
 });
 

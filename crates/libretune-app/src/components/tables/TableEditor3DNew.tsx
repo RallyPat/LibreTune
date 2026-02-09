@@ -291,10 +291,10 @@ function LiveCellIndicator({
       {/* Inverted triangle (cone) floating above */}
       <mesh 
         ref={coneRef} 
-        position={[position.x, position.y + 1.2, position.z]}
+        position={[position.x, position.y + 1.4, position.z]}
         rotation={[Math.PI, 0, 0]} // Inverted (pointing down)
       >
-        <coneGeometry args={[0.25, 0.5, 4]} />
+        <coneGeometry args={[0.4, 0.8, 8]} />
         <meshStandardMaterial 
           color="#00ff00" 
           emissive="#00ff00" 
@@ -516,53 +516,82 @@ function AxisLabels({
 }) {
   return (
     <>
-      {/* X-axis label */}
+      {/* 3D Box Frame (The "Z lines") */}
+      <lineSegments position={[5, 2.5, 5]}>
+        <edgesGeometry args={[new THREE.BoxGeometry(10, 5, 10)]} />
+        <lineBasicMaterial color="#666666" opacity={0.4} transparent />
+      </lineSegments>
+
+      {/* Grid floor */}
+      <gridHelper args={[10, 10, '#444444', '#333333']} position={[5, 0, 5]} />
+
+      {/* --- X AXIS LABELS (Red/Horizontal) --- */}
+      {/* Front (Z=10 side) */}
       <Text
-        position={[5, -0.5, -0.5]}
+        position={[5, -0.8, 10.5]}
         fontSize={0.4}
-        color="#ffffff"
+        color="#ff8888"
         anchorX="center"
+        rotation={[-Math.PI / 4, 0, 0]} 
       >
         {x_label || 'X'}
       </Text>
-      
-      {/* Y-axis label */}
+      {/* Back (Z=0 side) */}
+      <Text
+        position={[5, -0.5, -0.5]}
+        fontSize={0.4}
+        color="#ff8888"
+        anchorX="center"
+        rotation={[0, Math.PI, 0]} 
+      >
+        {x_label || 'X'}
+      </Text>
+
+      {/* --- Y AXIS LABELS (Green/Depth) --- */}
+      {/* Left (X=0 side) */}
       <Text
         position={[-0.5, -0.5, 5]}
         fontSize={0.4}
-        color="#ffffff"
+        color="#88ff88"
         anchorX="center"
-        rotation={[0, Math.PI / 2, 0]}
+        rotation={[0, -Math.PI / 2, 0]} 
+      >
+        {y_label || 'Y'}
+      </Text>
+      {/* Right (X=10 side) */}
+      <Text
+        position={[10.5, -0.5, 5]}
+        fontSize={0.4}
+        color="#88ff88"
+        anchorX="center"
+        rotation={[0, Math.PI / 2, 0]} 
       >
         {y_label || 'Y'}
       </Text>
       
-      {/* Z-axis label */}
+      {/* --- Z AXIS LABEL (Blue/Vertical) --- */}
       <Text
         position={[-0.8, 2.5, -0.8]}
         fontSize={0.4}
-        color="#ffffff"
+        color="#8888ff"
         anchorX="center"
         rotation={[0, 0, Math.PI / 2]}
       >
         {z_label || 'Z'}
       </Text>
       
-      {/* Grid floor */}
-      <gridHelper args={[10, 10, '#444444', '#333333']} position={[5, 0, 5]} />
-      
-      {/* Axis value labels (sample) */}
-      <Text position={[0, -0.3, -0.3]} fontSize={0.25} color="#888888">
-        {x_bins[0]?.toFixed(0)}
+      {/* Axis value labels - Corners */}
+      <Text position={[-0.3, -0.3, -0.3]} fontSize={0.25} color="#888888">
+        {x_bins[0]?.toFixed(0)}/{y_bins[0]?.toFixed(0)}
       </Text>
-      <Text position={[10, -0.3, -0.3]} fontSize={0.25} color="#888888">
+      <Text position={[10.3, -0.3, -0.3]} fontSize={0.25} color="#888888">
         {x_bins[x_bins.length - 1]?.toFixed(0)}
       </Text>
-      <Text position={[-0.3, -0.3, 0]} fontSize={0.25} color="#888888">
-        {y_bins[0]?.toFixed(0)}
-      </Text>
-      <Text position={[-0.3, -0.3, 10]} fontSize={0.25} color="#888888">
+      <Text position={[-0.3, -0.3, 10.3]} fontSize={0.25} color="#888888">
         {y_bins[y_bins.length - 1]?.toFixed(0)}
+      </Text>
+      <Text position={[10.3, -0.3, 10.3]} fontSize={0.25} color="#888888">
+        {x_bins[x_bins.length - 1]?.toFixed(0)}/{y_bins[y_bins.length - 1]?.toFixed(0)}
       </Text>
     </>
   );

@@ -2,13 +2,14 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { ArrowLeft, Save, Zap, ExternalLink } from 'lucide-react';
 import TableToolbar from './TableToolbar';
-import TableGrid from './TableGrid';
+import TableGrid, { SelectionRange } from './TableGrid';
 import TableContextMenu from './TableContextMenu';
 import RebinDialog from '../dialogs/RebinDialog';
 import CellEditDialog from '../dialogs/CellEditDialog';
 import { useHeatmapSettings } from '../../utils/useHeatmapSettings';
 import { useChannels } from '../../stores/realtimeStore';
 import { useToast } from '../ToastContext';
+import { getHotkeyManager } from '../../services/hotkeyService';
 import './TableComponents.css';
 import './TableEditor2D.css';
 
@@ -138,13 +139,31 @@ export default function TableEditor2D({
   const safeYBins = hasValidData ? y_bins : [0];
   
   const [localZValues, setLocalZValues] = useState<number[][]>([...safeZValues]);
-  const [selectedCells, setSelectedCells] = useState<Set<string>>(new Set());
+  const [localXBins, setLocalXBins] = useState<number[]>([...safeXBins]);
+  const [localYBins, setLocalYBins] = useState<number[]>([...safeYBins]);
+  
+  const [selectionRange, setSelectionRange] = useState<SelectionRange | null>(null);
   const [lockedCells, setLockedCells] = useState<Set<string>>(new Set());
   const [historyTrail, setHistoryTrail] = useState<[number, number][]>([]);
   const [showColorShade, setShowColorShade] = useState(true);
   const [showHistoryTrail, setShowHistoryTrail] = useState(false);
-  const [clipboard, setClipboard] = useState<[number, number][]>([]);
-  const [canUndo, setCanUndo] = useState(false);
+  
+  // History Stack
+  type HistorySnapshot = {
+    z: number[][];
+    x: number[];
+    y: number[];
+  };
+  const [history, setHistory] = useState<HistorySnapshot[]>([{ 
+    z: [...safeZValues.map(row => [...row])],
+    x: [...safeXBins],
+    y: [...safeYBins] 
+  }]);
+  const [historyIndex, setHistoryIndex] = useState(0);
+
+  const canUndo = historyIndex > 0;
+  const canRedo = historyIndex < history.length - 1;
+
   const [rebinDialog, setRebinDialog] = useState<RebinDialogState>({
     show: false,
     newXBins: [...safeXBins],
@@ -177,20 +196,27 @@ export default function TableEditor2D({
   // Get heatmap scheme from user settings
   const { settings: heatmapSettings } = useHeatmapSettings();
 
-  const selectedCellsPayload = useMemo(
-    () => Array.from(selectedCells).map((key) => {
-      const [x, y] = key.split(',').map(Number);
-      return [y, x] as [number, number]; // Backend expects (row, col)
-    }),
-    [selectedCells]
-  );
+  const selectedCellsCoords = useMemo(() => {
+    if (!selectionRange) return [];
+    
+    // Normalize coordinates (start logic might result in > end logic)
+    const minX = Math.min(selectionRange.start[0], selectionRange.end[0]);
+    const maxX = Math.max(selectionRange.start[0], selectionRange.end[0]);
+    const minY = Math.min(selectionRange.start[1], selectionRange.end[1]);
+    const maxY = Math.max(selectionRange.start[1], selectionRange.end[1]);
+    
+    const coords: [number, number][] = [];
+    for (let y = minY; y <= maxY; y++) {
+      for (let x = minX; x <= maxX; x++) {
+        coords.push([x, y]);
+      }
+    }
+    return coords;
+  }, [selectionRange]);
 
-  const selectedCellsCoords = useMemo(
-    () => Array.from(selectedCells).map((key) => {
-      const [x, y] = key.split(',').map(Number);
-      return [x, y] as [number, number];
-    }),
-    [selectedCells]
+  const selectedCellsPayload = useMemo(
+    () => selectedCellsCoords.map(([x, y]) => [y, x] as [number, number]), // Backend expects (row, col)
+    [selectedCellsCoords]
   );
 
   const handleOperationError = useCallback(
@@ -282,6 +308,22 @@ export default function TableEditor2D({
     [alertLargeChangeEnabled, alertLargeChangeAbs, alertLargeChangePercent, showToast]
   );
 
+  const pushHistory = useCallback((newZ: number[][], newX: number[], newY: number[]) => {
+    setHistory(prev => {
+      // Remove any redo history if we make a new change
+      const newHistory = prev.slice(0, historyIndex + 1);
+      newHistory.push({ 
+        z: newZ.map(row => [...row]), 
+        x: [...newX], 
+        y: [...newY] 
+      });
+      // Limit history size (optional, e.g. 50 steps)
+      if (newHistory.length > 50) newHistory.shift();
+      return newHistory;
+    });
+    setHistoryIndex(prev => Math.min(prev + 1, 49));
+  }, [historyIndex]);
+
   useEffect(() => {
     const interval = setInterval(() => {
       if (followMode && activeCell) {
@@ -303,121 +345,171 @@ export default function TableEditor2D({
       const isCtrl = e.ctrlKey || e.metaKey;
       const isShift = e.shiftKey;
       const multiplier = isCtrl ? 5 : 1; // Ctrl = 5x increment
+      
+      // Build composite key for Ctrl+key combinations
+      const getKeyCombo = (key: string): string => {
+        if (isCtrl && key.length === 1) {
+          return `Ctrl+${key.toUpperCase()}`;
+        }
+        return key;
+      };
+      
+      const keyCombo = getKeyCombo(e.key);
+      const hotkeyManager = getHotkeyManager();
 
-      switch (e.key) {
-        // Navigation
-        case 'ArrowUp':
-        case 'ArrowDown':
-        case 'ArrowLeft':
-        case 'ArrowRight':
-          e.preventDefault();
-          handleArrowNavigation(e.key, isShift);
-          break;
+      // Check if keyboard event matches a custom binding or default
+      const matchesAction = (actionId: string): boolean => {
+        return hotkeyManager.matchesBinding(actionId, keyCombo) || 
+               (hotkeyManager.getBindingForAction(actionId) === '' && matchesDefaultBinding(actionId, e.key));
+      };
+      
+      const matchesDefaultBinding = (actionId: string, key: string): boolean => {
+        // Fallback to default bindings if no custom binding is set
+        const defaults: Record<string, string[]> = {
+          'table.navigateUp': ['ArrowUp'],
+          'table.navigateDown': ['ArrowDown'],
+          'table.navigateLeft': ['ArrowLeft'],
+          'table.navigateRight': ['ArrowRight'],
+          'table.setEqual': ['='],
+          'table.increase': ['>', '.', 'q'],
+          'table.decrease': ['<', ',', '-', '_'],
+          'table.increaseMultiple': ['+'],
+          'table.scale': ['*'],
+          'table.interpolate': ['/'],
+          'table.smooth': ['s', 'S'],
+          'table.toggleFollowMode': ['f', 'F'],
+          'table.jumpToActive': ['g', 'G'],
+          'table.copy': ['Ctrl+C'],
+          'table.paste': ['Ctrl+V'],
+          'table.undo': ['Ctrl+Z'],
+          'table.escape': ['Escape'],
+        };
+        return (defaults[actionId] || []).includes(key);
+      };
 
-        // Cell operations
-        case '=':
-          e.preventDefault();
-          handleSetEqual();
-          break;
-        case '>':
-        case '.':
-        case 'q':
-          e.preventDefault();
-          handleIncrease(multiplier);
-          break;
-        case '<':
-        case ',':
-          e.preventDefault();
-          handleDecrease(multiplier);
-          break;
-        case '+':
-          e.preventDefault();
-          handleIncrease(10 * multiplier);
-          break;
-        case '-':
-        case '_':
-          e.preventDefault();
-          handleDecrease(10 * multiplier);
-          break;
-        case '*':
-          e.preventDefault();
-          handleScale(1.0);
-          break;
-        case '/':
-          e.preventDefault();
-          handleInterpolate();
-          break;
-        case 's':
-        case 'S':
-          if (!isCtrl) {
-            e.preventDefault();
-            handleSmooth();
-          }
-          break;
+      // Navigation
+      if (matchesAction('table.navigateUp') || e.key === 'ArrowUp') {
+        e.preventDefault();
+        handleArrowNavigation('ArrowUp', isShift);
+        return;
+      }
+      if (matchesAction('table.navigateDown') || e.key === 'ArrowDown') {
+        e.preventDefault();
+        handleArrowNavigation('ArrowDown', isShift);
+        return;
+      }
+      if (matchesAction('table.navigateLeft') || e.key === 'ArrowLeft') {
+        e.preventDefault();
+        handleArrowNavigation('ArrowLeft', isShift);
+        return;
+      }
+      if (matchesAction('table.navigateRight') || e.key === 'ArrowRight') {
+        e.preventDefault();
+        handleArrowNavigation('ArrowRight', isShift);
+        return;
+      }
 
-        // View controls
-        case 'f':
-        case 'F':
-          if (!isCtrl) {
-            e.preventDefault();
-            setFollowMode(!followMode);
-          }
-          break;
-        case 'g':
-        case 'G':
-          e.preventDefault();
-          // Go to live position (jump to active cell)
-          if (activeCell) {
-            setSelectedCells(new Set([`${activeCell[0]},${activeCell[1]}`]));
-          }
-          break;
+      // Cell operations
+      if (matchesAction('table.setEqual') || e.key === '=') {
+        e.preventDefault();
+        handleSetEqual();
+        return;
+      }
+      if (matchesAction('table.increase') || ['>', '.', 'q'].includes(e.key)) {
+        e.preventDefault();
+        handleIncrease(multiplier);
+        return;
+      }
+      if (matchesAction('table.decrease') || ['<', ',', '-', '_'].includes(e.key)) {
+        e.preventDefault();
+        handleDecrease(multiplier);
+        return;
+      }
+      if (matchesAction('table.increaseMultiple') || e.key === '+') {
+        e.preventDefault();
+        handleIncrease(10 * multiplier);
+        return;
+      }
+      if (matchesAction('table.scale') || e.key === '*') {
+        e.preventDefault();
+        handleScale(1.0);
+        return;
+      }
+      if (matchesAction('table.interpolate') || e.key === '/') {
+        e.preventDefault();
+        handleInterpolate();
+        return;
+      }
+      if ((matchesAction('table.smooth') || ['s', 'S'].includes(e.key)) && !isCtrl) {
+        e.preventDefault();
+        handleSmooth();
+        return;
+      }
 
-        // Copy/Paste
-        case 'c':
-        case 'C':
-          if (isCtrl) {
-            e.preventDefault();
-            handleCopy();
-          }
-          break;
-        case 'v':
-        case 'V':
-          if (isCtrl) {
-            e.preventDefault();
-            handlePaste();
-          }
-          break;
-        case 'z':
-        case 'Z':
-          if (isCtrl) {
-            e.preventDefault();
-            handleUndo();
-          }
-          break;
+      // View controls
+      if ((matchesAction('table.toggleFollowMode') || ['f', 'F'].includes(e.key)) && !isCtrl) {
+        e.preventDefault();
+        setFollowMode(!followMode);
+        return;
+      }
+      if (matchesAction('table.jumpToActive') || ['g', 'G'].includes(e.key)) {
+        e.preventDefault();
+        // Go to live position (jump to active cell)
+        if (activeCell) {
+          setSelectionRange({ start: activeCell, end: activeCell });
+        }
+        return;
+      }
 
-        // Escape to clear selection
-        case 'Escape':
-          setSelectedCells(new Set());
-          setContextMenu({ visible: false, x: 0, y: 0, value: 0 });
-          break;
+      // Copy/Paste
+      if (matchesAction('table.copy') || (isCtrl && (e.key === 'c' || e.key === 'C'))) {
+        e.preventDefault();
+        handleCopy();
+        return;
+      }
+      if (matchesAction('table.paste') || (isCtrl && (e.key === 'v' || e.key === 'V'))) {
+        e.preventDefault();
+        handlePaste();
+        return;
+      }
+      if (matchesAction('table.undo') || (isCtrl && (e.key === 'z' || e.key === 'Z'))) {
+        e.preventDefault();
+        if (isShift) {
+          handleRedo();
+        } else {
+          handleUndo();
+        }
+        return;
+      }
+      if (isCtrl && (e.key === 'y' || e.key === 'Y')) {
+        e.preventDefault();
+        handleRedo();
+        return;
+      }
+
+      // Escape to clear selection
+      if (matchesAction('table.escape') || e.key === 'Escape') {
+        e.preventDefault();
+        setSelectionRange(null);
+        setContextMenu({ visible: false, x: 0, y: 0, value: 0 });
+        return;
       }
     };
 
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [selectedCells, followMode, activeCell, localZValues]);
+  }, [selectionRange, followMode, activeCell, localZValues]);
 
   // Arrow key navigation helper
   const handleArrowNavigation = (key: string, extendSelection: boolean) => {
-    if (selectedCells.size === 0) {
+    if (!selectionRange) {
       // Start from top-left if no selection
-      setSelectedCells(new Set(['0,0']));
+      setSelectionRange({ start: [0, 0], end: [0, 0] });
       return;
     }
 
-    // Get current anchor cell (first selected)
-    const firstCell = Array.from(selectedCells)[0];
-    const [currentX, currentY] = firstCell.split(',').map(Number);
+    // Use current end as base for movement
+    const [currentX, currentY] = selectionRange.end;
 
     let newX = currentX;
     let newY = currentY;
@@ -438,14 +530,13 @@ export default function TableEditor2D({
     }
 
     if (extendSelection) {
-      // Extend selection to include new cell
-      const newSelection = new Set(selectedCells);
-      newSelection.add(`${newX},${newY}`);
-      setSelectedCells(newSelection);
+      // Extend selection: keep start, update end
+      setSelectionRange({ ...selectionRange, end: [newX, newY] });
     } else {
-      // Move to new cell
-      setSelectedCells(new Set([`${newX},${newY}`]));
+      // Move selection: both start and end move to new cell
+      setSelectionRange({ start: [newX, newY], end: [newX, newY] });
     }
+    setActiveCell([newX, newY]);
   };
 
   const handleCellChange = (
@@ -455,11 +546,12 @@ export default function TableEditor2D({
     options?: { suppressAlert?: boolean; operation?: string }
   ) => {
     const prevValue = localZValues[y][x];
-    const newValues = [...localZValues];
+    const newValues = localZValues.map(row => [...row]);
     newValues[y][x] = value;
+    
     setLocalZValues(newValues);
-    setSelectedCells(new Set([`${x},${y}`]));
-    setCanUndo(true);
+    setSelectionRange({ start: [x,y], end: [x,y] });
+    pushHistory(newValues, localXBins, localYBins);
     onValuesChange?.(newValues);
 
     if (!options?.suppressAlert) {
@@ -469,19 +561,22 @@ export default function TableEditor2D({
 
   const handleAxisChange = (axis: 'x' | 'y', index: number, value: number) => {
     if (axis === 'x') {
-      const newBins = [...x_bins];
+      const newBins = [...localXBins];
       newBins[index] = value;
+      setLocalXBins(newBins);
       setRebinDialog(prev => ({ ...prev, newXBins: newBins }));
+      pushHistory(localZValues, newBins, localYBins);
     } else {
-      const newBins = [...y_bins];
+      const newBins = [...localYBins];
       newBins[index] = value;
+      setLocalYBins(newBins);
       setRebinDialog(prev => ({ ...prev, newYBins: newBins }));
+      pushHistory(localZValues, localXBins, newBins);
     }
   };
 
   const handleSetEqual = async () => {
-    const values = Array.from(selectedCells).map(key => {
-      const [x, y] = key.split(',').map(Number);
+    const values = selectedCellsCoords.map(([x, y]) => {
       return { x, y, value: localZValues[y][x] };
     });
 
@@ -500,7 +595,7 @@ export default function TableEditor2D({
       if (result && result.z_values) {
         setLocalZValues(result.z_values);
         onValuesChange?.(result.z_values);
-        setCanUndo(true);
+        pushHistory(result.z_values, localXBins, localYBins);
         warnIfLargeChangeBatch(previousValues, result.z_values, selectedCellsCoords, 'Set equal');
       }
     } catch (err) {
@@ -517,10 +612,6 @@ export default function TableEditor2D({
     handleScale(1.0);
   };
 
-  const handleCellSelectWrapper = (x: number, y: number) => {
-    handleCellSelect(x, y, false);
-  };
-
   const handleContextMenuSetEqual = (_value: number) => {
     setContextMenu({ visible: false, x: 0, y: 0, value: 0 });
     handleSetEqual();
@@ -532,8 +623,7 @@ export default function TableEditor2D({
   };
 
   const handleIncrease = (amount: number) => {
-    const values = Array.from(selectedCells).map(key => {
-      const [x, y] = key.split(',').map(Number);
+    const values = selectedCellsCoords.map(([x, y]) => {
       return { x, y, value: localZValues[y][x] };
     });
     
@@ -543,8 +633,7 @@ export default function TableEditor2D({
   };
 
   const handleDecrease = (amount: number) => {
-    const values = Array.from(selectedCells).map(key => {
-      const [x, y] = key.split(',').map(Number);
+    const values = selectedCellsCoords.map(([x, y]) => {
       return { x, y, value: localZValues[y][x] };
     });
     
@@ -564,7 +653,7 @@ export default function TableEditor2D({
       if (result && result.z_values) {
         setLocalZValues(result.z_values);
         onValuesChange?.(result.z_values);
-        setCanUndo(true);
+        pushHistory(result.z_values, localXBins, localYBins);
         warnIfLargeChangeBatch(previousValues, result.z_values, selectedCellsCoords, 'Scale');
       }
     } catch (err) {
@@ -583,7 +672,7 @@ export default function TableEditor2D({
       if (result && result.z_values) {
         setLocalZValues(result.z_values);
         onValuesChange?.(result.z_values);
-        setCanUndo(true);
+        pushHistory(result.z_values, localXBins, localYBins);
         warnIfLargeChangeBatch(previousValues, result.z_values, selectedCellsCoords, 'Smooth');
       }
     } catch (err) {
@@ -601,12 +690,75 @@ export default function TableEditor2D({
       if (result && result.z_values) {
         setLocalZValues(result.z_values);
         onValuesChange?.(result.z_values);
-        setCanUndo(true);
+        pushHistory(result.z_values, localXBins, localYBins);
         warnIfLargeChangeBatch(previousValues, result.z_values, selectedCellsCoords, 'Interpolate');
       }
     } catch (err) {
       handleOperationError('Interpolate', err);
     }
+  };
+
+  const handleAddOffset = async (offset: number) => {
+    const previousValues = localZValues.map((row) => [...row]);
+    try {
+      const result = await invoke<TableOperationResult>('add_offset', {
+        table_name,
+        selected_cells: selectedCellsPayload,
+        offset: offset
+      });
+      if (result && result.z_values) {
+        setLocalZValues(result.z_values);
+        onValuesChange?.(result.z_values);
+        pushHistory(result.z_values, localXBins, localYBins);
+        warnIfLargeChangeBatch(previousValues, result.z_values, selectedCellsCoords, 'Offset');
+      }
+    } catch (err) {
+      handleOperationError('Offset', err);
+    }
+  };
+
+  const handleInterpolateLinear = async (axis: 'row' | 'col') => {
+    const previousValues = localZValues.map((row) => [...row]);
+    try {
+      const result = await invoke<TableOperationResult>('interpolate_linear', {
+        table_name,
+        selected_cells: selectedCellsPayload,
+        axis: axis
+      });
+      if (result && result.z_values) {
+        setLocalZValues(result.z_values);
+        onValuesChange?.(result.z_values);
+        pushHistory(result.z_values, localXBins, localYBins);
+        warnIfLargeChangeBatch(previousValues, result.z_values, selectedCellsCoords, 'Linear Interpolate');
+      }
+    } catch (err) {
+      handleOperationError('Linear Interpolate', err);
+    }
+  };
+
+  const handleFill = async (direction: 'right' | 'down') => {
+    const previousValues = localZValues.map((row) => [...row]);
+    try {
+      const result = await invoke<TableOperationResult>('fill_region', {
+        table_name,
+        selected_cells: selectedCellsPayload,
+        direction: direction
+      });
+      if (result && result.z_values) {
+        setLocalZValues(result.z_values);
+        onValuesChange?.(result.z_values);
+        pushHistory(result.z_values, localXBins, localYBins);
+        warnIfLargeChangeBatch(previousValues, result.z_values, selectedCellsCoords, 'Fill Region');
+      }
+    } catch (err) {
+      handleOperationError('Fill Region', err);
+    }
+  };
+
+  const handleNudge = (up: boolean, large: boolean) => {
+    const amount = large ? 0.05 : 0.01; 
+    if (up) handleIncrease(amount);
+    else handleDecrease(amount);
   };
 
   const handleRebin = async (newXBins: number[], newYBins: number[], interpolateZ: boolean) => {
@@ -623,9 +775,11 @@ export default function TableEditor2D({
       });
       if (result && result.z_values) {
         setLocalZValues(result.z_values);
+        setLocalXBins(newXBins);
+        setLocalYBins(newYBins);
         onValuesChange?.(result.z_values);
-        setCanUndo(true);
-        setSelectedCells(new Set());
+        setSelectionRange(null);
+        pushHistory(result.z_values, newXBins, newYBins);
         warnIfLargeChangeBatch(previousValues, result.z_values, null, 'Rebin');
       }
     } catch (err) {
@@ -646,36 +800,143 @@ export default function TableEditor2D({
     });
   };
 
-  const handleCopy = () => {
-    const cells: [number, number][] = Array.from(selectedCells).map(key => {
-      const parts = key.split(',').map(Number);
-      return [parts[0], parts[1]] as [number, number];
-    });
-    setClipboard(cells);
+  const handleCopy = async () => {
+    if (!selectionRange) return;
+
+    const minX = Math.min(selectionRange.start[0], selectionRange.end[0]);
+    const maxX = Math.max(selectionRange.start[0], selectionRange.end[0]);
+    const minY = Math.min(selectionRange.start[1], selectionRange.end[1]);
+    const maxY = Math.max(selectionRange.start[1], selectionRange.end[1]);
+
+    const rows: string[] = [];
+    for (let y = minY; y <= maxY; y++) {
+      const rowValues: string[] = [];
+      for (let x = minX; x <= maxX; x++) {
+        rowValues.push(localZValues[y][x].toString());
+      }
+      rows.push(rowValues.join('\t'));
+    }
+
+    const text = rows.join('\n');
+    try {
+      await navigator.clipboard.writeText(text);
+      // Optional: Visual feedback or toast could go here
+    } catch (err) {
+      console.error('Failed to copy to clipboard:', err);
+    }
   };
 
-  const handlePaste = () => {
-    if (clipboard.length === 0) return;
+  const handlePaste = async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      if (!text) return;
 
-    clipboard.forEach(([x, y]) => {
-      if (x >= 0 && x < x_bins.length && y >= 0 && y < y_bins.length) {
-        const targetKey = `${x},${y}`;
-        if (!lockedCells.has(targetKey)) {
-          handleCellChange(x, y, localZValues[y][x], { suppressAlert: true });
-        }
+      // Determine paste anchor (top-left of selection)
+      const startX = selectionRange 
+        ? Math.min(selectionRange.start[0], selectionRange.end[0]) 
+        : (activeCell ? activeCell[0] : 0);
+      const startY = selectionRange 
+        ? Math.min(selectionRange.start[1], selectionRange.end[1]) 
+        : (activeCell ? activeCell[1] : 0);
+
+      // Parse data (handle standard TSV/CSV)
+      const rows = text.split(/\r?\n/).filter(line => line.trim() !== '');
+      if (rows.length === 0) return;
+
+      // Create new table state
+      const newValues = localZValues.map(row => [...row]);
+      let hasChanges = false;
+
+      rows.forEach((line, r) => {
+        const y = startY + r;
+        if (y >= y_bins.length) return;
+
+        // Auto-detect delimiter (tab preferred, then comma)
+        const delimiter = line.includes('\t') ? '\t' : ',';
+        const cols = line.split(delimiter);
+
+        cols.forEach((valStr, c) => {
+          const x = startX + c;
+          if (x >= x_bins.length) return;
+
+          const val = parseFloat(valStr.trim());
+          if (!isNaN(val)) {
+            const targetKey = `${x},${y}`;
+            if (!lockedCells.has(targetKey)) {
+              if (newValues[y][x] !== val) {
+                newValues[y][x] = val;
+                hasChanges = true;
+              }
+            }
+          }
+        });
+      });
+
+      if (hasChanges) {
+        setLocalZValues(newValues);
+        pushHistory(newValues, localXBins, localYBins);
+        // Persist to backend without triggering n*m alerts
+        invoke('update_table_data', {
+          table_name,
+          z_values: newValues
+        });
+        
+        // Update selection to cover pasted area
+        const endY = Math.min(startY + rows.length - 1, y_bins.length - 1);
+        const maxCols = Math.max(...rows.map(r => r.split(r.includes('\t') ? '\t' : ',').length));
+        const endX = Math.min(startX + maxCols - 1, x_bins.length - 1);
+        
+        setSelectionRange({
+          start: [startX, startY],
+          end: [endX, endY]
+        });
       }
-    });
+    } catch (err) {
+      console.error('Failed to paste from clipboard:', err);
+    }
   };
 
   const handleUndo = () => {
-    invoke('update_table_data', {
-      table_name,
-      z_values
-    }).then(() => {
-      setLocalZValues(z_values);
-      setSelectedCells(new Set());
-      setCanUndo(false);
-    });
+    if (historyIndex > 0) {
+      const prevIndex = historyIndex - 1;
+      const snapshot = history[prevIndex];
+      
+      setLocalZValues(snapshot.z);
+      setLocalXBins(snapshot.x);
+      setLocalYBins(snapshot.y);
+      setRebinDialog(prev => ({ ...prev, newXBins: snapshot.x, newYBins: snapshot.y }));
+      
+      setHistoryIndex(prevIndex);
+      onValuesChange?.(snapshot.z);
+      
+      // Update backend
+      invoke('update_table_data', {
+        table_name,
+        z_values: snapshot.z,
+        // Backend update for axis not yet available via simple set command
+        // but local state is reverted
+      });
+    }
+  };
+
+  const handleRedo = () => {
+    if (historyIndex < history.length - 1) {
+      const nextIndex = historyIndex + 1;
+      const snapshot = history[nextIndex];
+      
+      setLocalZValues(snapshot.z);
+      setLocalXBins(snapshot.x);
+      setLocalYBins(snapshot.y);
+      setRebinDialog(prev => ({ ...prev, newXBins: snapshot.x, newYBins: snapshot.y }));
+      
+      setHistoryIndex(nextIndex);
+      onValuesChange?.(snapshot.z);
+
+      invoke('update_table_data', {
+        table_name,
+        z_values: snapshot.z
+      });
+    }
   };
 
   const handleCellLock = (x: number, y: number, locked: boolean) => {
@@ -689,16 +950,12 @@ export default function TableEditor2D({
     setLockedCells(newLocked);
   };
 
-  const handleCellSelect = (x: number, y: number, shiftKey: boolean) => {
-    if (shiftKey) {
-      const newSelected = new Set(selectedCells);
-      newSelected.add(`${x},${y}`);
-      setSelectedCells(newSelected);
-    } else {
-      setSelectedCells(new Set([`${x},${y}`]));
+  const handleSelectionChange = (range: SelectionRange | null) => {
+    setSelectionRange(range);
+    if (range) {
+      setActiveCell(range.end);
+      setContextMenu({ visible: false, x: 0, y: 0, value: 0 });
     }
-    setActiveCell([x, y]);
-    setContextMenu({ visible: false, x: 0, y: 0, value: 0 });
   };
 
   const handleSave = () => {
@@ -706,7 +963,6 @@ export default function TableEditor2D({
       table_name,
       z_values: localZValues
     }).then(() => {
-      setCanUndo(false);
     });
   };
 
@@ -831,8 +1087,10 @@ export default function TableEditor2D({
           onCopy={handleCopy}
           onPaste={handlePaste}
           onUndo={handleUndo}
+          onRedo={handleRedo}
           canUndo={canUndo}
-          canPaste={clipboard.length > 0}
+          canRedo={canRedo}
+          canPaste={true}
           followMode={followMode}
           onFollowModeToggle={() => setFollowMode(!followMode)}
           showColorShade={showColorShade}
@@ -855,16 +1113,13 @@ export default function TableEditor2D({
         }}
       >
         <TableGrid
-          x_bins={rebinDialog.newXBins}
-          y_bins={rebinDialog.newYBins}
+          x_bins={localXBins}
+          y_bins={localYBins}
           z_values={localZValues}
           onCellChange={handleCellChange}
           onAxisChange={handleAxisChange}
-          selectedCell={Array.from(selectedCells).map(key => {
-            const [x, y] = key.split(',').map(Number);
-            return [x, y] as [number, number];
-          })[0] || null}
-          onCellSelect={handleCellSelectWrapper}
+          selectionRange={selectionRange}
+          onSelectionChange={handleSelectionChange}
           onCellDoubleClick={handleCellDoubleClick}
           historyTrail={showHistoryTrail ? historyTrail : []}
           lockedCells={lockedCells}
@@ -889,10 +1144,17 @@ export default function TableEditor2D({
         onSetEqual={handleContextMenuSetEqual}
         onScale={handleContextMenuScale}
         onInterpolate={() => { setContextMenu({ visible: false, x: 0, y: 0, value: 0 }); handleInterpolate(); }}
+        onInterpolateLinear={(axis) => { setContextMenu({ visible: false, x: 0, y: 0, value: 0 }); handleInterpolateLinear(axis); }}
         onSmooth={() => { setContextMenu({ visible: false, x: 0, y: 0, value: 0 }); handleSmooth(); }}
+        onAddOffset={(offset) => { setContextMenu({ visible: false, x: 0, y: 0, value: 0 }); handleAddOffset(offset); }}
+        onNudge={(up, large) => { setContextMenu({ visible: false, x: 0, y: 0, value: 0 }); handleNudge(up, large); }}
+        onFill={(direction) => { setContextMenu({ visible: false, x: 0, y: 0, value: 0 }); handleFill(direction); }}
         onLock={() => { setContextMenu({ visible: false, x: 0, y: 0, value: 0 }); handleCellLock(contextMenu.x, contextMenu.y, true); }}
         onUnlock={() => { setContextMenu({ visible: false, x: 0, y: 0, value: 0 }); handleCellLock(contextMenu.x, contextMenu.y, false); }}
         isLocked={lockedCells.has(`${contextMenu.x},${contextMenu.y}`)}
+        onCopy={() => { setContextMenu({ visible: false, x: 0, y: 0, value: 0 }); handleCopy(); }}
+        onPaste={() => { setContextMenu({ visible: false, x: 0, y: 0, value: 0 }); handlePaste(); }}
+        onToggleHeatmap={() => { setContextMenu({ visible: false, x: 0, y: 0, value: 0 }); setShowColorShade(prev => !prev); }}
       />
 
       <RebinDialog

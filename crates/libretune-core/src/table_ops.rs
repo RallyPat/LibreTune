@@ -271,3 +271,149 @@ pub fn set_cells_equal(z_values: &mut [Vec<f64>], selected_cells: Vec<TableCell>
         }
     }
 }
+
+/// Axis for linear interpolation
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub enum InterpolationAxis {
+    Row,
+    Col,
+}
+
+/// Direction for fill operations
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub enum FillDirection {
+    Right,
+    Down,
+}
+
+/// Add an offset to selected cells
+pub fn add_offset(
+    z_values: &[Vec<f64>],
+    selected_cells: Vec<TableCell>,
+    offset: f64,
+) -> Vec<Vec<f64>> {
+    let mut result = z_values.to_vec();
+
+    for &(y, x) in selected_cells.iter() {
+        if let Some(val) = get_cell_value(&mut result, y, x) {
+            result[y][x] = val + offset;
+        }
+    }
+
+    result
+}
+
+/// Interpolate selected cells linearly along an axis
+pub fn interpolate_linear(
+    z_values: &[Vec<f64>],
+    selected_cells: Vec<TableCell>,
+    axis: InterpolationAxis,
+) -> Vec<Vec<f64>> {
+    let mut result = z_values.to_vec();
+    if selected_cells.is_empty() {
+        return result;
+    }
+
+    // Determine bounds
+    let mut min_x = usize::MAX;
+    let mut max_x = usize::MIN;
+    let mut min_y = usize::MAX;
+    let mut max_y = usize::MIN;
+
+    for &(y, x) in &selected_cells {
+        min_x = min_x.min(x);
+        max_x = max_x.max(x);
+        min_y = min_y.min(y);
+        max_y = max_y.max(y);
+    }
+    
+    match axis {
+        InterpolationAxis::Row => {
+            // Horizontal interpolation: for each row y from min_y to max_y
+            // Interpolate between value at min_x and max_x
+             for y in min_y..=max_y {
+                let start_val = result[y][min_x];
+                let end_val = result[y][max_x];
+                let span = (max_x - min_x) as f64;
+                
+                if span > 0.0 {
+                    for x in min_x..=max_x {
+                         if selected_cells.contains(&(y, x)) {
+                             let ratio = (x - min_x) as f64 / span;
+                             result[y][x] = start_val + (end_val - start_val) * ratio;
+                         }
+                    }
+                }
+             }
+        }
+        InterpolationAxis::Col => {
+            // Vertical interpolation
+             for x in min_x..=max_x {
+                let start_val = result[min_y][x];
+                let end_val = result[max_y][x];
+                let span = (max_y - min_y) as f64;
+
+                if span > 0.0 {
+                     for y in min_y..=max_y {
+                         if selected_cells.contains(&(y, x)) {
+                             let ratio = (y - min_y) as f64 / span;
+                             result[y][x] = start_val + (end_val - start_val) * ratio;
+                         }
+                     }
+                }
+             }
+        }
+    }
+
+    result
+}
+
+/// Fill region from edges
+pub fn fill_region(
+    z_values: &[Vec<f64>],
+    selected_cells: Vec<TableCell>,
+    direction: FillDirection,
+) -> Vec<Vec<f64>> {
+    let mut result = z_values.to_vec();
+    if selected_cells.is_empty() { return result; }
+    
+    // Bounds
+    let mut min_x = usize::MAX;
+    let mut max_x = usize::MIN;
+    let mut min_y = usize::MAX;
+    let mut max_y = usize::MIN;
+
+    for &(y, x) in &selected_cells {
+        min_x = min_x.min(x);
+        max_x = max_x.max(x);
+        min_y = min_y.min(y);
+        max_y = max_y.max(y);
+    }
+
+    match direction {
+        FillDirection::Right => {
+            // Take values from min_x column and propagate right
+             for y in min_y..=max_y {
+                 let source_val = result[y][min_x];
+                 for x in min_x..=max_x {
+                     if selected_cells.contains(&(y, x)) {
+                         result[y][x] = source_val;
+                     }
+                 }
+             }
+        }
+        FillDirection::Down => {
+            // Take values from min_y row and propagate down
+            for x in min_x..=max_x {
+                let source_val = result[min_y][x];
+                for y in min_y..=max_y {
+                    if selected_cells.contains(&(y, x)) {
+                        result[y][x] = source_val;
+                    }
+                }
+            }
+        }
+    }
+    
+    result
+}

@@ -4,6 +4,7 @@ import {
   Equal,
   X,
   Undo2,
+  Redo2,
   Copy,
   ClipboardPaste,
   Sparkles,
@@ -24,7 +25,9 @@ interface TableToolbarProps {
   onCopy: () => void;
   onPaste: () => void;
   onUndo: () => void;
+  onRedo?: () => void;
   canUndo: boolean;
+  canRedo?: boolean;
   canPaste: boolean;
   followMode?: boolean;
   onFollowModeToggle?: () => void;
@@ -43,7 +46,9 @@ export default function TableToolbar({
   onCopy,
   onPaste,
   onUndo,
+  onRedo,
   canUndo,
+  canRedo,
   canPaste,
   followMode = false,
   onFollowModeToggle,
@@ -144,6 +149,16 @@ export default function TableToolbar({
         >
           <Undo2 size={14} />
         </button>
+        {onRedo && (
+          <button 
+            className="ts-toolbar-btn" 
+            title="Redo (Ctrl+Y)"
+            onClick={onRedo}
+            disabled={!canRedo}
+          >
+            <Redo2 size={14} />
+          </button>
+        )}
       </div>
 
       <div className="ts-toolbar-divider" />

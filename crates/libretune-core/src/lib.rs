@@ -53,6 +53,7 @@ pub mod plugin_system;
 pub mod port_editor;
 pub mod project;
 pub mod protocol;
+pub mod realtime;
 pub mod table_ops;
 pub mod tune;
 pub mod unit_conversion;
