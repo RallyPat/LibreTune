@@ -536,31 +536,99 @@ function AppContent() {
 
           if (settings.last_active_tab && settings.last_active_tab !== "dashboard") {
              const tabId = settings.last_active_tab;
+             
+             // Define known tools mapping for quick persistence restoration
+             const TOOLS: Record<string, { title: string, icon: string, type: TabContent['type'] }> = {
+               "console": { title: "ECU Console", icon: "terminal", type: "console" },
+               "datalog": { title: "Data Logging", icon: "datalog", type: "datalog" },
+               "autotune": { title: "AutoTune", icon: "autotune", type: "autotune" },
+               "tooth-logger": { title: "Tooth Logger", icon: "scope", type: "tooth-logger" },
+               "composite-logger": { title: "Composite Logger", icon: "scope", type: "composite-logger" },
+               "lua-console": { title: "Lua Console", icon: "terminal", type: "lua-console" },
+               "settings": { title: "Settings", icon: "settings", type: "settings" },
+             };
+
              try {
-                if (tabId.startsWith("table:") || !tabId.includes(":")) {
-                   const tableName = tabId.replace("table:", "");
-                   // Manually fetch data to reconstruct tab state
-                   const data = await invoke<BackendTableData>("get_table_data", { tableName });
-                   const tableData = toTunerTableData(data);
-                   
-                   setTabs([dashTab, { id: tableName, title: data.title || tableName, icon: "table" }]);
+                if (TOOLS[tabId]) {
+                   // Case 1: Known Tool request
+                   const tool = TOOLS[tabId];
+                   console.log(`Restoring tool tab: ${tabId}`);
+                   setTabs([dashTab, { id: tabId, title: tool.title, icon: tool.icon }]);
                    setTabContents({ 
                      dashboard: { type: "dashboard" },
-                     [tableName]: { type: "table", data: tableData }
-                   });
-                   setActiveTabId(tableName);
-                   restored = true;
-                } else if (tabId === "console" || tabId === "datalog" || tabId === "autotune") {
-                   const icon = tabId === "console" ? "terminal" : (tabId === "autotune" ? "autotune" : "datalog");
-                   const title = tabId === "console" ? "ECU Console" : (tabId === "autotune" ? "AutoTune" : "Data Logging");
-                   setTabs([dashTab, { id: tabId, title, icon }]);
-                   const contentData = tabId === "autotune" ? { type: "autotune", data: "" } : { type: tabId as any };
-                   setTabContents({ 
-                     dashboard: { type: "dashboard" },
-                     [tabId]: contentData as any
+                     [tabId]: { type: tool.type, data: tabId === "autotune" ? "" : undefined }
                    });
                    setActiveTabId(tabId);
                    restored = true;
+                } else {
+                   // Case 2: Content (Table, Curve, Dialog, PortEditor)
+                   // Remove "table:" prefix if present (legacy support)
+                   const targetName = tabId.startsWith("table:") ? tabId.replace("table:", "") : tabId;
+                   console.log(`Restoring content tab: ${targetName}`);
+
+                   // Strategy: Try Table -> Curve -> Dialog -> PortEditor
+                   try {
+                     // 1. Try Table
+                     const data = await invoke<BackendTableData>("get_table_data", { tableName: targetName });
+                     const tableData = toTunerTableData(data);
+                     
+                     setTabs([dashTab, { id: targetName, title: data.title || targetName, icon: "table" }]);
+                     setTabContents({ 
+                       dashboard: { type: "dashboard" },
+                       [targetName]: { type: "table", data: tableData }
+                     });
+                     setActiveTabId(targetName);
+                     restored = true;
+                   } catch {
+                     // 2. Try Curve
+                     try {
+                       const data = await invoke<BackendCurveData>("get_curve_data", { curveName: targetName });
+                       const curveData = toCurveData(data);
+                       let gaugeInfo: SimpleGaugeInfo | null = null;
+                       if (data.gauge) {
+                         try {
+                           gaugeInfo = await invoke<SimpleGaugeInfo>("get_gauge_config", { gaugeName: data.gauge });
+                         } catch (e) { console.warn("Gauge load failed", e); }
+                       }
+                       
+                       setTabs([dashTab, { id: targetName, title: data.title || targetName, icon: "curve" }]);
+                       setTabContents({ 
+                         dashboard: { type: "dashboard" },
+                         [targetName]: { type: "curve", data: curveData, gauge: gaugeInfo }
+                       });
+                       setActiveTabId(targetName);
+                       restored = true;
+                     } catch {
+                       // 3. Try Dialog
+                       try {
+                         const def = await invoke<RendererDialogDef>("get_dialog_definition", { name: targetName });
+                         setTabs([dashTab, { id: targetName, title: def.title || targetName, icon: "dialog" }]);
+                         setTabContents({ 
+                           dashboard: { type: "dashboard" },
+                           [targetName]: { type: "dialog", data: def }
+                         });
+                         setActiveTabId(targetName);
+                         restored = true;
+                       } catch {
+                          // 4. Try PortEditor
+                          try {
+                            const portEditor = await invoke<{ name: string; label: string }>("get_port_editor", { name: targetName });
+                            const assignments = await invoke("get_port_editor_assignments", { name: portEditor.name }).catch(() => []);
+                            setPortEditorAssignments(prev => ({ ...prev, [portEditor.name]: assignments as any }));
+
+                            setTabs([dashTab, { id: targetName, title: portEditor.label || targetName, icon: "dialog" }]);
+                            setTabContents({ 
+                              dashboard: { type: "dashboard" },
+                              [targetName]: { type: "portEditor", data: portEditor }
+                            });
+                            setActiveTabId(targetName);
+                            restored = true;
+                          } catch {
+                            console.warn(`Could not restore tab '${tabId}' - content not found.`);
+                          }
+                       }
+                     }
+                   }
                 }
              } catch (restoreErr) {
                 console.warn("Failed to restore tab:", restoreErr);
