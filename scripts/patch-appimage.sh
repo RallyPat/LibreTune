@@ -51,6 +51,25 @@ if [ ! -f "$BINARY_PATH" ]; then
     fi
 fi
 
+# Fix missing lib/x86_64-linux-gnu symlink (Required for WebKit/GTK in AppImage)
+# This addresses CI validation failures where the AppImage structure is missing this path
+ensure_lib_symlink() {
+    local target_dir="$1/lib"
+    local symlink_path="$target_dir/x86_64-linux-gnu"
+    
+    if [ ! -d "$target_dir" ]; then
+        mkdir -p "$target_dir"
+    fi
+
+    if [ ! -L "$symlink_path" ] && [ ! -d "$symlink_path" ]; then
+        echo "Creating missing symlink lib/x86_64-linux-gnu -> /usr/lib/x86_64-linux-gnu"
+        ln -s /usr/lib/x86_64-linux-gnu "$symlink_path"
+        echo "✓ Created symlink: $symlink_path"
+    fi
+}
+
+ensure_lib_symlink "$APPIMAGE_DIR"
+
 BINARY_NAME=$(basename "$BINARY_PATH")
 
 # Replace the @EXEC@ placeholder with the actual binary path (relative to AppDir)

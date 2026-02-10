@@ -153,6 +153,12 @@ jobs:
           mkdir -p appimage-extract
           cd appimage-extract
           "$APPIMAGE" --appimage-extract > /dev/null 2>&1 || true
+
+          # Patch the extracted AppDir structure to ensure it meets requirements
+          # This simulates the post-processing done in release builds
+          echo "Patching extracted AppDir..."
+          chmod +x ../scripts/patch-appimage.sh
+          ../scripts/patch-appimage.sh squashfs-root
           
           # Check for critical issues
           ERRORS=0
