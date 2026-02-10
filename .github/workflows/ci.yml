@@ -150,9 +150,19 @@ jobs:
           echo "Found AppImage: $APPIMAGE"
           
           # Extract AppImage to validate structure
+          chmod +x "$APPIMAGE"
           mkdir -p appimage-extract
           cd appimage-extract
-          "$APPIMAGE" --appimage-extract > /dev/null 2>&1 || true
+          
+          echo "Extracting AppImage..."
+          "$APPIMAGE" --appimage-extract > /dev/null 2>&1
+          
+          if [ ! -d "squashfs-root" ]; then
+            echo "✗ FAIL: AppImage extraction failed - squashfs-root directory not created"
+            echo "Contents of extraction directory:"
+            ls -la
+            exit 1
+          fi
 
           # Patch the extracted AppDir structure to ensure it meets requirements
           # This simulates the post-processing done in release builds
