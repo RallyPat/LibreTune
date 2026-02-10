@@ -118,11 +118,11 @@ impl PluginInstance {
     ) -> Result<Self, String> {
         // Create WASM runtime
         let engine = Engine::default();
-        
+
         // Read WASM file into bytes
-        let wasm_bytes = std::fs::read(wasm_path)
-            .map_err(|e| format!("Failed to read WASM file: {}", e))?;
-        
+        let wasm_bytes =
+            std::fs::read(wasm_path).map_err(|e| format!("Failed to read WASM file: {}", e))?;
+
         let module = Module::new(&engine, &wasm_bytes)
             .map_err(|e| format!("Failed to load WASM module: {}", e))?;
 
@@ -161,7 +161,8 @@ impl PluginInstance {
             .get_typed_func::<(i32, i32, i32), i32>(&mut self.store, "plugin_init")
         {
             // Pass simple parameters: config size, ecu_type ptr, version ptr
-            let _ = init.call(&mut self.store, (0, 0, 0))
+            let _ = init
+                .call(&mut self.store, (0, 0, 0))
                 .map_err(|e| format!("Plugin init failed: {}", e))?;
         }
 
@@ -191,7 +192,8 @@ impl PluginInstance {
             .instance
             .get_typed_func::<(), i32>(&mut self.store, "plugin_execute")
         {
-            let _result = exec.call(&mut self.store, ())
+            let _result = exec
+                .call(&mut self.store, ())
                 .map_err(|e| format!("Plugin execution failed: {}", e))?;
         }
 
@@ -357,7 +359,9 @@ mod tests {
         let manifest = test_manifest();
         assert!(manifest.permissions.contains(&Permission::ReadTables));
         assert!(manifest.permissions.contains(&Permission::WriteConstants));
-        assert!(!manifest.permissions.contains(&Permission::SubscribeChannels));
+        assert!(!manifest
+            .permissions
+            .contains(&Permission::SubscribeChannels));
     }
 
     #[test]

@@ -170,9 +170,7 @@ mod tests {
 
         // Pause
         recorder
-            .record_action(Action::Pause {
-                duration_ms: 500,
-            })
+            .record_action(Action::Pause { duration_ms: 500 })
             .unwrap();
 
         // Table edit
@@ -255,12 +253,8 @@ mod tests {
             new_value: 14.5,
             old_value: None,
         });
-        set.actions.push(Action::Pause {
-            duration_ms: 100,
-        });
-        set.actions.push(Action::Pause {
-            duration_ms: 200,
-        });
+        set.actions.push(Action::Pause { duration_ms: 100 });
+        set.actions.push(Action::Pause { duration_ms: 200 });
 
         let summary = ActionPlayer::summarize(&set);
 
@@ -275,9 +269,7 @@ mod tests {
     fn test_recording_without_start() {
         let mut recorder = ActionRecorder::new();
 
-        let action = Action::Pause {
-            duration_ms: 100,
-        };
+        let action = Action::Pause { duration_ms: 100 };
 
         let result = recorder.record_action(action);
         assert!(result.is_err());

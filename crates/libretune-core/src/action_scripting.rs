@@ -4,9 +4,9 @@
 //! Actions are discrete operations like table edits, constant changes, or bulk operations.
 //! They can be serialized to JSON for sharing and reuse as templates.
 
+use crate::ini::EcuDefinition;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use crate::ini::EcuDefinition;
 
 /// Represents a single tuning action that can be recorded and replayed
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -30,23 +30,16 @@ pub enum Action {
     BulkOperation {
         operation: String, // "scale", "smooth", "interpolate", "set_equal", "rebin"
         table_name: String,
-        cells: Vec<(u16, u16)>, // (x, y) coordinates
+        cells: Vec<(u16, u16)>,           // (x, y) coordinates
         parameters: HashMap<String, f64>, // operation-specific parameters
-        old_values: Option<Vec<f64>>, // for undo
+        old_values: Option<Vec<f64>>,     // for undo
     },
     /// Execute a Lua script for custom calculations
-    ExecuteLuaScript {
-        script: String,
-        description: String,
-    },
+    ExecuteLuaScript { script: String, description: String },
     /// Pause/delay during playback (in milliseconds)
-    Pause {
-        duration_ms: u32,
-    },
+    Pause { duration_ms: u32 },
     /// Send a controller command (e.g. "burn", "reset")
-    SendCommand {
-        command: String,
-    },
+    SendCommand { command: String },
 }
 
 /// A recorded or created sequence of actions
@@ -103,7 +96,6 @@ impl Default for ActionRecorder {
 }
 
 impl ActionRecorder {
-
     /// Start recording a new action set
     pub fn start_recording(
         &mut self,
@@ -186,16 +178,25 @@ pub struct ActionPlayer;
 
 impl ActionPlayer {
     /// Execute an action set
-    /// 
+    ///
     /// This is a simulated execution that validates actions.
     /// Actual execution requires integration with the ECU communication layer.
-    pub fn validate_action_set(action_set: &ActionSet, def: Option<&EcuDefinition>) -> Result<Vec<String>, Vec<String>> {
+    pub fn validate_action_set(
+        action_set: &ActionSet,
+        def: Option<&EcuDefinition>,
+    ) -> Result<Vec<String>, Vec<String>> {
         let mut warnings = Vec::new();
         let mut errors = Vec::new();
 
         for (idx, action) in action_set.actions.iter().enumerate() {
             match action {
-                Action::TableEdit { table_name, x_index: _, y_index: _, new_value, .. } => {
+                Action::TableEdit {
+                    table_name,
+                    x_index: _,
+                    y_index: _,
+                    new_value,
+                    ..
+                } => {
                     if table_name.is_empty() {
                         errors.push(format!("Action {}: Empty table name", idx));
                     }
@@ -203,12 +204,21 @@ impl ActionPlayer {
                         errors.push(format!("Action {}: Invalid value {}", idx, new_value));
                     }
                     if let Some(d) = def {
-                        if !d.tables.contains_key(table_name) && !d.table_map_to_name.contains_key(table_name) {
-                            errors.push(format!("Action {}: Table '{}' not found in ECU definition", idx, table_name));
+                        if !d.tables.contains_key(table_name)
+                            && !d.table_map_to_name.contains_key(table_name)
+                        {
+                            errors.push(format!(
+                                "Action {}: Table '{}' not found in ECU definition",
+                                idx, table_name
+                            ));
                         }
                     }
                 }
-                Action::ConstantChange { constant_name, new_value, .. } => {
+                Action::ConstantChange {
+                    constant_name,
+                    new_value,
+                    ..
+                } => {
                     if constant_name.is_empty() {
                         errors.push(format!("Action {}: Empty constant name", idx));
                     }
@@ -217,31 +227,54 @@ impl ActionPlayer {
                     }
                     if let Some(d) = def {
                         if !d.constants.contains_key(constant_name) {
-                            errors.push(format!("Action {}: Constant '{}' not found in ECU definition", idx, constant_name));
+                            errors.push(format!(
+                                "Action {}: Constant '{}' not found in ECU definition",
+                                idx, constant_name
+                            ));
                         }
                     }
                 }
-                Action::BulkOperation { operation, table_name, cells, parameters, .. } => {
+                Action::BulkOperation {
+                    operation,
+                    table_name,
+                    cells,
+                    parameters,
+                    ..
+                } => {
                     if table_name.is_empty() {
                         errors.push(format!("Action {}: Empty table name", idx));
                     }
                     if cells.is_empty() {
-                        warnings.push(format!("Action {}: No cells selected for {}", idx, operation));
+                        warnings.push(format!(
+                            "Action {}: No cells selected for {}",
+                            idx, operation
+                        ));
                     }
                     if let Some(d) = def {
-                        if !d.tables.contains_key(table_name) && !d.table_map_to_name.contains_key(table_name) {
-                            errors.push(format!("Action {}: Table '{}' not found in ECU definition", idx, table_name));
+                        if !d.tables.contains_key(table_name)
+                            && !d.table_map_to_name.contains_key(table_name)
+                        {
+                            errors.push(format!(
+                                "Action {}: Table '{}' not found in ECU definition",
+                                idx, table_name
+                            ));
                         }
                     }
                     match operation.as_str() {
                         "scale" => {
                             if !parameters.contains_key("factor") {
-                                errors.push(format!("Action {}: scale missing 'factor' parameter", idx));
+                                errors.push(format!(
+                                    "Action {}: scale missing 'factor' parameter",
+                                    idx
+                                ));
                             }
                         }
                         "rebin" => {
-                            if !parameters.contains_key("x_bins") || !parameters.contains_key("y_bins") {
-                                errors.push(format!("Action {}: rebin missing bin parameters", idx));
+                            if !parameters.contains_key("x_bins")
+                                || !parameters.contains_key("y_bins")
+                            {
+                                errors
+                                    .push(format!("Action {}: rebin missing bin parameters", idx));
                             }
                         }
                         _ => {} // Other operations
@@ -262,7 +295,10 @@ impl ActionPlayer {
                         errors.push(format!("Action {}: Empty command", idx));
                     } else if let Some(d) = def {
                         if !d.controller_commands.contains_key(command) {
-                            errors.push(format!("Action {}: Command '{}' not supported by ECU definition", idx, command));
+                            errors.push(format!(
+                                "Action {}: Command '{}' not supported by ECU definition",
+                                idx, command
+                            ));
                         }
                     }
                 }
@@ -310,8 +346,7 @@ pub fn serialize_action_set(action_set: &ActionSet) -> Result<String, String> {
 
 /// Deserialize an action set from JSON string
 pub fn deserialize_action_set(json: &str) -> Result<ActionSet, String> {
-    serde_json::from_str(json)
-        .map_err(|e| format!("Failed to deserialize action set: {}", e))
+    serde_json::from_str(json).map_err(|e| format!("Failed to deserialize action set: {}", e))
 }
 
 #[cfg(test)]
@@ -359,9 +394,7 @@ mod tests {
     #[test]
     fn test_record_without_start_fails() {
         let mut recorder = ActionRecorder::new();
-        let action = Action::Pause {
-            duration_ms: 100,
-        };
+        let action = Action::Pause { duration_ms: 100 };
 
         assert!(recorder.record_action(action).is_err());
     }
@@ -491,9 +524,7 @@ mod tests {
             new_value: 14.5,
             old_value: None,
         });
-        set.actions.push(Action::Pause {
-            duration_ms: 100,
-        });
+        set.actions.push(Action::Pause { duration_ms: 100 });
 
         let summary = ActionPlayer::summarize(&set);
         assert!(summary.contains("Test Actions"));

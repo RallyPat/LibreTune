@@ -21,9 +21,9 @@ use libretune_core::plugin_system::{
     PluginManifest as WasmPluginManifest,
 };
 use libretune_core::project::{
-    format_commit_message, BranchInfo, CommitDiff, CommitInfo, ConnectionSettings, IniRepository,
-    IniSource, load_math_channels, save_math_channels, OnlineIniEntry, OnlineIniRepository, Project,
-    ProjectConfig, ProjectSettings, ProjectTemplate, TemplateManager, UserMathChannel,
+    format_commit_message, load_math_channels, save_math_channels, BranchInfo, CommitDiff,
+    CommitInfo, ConnectionSettings, IniRepository, IniSource, OnlineIniEntry, OnlineIniRepository,
+    Project, ProjectConfig, ProjectSettings, ProjectTemplate, TemplateManager, UserMathChannel,
     VersionControl,
 };
 use libretune_core::protocol::serial::list_ports;
@@ -117,8 +117,7 @@ fn load_port_editor_store(project: &Project) -> Result<PortEditorStore, String> 
     }
     let content = std::fs::read_to_string(&path)
         .map_err(|e| format!("Failed to read port editor store: {}", e))?;
-    serde_json::from_str(&content)
-        .map_err(|e| format!("Failed to parse port editor store: {}", e))
+    serde_json::from_str(&content).map_err(|e| format!("Failed to parse port editor store: {}", e))
 }
 
 fn save_port_editor_store(project: &Project, store: &PortEditorStore) -> Result<(), String> {
@@ -129,8 +128,7 @@ fn save_port_editor_store(project: &Project, store: &PortEditorStore) -> Result<
     }
     let json = serde_json::to_string_pretty(store)
         .map_err(|e| format!("Failed to serialize port editor store: {}", e))?;
-    std::fs::write(&path, json)
-        .map_err(|e| format!("Failed to write port editor store: {}", e))?;
+    std::fs::write(&path, json).map_err(|e| format!("Failed to write port editor store: {}", e))?;
     Ok(())
 }
 
@@ -3143,16 +3141,16 @@ async fn get_realtime_data(
     } else {
         // Fallback: Manual parsing (basic channels only) if Evaluator not available
         let mut results = HashMap::new();
-        
+
         // First pass: Parse all raw channels
         for (name, channel) in channels_arc.iter() {
-             if !channel.is_computed() {
-                 if let Some(val) = channel.parse(&raw_data, endianness) {
-                     results.insert(name.clone(), val);
-                 }
-             }
+            if !channel.is_computed() {
+                if let Some(val) = channel.parse(&raw_data, endianness) {
+                    results.insert(name.clone(), val);
+                }
+            }
         }
-        
+
         results
     };
 
@@ -3405,7 +3403,9 @@ async fn start_realtime_stream(
                                 let _ = channel.compile();
                             }
                             if let Some(expr) = &channel.cached_ast {
-                                if let Ok(val) = libretune_core::ini::expression::evaluate_simple(expr, &data) {
+                                if let Ok(val) =
+                                    libretune_core::ini::expression::evaluate_simple(expr, &data)
+                                {
                                     data.insert(channel.name.clone(), val.as_f64());
                                 }
                             }
@@ -3513,7 +3513,11 @@ async fn start_realtime_stream(
                                     let _ = channel.compile();
                                 }
                                 if let Some(expr) = &channel.cached_ast {
-                                    if let Ok(val) = libretune_core::ini::expression::evaluate_simple(expr, &data) {
+                                    if let Ok(val) =
+                                        libretune_core::ini::expression::evaluate_simple(
+                                            expr, &data,
+                                        )
+                                    {
                                         data.insert(channel.name.clone(), val.as_f64());
                                     }
                                 }
@@ -4184,12 +4188,12 @@ async fn get_port_editor(
 ) -> Result<libretune_core::ini::PortEditorConfig, String> {
     let def_guard = state.definition.lock().await;
     let def = def_guard.as_ref().ok_or("Definition not loaded")?;
-    
+
     // First try to get from INI definition
     if let Some(config) = def.port_editors.get(&name) {
         return Ok(config.clone());
     }
-    
+
     // For built-in std_port_edit, provide a default if not explicitly defined
     if name == "std_port_edit" {
         return Ok(libretune_core::ini::PortEditorConfig {
@@ -4198,7 +4202,7 @@ async fn get_port_editor(
             enable_condition: None,
         });
     }
-    
+
     Err(format!("PortEditor {} not found", name))
 }
 
@@ -6223,11 +6227,8 @@ async fn interpolate_linear(
     };
 
     let table_data = get_table_data_internal(&state, &table_name).await?;
-    let new_z_values = table_ops::interpolate_linear(
-        &table_data.z_values,
-        selected_cells,
-        axis_enum,
-    );
+    let new_z_values =
+        table_ops::interpolate_linear(&table_data.z_values, selected_cells, axis_enum);
 
     update_table_z_values_internal(&state, &table_name, new_z_values.clone()).await?;
 
@@ -6245,11 +6246,7 @@ async fn add_offset(
     offset: f64,
 ) -> Result<TableData, String> {
     let table_data = get_table_data_internal(&state, &table_name).await?;
-    let new_z_values = table_ops::add_offset(
-        &table_data.z_values,
-        selected_cells,
-        offset,
-    );
+    let new_z_values = table_ops::add_offset(&table_data.z_values, selected_cells, offset);
 
     update_table_z_values_internal(&state, &table_name, new_z_values.clone()).await?;
 
@@ -6273,11 +6270,7 @@ async fn fill_region(
     };
 
     let table_data = get_table_data_internal(&state, &table_name).await?;
-    let new_z_values = table_ops::fill_region(
-        &table_data.z_values,
-        selected_cells,
-        dir_enum,
-    );
+    let new_z_values = table_ops::fill_region(&table_data.z_values, selected_cells, dir_enum);
 
     update_table_z_values_internal(&state, &table_name, new_z_values.clone()).await?;
 
@@ -9757,11 +9750,11 @@ async fn open_project(
         Ok(c) => {
             eprintln!("[INFO] Loaded {} math channels", c.len());
             c
-        },
+        }
         Err(e) => {
             // It's normal for this to not exist in new projects
             if math_channels_path.exists() {
-                 eprintln!("[WARN] Failed to load math_channels.json: {}", e);
+                eprintln!("[WARN] Failed to load math_channels.json: {}", e);
             }
             Vec::new()
         }
@@ -11046,7 +11039,9 @@ async fn git_has_changes(state: tauri::State<'_, AppState>) -> Result<bool, Stri
 // =====================================================
 
 #[tauri::command]
-async fn get_math_channels(state: tauri::State<'_, AppState>) -> Result<Vec<UserMathChannel>, String> {
+async fn get_math_channels(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<UserMathChannel>, String> {
     Ok(state.math_channels.lock().await.clone())
 }
 
@@ -11056,24 +11051,26 @@ async fn set_math_channel(
     mut channel: UserMathChannel,
 ) -> Result<(), String> {
     // Validate first
-    channel.compile().map_err(|e| format!("Invalid expression: {}", e))?;
+    channel
+        .compile()
+        .map_err(|e| format!("Invalid expression: {}", e))?;
 
     let mut channels = state.math_channels.lock().await;
-    
+
     // Check if updating existing
     if let Some(existing) = channels.iter_mut().find(|c| c.name == channel.name) {
         *existing = channel;
     } else {
         channels.push(channel);
     }
-    
+
     // Auto-save if project open
     let project = state.current_project.lock().await;
     if let Some(ref proj) = *project {
         let path = proj.path.join("math_channels.json");
         save_math_channels(&path, &channels)?;
     }
-    
+
     Ok(())
 }
 
@@ -11085,18 +11082,18 @@ async fn delete_math_channel(
     let mut channels = state.math_channels.lock().await;
     let initial_len = channels.len();
     channels.retain(|c| c.name != name);
-    
+
     if channels.len() == initial_len {
         return Err(format!("Channel '{}' not found", name));
     }
-    
+
     // Auto-save
     let project = state.current_project.lock().await;
     if let Some(ref proj) = *project {
         let path = proj.path.join("math_channels.json");
         save_math_channels(&path, &channels)?;
     }
-    
+
     Ok(())
 }
 
@@ -12226,13 +12223,15 @@ async fn update_setting(app: tauri::AppHandle, key: String, value: String) -> Re
         }
         // Alert rules settings
         "alert_large_change_enabled" => {
-            settings.alert_large_change_enabled = value.parse().map_err(|_| "Invalid boolean value")?
+            settings.alert_large_change_enabled =
+                value.parse().map_err(|_| "Invalid boolean value")?
         }
         "alert_large_change_abs" => {
             settings.alert_large_change_abs = value.parse().map_err(|_| "Invalid number value")?
         }
         "alert_large_change_percent" => {
-            settings.alert_large_change_percent = value.parse().map_err(|_| "Invalid number value")?
+            settings.alert_large_change_percent =
+                value.parse().map_err(|_| "Invalid number value")?
         }
         "runtime_packet_mode" => {
             // Accept any string; UI should validate. Store as-is.
@@ -12370,9 +12369,7 @@ struct WasmPluginInfo {
 }
 
 /// Ensure the WASM plugin manager is initialized.
-fn ensure_wasm_plugin_manager(
-    _state: &AppState,
-) -> WasmPluginManager {
+fn ensure_wasm_plugin_manager(_state: &AppState) -> WasmPluginManager {
     WasmPluginManager::new(WasmPluginConfig {
         data_dir: String::new(),
         ecu_type: String::from("Unknown"),
@@ -12410,10 +12407,7 @@ async fn load_wasm_plugin(
 
 /// Unload a WASM plugin by name.
 #[tauri::command]
-async fn unload_wasm_plugin(
-    name: String,
-    state: tauri::State<'_, AppState>,
-) -> Result<(), String> {
+async fn unload_wasm_plugin(name: String, state: tauri::State<'_, AppState>) -> Result<(), String> {
     let mut pm_guard = state.wasm_plugin_manager.lock().await;
     let pm = pm_guard.as_mut().ok_or("Plugin manager not initialized")?;
     pm.unload_plugin(&name)
@@ -12429,30 +12423,34 @@ async fn list_wasm_plugins(
     match pm_guard.as_ref() {
         Some(pm) => {
             let list = pm.list_plugins();
-            Ok(list.iter().map(|(name, stats)| {
-                // Try to get the manifest for additional info
-                let (version, description, author, permissions) = if let Some(plugin) = pm.get_plugin(name) {
-                    let m = plugin.manifest();
-                    (
-                        m.version.clone(),
-                        m.description.clone(),
-                        m.author.clone(),
-                        m.permissions.iter().map(|p| format!("{:?}", p)).collect(),
-                    )
-                } else {
-                    (String::new(), String::new(), String::new(), vec![])
-                };
+            Ok(list
+                .iter()
+                .map(|(name, stats)| {
+                    // Try to get the manifest for additional info
+                    let (version, description, author, permissions) =
+                        if let Some(plugin) = pm.get_plugin(name) {
+                            let m = plugin.manifest();
+                            (
+                                m.version.clone(),
+                                m.description.clone(),
+                                m.author.clone(),
+                                m.permissions.iter().map(|p| format!("{:?}", p)).collect(),
+                            )
+                        } else {
+                            (String::new(), String::new(), String::new(), vec![])
+                        };
 
-                WasmPluginInfo {
-                    name: name.clone(),
-                    version,
-                    description,
-                    author,
-                    state: format!("{:?}", stats.state),
-                    permissions,
-                    exec_count: stats.exec_count,
-                }
-            }).collect())
+                    WasmPluginInfo {
+                        name: name.clone(),
+                        version,
+                        description,
+                        author,
+                        state: format!("{:?}", stats.state),
+                        permissions,
+                        exec_count: stats.exec_count,
+                    }
+                })
+                .collect())
         }
         None => Ok(vec![]),
     }
@@ -12478,7 +12476,8 @@ async fn get_wasm_plugin_info(
     let pm_guard = state.wasm_plugin_manager.lock().await;
     let pm = pm_guard.as_ref().ok_or("Plugin manager not initialized")?;
 
-    let plugin = pm.get_plugin(&name)
+    let plugin = pm
+        .get_plugin(&name)
         .ok_or_else(|| format!("Plugin '{}' not found", name))?;
 
     let stats = plugin.stats();
@@ -12490,7 +12489,11 @@ async fn get_wasm_plugin_info(
         description: manifest.description.clone(),
         author: manifest.author.clone(),
         state: format!("{:?}", stats.state),
-        permissions: manifest.permissions.iter().map(|p| format!("{:?}", p)).collect(),
+        permissions: manifest
+            .permissions
+            .iter()
+            .map(|p| format!("{:?}", p))
+            .collect(),
         exec_count: stats.exec_count,
     })
 }

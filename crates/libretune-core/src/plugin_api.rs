@@ -150,7 +150,10 @@ impl PluginLogMessage {
     pub fn format_display(&self) -> String {
         format!(
             "[{}] {} [{}]: {}",
-            self.timestamp_ms, self.plugin_name, self.level.as_str(), self.message
+            self.timestamp_ms,
+            self.plugin_name,
+            self.level.as_str(),
+            self.message
         )
     }
 }

@@ -323,7 +323,7 @@ fn test_crc_command(
             // Read payload + CRC (4 bytes)
             let mut payload_and_crc = vec![0u8; length + 4];
             match read_exact_with_timeout(port, &mut payload_and_crc, timeout_ms) {
-                Ok(elapsed_payload) => {
+                Ok(_elapsed_payload) => {
                     let elapsed = start.elapsed();
                     let payload_data = &payload_and_crc[..length];
                     let crc_bytes = &payload_and_crc[length..];

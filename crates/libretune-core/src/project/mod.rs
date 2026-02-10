@@ -21,6 +21,7 @@
 //!
 //! This matches TS project layout for familiarity.
 
+pub mod math_channels;
 mod online_repository;
 #[allow(clippy::module_inception)]
 mod project;
@@ -28,8 +29,8 @@ mod properties;
 mod repository;
 mod templates;
 mod version_control;
-pub mod math_channels;
 
+pub use math_channels::{load_math_channels, save_math_channels, UserMathChannel};
 pub use online_repository::{IniSource, OnlineIniEntry, OnlineIniRepository};
 pub use project::{
     ConnectionSettings, Project, ProjectConfig, ProjectInfo, ProjectSettings, RestorePointInfo,
@@ -40,4 +41,3 @@ pub use templates::{ProjectTemplate, TemplateManager};
 pub use version_control::{
     format_commit_message, BranchInfo, CommitDiff, CommitInfo, TuneChange, VersionControl,
 };
-pub use math_channels::{UserMathChannel, save_math_channels, load_math_channels};

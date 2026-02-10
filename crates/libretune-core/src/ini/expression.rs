@@ -141,7 +141,11 @@ impl<'a> Parser<'a> {
                 return Err("Expected ':' in ternary expression".to_string());
             }
             let false_expr = self.parse()?;
-            Ok(Expr::Ternary(Box::new(node), Box::new(true_expr), Box::new(false_expr)))
+            Ok(Expr::Ternary(
+                Box::new(node),
+                Box::new(true_expr),
+                Box::new(false_expr),
+            ))
         } else {
             Ok(node)
         }

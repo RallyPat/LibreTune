@@ -77,7 +77,7 @@ fn test_tune_value_equality() {
     let v1 = TuneValue::Scalar(42.0);
     let v2 = TuneValue::Scalar(42.0);
     let v3 = TuneValue::Scalar(43.0);
-    
+
     match (&v1, &v2, &v3) {
         (TuneValue::Scalar(a), TuneValue::Scalar(b), TuneValue::Scalar(c)) => {
             assert_eq!(a, b);

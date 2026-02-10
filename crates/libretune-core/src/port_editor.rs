@@ -116,7 +116,11 @@ impl PortEditorConfig {
     }
 
     /// Add a port assignment
-    pub fn add_assignment(&mut self, output: DigitalOutputType, pin_id: String) -> Result<(), String> {
+    pub fn add_assignment(
+        &mut self,
+        output: DigitalOutputType,
+        pin_id: String,
+    ) -> Result<(), String> {
         // Validate pin exists
         if !self.available_pins.iter().any(|p| p.pin_id == pin_id) {
             return Err(format!("Pin {} does not exist", pin_id));
@@ -146,7 +150,11 @@ impl PortEditorConfig {
     }
 
     /// Modify an existing assignment
-    pub fn modify_assignment(&mut self, output: DigitalOutputType, new_pin_id: String) -> Result<(), String> {
+    pub fn modify_assignment(
+        &mut self,
+        output: DigitalOutputType,
+        new_pin_id: String,
+    ) -> Result<(), String> {
         // Validate pin exists
         if !self.available_pins.iter().any(|p| p.pin_id == new_pin_id) {
             return Err(format!("Pin {} does not exist", new_pin_id));
@@ -199,7 +207,10 @@ impl PortEditorConfig {
 
     /// Get all available pin IDs
     pub fn available_pin_ids(&self) -> Vec<String> {
-        self.available_pins.iter().map(|p| p.pin_id.clone()).collect()
+        self.available_pins
+            .iter()
+            .map(|p| p.pin_id.clone())
+            .collect()
     }
 
     /// Get assignments grouped by category
@@ -208,7 +219,10 @@ impl PortEditorConfig {
 
         for assignment in &self.assignments {
             let category = assignment.output.category().to_string();
-            grouped.entry(category).or_default().push(assignment.clone());
+            grouped
+                .entry(category)
+                .or_default()
+                .push(assignment.clone());
         }
 
         grouped
@@ -246,7 +260,10 @@ mod tests {
     fn test_add_assignment() {
         let mut config = create_test_config();
 
-        let result = config.add_assignment(DigitalOutputType::InjectorOutput { number: 1 }, "A1".to_string());
+        let result = config.add_assignment(
+            DigitalOutputType::InjectorOutput { number: 1 },
+            "A1".to_string(),
+        );
         assert!(result.is_ok());
         assert_eq!(config.assignments.len(), 1);
     }
@@ -255,7 +272,10 @@ mod tests {
     fn test_add_assignment_invalid_pin() {
         let mut config = create_test_config();
 
-        let result = config.add_assignment(DigitalOutputType::InjectorOutput { number: 1 }, "Z9".to_string());
+        let result = config.add_assignment(
+            DigitalOutputType::InjectorOutput { number: 1 },
+            "Z9".to_string(),
+        );
         assert!(result.is_err());
     }
 
@@ -263,9 +283,17 @@ mod tests {
     fn test_duplicate_assignment() {
         let mut config = create_test_config();
 
-        config.add_assignment(DigitalOutputType::InjectorOutput { number: 1 }, "A1".to_string()).unwrap();
+        config
+            .add_assignment(
+                DigitalOutputType::InjectorOutput { number: 1 },
+                "A1".to_string(),
+            )
+            .unwrap();
 
-        let result = config.add_assignment(DigitalOutputType::InjectorOutput { number: 1 }, "A2".to_string());
+        let result = config.add_assignment(
+            DigitalOutputType::InjectorOutput { number: 1 },
+            "A2".to_string(),
+        );
         assert!(result.is_err());
     }
 
@@ -273,8 +301,15 @@ mod tests {
     fn test_detect_conflicts() {
         let mut config = create_test_config();
 
-        config.add_assignment(DigitalOutputType::InjectorOutput { number: 1 }, "A1".to_string()).unwrap();
-        config.add_assignment(DigitalOutputType::FuelPumpOutput, "A1".to_string()).unwrap();
+        config
+            .add_assignment(
+                DigitalOutputType::InjectorOutput { number: 1 },
+                "A1".to_string(),
+            )
+            .unwrap();
+        config
+            .add_assignment(DigitalOutputType::FuelPumpOutput, "A1".to_string())
+            .unwrap();
 
         let report = config.detect_conflicts();
         assert!(report.has_conflicts);
@@ -286,9 +321,21 @@ mod tests {
     fn test_no_conflicts() {
         let mut config = create_test_config();
 
-        config.add_assignment(DigitalOutputType::InjectorOutput { number: 1 }, "A1".to_string()).unwrap();
-        config.add_assignment(DigitalOutputType::InjectorOutput { number: 2 }, "A2".to_string()).unwrap();
-        config.add_assignment(DigitalOutputType::FuelPumpOutput, "B1".to_string()).unwrap();
+        config
+            .add_assignment(
+                DigitalOutputType::InjectorOutput { number: 1 },
+                "A1".to_string(),
+            )
+            .unwrap();
+        config
+            .add_assignment(
+                DigitalOutputType::InjectorOutput { number: 2 },
+                "A2".to_string(),
+            )
+            .unwrap();
+        config
+            .add_assignment(DigitalOutputType::FuelPumpOutput, "B1".to_string())
+            .unwrap();
 
         let report = config.detect_conflicts();
         assert!(!report.has_conflicts);
@@ -299,7 +346,12 @@ mod tests {
     fn test_remove_assignment() {
         let mut config = create_test_config();
 
-        config.add_assignment(DigitalOutputType::InjectorOutput { number: 1 }, "A1".to_string()).unwrap();
+        config
+            .add_assignment(
+                DigitalOutputType::InjectorOutput { number: 1 },
+                "A1".to_string(),
+            )
+            .unwrap();
         assert_eq!(config.assignments.len(), 1);
 
         config.remove_assignment(&DigitalOutputType::InjectorOutput { number: 1 });
@@ -310,9 +362,17 @@ mod tests {
     fn test_modify_assignment() {
         let mut config = create_test_config();
 
-        config.add_assignment(DigitalOutputType::InjectorOutput { number: 1 }, "A1".to_string()).unwrap();
+        config
+            .add_assignment(
+                DigitalOutputType::InjectorOutput { number: 1 },
+                "A1".to_string(),
+            )
+            .unwrap();
 
-        let result = config.modify_assignment(DigitalOutputType::InjectorOutput { number: 1 }, "A2".to_string());
+        let result = config.modify_assignment(
+            DigitalOutputType::InjectorOutput { number: 1 },
+            "A2".to_string(),
+        );
         assert!(result.is_ok());
         assert_eq!(config.assignments[0].pin_id, "A2");
     }
@@ -321,7 +381,10 @@ mod tests {
     fn test_modify_nonexistent() {
         let mut config = create_test_config();
 
-        let result = config.modify_assignment(DigitalOutputType::InjectorOutput { number: 1 }, "A1".to_string());
+        let result = config.modify_assignment(
+            DigitalOutputType::InjectorOutput { number: 1 },
+            "A1".to_string(),
+        );
         assert!(result.is_err());
     }
 
@@ -329,9 +392,21 @@ mod tests {
     fn test_group_by_category() {
         let mut config = create_test_config();
 
-        config.add_assignment(DigitalOutputType::InjectorOutput { number: 1 }, "A1".to_string()).unwrap();
-        config.add_assignment(DigitalOutputType::IgnitionOutput { number: 1 }, "A2".to_string()).unwrap();
-        config.add_assignment(DigitalOutputType::FuelPumpOutput, "B1".to_string()).unwrap();
+        config
+            .add_assignment(
+                DigitalOutputType::InjectorOutput { number: 1 },
+                "A1".to_string(),
+            )
+            .unwrap();
+        config
+            .add_assignment(
+                DigitalOutputType::IgnitionOutput { number: 1 },
+                "A2".to_string(),
+            )
+            .unwrap();
+        config
+            .add_assignment(DigitalOutputType::FuelPumpOutput, "B1".to_string())
+            .unwrap();
 
         let grouped = config.assignments_by_category();
         assert!(grouped.contains_key("Fuel Control"));
@@ -341,8 +416,14 @@ mod tests {
 
     #[test]
     fn test_output_type_names() {
-        assert_eq!(DigitalOutputType::InjectorOutput { number: 1 }.name(), "Injector 1");
-        assert_eq!(DigitalOutputType::IgnitionOutput { number: 2 }.name(), "Ignition Output 2");
+        assert_eq!(
+            DigitalOutputType::InjectorOutput { number: 1 }.name(),
+            "Injector 1"
+        );
+        assert_eq!(
+            DigitalOutputType::IgnitionOutput { number: 2 }.name(),
+            "Ignition Output 2"
+        );
         assert_eq!(DigitalOutputType::FuelPumpOutput.name(), "Fuel Pump");
         assert_eq!(DigitalOutputType::TachOutput.name(), "Tachometer");
     }

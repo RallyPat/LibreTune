@@ -26,14 +26,11 @@ fn test_add_offset_negative() {
 
 #[test]
 fn test_interpolate_linear_row() {
-    let z_values = vec![
-        vec![10.0, 0.0, 0.0, 50.0],
-        vec![20.0, 0.0, 0.0, 80.0],
-    ];
-    
+    let z_values = vec![vec![10.0, 0.0, 0.0, 50.0], vec![20.0, 0.0, 0.0, 80.0]];
+
     // Select the first row
     let selected_cells = vec![(0, 0), (0, 1), (0, 2), (0, 3)];
-    
+
     let result = interpolate_linear(&z_values, selected_cells, InterpolationAxis::Row);
 
     // Row 0 should be interpolated
@@ -54,10 +51,10 @@ fn test_interpolate_linear_col() {
         vec![0.0, 0.0],
         vec![40.0, 80.0],
     ];
-    
+
     // Select column 1 (values 20, 0, 0, 80)
     let selected_cells = vec![(0, 1), (1, 1), (2, 1), (3, 1)];
-    
+
     let result = interpolate_linear(&z_values, selected_cells, InterpolationAxis::Col);
 
     // Col 0 unchanged
@@ -77,26 +74,20 @@ fn test_interpolate_linear_partial_selection() {
     // NOTE: Current implementation of interpolate_linear determines min/max of selection
     // and interpolates between those bounds.
     let selected_cells = vec![(0, 1), (0, 2)];
-    
+
     // In this case, min_x=1, max_x=2. It interpolates between index 1 and 2 using bounds 1 and 2.
     // value at 1 is 0.0, value at 2 is 0.0. Result should be 0.0.
     // This highlights behavior: interpolation anchors are the EDGES of the selection.
-    
+
     let result = interpolate_linear(&z_values, selected_cells, InterpolationAxis::Row);
-    assert_eq!(result[0][1], 0.0); 
+    assert_eq!(result[0][1], 0.0);
 }
 
 #[test]
 fn test_fill_right() {
-    let z_values = vec![
-        vec![10.0, 0.0, 0.0],
-        vec![20.0, 0.0, 0.0],
-    ];
-    
-    let selected_cells = vec![
-        (0, 0), (0, 1), (0, 2),
-        (1, 0), (1, 1), (1, 2)
-    ]; // Full 2x3 block selection
+    let z_values = vec![vec![10.0, 0.0, 0.0], vec![20.0, 0.0, 0.0]];
+
+    let selected_cells = vec![(0, 0), (0, 1), (0, 2), (1, 0), (1, 1), (1, 2)]; // Full 2x3 block selection
 
     let result = fill_region(&z_values, selected_cells, FillDirection::Right);
 
@@ -114,11 +105,17 @@ fn test_fill_down() {
         vec![0.0, 0.0, 0.0],
         vec![0.0, 0.0, 0.0],
     ];
-    
+
     let selected_cells = vec![
-        (0, 0), (0, 1), (0, 2),
-        (1, 0), (1, 1), (1, 2),
-        (2, 0), (2, 1), (2, 2)
+        (0, 0),
+        (0, 1),
+        (0, 2),
+        (1, 0),
+        (1, 1),
+        (1, 2),
+        (2, 0),
+        (2, 1),
+        (2, 2),
     ]; // Full 3x3 block
 
     let result = fill_region(&z_values, selected_cells, FillDirection::Down);

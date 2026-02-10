@@ -251,8 +251,8 @@ fn test_ini_capabilities_consistency() {
 
     for path in samples {
         let filename = path.file_name().unwrap().to_string_lossy();
-        let def = EcuDefinition::from_file(&path)
-            .expect(&format!("Should parse INI: {}", filename));
+        let def =
+            EcuDefinition::from_file(&path).expect(&format!("Should parse INI: {}", filename));
         let caps = def.capabilities();
 
         assert_eq!(caps.has_constants, !def.constants.is_empty());
@@ -268,15 +268,24 @@ fn test_ini_capabilities_consistency() {
         assert_eq!(caps.has_default_values, !def.default_values.is_empty());
         assert_eq!(caps.has_datalog_entries, !def.datalog_entries.is_empty());
         assert_eq!(caps.has_datalog_views, !def.datalog_views.is_empty());
-        assert_eq!(caps.has_logger_definitions, !def.logger_definitions.is_empty());
-        assert_eq!(caps.has_controller_commands, !def.controller_commands.is_empty());
+        assert_eq!(
+            caps.has_logger_definitions,
+            !def.logger_definitions.is_empty()
+        );
+        assert_eq!(
+            caps.has_controller_commands,
+            !def.controller_commands.is_empty()
+        );
         assert_eq!(caps.has_port_editors, !def.port_editors.is_empty());
         assert_eq!(caps.has_reference_tables, !def.reference_tables.is_empty());
         assert_eq!(caps.has_key_actions, !def.key_actions.is_empty());
         assert_eq!(caps.has_ve_analyze, def.ve_analyze.is_some());
         assert_eq!(caps.has_wue_analyze, def.wue_analyze.is_some());
         assert_eq!(caps.has_gamma_e, def.gamma_e.is_some());
-        assert_eq!(caps.supports_console, def.ecu_type.supports_console() && !def.controller_commands.is_empty());
+        assert_eq!(
+            caps.supports_console,
+            def.ecu_type.supports_console() && !def.controller_commands.is_empty()
+        );
     }
 }
 

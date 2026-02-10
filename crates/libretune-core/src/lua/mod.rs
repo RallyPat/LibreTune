@@ -32,13 +32,9 @@ pub fn execute_script(script: &str) -> Result<LuaExecutionResult, String> {
     let output_writer = output.clone();
 
     // Create Lua with vendored Lua 5.4 and sandboxed standard libraries
-    let lua_options = LuaOptions::new()
-        .catch_rust_panics(true);
-    
-    let lua = Lua::new_with(
-        StdLib::TABLE | StdLib::STRING | StdLib::MATH,
-        lua_options
-    )
+    let lua_options = LuaOptions::new().catch_rust_panics(true);
+
+    let lua = Lua::new_with(StdLib::TABLE | StdLib::STRING | StdLib::MATH, lua_options)
         .map_err(|e| format!("Failed to initialize Lua: {e}"))?;
 
     let print_fn = lua

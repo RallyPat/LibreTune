@@ -1,6 +1,6 @@
 use libretune_core::unit_conversion::{
-    celsius_to_fahrenheit, fahrenheit_to_celsius, kpa_to_psi, psi_to_kpa,
-    bar_to_psi, psi_to_bar, kmh_to_mph, mph_to_kmh, lambda_to_afr, afr_to_lambda,
+    afr_to_lambda, bar_to_psi, celsius_to_fahrenheit, fahrenheit_to_celsius, kmh_to_mph,
+    kpa_to_psi, lambda_to_afr, mph_to_kmh, psi_to_bar, psi_to_kpa,
 };
 
 #[test]

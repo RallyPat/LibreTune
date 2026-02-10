@@ -35,7 +35,9 @@ fn test_plugin_manifest_permissions() {
     let manifest = create_test_manifest();
     assert!(manifest.permissions.contains(&Permission::ReadTables));
     assert!(manifest.permissions.contains(&Permission::WriteConstants));
-    assert!(!manifest.permissions.contains(&Permission::SubscribeChannels));
+    assert!(!manifest
+        .permissions
+        .contains(&Permission::SubscribeChannels));
     assert!(!manifest.permissions.contains(&Permission::ExecuteActions));
 }
 
@@ -137,8 +139,7 @@ fn test_plugin_manifest_serialization() {
     assert!(json.contains("1.0.0"));
 
     // Deserialize back
-    let deserialized: PluginManifest =
-        serde_json::from_str(&json).expect("Failed to deserialize");
+    let deserialized: PluginManifest = serde_json::from_str(&json).expect("Failed to deserialize");
     assert_eq!(manifest.name, deserialized.name);
     assert_eq!(manifest.version, deserialized.version);
     assert_eq!(manifest.permissions.len(), deserialized.permissions.len());
@@ -175,7 +176,9 @@ fn test_manifest_with_all_permissions() {
     assert_eq!(manifest.permissions.len(), 4);
     assert!(manifest.permissions.contains(&Permission::ReadTables));
     assert!(manifest.permissions.contains(&Permission::WriteConstants));
-    assert!(manifest.permissions.contains(&Permission::SubscribeChannels));
+    assert!(manifest
+        .permissions
+        .contains(&Permission::SubscribeChannels));
     assert!(manifest.permissions.contains(&Permission::ExecuteActions));
 }
 

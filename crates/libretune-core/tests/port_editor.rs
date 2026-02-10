@@ -53,7 +53,10 @@ mod tests {
         let pins = create_mock_pins();
         let mut config = PortEditorConfig::new(pins);
 
-        let result = config.add_assignment(DigitalOutputType::InjectorOutput { number: 1 }, "P0.0".to_string());
+        let result = config.add_assignment(
+            DigitalOutputType::InjectorOutput { number: 1 },
+            "P0.0".to_string(),
+        );
 
         assert!(result.is_ok());
         assert_eq!(config.assignments.len(), 1);
@@ -65,8 +68,18 @@ mod tests {
         let pins = create_mock_pins();
         let mut config = PortEditorConfig::new(pins);
 
-        config.add_assignment(DigitalOutputType::InjectorOutput { number: 1 }, "P0.0".to_string()).unwrap();
-        config.add_assignment(DigitalOutputType::InjectorOutput { number: 2 }, "P0.1".to_string()).unwrap();
+        config
+            .add_assignment(
+                DigitalOutputType::InjectorOutput { number: 1 },
+                "P0.0".to_string(),
+            )
+            .unwrap();
+        config
+            .add_assignment(
+                DigitalOutputType::InjectorOutput { number: 2 },
+                "P0.1".to_string(),
+            )
+            .unwrap();
 
         assert_eq!(config.assignments.len(), 2);
     }
@@ -76,8 +89,18 @@ mod tests {
         let pins = create_mock_pins();
         let mut config = PortEditorConfig::new(pins);
 
-        config.add_assignment(DigitalOutputType::InjectorOutput { number: 1 }, "P0.0".to_string()).unwrap();
-        config.add_assignment(DigitalOutputType::IgnitionOutput { number: 1 }, "P0.0".to_string()).unwrap();
+        config
+            .add_assignment(
+                DigitalOutputType::InjectorOutput { number: 1 },
+                "P0.0".to_string(),
+            )
+            .unwrap();
+        config
+            .add_assignment(
+                DigitalOutputType::IgnitionOutput { number: 1 },
+                "P0.0".to_string(),
+            )
+            .unwrap();
 
         let report = config.detect_conflicts();
 
@@ -92,14 +115,21 @@ mod tests {
         let pins = create_mock_pins();
         let mut config = PortEditorConfig::new(pins);
 
-        config.add_assignment(DigitalOutputType::InjectorOutput { number: 1 }, "P0.0".to_string()).unwrap();
+        config
+            .add_assignment(
+                DigitalOutputType::InjectorOutput { number: 1 },
+                "P0.0".to_string(),
+            )
+            .unwrap();
 
         // Disable the assignment - should not appear in conflict detection
         if let Some(assignment) = config.assignments.iter_mut().next() {
             assignment.enabled = false;
         }
 
-        config.add_assignment(DigitalOutputType::FuelPumpOutput, "P0.0".to_string()).unwrap();
+        config
+            .add_assignment(DigitalOutputType::FuelPumpOutput, "P0.0".to_string())
+            .unwrap();
 
         let report = config.detect_conflicts();
 
@@ -111,7 +141,10 @@ mod tests {
         let pins = create_mock_pins();
         let mut config = PortEditorConfig::new(pins);
 
-        let result = config.add_assignment(DigitalOutputType::InjectorOutput { number: 1 }, "P9.9".to_string());
+        let result = config.add_assignment(
+            DigitalOutputType::InjectorOutput { number: 1 },
+            "P9.9".to_string(),
+        );
 
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("does not exist"));
@@ -122,9 +155,17 @@ mod tests {
         let pins = create_mock_pins();
         let mut config = PortEditorConfig::new(pins);
 
-        config.add_assignment(DigitalOutputType::InjectorOutput { number: 1 }, "P0.0".to_string()).unwrap();
+        config
+            .add_assignment(
+                DigitalOutputType::InjectorOutput { number: 1 },
+                "P0.0".to_string(),
+            )
+            .unwrap();
 
-        let result = config.add_assignment(DigitalOutputType::InjectorOutput { number: 1 }, "P0.1".to_string());
+        let result = config.add_assignment(
+            DigitalOutputType::InjectorOutput { number: 1 },
+            "P0.1".to_string(),
+        );
 
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("already assigned"));
@@ -135,9 +176,17 @@ mod tests {
         let pins = create_mock_pins();
         let mut config = PortEditorConfig::new(pins);
 
-        config.add_assignment(DigitalOutputType::InjectorOutput { number: 1 }, "P0.0".to_string()).unwrap();
+        config
+            .add_assignment(
+                DigitalOutputType::InjectorOutput { number: 1 },
+                "P0.0".to_string(),
+            )
+            .unwrap();
 
-        let result = config.modify_assignment(DigitalOutputType::InjectorOutput { number: 1 }, "P0.1".to_string());
+        let result = config.modify_assignment(
+            DigitalOutputType::InjectorOutput { number: 1 },
+            "P0.1".to_string(),
+        );
 
         assert!(result.is_ok());
         assert_eq!(config.assignments[0].pin_id, "P0.1");
@@ -148,7 +197,10 @@ mod tests {
         let pins = create_mock_pins();
         let mut config = PortEditorConfig::new(pins);
 
-        let result = config.modify_assignment(DigitalOutputType::InjectorOutput { number: 1 }, "P0.0".to_string());
+        let result = config.modify_assignment(
+            DigitalOutputType::InjectorOutput { number: 1 },
+            "P0.0".to_string(),
+        );
 
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("not found"));
@@ -159,7 +211,12 @@ mod tests {
         let pins = create_mock_pins();
         let mut config = PortEditorConfig::new(pins);
 
-        config.add_assignment(DigitalOutputType::InjectorOutput { number: 1 }, "P0.0".to_string()).unwrap();
+        config
+            .add_assignment(
+                DigitalOutputType::InjectorOutput { number: 1 },
+                "P0.0".to_string(),
+            )
+            .unwrap();
         assert_eq!(config.assignments.len(), 1);
 
         config.remove_assignment(&DigitalOutputType::InjectorOutput { number: 1 });
@@ -184,9 +241,21 @@ mod tests {
         let pins = create_mock_pins();
         let mut config = PortEditorConfig::new(pins);
 
-        config.add_assignment(DigitalOutputType::InjectorOutput { number: 1 }, "P0.0".to_string()).unwrap();
-        config.add_assignment(DigitalOutputType::IgnitionOutput { number: 1 }, "P0.2".to_string()).unwrap();
-        config.add_assignment(DigitalOutputType::FuelPumpOutput, "P1.5".to_string()).unwrap();
+        config
+            .add_assignment(
+                DigitalOutputType::InjectorOutput { number: 1 },
+                "P0.0".to_string(),
+            )
+            .unwrap();
+        config
+            .add_assignment(
+                DigitalOutputType::IgnitionOutput { number: 1 },
+                "P0.2".to_string(),
+            )
+            .unwrap();
+        config
+            .add_assignment(DigitalOutputType::FuelPumpOutput, "P1.5".to_string())
+            .unwrap();
 
         let grouped = config.assignments_by_category();
 
@@ -201,9 +270,21 @@ mod tests {
         let pins = create_mock_pins();
         let mut config = PortEditorConfig::new(pins);
 
-        config.add_assignment(DigitalOutputType::InjectorOutput { number: 1 }, "P0.0".to_string()).unwrap();
-        config.add_assignment(DigitalOutputType::InjectorOutput { number: 2 }, "P0.0".to_string()).unwrap();
-        config.add_assignment(DigitalOutputType::FuelPumpOutput, "P0.0".to_string()).unwrap();
+        config
+            .add_assignment(
+                DigitalOutputType::InjectorOutput { number: 1 },
+                "P0.0".to_string(),
+            )
+            .unwrap();
+        config
+            .add_assignment(
+                DigitalOutputType::InjectorOutput { number: 2 },
+                "P0.0".to_string(),
+            )
+            .unwrap();
+        config
+            .add_assignment(DigitalOutputType::FuelPumpOutput, "P0.0".to_string())
+            .unwrap();
 
         let report = config.detect_conflicts();
 

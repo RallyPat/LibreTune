@@ -8,9 +8,9 @@ fn test_lua_print_basic() {
     let script = r#"
         print("Hello from Lua!")
     "#;
-    
+
     let result = execute_script(script).expect("Script execution failed");
-    
+
     assert_eq!(result.stdout.trim(), "Hello from Lua!");
     assert!(result.error.is_none());
 }
@@ -20,9 +20,9 @@ fn test_lua_print_multiple_values() {
     let script = r#"
         print("Value:", 42, "Bool:", true)
     "#;
-    
+
     let result = execute_script(script).expect("Script execution failed");
-    
+
     assert!(result.stdout.contains("Value:"));
     assert!(result.stdout.contains("42"));
     assert!(result.stdout.contains("true"));
@@ -36,9 +36,9 @@ fn test_lua_variable_assignment() {
         y = "hello"
         print("x=", x, "y=", y)
     "#;
-    
+
     let result = execute_script(script).expect("Script execution failed");
-    
+
     assert!(result.stdout.contains("x="));
     assert!(result.stdout.contains("42"));
     assert!(result.stdout.contains("y="));
@@ -56,9 +56,9 @@ fn test_lua_table_operations() {
             print("Index", i, "=", v)
         end
     "#;
-    
+
     let result = execute_script(script).expect("Script execution failed");
-    
+
     assert!(result.stdout.contains("Table length:"));
     assert!(result.stdout.contains("4"));
     assert!(result.error.is_none());
@@ -72,9 +72,9 @@ fn test_lua_math_operations() {
         print("abs(-42) =", math.abs(-42))
         print("max(1,5,3) =", math.max(1, 5, 3))
     "#;
-    
+
     let result = execute_script(script).expect("Script execution failed");
-    
+
     assert!(result.stdout.contains("sqrt(16)"));
     assert!(result.stdout.contains("4"));
     assert!(result.stdout.contains("pow(2, 10)"));
@@ -91,9 +91,9 @@ fn test_lua_string_operations() {
         local formatted = string.format("Number: %d, Float: %.1f", 42, 3.14159)
         print(formatted)
     "#;
-    
+
     let result = execute_script(script).expect("Script execution failed");
-    
+
     assert!(result.stdout.contains("Substring:"));
     assert!(result.stdout.contains("hello"));
     assert!(result.stdout.contains("Length:"));
@@ -110,9 +110,9 @@ fn test_lua_function_definition() {
         result = add(10, 20)
         print("10 + 20 =", result)
     "#;
-    
+
     let result = execute_script(script).expect("Script execution failed");
-    
+
     assert!(result.stdout.contains("10 + 20"));
     assert!(result.stdout.contains("30"));
     assert!(result.error.is_none());
@@ -123,9 +123,9 @@ fn test_lua_syntax_error() {
     let script = r#"
         local x = 10 +  -- Missing operand
     "#;
-    
+
     let result = execute_script(script).expect("Script execution should complete");
-    
+
     // Should have error but execution should not panic
     assert!(result.error.is_some());
     let error_msg = result.error.unwrap();
@@ -138,9 +138,9 @@ fn test_lua_runtime_error() {
         local x = nil
         print(x.field)  -- Attempt to index nil
     "#;
-    
+
     let result = execute_script(script).expect("Script execution should complete");
-    
+
     assert!(result.error.is_some());
     let error_msg = result.error.unwrap();
     assert!(error_msg.contains("index") || error_msg.contains("nil"));
@@ -156,9 +156,9 @@ fn test_lua_sandboxing_os_restricted() {
             print("OK: os library correctly restricted")
         end
     "#;
-    
+
     let result = execute_script(script).expect("Script execution failed");
-    
+
     assert!(result.stdout.contains("OK"));
     assert!(!result.stdout.contains("ERROR"));
     assert!(result.error.is_none());
@@ -174,9 +174,9 @@ fn test_lua_sandboxing_io_restricted() {
             print("OK: io library correctly restricted")
         end
     "#;
-    
+
     let result = execute_script(script).expect("Script execution failed");
-    
+
     assert!(result.stdout.contains("OK"));
     assert!(!result.stdout.contains("ERROR"));
     assert!(result.error.is_none());
@@ -191,9 +191,9 @@ fn test_lua_type_function() {
         print("Type of true:", type(true))
         print("Type of nil:", type(nil))
     "#;
-    
+
     let result = execute_script(script).expect("Script execution failed");
-    
+
     assert!(result.stdout.contains("number"));
     assert!(result.stdout.contains("string"));
     assert!(result.stdout.contains("table"));
@@ -210,9 +210,9 @@ fn test_lua_type_conversion() {
         print("tonumber('123') =", n, "type:", type(n))
         print("tostring(456) =", s, "type:", type(s))
     "#;
-    
+
     let result = execute_script(script).expect("Script execution failed");
-    
+
     assert!(result.stdout.contains("123"));
     assert!(result.stdout.contains("456"));
     assert!(result.error.is_none());
@@ -240,9 +240,9 @@ fn test_lua_ve_table_scaling_example() {
         print("Scaled [1][1] is now", ve_table[1][1])
         print("Scaled [2][2] is now", ve_table[2][2])
     "#;
-    
+
     let result = execute_script(script).expect("Script execution failed");
-    
+
     assert!(result.stdout.contains("110")); // 100 * 1.1
     assert!(result.stdout.contains("126.5")); // 115 * 1.1
     assert!(result.error.is_none());
@@ -251,9 +251,9 @@ fn test_lua_ve_table_scaling_example() {
 #[test]
 fn test_lua_empty_script() {
     let script = "";
-    
+
     let result = execute_script(script).expect("Script execution failed");
-    
+
     // Empty script should not error
     assert!(result.error.is_none());
 }
@@ -261,9 +261,9 @@ fn test_lua_empty_script() {
 #[test]
 fn test_lua_whitespace_script() {
     let script = "   \n  \n   ";
-    
+
     let result = execute_script(script).expect("Script execution failed");
-    
+
     assert!(result.error.is_none());
 }
 
@@ -273,9 +273,9 @@ fn test_lua_comment_only_script() {
         -- This is a comment
         -- More comments here
     "#;
-    
+
     let result = execute_script(script).expect("Script execution failed");
-    
+
     assert!(result.error.is_none());
 }
 
@@ -290,9 +290,9 @@ fn test_lua_loop_and_conditionals() {
         end
         print("Sum of even numbers 1-10:", sum)
     "#;
-    
+
     let result = execute_script(script).expect("Script execution failed");
-    
+
     assert!(result.stdout.contains("Sum of even numbers"));
     assert!(result.stdout.contains("30")); // 2+4+6+8+10
     assert!(result.error.is_none());

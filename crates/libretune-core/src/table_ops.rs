@@ -304,6 +304,7 @@ pub fn add_offset(
 }
 
 /// Interpolate selected cells linearly along an axis
+#[allow(clippy::needless_range_loop)]
 pub fn interpolate_linear(
     z_values: &[Vec<f64>],
     selected_cells: Vec<TableCell>,
@@ -326,42 +327,42 @@ pub fn interpolate_linear(
         min_y = min_y.min(y);
         max_y = max_y.max(y);
     }
-    
+
     match axis {
         InterpolationAxis::Row => {
             // Horizontal interpolation: for each row y from min_y to max_y
             // Interpolate between value at min_x and max_x
-             for y in min_y..=max_y {
+            for y in min_y..=max_y {
                 let start_val = result[y][min_x];
                 let end_val = result[y][max_x];
                 let span = (max_x - min_x) as f64;
-                
+
                 if span > 0.0 {
                     for x in min_x..=max_x {
-                         if selected_cells.contains(&(y, x)) {
-                             let ratio = (x - min_x) as f64 / span;
-                             result[y][x] = start_val + (end_val - start_val) * ratio;
-                         }
+                        if selected_cells.contains(&(y, x)) {
+                            let ratio = (x - min_x) as f64 / span;
+                            result[y][x] = start_val + (end_val - start_val) * ratio;
+                        }
                     }
                 }
-             }
+            }
         }
         InterpolationAxis::Col => {
             // Vertical interpolation
-             for x in min_x..=max_x {
+            for x in min_x..=max_x {
                 let start_val = result[min_y][x];
                 let end_val = result[max_y][x];
                 let span = (max_y - min_y) as f64;
 
                 if span > 0.0 {
-                     for y in min_y..=max_y {
-                         if selected_cells.contains(&(y, x)) {
-                             let ratio = (y - min_y) as f64 / span;
-                             result[y][x] = start_val + (end_val - start_val) * ratio;
-                         }
-                     }
+                    for y in min_y..=max_y {
+                        if selected_cells.contains(&(y, x)) {
+                            let ratio = (y - min_y) as f64 / span;
+                            result[y][x] = start_val + (end_val - start_val) * ratio;
+                        }
+                    }
                 }
-             }
+            }
         }
     }
 
@@ -369,14 +370,17 @@ pub fn interpolate_linear(
 }
 
 /// Fill region from edges
+#[allow(clippy::needless_range_loop)]
 pub fn fill_region(
     z_values: &[Vec<f64>],
     selected_cells: Vec<TableCell>,
     direction: FillDirection,
 ) -> Vec<Vec<f64>> {
     let mut result = z_values.to_vec();
-    if selected_cells.is_empty() { return result; }
-    
+    if selected_cells.is_empty() {
+        return result;
+    }
+
     // Bounds
     let mut min_x = usize::MAX;
     let mut max_x = usize::MIN;
@@ -393,14 +397,14 @@ pub fn fill_region(
     match direction {
         FillDirection::Right => {
             // Take values from min_x column and propagate right
-             for y in min_y..=max_y {
-                 let source_val = result[y][min_x];
-                 for x in min_x..=max_x {
-                     if selected_cells.contains(&(y, x)) {
-                         result[y][x] = source_val;
-                     }
-                 }
-             }
+            for y in min_y..=max_y {
+                let source_val = result[y][min_x];
+                for x in min_x..=max_x {
+                    if selected_cells.contains(&(y, x)) {
+                        result[y][x] = source_val;
+                    }
+                }
+            }
         }
         FillDirection::Down => {
             // Take values from min_y row and propagate down
@@ -414,6 +418,6 @@ pub fn fill_region(
             }
         }
     }
-    
+
     result
 }

@@ -328,7 +328,8 @@ impl EcuDefinition {
             has_ve_analyze: self.ve_analyze.is_some(),
             has_wue_analyze: self.wue_analyze.is_some(),
             has_gamma_e: self.gamma_e.is_some(),
-            supports_console: self.ecu_type.supports_console() && !self.controller_commands.is_empty(),
+            supports_console: self.ecu_type.supports_console()
+                && !self.controller_commands.is_empty(),
         }
     }
 }

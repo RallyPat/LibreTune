@@ -1,14 +1,15 @@
-
 #[cfg(test)]
 mod tests {
-    use libretune_core::action_scripting::{Action, ActionSet, ActionPlayer, ActionMetadata};
-    use libretune_core::ini::{EcuDefinition, TableDefinition, Constant, TableType, ControllerCommand, CommandPart};
+    use libretune_core::action_scripting::{Action, ActionMetadata, ActionPlayer, ActionSet};
     use libretune_core::ini::DataType;
+    use libretune_core::ini::{
+        CommandPart, Constant, ControllerCommand, EcuDefinition, TableDefinition, TableType,
+    };
 
     #[test]
     fn test_validate_action_set_valid() {
         let mut def = EcuDefinition::default();
-        
+
         // Setup Table
         let table = TableDefinition {
             name: "veTable1".to_string(),
@@ -32,20 +33,20 @@ mod tests {
             y_label: None,
         };
         def.tables.insert("veTable1".to_string(), table);
-        
+
         // Setup Constant
         let constant = Constant::new("RevLim", 1, 0, DataType::U16);
         def.constants.insert("RevLim".to_string(), constant);
-    
+
         // Setup Command
         let cmd = ControllerCommand {
             name: "burn".to_string(),
             label: "Burn".to_string(),
             parts: vec![CommandPart::Raw("B".to_string())],
-            enable_condition: None
+            enable_condition: None,
         };
         def.controller_commands.insert("burn".to_string(), cmd);
-        
+
         let mut actions = Vec::new();
         actions.push(Action::TableEdit {
             table_name: "veTable1".to_string(),
@@ -62,13 +63,13 @@ mod tests {
         actions.push(Action::SendCommand {
             command: "burn".to_string(),
         });
-        
+
         let metadata = ActionMetadata {
-             created_by: "tester".to_string(),
-             created_at: "".to_string(),
-             modified_at: "".to_string(),
-             tags: vec![],
-             compatible_ecus: vec![],
+            created_by: "tester".to_string(),
+            created_at: "".to_string(),
+            modified_at: "".to_string(),
+            tags: vec![],
+            compatible_ecus: vec![],
         };
 
         let set = ActionSet {
@@ -79,15 +80,15 @@ mod tests {
             actions,
             metadata,
         };
-        
+
         let result = ActionPlayer::validate_action_set(&set, Some(&def));
         assert!(result.is_ok(), "Validation failed: {:?}", result.err());
     }
-    
+
     #[test]
     fn test_validate_action_set_invalid() {
-        let mut def = EcuDefinition::default();
-        
+        let def = EcuDefinition::default();
+
         let mut actions = Vec::new();
         actions.push(Action::TableEdit {
             table_name: "MissingTable".to_string(),
@@ -104,13 +105,13 @@ mod tests {
         actions.push(Action::SendCommand {
             command: "MissingCmd".to_string(),
         });
-    
+
         let metadata = ActionMetadata {
-             created_by: "tester".to_string(),
-             created_at: "".to_string(),
-             modified_at: "".to_string(),
-             tags: vec![],
-             compatible_ecus: vec![],
+            created_by: "tester".to_string(),
+            created_at: "".to_string(),
+            modified_at: "".to_string(),
+            tags: vec![],
+            compatible_ecus: vec![],
         };
 
         let set = ActionSet {
@@ -121,7 +122,7 @@ mod tests {
             actions,
             metadata,
         };
-        
+
         let result = ActionPlayer::validate_action_set(&set, Some(&def));
         assert!(result.is_err());
         let msg = format!("{:?}", result.unwrap_err());

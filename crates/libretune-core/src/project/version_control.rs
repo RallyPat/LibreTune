@@ -366,11 +366,7 @@ datalogs/
         let sha_short = sha[..7.min(sha.len())].to_string();
 
         let full_message = commit.message().unwrap_or("");
-        let message = full_message
-            .lines()
-            .next()
-            .unwrap_or("")
-            .to_string();
+        let message = full_message.lines().next().unwrap_or("").to_string();
         let annotation = extract_annotation(full_message);
 
         let author = commit.author().name().unwrap_or("Unknown").to_string();
