@@ -62,7 +62,7 @@ libc = "0.2.178"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 
 # Git integration for tune versioning (using vendored libgit2 + bundled SSL)
-git2 = { version = "0.19", default-features = false, features = ["vendored-libgit2"] }
+git2 = { version = "0.20", default-features = false, features = ["vendored-libgit2"] }
 
 # WebAssembly runtime for plugin system
 wasmtime = { workspace = true }

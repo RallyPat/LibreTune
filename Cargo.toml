@@ -47,7 +47,7 @@ uuid = { version = "1.0", features = ["v4", "serde"] }
 rand = "0.8"
 
 # WebAssembly runtime for plugin system
-wasmtime = "26"
+wasmtime = "41"
 
 # Testing
 pretty_assertions = "1.4"
