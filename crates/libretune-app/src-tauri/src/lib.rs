@@ -1485,9 +1485,22 @@ async fn connect_to_ecu(
     baud_rate: u32,
     timeout_ms: Option<u64>,
     runtime_packet_mode: Option<String>,
+    connection_type: Option<String>,
+    tcp_host: Option<String>,
+    tcp_port: Option<u16>,
 ) -> Result<ConnectResult, String> {
+    use libretune_core::protocol::ConnectionType;
+
+    let conn_type = match connection_type.as_deref() {
+        Some(t) if t.eq_ignore_ascii_case("tcp") => ConnectionType::Tcp,
+        _ => ConnectionType::Serial,
+    };
+
     let mut config = ConnectionConfig {
+        connection_type: conn_type,
         port_name: port_name.clone(),
+        tcp_host,
+        tcp_port,
         ..Default::default()
     };
 
@@ -1509,8 +1522,13 @@ async fn connect_to_ecu(
 
     // Log resolved configuration for diagnostics
     eprintln!(
-        "[INFO] connect_to_ecu: port='{}' baud={} timeout_ms={}",
-        config.port_name, config.baud_rate, config.timeout_ms
+        "[INFO] connect_to_ecu: type={:?} port='{}' baud={} tcp={:?}:{:?} timeout_ms={}",
+        config.connection_type,
+        config.port_name,
+        config.baud_rate,
+        config.tcp_host,
+        config.tcp_port,
+        config.timeout_ms
     );
 
     // Get protocol settings from loaded definition if available

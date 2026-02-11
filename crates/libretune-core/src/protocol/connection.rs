@@ -3,10 +3,11 @@
 //! Handles the connection lifecycle and command execution with the ECU.
 
 use serde::{Deserialize, Serialize};
-use serialport::SerialPort;
 use std::io::{Read, Write};
+use std::net::TcpStream;
 use std::time::{Duration, Instant};
 
+use super::stream::{CommunicationChannel, SerialChannel, TcpChannel};
 use super::{
     commands::{BurnParams, ReadMemoryParams, WriteMemoryParams},
     serial::{clear_buffers, configure_port, list_ports, open_port, PortInfo},
@@ -84,21 +85,16 @@ fn parse_command_string(s: &str) -> Vec<u8> {
 /// If None, uses a conservative 10ms minimum.
 #[cfg(target_family = "unix")]
 fn write_and_wait(
-    port: &mut Box<dyn SerialPort>,
+    channel: &mut Box<dyn CommunicationChannel>,
     data: &[u8],
     baud_rate: u32,
     min_wait_ms: Option<u64>,
 ) -> Result<(), std::io::Error> {
     // Write the data - this goes to the kernel's tty output buffer
-    port.write_all(data)?;
+    channel.write_all(data)?;
 
     // Guard against zero baud rate
-    let safe_baud = if baud_rate == 0 {
-        eprintln!("[WARN] write_and_wait: baud_rate is 0, defaulting to 115200");
-        115200
-    } else {
-        baud_rate
-    };
+    let safe_baud = if baud_rate == 0 { 115200 } else { baud_rate };
 
     // Calculate transmission time at the given baud rate
     // Each byte = 10 bits (1 start + 8 data + 1 stop)
@@ -128,13 +124,13 @@ fn write_and_wait(
 /// Non-Unix systems: use write_all with flush
 #[cfg(not(target_family = "unix"))]
 fn write_and_wait(
-    port: &mut Box<dyn SerialPort>,
+    channel: &mut Box<dyn CommunicationChannel>,
     data: &[u8],
     _baud_rate: u32,
     _min_wait_ms: Option<u64>,
 ) -> Result<(), std::io::Error> {
-    port.write_all(data)?;
-    port.flush()
+    channel.write_all(data)?;
+    channel.flush()
 }
 
 /// Connection state
@@ -148,6 +144,13 @@ pub enum ConnectionState {
     Connected,
     /// Connection error
     Error,
+}
+
+/// Connection type
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ConnectionType {
+    Serial,
+    Tcp,
 }
 
 /// Connection runtime packet selection override
@@ -170,10 +173,16 @@ pub enum RuntimeFetch {
 /// Connection configuration
 #[derive(Debug, Clone)]
 pub struct ConnectionConfig {
+    /// Connection type
+    pub connection_type: ConnectionType,
     /// Serial port name
     pub port_name: String,
     /// Baud rate
     pub baud_rate: u32,
+    /// TCP host address (for TCP connection)
+    pub tcp_host: Option<String>,
+    /// TCP port (for TCP connection)
+    pub tcp_port: Option<u16>,
     /// Use modern protocol with CRC
     pub use_modern_protocol: bool,
     /// Response timeout in milliseconds
@@ -185,8 +194,11 @@ pub struct ConnectionConfig {
 impl Default for ConnectionConfig {
     fn default() -> Self {
         Self {
+            connection_type: ConnectionType::Serial,
             port_name: String::new(),
             baud_rate: DEFAULT_BAUD_RATE,
+            tcp_host: None,
+            tcp_port: None,
             use_modern_protocol: true,
             timeout_ms: DEFAULT_TIMEOUT_MS,
             runtime_packet_mode: RuntimePacketMode::Auto,
@@ -196,8 +208,8 @@ impl Default for ConnectionConfig {
 
 /// ECU connection with INI-driven protocol
 pub struct Connection {
-    /// Serial port handle
-    port: Option<Box<dyn SerialPort>>,
+    /// Communication channel (Serial or TCP)
+    channel: Option<Box<dyn CommunicationChannel>>,
     /// Current connection state
     state: ConnectionState,
     /// Connection configuration
@@ -225,7 +237,7 @@ impl Connection {
     /// Create a new connection (not yet connected)
     pub fn new(config: ConnectionConfig) -> Self {
         Self {
-            port: None,
+            channel: None,
             state: ConnectionState::Disconnected,
             config,
             signature: None,
@@ -250,7 +262,7 @@ impl Connection {
         let use_little_endian = endianness == Endianness::Little;
         let use_modern = protocol.uses_modern_protocol();
         Self {
-            port: None,
+            channel: None,
             state: ConnectionState::Disconnected,
             config,
             signature: None,
@@ -418,10 +430,26 @@ impl Connection {
 
         self.state = ConnectionState::Connecting;
 
-        // Open serial port
-        let mut port = open_port(&self.config.port_name, Some(self.config.baud_rate))?;
-        configure_port(port.as_mut())?;
-        clear_buffers(port.as_mut())?;
+        // Open communication channel
+        let mut channel: Box<dyn CommunicationChannel> = match self.config.connection_type {
+            ConnectionType::Serial => {
+                // Open serial port
+                let mut port = open_port(&self.config.port_name, Some(self.config.baud_rate))?;
+                configure_port(port.as_mut())?;
+                clear_buffers(port.as_mut())?;
+                Box::new(SerialChannel::new(port))
+            }
+            ConnectionType::Tcp => {
+                let host = self.config.tcp_host.as_deref().unwrap_or("localhost");
+                let port = self.config.tcp_port.unwrap_or(29001);
+                let addr = format!("{}:{}", host, port);
+                eprintln!("[INFO] Connecting to ECU via TCP: {}", addr);
+                let stream = TcpStream::connect(&addr)
+                    .map_err(|e| ProtocolError::ConnectionFailed(e.to_string()))?;
+                stream.set_nodelay(true).ok();
+                Box::new(TcpChannel::new(stream))
+            }
+        };
 
         // Wait for ECU stabilization after port open
         // Use INI-specified delay_after_port_open, or default 1000ms for Arduino bootloader
@@ -437,11 +465,11 @@ impl Connection {
         std::thread::sleep(Duration::from_millis(port_open_delay as u64));
 
         // Clear any garbage data that arrived during delay
-        clear_buffers(port.as_mut())?;
+        channel.clear_input_buffer().ok();
         // Small additional delay after clearing
         std::thread::sleep(Duration::from_millis(20));
 
-        self.port = Some(port);
+        self.channel = Some(channel);
 
         // Perform handshake
         match self.handshake() {
@@ -452,7 +480,7 @@ impl Connection {
             }
             Err(e) => {
                 self.state = ConnectionState::Error;
-                self.port = None;
+                self.channel = None;
                 Err(e)
             }
         }
@@ -460,7 +488,7 @@ impl Connection {
 
     /// Disconnect from the ECU
     pub fn disconnect(&mut self) {
-        self.port = None;
+        self.channel = None;
         self.signature = None;
         self.state = ConnectionState::Disconnected;
     }
@@ -497,8 +525,8 @@ impl Connection {
             eprintln!("[DEBUG] handshake: trying CRC protocol first");
 
             // Clear buffers before CRC attempt
-            if let Some(port) = self.port.as_mut() {
-                let _ = clear_buffers(port.as_mut());
+            if let Some(channel) = self.channel.as_mut() {
+                let _ = channel.clear_input_buffer();
             }
 
             let packet = Packet::new(cmd_bytes.clone());
@@ -532,8 +560,8 @@ impl Connection {
         );
 
         // Clear buffers before legacy attempt
-        if let Some(port) = self.port.as_mut() {
-            let _ = clear_buffers(port.as_mut());
+        if let Some(channel) = self.channel.as_mut() {
+            let _ = channel.clear_input_buffer();
         }
 
         match self.send_raw_command(&[cmd_byte]) {
@@ -557,8 +585,8 @@ impl Connection {
                 if !ini_uses_modern {
                     eprintln!("[DEBUG] handshake: trying CRC as fallback");
 
-                    if let Some(port) = self.port.as_mut() {
-                        let _ = clear_buffers(port.as_mut());
+                    if let Some(channel) = self.channel.as_mut() {
+                        let _ = channel.clear_input_buffer();
                     }
                     std::thread::sleep(Duration::from_millis(50));
 
@@ -602,11 +630,12 @@ impl Connection {
             2
         };
 
-        let port = self.port.as_mut().ok_or(ProtocolError::NotConnected)?;
+        let channel = self.channel.as_mut().ok_or(ProtocolError::NotConnected)?;
 
         eprintln!("[DEBUG] send_raw_command: clearing buffers before send");
         // Clear any stale data in buffers
-        let _ = port.clear(serialport::ClearBuffer::All);
+        let _ = channel.clear_input_buffer();
+        let _ = channel.clear_output_buffer();
 
         eprintln!(
             "[DEBUG] send_raw_command: sending {} bytes: {:02x?}",
@@ -619,7 +648,7 @@ impl Connection {
 
         // Send command bytes and wait for transmission
         // Use write_and_wait which avoids the blocking tcdrain issue
-        write_and_wait(port, cmd, baud_rate, min_wait)
+        write_and_wait(channel, cmd, baud_rate, min_wait)
             .map_err(|e| ProtocolError::SerialError(e.to_string()))?;
 
         eprintln!(
@@ -641,7 +670,7 @@ impl Connection {
             }
 
             // Check how many bytes are available without blocking
-            let available = match port.bytes_to_read() {
+            let available = match channel.bytes_to_read() {
                 Ok(n) => n,
                 Err(e) => {
                     eprintln!("[DEBUG] send_raw_command: bytes_to_read error: {}", e);
@@ -651,7 +680,7 @@ impl Connection {
 
             if available > 0 {
                 let to_read = std::cmp::min(available as usize, buffer.len());
-                match port.read(&mut buffer[..to_read]) {
+                match channel.read(&mut buffer[..to_read]) {
                     Ok(0) => {
                         eprintln!("[DEBUG] send_raw_command: read returned 0 (EOF)");
                         break;
@@ -722,7 +751,7 @@ impl Connection {
         let baud_rate = self.config.baud_rate;
         let min_wait = Some(self.get_effective_min_wait());
 
-        let port = self.port.as_mut().ok_or(ProtocolError::NotConnected)?;
+        let channel = self.channel.as_mut().ok_or(ProtocolError::NotConnected)?;
 
         eprintln!(
             "[DEBUG] send_raw_command_no_response: sending {} bytes: {:02x?}",
@@ -731,7 +760,7 @@ impl Connection {
         );
 
         // Send command bytes and wait for transmission to complete
-        write_and_wait(port, cmd, baud_rate, min_wait)
+        write_and_wait(channel, cmd, baud_rate, min_wait)
             .map_err(|e| ProtocolError::SerialError(e.to_string()))?;
 
         eprintln!("[DEBUG] send_raw_command_no_response: command sent, not waiting for response");
@@ -741,7 +770,7 @@ impl Connection {
 
     /// Send CRC packet WITHOUT waiting for response (for burn commands)
     fn send_packet_no_response(&mut self, packet: Packet) -> Result<(), ProtocolError> {
-        let port = self.port.as_mut().ok_or(ProtocolError::NotConnected)?;
+        let channel = self.channel.as_mut().ok_or(ProtocolError::NotConnected)?;
         let bytes = packet.to_bytes();
 
         eprintln!(
@@ -751,9 +780,11 @@ impl Connection {
 
         self.tx_bytes = self.tx_bytes.saturating_add(bytes.len() as u64);
         self.tx_packets = self.tx_packets.saturating_add(1);
-        port.write_all(&bytes)
+        channel
+            .write_all(&bytes)
             .map_err(|e| ProtocolError::SerialError(e.to_string()))?;
-        port.flush()
+        channel
+            .flush()
             .map_err(|e| ProtocolError::SerialError(e.to_string()))?;
 
         eprintln!("[DEBUG] send_packet_no_response: packet sent, not waiting for response");
@@ -764,15 +795,17 @@ impl Connection {
     /// Send a legacy (ASCII) command and get response
     #[allow(dead_code)]
     fn send_legacy_command(&mut self, cmd: Command) -> Result<Vec<u8>, ProtocolError> {
-        let port = self.port.as_mut().ok_or(ProtocolError::NotConnected)?;
+        let channel = self.channel.as_mut().ok_or(ProtocolError::NotConnected)?;
 
         // Send single command byte
         let legacy_bytes = [cmd.legacy_byte()];
         self.tx_bytes = self.tx_bytes.saturating_add(legacy_bytes.len() as u64);
         self.tx_packets = self.tx_packets.saturating_add(1);
-        port.write_all(&legacy_bytes)
+        channel
+            .write_all(&legacy_bytes)
             .map_err(|e| ProtocolError::SerialError(e.to_string()))?;
-        port.flush()
+        channel
+            .flush()
             .map_err(|e| ProtocolError::SerialError(e.to_string()))?;
 
         // Read response with timeout
@@ -782,7 +815,7 @@ impl Connection {
         let timeout = Duration::from_millis(cmd.timeout_ms());
 
         loop {
-            match port.read(&mut buffer) {
+            match channel.read(&mut buffer) {
                 Ok(0) => break,
                 Ok(n) => {
                     response.extend_from_slice(&buffer[..n]);
@@ -828,11 +861,12 @@ impl Connection {
             2
         };
 
-        let port = self.port.as_mut().ok_or(ProtocolError::NotConnected)?;
+        let channel = self.channel.as_mut().ok_or(ProtocolError::NotConnected)?;
 
         // Clear buffers before sending
         eprintln!("[DEBUG] send_packet: clearing buffers");
-        let _ = port.clear(serialport::ClearBuffer::All);
+        let _ = channel.clear_input_buffer();
+        let _ = channel.clear_output_buffer();
 
         // Start timing for adaptive timing
         let send_start = Instant::now();
@@ -847,7 +881,7 @@ impl Connection {
         // Use write_and_wait which avoids the blocking tcdrain issue
         self.tx_bytes = self.tx_bytes.saturating_add(bytes.len() as u64);
         self.tx_packets = self.tx_packets.saturating_add(1);
-        write_and_wait(port, &bytes, baud_rate, min_wait)
+        write_and_wait(channel, &bytes, baud_rate, min_wait)
             .map_err(|e| ProtocolError::SerialError(e.to_string()))?;
 
         eprintln!(
@@ -858,7 +892,7 @@ impl Connection {
         // Helper to read exact bytes with timeout
         // Uses bytes_to_read() polling to avoid blocking read() calls on Linux
         fn read_exact_timeout(
-            port: &mut Box<dyn SerialPort>,
+            channel: &mut Box<dyn CommunicationChannel>,
             buf: &mut [u8],
             timeout: Duration,
             poll_ms: u64,
@@ -877,7 +911,7 @@ impl Connection {
                 }
 
                 // Check how many bytes are available
-                let available = port
+                let available = channel
                     .bytes_to_read()
                     .map_err(|e| ProtocolError::SerialError(e.to_string()))?
                     as usize;
@@ -890,7 +924,7 @@ impl Connection {
 
                 // Read available bytes (up to what we need)
                 let to_read = std::cmp::min(available, buf.len() - offset);
-                match port.read(&mut buf[offset..offset + to_read]) {
+                match channel.read(&mut buf[offset..offset + to_read]) {
                     Ok(0) => {
                         eprintln!("[DEBUG] read_exact_timeout: EOF after {} bytes", offset);
                         return Err(ProtocolError::Timeout);
@@ -918,13 +952,10 @@ impl Connection {
             Ok(())
         }
 
-        // Cast port to the right type for bytes_to_read()
-        let port_box = port;
-
         // Read response header (2 bytes for length)
         let mut header = [0u8; 2];
         eprintln!("[DEBUG] send_packet: waiting for response header...");
-        if let Err(e) = read_exact_timeout(port_box, &mut header, timeout, poll_interval_ms) {
+        if let Err(e) = read_exact_timeout(channel, &mut header, timeout, poll_interval_ms) {
             self.reset_adaptive_timing_on_error();
             return Err(e);
         }
@@ -939,8 +970,7 @@ impl Connection {
 
         // Read payload + CRC
         let mut payload_and_crc = vec![0u8; length + 4];
-        if let Err(e) =
-            read_exact_timeout(port_box, &mut payload_and_crc, timeout, poll_interval_ms)
+        if let Err(e) = read_exact_timeout(channel, &mut payload_and_crc, timeout, poll_interval_ms)
         {
             self.reset_adaptive_timing_on_error();
             return Err(e);
@@ -1340,16 +1370,17 @@ impl Connection {
         let timeout = Duration::from_millis(cmd.get_timeout_ms());
         let inter_char_timeout = self.get_effective_inter_char_timeout();
 
-        let port = self.port.as_mut().ok_or(ProtocolError::NotConnected)?;
+        let channel = self.channel.as_mut().ok_or(ProtocolError::NotConnected)?;
 
         eprintln!("[DEBUG] send_console_command: sending '{}'", cmd.command);
 
         // Clear buffers before sending
-        let _ = port.clear(serialport::ClearBuffer::All);
+        let _ = channel.clear_input_buffer();
+        let _ = channel.clear_output_buffer();
 
         // Convert command to bytes and send
         let cmd_bytes = cmd.to_bytes();
-        write_and_wait(port, &cmd_bytes, baud_rate, min_wait)
+        write_and_wait(channel, &cmd_bytes, baud_rate, min_wait)
             .map_err(|e| ProtocolError::SerialError(e.to_string()))?;
 
         eprintln!("[DEBUG] send_console_command: command sent, waiting for response");
@@ -1367,7 +1398,7 @@ impl Connection {
             }
 
             // Check for available data
-            let available = match port.bytes_to_read() {
+            let available = match channel.bytes_to_read() {
                 Ok(n) => n,
                 Err(e) => {
                     eprintln!("[DEBUG] send_console_command: bytes_to_read error: {}", e);
@@ -1377,7 +1408,7 @@ impl Connection {
 
             if available > 0 {
                 let to_read = std::cmp::min(available as usize, buffer.len());
-                match port.read(&mut buffer[..to_read]) {
+                match channel.read(&mut buffer[..to_read]) {
                     Ok(0) => {
                         eprintln!("[DEBUG] send_console_command: read returned 0 (EOF)");
                         break;

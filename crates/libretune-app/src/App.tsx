@@ -263,6 +263,9 @@ function AppContent() {
   const [selectedPort, setSelectedPort] = useState("");
   const [baudRate, setBaudRate] = useState(115200);
   const [timeoutMs, setTimeoutMs] = useState(2000);
+  const [connectionType, setConnectionType] = useState<'Serial' | 'Tcp'>("Serial");
+  const [tcpHost, setTcpHost] = useState("localhost");
+  const [tcpPort, setTcpPort] = useState(29001);
 
   // INI-derived defaults
   const [iniDefaults, setIniDefaults] = useState<ProtocolDefaults | null>(null);
@@ -1252,7 +1255,15 @@ function AppContent() {
         }
       }
 
-      const result = await invoke<ConnectResult>("connect_to_ecu", { portName: selectedPort, baudRate, timeoutMs, runtimePacketMode: runtimeMode });
+      const result = await invoke<ConnectResult>("connect_to_ecu", { 
+        portName: selectedPort, 
+        baudRate, 
+        timeoutMs, 
+        runtimePacketMode: runtimeMode,
+        connectionType,
+        tcpHost,
+        tcpPort
+      });
       await checkStatus();
       
       // If there's a signature mismatch, behave based on severity
@@ -2543,6 +2554,12 @@ function AppContent() {
         selectedPort={selectedPort}
         baudRate={baudRate}
         timeoutMs={timeoutMs}
+        connectionType={connectionType}
+        onConnectionTypeChange={setConnectionType}
+        tcpHost={tcpHost}
+        onTcpHostChange={setTcpHost}
+        tcpPort={tcpPort}
+        onTcpPortChange={setTcpPort}
         connected={status.state === "Connected"}
         connecting={connecting || syncing}
         onPortChange={setSelectedPort}

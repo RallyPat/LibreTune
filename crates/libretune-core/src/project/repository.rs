@@ -182,20 +182,35 @@ impl IniRepository {
     fn extract_ini_info(content: &str) -> io::Result<(String, String)> {
         let mut name = String::new();
         let mut signature = String::new();
+        let mut in_megatune = false;
 
         for line in content.lines() {
             let line = line.trim();
 
+            if line.starts_with('[') {
+                // Check for [MegaTune] section start (case-insensitive)
+                // Handle trailing comments: [MegaTune] ; comment
+                let header_part = line.split(';').next().unwrap_or("").trim();
+                in_megatune = header_part
+                    .trim_matches(|c| c == '[' || c == ']')
+                    .eq_ignore_ascii_case("MegaTune");
+                continue;
+            }
+
+            if !in_megatune {
+                continue;
+            }
+
             // Look for signature in [MegaTune] section
-            if line.starts_with("signature") {
-                if let Some(val) = line.split('=').nth(1) {
+            if line.to_lowercase().starts_with("signature") {
+                if let Some(val) = line.splitn(2, '=').nth(1) {
                     signature = Self::extract_quoted_value(val);
                 }
             }
 
             // Look for nEmu in [MegaTune] section for display name
-            if line.starts_with("nEmu") {
-                if let Some(val) = line.split('=').nth(1) {
+            if line.to_lowercase().starts_with("nemu") {
+                if let Some(val) = line.splitn(2, '=').nth(1) {
                     name = Self::extract_quoted_value(val);
                 }
             }
@@ -204,7 +219,7 @@ impl IniRepository {
         if signature.is_empty() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
-                "Could not find signature in INI file",
+                "Could not find signature in [MegaTune] section of INI file",
             ));
         }
 

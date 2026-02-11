@@ -14,6 +14,9 @@ pub enum ProtocolError {
     #[error("Not connected to ECU")]
     NotConnected,
 
+    #[error("Connection failed: {0}")]
+    ConnectionFailed(String),
+
     #[error("Already connected")]
     AlreadyConnected,
 

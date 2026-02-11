@@ -10,13 +10,17 @@ mod connection;
 mod error;
 mod packet;
 pub mod serial;
+pub mod stream;
 
 pub use command_builder::CommandBuilder;
 pub use commands::{Command, ConsoleCommand};
-pub use connection::{Connection, ConnectionConfig, ConnectionState, RuntimePacketMode};
+pub use connection::{
+    Connection, ConnectionConfig, ConnectionState, ConnectionType, RuntimePacketMode,
+};
 pub use error::ProtocolError;
 pub use packet::{Packet, PacketBuilder};
 pub use serial::{clear_buffers, configure_port, list_ports, open_port, PortInfo};
+pub use stream::CommunicationChannel;
 
 /// Default baud rate for ECU communication
 pub const DEFAULT_BAUD_RATE: u32 = 115200;

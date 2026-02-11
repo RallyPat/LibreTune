@@ -43,6 +43,8 @@ struct IncludeContext {
     included_files: HashSet<PathBuf>,
     /// Current include depth
     depth: usize,
+    /// Symbols defined via #set directive (shared across includes)
+    pub defined_symbols: HashSet<String>,
 }
 
 impl IncludeContext {
@@ -51,6 +53,7 @@ impl IncludeContext {
             base_dir: base_path.and_then(|p| p.parent().map(|d| d.to_path_buf())),
             included_files: HashSet::new(),
             depth: 0,
+            defined_symbols: HashSet::new(),
         }
     }
 
@@ -117,8 +120,7 @@ fn parse_ini_internal(content: &str, ctx: &mut IncludeContext) -> Result<EcuDefi
         current_help: None,
     };
 
-    // Preprocessor state for handling #set, #if, #else, #endif
-    let mut defined_symbols: std::collections::HashSet<String> = std::collections::HashSet::new();
+    // Preprocessor state - now shared via ctx.defined_symbols
     let mut condition_stack: Vec<bool> = Vec::new();
 
     // Pre-compile regex for line continuations
@@ -149,7 +151,7 @@ fn parse_ini_internal(content: &str, ctx: &mut IncludeContext) -> Result<EcuDefi
         if let Some(stripped) = line.strip_prefix("#set ") {
             let symbol = stripped.trim().to_string();
             eprintln!("[DEBUG] preprocessor: #set {}", symbol);
-            defined_symbols.insert(symbol);
+            ctx.defined_symbols.insert(symbol);
             i += 1;
             continue;
         }
@@ -157,14 +159,14 @@ fn parse_ini_internal(content: &str, ctx: &mut IncludeContext) -> Result<EcuDefi
         if let Some(stripped) = line.strip_prefix("#unset ") {
             let symbol = stripped.trim();
             eprintln!("[DEBUG] preprocessor: #unset {}", symbol);
-            defined_symbols.remove(symbol);
+            ctx.defined_symbols.remove(symbol);
             i += 1;
             continue;
         }
 
         if let Some(stripped) = line.strip_prefix("#if ") {
             let symbol = stripped.trim();
-            let is_defined = defined_symbols.contains(symbol);
+            let is_defined = ctx.defined_symbols.contains(symbol);
             eprintln!("[DEBUG] preprocessor: #if {} -> {}", symbol, is_defined);
             condition_stack.push(is_defined);
             i += 1;
@@ -257,33 +259,35 @@ fn parse_ini_internal(content: &str, ctx: &mut IncludeContext) -> Result<EcuDefi
         }
 
         // Check for section header
-        if line.starts_with('[') && line.ends_with(']') {
-            current_section = line[1..line.len() - 1].trim().to_string();
+        let line_trimmed = line.trim();
+        if line_trimmed.starts_with('[') && line_trimmed.ends_with(']') {
+            current_section = line_trimmed[1..line_trimmed.len() - 1].trim().to_string();
             i += 1;
             continue;
         }
 
         // Parse key = value
         if let Some((key, value)) = parse_key_value(line) {
-            match current_section.as_str() {
-                "MegaTune" => parse_megatune(&mut definition, key, value),
-                "TunerStudio" => parse_tunerstudio(&mut definition, key, value),
-                "Constants" => parse_constants_entry(
+            // Case-insensitive section matching for robustness
+            match current_section.to_lowercase().as_str() {
+                "megatune" => parse_megatune(&mut definition, key, value),
+                "tunerstudio" => parse_tunerstudio(&mut definition, key, value),
+                "constants" => parse_constants_entry(
                     &mut definition,
                     key,
                     value,
                     &mut state.current_page,
                     &mut state.last_offset,
                 ),
-                "OutputChannels" => parse_output_channel_entry(&mut definition, key, value),
-                "BurstMode" => parse_burst_mode_entry(&mut definition, key, value),
-                "GaugeConfigurations" => parse_gauge_entry(&mut definition, key, value),
-                "SettingGroups" => parse_setting_group_entry(&mut definition, key, value),
-                "PcVariables" => parse_pc_variable_entry(&mut definition, key, value),
-                "Datalog" => parse_datalog_entry(&mut definition, key, value),
-                "Defaults" => parse_defaults_entry(&mut definition, key, value),
-                "Menu" => parse_menu_entry(&mut definition, key, value),
-                "UserDefined" => parse_user_defined_entry(
+                "outputchannels" => parse_output_channel_entry(&mut definition, key, value),
+                "burstmode" => parse_burst_mode_entry(&mut definition, key, value),
+                "gaugeconfigurations" => parse_gauge_entry(&mut definition, key, value),
+                "settinggroups" => parse_setting_group_entry(&mut definition, key, value),
+                "pcvariables" => parse_pc_variable_entry(&mut definition, key, value),
+                "datalog" => parse_datalog_entry(&mut definition, key, value),
+                "defaults" => parse_defaults_entry(&mut definition, key, value),
+                "menu" => parse_menu_entry(&mut definition, key, value),
+                "userdefined" => parse_user_defined_entry(
                     &mut definition,
                     key,
                     value,
@@ -291,30 +295,34 @@ fn parse_ini_internal(content: &str, ctx: &mut IncludeContext) -> Result<EcuDefi
                     &mut state.current_indicator_panel,
                     &mut state.current_help,
                 ),
-                "SettingContextHelp" => parse_setting_context_help(&mut definition, key, value),
-                "FrontPage" => parse_frontpage_entry(&mut definition, key, value),
-                "ControllerCommands" => parse_controller_command_entry(&mut definition, key, value),
-                "LoggerDefinition" => parse_logger_definition_entry(&mut definition, key, value),
-                "PortEditor" => parse_port_editor_entry(&mut definition, key, value),
-                "ReferenceTables" => parse_reference_table_entry(&mut definition, key, value),
-                "FTPBrowser" => parse_ftp_browser_entry(&mut definition, key, value),
-                "DatalogViews" => parse_datalog_view_entry(&mut definition, key, value),
-                "KeyActions" => parse_key_action_entry(&mut definition, key, value),
-                "VeAnalyze" => parse_ve_analyze_entry(&mut definition, key, value),
-                "WueAnalyze" => parse_wue_analyze_entry(&mut definition, key, value),
-                "GammaE" => parse_gamma_e_entry(&mut definition, key, value),
-                "ConstantsExtensions" => {
+                "settingcontexthelp" => parse_setting_context_help(&mut definition, key, value),
+                "frontpage" => parse_frontpage_entry(&mut definition, key, value),
+                "controllercommands" => parse_controller_command_entry(&mut definition, key, value),
+                "loggerdefinition" => parse_logger_definition_entry(&mut definition, key, value),
+                "porteditor" => parse_port_editor_entry(&mut definition, key, value),
+                "referencetables" => parse_reference_table_entry(&mut definition, key, value),
+                "ftpbrowser" => parse_ftp_browser_entry(&mut definition, key, value),
+                "datalogviews" => parse_datalog_view_entry(&mut definition, key, value),
+                "keyactions" => parse_key_action_entry(&mut definition, key, value),
+                "veanalyze" => parse_ve_analyze_entry(&mut definition, key, value),
+                "wueanalyze" => parse_wue_analyze_entry(&mut definition, key, value),
+                "gammae" => parse_gamma_e_entry(&mut definition, key, value),
+                "constantsextensions" => {
                     parse_constants_extensions_entry(&mut definition, key, value)
                 }
                 _ => {
-                    if current_section.contains("TableEditor") {
+                    // Startswith / contains checks (keeping case-sensitive or making insensitive?)
+                    // For now, let's keep these checks against the original string or lowercase?
+                    // "TableEditor" logic:
+                    let section_lower = current_section.to_lowercase();
+                    if section_lower.contains("tableeditor") {
                         parse_table_editor_entry(
                             &mut definition,
                             key,
                             value,
                             &mut state.current_table,
                         );
-                    } else if current_section.contains("CurveEditor") {
+                    } else if section_lower.contains("curveeditor") {
                         parse_curve_editor_entry(
                             &mut definition,
                             key,
@@ -468,6 +476,19 @@ fn merge_definitions(target: &mut EcuDefinition, source: EcuDefinition) {
 /// Note: '#' is handled at the line level for preprocessor directives
 /// Special case: Don't strip semicolons in field names before '=' (for help text syntax)
 fn strip_comment(line: &str) -> String {
+    // First pass: Check if line contains '=' (outside quotes)
+    // This allows us to distinguish between properties (key=val) and other lines (headers, directives)
+    let mut has_equals = false;
+    let mut in_quotes_scan = false;
+    for ch in line.chars() {
+        if ch == '"' {
+            in_quotes_scan = !in_quotes_scan;
+        } else if ch == '=' && !in_quotes_scan {
+            has_equals = true;
+            break;
+        }
+    }
+
     let mut result = String::new();
     let mut in_quotes = false;
     let mut found_equals = false;
@@ -479,10 +500,20 @@ fn strip_comment(line: &str) -> String {
         } else if ch == '=' && !in_quotes {
             found_equals = true;
             result.push(ch);
-        } else if ch == ';' && !in_quotes && found_equals {
-            // Only strip semicolons as comments AFTER we've seen the '=' sign
-            // This preserves help text syntax: fieldname;+help = value
-            break;
+        } else if ch == ';' && !in_quotes {
+            if has_equals {
+                // For property lines (with '='), only strip comments AFTER the '=' sign
+                // This preserves help text syntax: fieldname;+help = value
+                if found_equals {
+                    break;
+                } else {
+                    result.push(ch);
+                }
+            } else {
+                // For lines without '=' (e.g. section headers [Section] ; comment),
+                // strip from the first semicolon
+                break;
+            }
         } else {
             result.push(ch);
         }
@@ -666,6 +697,9 @@ fn parse_megatune(def: &mut EcuDefinition, key: &str, value: &str) {
 fn parse_tunerstudio(def: &mut EcuDefinition, key: &str, value: &str) {
     eprintln!("[DEBUG] parse_ts: key = {:?}, value = {:?}", key, value);
     match key.to_lowercase().as_str() {
+        "signature" => {
+            def.signature = value.trim_matches('"').to_string();
+        }
         "inispecversion" => {
             def.ini_spec_version = value.trim_matches('"').to_string();
         }

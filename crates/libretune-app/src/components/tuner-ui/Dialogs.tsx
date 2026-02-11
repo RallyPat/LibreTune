@@ -1342,6 +1342,14 @@ interface ConnectionDialogProps extends DialogProps {
   selectedPort: string;
   baudRate: number;
   timeoutMs: number;
+  // Connection type and TCP settings
+  connectionType?: 'Serial' | 'Tcp';
+  onConnectionTypeChange?: (type: 'Serial' | 'Tcp') => void;
+  tcpHost?: string;
+  onTcpHostChange?: (host: string) => void;
+  tcpPort?: number;
+  onTcpPortChange?: (port: number) => void;
+  
   connected: boolean;
   connecting: boolean;
   onPortChange: (port: string) => void;
@@ -1371,6 +1379,12 @@ export function ConnectionDialog({
   selectedPort,
   baudRate,
   timeoutMs,
+  connectionType = 'Serial', // Default to Serial if not provided
+  onConnectionTypeChange,
+  tcpHost = '127.0.0.1',
+  onTcpHostChange,
+  tcpPort = 29001,
+  onTcpPortChange,
   connected,
   connecting,
   onPortChange,
@@ -1411,41 +1425,96 @@ export function ConnectionDialog({
         
         <div className="dialog-content">
           <div className="dialog-form-group">
-            <label>Serial Port</label>
-            <div className="dialog-port-row">
-              <select 
-                value={selectedPort} 
-                onChange={(e) => onPortChange(e.target.value)}
-                disabled={connected}
-              >
-                {ports.length === 0 ? (
-                  <option value="">No ports found</option>
-                ) : (
-                  ports.map((port) => (
-                    <option key={port} value={port}>{port}</option>
-                  ))
-                )}
-              </select>
-              <button onClick={onRefreshPorts} disabled={connected}>
-                🔄 Refresh
-              </button>
+            <label>Connection Mode</label>
+            <div className="dialog-row radio-group" style={{ display: 'flex', gap: '15px', alignItems: 'center', marginBottom: '10px' }}>
+                <label className="radio-label" style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: connected ? 'default' : 'pointer' }}>
+                  <input
+                    type="radio"
+                    checked={connectionType === 'Serial'}
+                    onChange={() => onConnectionTypeChange?.('Serial')}
+                    disabled={connected}
+                  />
+                  <span>Serial / USB</span>
+                </label>
+                <label className="radio-label" style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: connected ? 'default' : 'pointer' }}>
+                  <input
+                    type="radio"
+                    checked={connectionType === 'Tcp'}
+                    onChange={() => onConnectionTypeChange?.('Tcp')}
+                    disabled={connected}
+                  />
+                  <span>TCP / WiFi (Sim)</span>
+                </label>
             </div>
           </div>
           
-          <div className="dialog-form-group">
-            <label>Baud Rate</label>
-            <select 
-              value={baudRate} 
-              onChange={(e) => onBaudChange(Number(e.target.value))}
-              disabled={connected}
-            >
-              <option value={115200}>115200</option>
-              <option value={57600}>57600</option>
-              <option value={38400}>38400</option>
-              <option value={19200}>19200</option>
-              <option value={9600}>9600</option>
-            </select>
-          </div>
+          {connectionType === 'Serial' ? (
+            <>
+              <div className="dialog-form-group">
+                <label>Serial Port</label>
+                <div className="dialog-port-row">
+                  <select 
+                    value={selectedPort} 
+                    onChange={(e) => onPortChange(e.target.value)}
+                    disabled={connected}
+                  >
+                    {ports.length === 0 ? (
+                      <option value="">No ports found</option>
+                    ) : (
+                      ports.map((port) => (
+                        <option key={port} value={port}>{port}</option>
+                      ))
+                    )}
+                  </select>
+                  <button onClick={onRefreshPorts} disabled={connected}>
+                    🔄 Refresh
+                  </button>
+                </div>
+              </div>
+              
+              <div className="dialog-form-group">
+                <label>Baud Rate</label>
+                <select 
+                  value={baudRate} 
+                  onChange={(e) => onBaudChange(Number(e.target.value))}
+                  disabled={connected}
+                >
+                  <option value={115200}>115200</option>
+                  <option value={57600}>57600</option>
+                  <option value={38400}>38400</option>
+                  <option value={19200}>19200</option>
+                  <option value={9600}>9600</option>
+                </select>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="dialog-form-group">
+                <label>Host Address</label>
+                <input
+                  type="text"
+                  className="dialog-input"
+                  style={{ width: '100%', padding: '8px', background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.1)', color: 'white', borderRadius: '4px' }}
+                  value={tcpHost}
+                  onChange={(e) => onTcpHostChange?.(e.target.value)}
+                  disabled={connected}
+                  placeholder="localhost"
+                />
+              </div>
+              <div className="dialog-form-group">
+                <label>TCP Port</label>
+                <input
+                  type="number"
+                  className="dialog-input"
+                  style={{ width: '100%', padding: '8px', background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.1)', color: 'white', borderRadius: '4px' }}
+                  value={tcpPort}
+                  onChange={(e) => onTcpPortChange?.(Number(e.target.value))}
+                  disabled={connected}
+                  placeholder="29001"
+                />
+              </div>
+            </>
+          )}
 
           <div className="dialog-form-group">
             <label>Timeout</label>
