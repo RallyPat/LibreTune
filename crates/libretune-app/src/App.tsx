@@ -45,6 +45,8 @@ import RestorePointsDialog from "./components/dialogs/RestorePointsDialog";
 import ImportProjectWizard from "./components/dialogs/ImportProjectWizard";
 import MathChannelsDialog from "./components/dialogs/MathChannelsDialog";
 import MigrationReportDialog from "./components/dialogs/MigrationReportDialog";
+import TuneFileDiffDialog from "./components/dialogs/TuneFileDiffDialog";
+import DynoOverlay from "./components/tuner-ui/DynoOverlay";
 import TuneHistoryPanel from "./components/TuneHistoryPanel";
 import ErrorDetailsDialog, { useErrorDialog } from "./components/dialogs/ErrorDetailsDialog";
 import ErrorBoundary from "./components/common/ErrorBoundary";
@@ -449,6 +451,12 @@ function AppContent() {
   
   // Migration report dialog state (shown when loading a tune from different INI version)
   const [migrationReportOpen, setMigrationReportOpen] = useState(false);
+  
+  // Tune file diff dialog state (cross-file comparison + merge)
+  const [tuneFileDiffOpen, setTuneFileDiffOpen] = useState(false);
+  
+  // Dyno overlay dialog state
+  const [dynoOverlayOpen, setDynoOverlayOpen] = useState(false);
   
   // WASM Plugin panel state
   const [pluginPanelOpen, setPluginPanelOpen] = useState(false);
@@ -2168,6 +2176,8 @@ function AppContent() {
       toolItems.push({ id: "sep3", label: "", separator: true });
     }
     toolItems.push({ id: "compare-tables", label: "Table &Compare", onClick: () => setTableComparisonOpen(true), disabled: !currentProject });
+    toolItems.push({ id: "tune-file-diff", label: "Tune File &Diff...", onClick: () => setTuneFileDiffOpen(true), disabled: !currentProject });
+    toolItems.push({ id: "dyno-overlay", label: "D&yno Data...", onClick: () => setDynoOverlayOpen(true) });
     toolItems.push({ id: "math-channels", label: "&Math Channels...", onClick: () => setMathChannelsDialogOpen(true), disabled: !currentProject });
     toolItems.push({ id: "sep4", label: "", separator: true });
     toolItems.push(
@@ -2664,6 +2674,18 @@ function AppContent() {
       <TableComparisonDialog
         isOpen={tableComparisonOpen}
         onClose={() => setTableComparisonOpen(false)}
+      />
+      
+      {/* Tune File Diff Dialog (cross-file comparison + cherry-pick merge) */}
+      <TuneFileDiffDialog
+        isOpen={tuneFileDiffOpen}
+        onClose={() => setTuneFileDiffOpen(false)}
+      />
+      
+      {/* Dyno Data Overlay */}
+      <DynoOverlay
+        isOpen={dynoOverlayOpen}
+        onClose={() => setDynoOverlayOpen(false)}
       />
       
       {/* Performance Calculator Dialog */}

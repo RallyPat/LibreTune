@@ -55,6 +55,41 @@ pub struct TuneFile {
     /// Lists all constants with their types/offsets at save time
     #[serde(default)]
     pub constant_manifest: Option<Vec<ConstantManifestEntry>>,
+
+    /// User annotations / notes on specific constants or table cells
+    /// Key format: "constant_name" for scalars, "table_name:row:col" for cells
+    #[serde(default)]
+    pub annotations: HashMap<String, TuneAnnotation>,
+}
+
+/// A user annotation attached to a constant, table, or cell
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TuneAnnotation {
+    /// The annotation text / note
+    pub text: String,
+    /// Author who created this annotation
+    pub author: Option<String>,
+    /// ISO 8601 timestamp when created
+    pub created: String,
+    /// ISO 8601 timestamp when last modified
+    pub modified: Option<String>,
+    /// Optional severity/priority tag
+    pub tag: Option<AnnotationTag>,
+}
+
+/// Tags for categorizing annotations
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum AnnotationTag {
+    /// Informational note
+    Info,
+    /// Something that needs attention
+    Warning,
+    /// Critical issue that must be fixed
+    Critical,
+    /// Successful tuning achievement
+    Success,
+    /// Reminder for future tuning session
+    Todo,
 }
 
 /// A value in a tune file
@@ -124,6 +159,7 @@ impl TuneFile {
             pc_variables: HashMap::new(),
             ini_metadata: None,
             constant_manifest: None,
+            annotations: HashMap::new(),
         }
     }
 
@@ -1001,6 +1037,48 @@ impl TuneFile {
             .or_else(|| self.pc_variables.get(name))
     }
 
+    /// Set an annotation on a constant, table, or cell
+    /// Key format: "constant_name" for scalars, "table_name:row:col" for cells
+    pub fn set_annotation(&mut self, key: impl Into<String>, annotation: TuneAnnotation) {
+        self.annotations.insert(key.into(), annotation);
+        self.touch();
+    }
+
+    /// Get an annotation by key
+    pub fn get_annotation(&self, key: &str) -> Option<&TuneAnnotation> {
+        self.annotations.get(key)
+    }
+
+    /// Remove an annotation by key
+    pub fn remove_annotation(&self, key: &str) -> bool {
+        // TuneFile is Clone, so we create a new map for immutable path
+        // but we only need the check
+        self.annotations.contains_key(key)
+    }
+
+    /// Remove an annotation (mutable version)
+    pub fn delete_annotation(&mut self, key: &str) -> bool {
+        let removed = self.annotations.remove(key).is_some();
+        if removed {
+            self.touch();
+        }
+        removed
+    }
+
+    /// Get all annotations for a table (any key starting with "table_name:")
+    pub fn get_table_annotations(&self, table_name: &str) -> Vec<(&String, &TuneAnnotation)> {
+        let prefix = format!("{}:", table_name);
+        self.annotations
+            .iter()
+            .filter(|(k, _)| k.starts_with(&prefix) || *k == table_name)
+            .collect()
+    }
+
+    /// Get all annotations
+    pub fn all_annotations(&self) -> &HashMap<String, TuneAnnotation> {
+        &self.annotations
+    }
+
     /// Save only PC variables to a separate file (pcVariableValues.msq format)
     pub fn save_pc_variables<P: AsRef<Path>>(&self, path: P, signature: &str) -> io::Result<()> {
         let mut xml = String::new();
@@ -1099,6 +1177,7 @@ impl Default for TuneFile {
             pc_variables: HashMap::new(),
             ini_metadata: None,
             constant_manifest: None,
+            annotations: HashMap::new(),
         }
     }
 }

@@ -6370,6 +6370,207 @@ async fn get_tune_health_report(
     Ok(scorer.score_table(table_values, &hit_counts, &table_data.x_bins, &table_data.y_bins))
 }
 
+// ============================================================================
+// Cross-file Tune Comparison & Collaborative Tuning
+// ============================================================================
+
+/// Compare two tune files (from disk) and return detailed diff
+#[tauri::command]
+async fn compare_tune_files(
+    path_a: String,
+    path_b: String,
+) -> Result<libretune_core::tune::TuneDiff, String> {
+    use libretune_core::tune::{TuneDiff, TuneFile};
+
+    let tune_a = TuneFile::load(&path_a).map_err(|e| format!("Failed to load tune A: {}", e))?;
+    let tune_b = TuneFile::load(&path_b).map_err(|e| format!("Failed to load tune B: {}", e))?;
+
+    Ok(TuneDiff::compare(&tune_a, &tune_b))
+}
+
+/// Merge selected constants from another tune file into the current tune
+///
+/// # Arguments
+/// * `source_path` - Path to the source tune file to merge from
+/// * `constant_names` - List of constant names to cherry-pick
+///
+/// Returns: Number of constants merged
+#[tauri::command]
+async fn merge_from_tune(
+    state: tauri::State<'_, AppState>,
+    source_path: String,
+    constant_names: Vec<String>,
+) -> Result<usize, String> {
+    use libretune_core::tune::{TuneDiff, TuneFile};
+
+    let source =
+        TuneFile::load(&source_path).map_err(|e| format!("Failed to load source tune: {}", e))?;
+
+    let mut tune_guard = state.current_tune.lock().await;
+    let tune = tune_guard.as_mut().ok_or("No tune loaded")?;
+
+    let merged = TuneDiff::merge_selected(tune, &source, &constant_names);
+
+    // Also update the tune cache with the merged values
+    if merged > 0 {
+        let mut cache_guard = state.tune_cache.lock().await;
+        let def_guard = state.definition.lock().await;
+        if let (Some(cache), Some(def)) = (cache_guard.as_mut(), def_guard.as_ref()) {
+            for name in &constant_names {
+                if let Some(value) = source.constants.get(name) {
+                    if let Some(constant) = def.constants.get(name) {
+                        // Update raw page data in cache via write_bytes
+                        if let libretune_core::tune::TuneValue::Scalar(v) = value {
+                            let raw_val =
+                                ((*v - constant.translate as f64) / constant.scale as f64) as i64;
+                            let page = constant.page;
+                            let offset = constant.offset;
+                            cache.write_bytes(page, offset, &[(raw_val & 0xFF) as u8]);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(merged)
+}
+
+// ============================================================================
+// Tune Annotations
+// ============================================================================
+
+// ============================================================================
+// Tune Annotations
+// ============================================================================
+
+/// Set an annotation on a constant, table, or cell
+/// Key format: "constant_name" for scalars, "table_name:row:col" for cells
+#[tauri::command]
+async fn set_annotation(
+    state: tauri::State<'_, AppState>,
+    key: String,
+    text: String,
+    tag: Option<String>,
+) -> Result<(), String> {
+    use libretune_core::tune::{AnnotationTag, TuneAnnotation};
+
+    let annotation_tag = tag.and_then(|t| match t.as_str() {
+        "info" => Some(AnnotationTag::Info),
+        "warning" => Some(AnnotationTag::Warning),
+        "critical" => Some(AnnotationTag::Critical),
+        "success" => Some(AnnotationTag::Success),
+        "todo" => Some(AnnotationTag::Todo),
+        _ => None,
+    });
+
+    let annotation = TuneAnnotation {
+        text,
+        author: None,
+        created: chrono::Utc::now().to_rfc3339(),
+        modified: None,
+        tag: annotation_tag,
+    };
+
+    let mut tune_guard = state.current_tune.lock().await;
+    let tune = tune_guard.as_mut().ok_or("No tune loaded")?;
+    tune.set_annotation(key, annotation);
+
+    Ok(())
+}
+
+/// Get an annotation by key
+#[tauri::command]
+async fn get_annotation(
+    state: tauri::State<'_, AppState>,
+    key: String,
+) -> Result<Option<libretune_core::tune::TuneAnnotation>, String> {
+    let tune_guard = state.current_tune.lock().await;
+    let tune = tune_guard.as_ref().ok_or("No tune loaded")?;
+    Ok(tune.get_annotation(&key).cloned())
+}
+
+/// Get all annotations for a table
+#[tauri::command]
+async fn get_table_annotations(
+    state: tauri::State<'_, AppState>,
+    table_name: String,
+) -> Result<Vec<(String, libretune_core::tune::TuneAnnotation)>, String> {
+    let tune_guard = state.current_tune.lock().await;
+    let tune = tune_guard.as_ref().ok_or("No tune loaded")?;
+    let annotations = tune
+        .get_table_annotations(&table_name)
+        .into_iter()
+        .map(|(k, a)| (k.clone(), a.clone()))
+        .collect();
+    Ok(annotations)
+}
+
+/// Delete an annotation
+#[tauri::command]
+async fn delete_annotation(
+    state: tauri::State<'_, AppState>,
+    key: String,
+) -> Result<bool, String> {
+    let mut tune_guard = state.current_tune.lock().await;
+    let tune = tune_guard.as_mut().ok_or("No tune loaded")?;
+    Ok(tune.delete_annotation(&key))
+}
+
+/// Get all annotations in the tune
+#[tauri::command]
+async fn get_all_annotations(
+    state: tauri::State<'_, AppState>,
+) -> Result<std::collections::HashMap<String, libretune_core::tune::TuneAnnotation>, String> {
+    let tune_guard = state.current_tune.lock().await;
+    let tune = tune_guard.as_ref().ok_or("No tune loaded")?;
+    Ok(tune.all_annotations().clone())
+}
+
+// ============================================================================
+// Dyno Data Import & Overlay
+// ============================================================================
+
+/// Load a dyno CSV file and return the parsed run data
+#[tauri::command]
+async fn load_dyno_run(
+    path: String,
+    name: String,
+) -> Result<libretune_core::datalog::dyno::DynoRun, String> {
+    libretune_core::datalog::dyno::DynoRun::from_csv(&path, name)
+        .map_err(|e| format!("Failed to load dyno CSV: {}", e))
+}
+
+/// Detect CSV column headers for dyno import
+#[tauri::command]
+async fn detect_dyno_headers(
+    path: String,
+) -> Result<Vec<String>, String> {
+    libretune_core::datalog::dyno::detect_csv_headers(&path)
+        .map_err(|e| format!("Failed to read CSV headers: {}", e))
+}
+
+/// Compare two dyno runs
+#[tauri::command]
+async fn compare_dyno_runs(
+    run_a: libretune_core::datalog::dyno::DynoRun,
+    run_b: libretune_core::datalog::dyno::DynoRun,
+) -> Result<libretune_core::datalog::dyno::DynoComparison, String> {
+    Ok(libretune_core::datalog::dyno::DynoComparison::compare(run_a, run_b))
+}
+
+/// Map dyno data onto a table for overlay visualization
+#[tauri::command]
+async fn get_dyno_table_overlay(
+    state: tauri::State<'_, AppState>,
+    table_name: String,
+    dyno_run: libretune_core::datalog::dyno::DynoRun,
+) -> Result<libretune_core::datalog::dyno::DynoTableOverlay, String> {
+    let table_data = get_table_data_internal(&state, &table_name).await?;
+
+    Ok(dyno_run.map_to_table(&table_data.x_bins, &table_data.y_bins, None))
+}
+
 /// Helper function to get table data internally (avoids code duplication)
 async fn get_table_data_internal(
     state: &tauri::State<'_, AppState>,
@@ -13467,6 +13668,17 @@ pub fn run() {
             get_predicted_fills,
             get_tune_anomalies,
             get_tune_health_report,
+            compare_tune_files,
+            merge_from_tune,
+            set_annotation,
+            get_annotation,
+            get_table_annotations,
+            delete_annotation,
+            get_all_annotations,
+            load_dyno_run,
+            detect_dyno_headers,
+            compare_dyno_runs,
+            get_dyno_table_overlay,
             rebin_table,
             smooth_table,
             interpolate_cells,

@@ -5,6 +5,7 @@
 mod format;
 mod playback;
 mod recorder;
+pub mod dyno;
 
 pub use format::LogFormat;
 pub use playback::LogPlayer;

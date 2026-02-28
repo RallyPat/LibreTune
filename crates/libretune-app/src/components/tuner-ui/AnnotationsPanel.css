@@ -1,0 +1,186 @@
+/* Annotations Panel Styles */
+
+.annotations-panel {
+  background: rgba(25, 25, 35, 0.9);
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+  margin-top: 8px;
+}
+
+.annotations-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.annotations-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #aaa;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.annotations-add-btn {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 1px solid rgba(79, 195, 247, 0.3);
+  background: rgba(79, 195, 247, 0.1);
+  color: #4fc3f7;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.annotations-add-btn:hover {
+  background: rgba(79, 195, 247, 0.2);
+}
+
+.annotation-add-form {
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.annotation-key-input,
+.annotation-text-input {
+  width: 100%;
+  padding: 6px 8px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  color: #e0e0e0;
+  font-size: 12px;
+  font-family: inherit;
+  resize: vertical;
+  box-sizing: border-box;
+}
+
+.annotation-key-input {
+  font-family: monospace;
+}
+
+.annotation-add-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.annotation-add-actions select {
+  padding: 4px 8px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  color: #e0e0e0;
+  font-size: 11px;
+}
+
+.annotation-save-btn {
+  padding: 4px 12px;
+  background: rgba(102, 187, 106, 0.2);
+  border: 1px solid rgba(102, 187, 106, 0.4);
+  border-radius: 4px;
+  color: #66bb6a;
+  font-size: 11px;
+  cursor: pointer;
+  margin-left: auto;
+}
+
+.annotation-save-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.annotations-list {
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.annotations-empty {
+  padding: 16px;
+  text-align: center;
+  color: #555;
+  font-size: 12px;
+}
+
+.annotation-item {
+  padding: 8px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+  transition: background 0.2s;
+}
+
+.annotation-item:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.annotation-item-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.annotation-tag {
+  padding: 1px 6px;
+  border-radius: 8px;
+  font-size: 9px;
+  font-weight: 700;
+  color: #fff;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.annotation-key {
+  font-family: monospace;
+  font-size: 11px;
+  color: #aaa;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.annotation-delete-btn {
+  padding: 0 4px;
+  background: transparent;
+  border: none;
+  color: #555;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.annotation-delete-btn:hover {
+  color: #ef5350;
+}
+
+.annotation-text {
+  font-size: 12px;
+  color: #ccc;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.annotation-meta {
+  font-size: 10px;
+  color: #666;
+  margin-top: 2px;
+}
+
+/* Scrollbar */
+.annotations-list::-webkit-scrollbar {
+  width: 4px;
+}
+
+.annotations-list::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 2px;
+}

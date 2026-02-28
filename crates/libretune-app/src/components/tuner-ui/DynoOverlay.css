@@ -1,0 +1,256 @@
+/* Dyno Data Overlay Styles */
+
+.dyno-overlay-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: rgba(20, 20, 30, 0.95);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.dyno-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.dyno-header h3 {
+  margin: 0;
+  font-size: 14px;
+  color: #e0e0e0;
+}
+
+.dyno-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.dyno-import-btn {
+  padding: 5px 12px;
+  background: rgba(79, 195, 247, 0.15);
+  border: 1px solid rgba(79, 195, 247, 0.3);
+  border-radius: 4px;
+  color: #4fc3f7;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.dyno-import-btn:hover:not(:disabled) {
+  background: rgba(79, 195, 247, 0.25);
+}
+
+.dyno-import-btn:disabled {
+  opacity: 0.5;
+}
+
+.dyno-channel-toggle {
+  display: flex;
+  gap: 2px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 4px;
+  padding: 2px;
+}
+
+.dyno-channel-toggle button {
+  padding: 3px 8px;
+  font-size: 11px;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: #888;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.dyno-channel-toggle button.active {
+  background: rgba(79, 195, 247, 0.2);
+  color: #4fc3f7;
+}
+
+.dyno-close-btn {
+  padding: 2px 8px;
+  background: transparent;
+  border: none;
+  color: #888;
+  font-size: 16px;
+  cursor: pointer;
+}
+
+.dyno-close-btn:hover {
+  color: #e0e0e0;
+}
+
+.dyno-error {
+  padding: 8px 16px;
+  color: #ef5350;
+  font-size: 12px;
+  background: rgba(239, 83, 80, 0.08);
+}
+
+.dyno-chart-area {
+  flex: 1;
+  position: relative;
+  min-height: 250px;
+}
+
+.dyno-canvas {
+  width: 100%;
+  height: 100%;
+}
+
+.dyno-empty {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  text-align: center;
+  color: #666;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.dyno-runs {
+  padding: 10px 16px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.dyno-run-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  margin-bottom: 4px;
+  background: rgba(255, 255, 255, 0.03);
+  transition: background 0.2s;
+}
+
+.dyno-run-card:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.dyno-run-color {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.dyno-run-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.dyno-run-name {
+  font-size: 12px;
+  color: #e0e0e0;
+  font-weight: 600;
+}
+
+.dyno-run-stats {
+  font-size: 10px;
+  color: #888;
+}
+
+.dyno-run-remove {
+  padding: 2px 6px;
+  background: transparent;
+  border: none;
+  color: #666;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.dyno-run-remove:hover {
+  color: #ef5350;
+}
+
+.dyno-compare {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+  margin-top: 4px;
+  border-top: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.dyno-compare select {
+  padding: 4px 8px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  color: #e0e0e0;
+  font-size: 11px;
+}
+
+.dyno-compare span {
+  color: #666;
+  font-size: 11px;
+}
+
+.dyno-compare button {
+  padding: 4px 10px;
+  background: rgba(79, 195, 247, 0.15);
+  border: 1px solid rgba(79, 195, 247, 0.3);
+  border-radius: 4px;
+  color: #4fc3f7;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.dyno-compare button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.dyno-comparison-results {
+  display: flex;
+  gap: 16px;
+  padding: 8px 0;
+}
+
+.dyno-comp-stat {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  background: rgba(255, 255, 255, 0.03);
+  padding: 8px 12px;
+  border-radius: 4px;
+}
+
+.dyno-comp-stat .label {
+  font-size: 10px;
+  color: #888;
+  text-transform: uppercase;
+}
+
+.dyno-comp-stat .value {
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.dyno-comp-stat .value.gain {
+  color: #66bb6a;
+}
+
+.dyno-comp-stat .value.loss {
+  color: #ef5350;
+}
+
+/* Scrollbar */
+.dyno-runs::-webkit-scrollbar {
+  width: 4px;
+}
+
+.dyno-runs::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 2px;
+}
