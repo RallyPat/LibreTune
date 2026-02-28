@@ -69,11 +69,12 @@ See [docs/src/technical/plugin-system.md](docs/src/technical/plugin-system.md) f
 
 ### Dashboard & Gauges
 - **TS-Compatible Dashboards**: Import existing .dash files
-- **9 Gauge Types**: Analog dials, bar gauges (horizontal/vertical), digital readouts, sweep gauges, line graphs, histograms, dashed bars
+- **13 Gauge Types**: Analog dials, bar gauges (horizontal/vertical), digital readouts, sweep gauges, line graphs, histograms, dashed bars, round gauges, fuel meters, tachometers
 - **Customizable Layout**: Drag-and-drop gauge positioning
 - **Designer Mode**: Edit dashboard layouts visually
 - **Dashboard Management**: Create, duplicate, rename, delete, export dashboards
 - **3 Default Dashboards**: Basic, Racing, and Tuning layouts included
+- **Protected Tab**: Dashboard tab cannot be accidentally closed; always recoverable via View → Dashboard
 
 ### AutoTune
 - **Live Auto-tuning**: Real-time fuel table recommendations based on AFR targets

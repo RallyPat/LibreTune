@@ -8,14 +8,15 @@
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { TsGaugeConfig, TsColor, tsColorToRgba, tsColorToHex } from '../dashboards/dashTypes';
+import { useRealtimeStore, getChannelHistoryBuffer } from '../../stores/realtimeStore';
 
 interface TsGaugeProps {
   config: TsGaugeConfig;
   value: number;
   embeddedImages?: Map<string, string>;
   legacyMode?: boolean;
-  /** Optional history array for strip chart visualization (LineGraph only) */
-  history?: number[];
+  /** When true, the value prop takes priority over the store subscription (sweep/demo mode) */
+  overrideStore?: boolean;
 }
 
 // Cache for loaded fonts
@@ -24,21 +25,45 @@ const loadedFonts = new Set<string>();
 // Cache for loaded HTMLImageElement objects (for canvas drawImage)
 const loadedImages = new Map<string, HTMLImageElement>();
 
-// Threshold for value change to trigger redraw (0.5% of gauge range)
-const VALUE_CHANGE_THRESHOLD_PERCENT = 0.5;
+// Lerp factor per animation frame (25% of remaining distance → reaches within 1% in ~17 frames ≈ 280ms @ 60fps)
+const ANIMATION_LERP = 0.25;
 
 /**
  * Internal TsGauge component - wrapped in React.memo below
  */
-function TsGaugeInner({ config, value, embeddedImages, legacyMode = false, history }: TsGaugeProps) {
+function TsGaugeInner({ config, value, embeddedImages, legacyMode = false, overrideStore = false }: TsGaugeProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [fontsReady, setFontsReady] = useState(false);
   const [imagesReady, setImagesReady] = useState(false);
 
-  // Clamp value to min/max if peg_limits is true
-  const clampedValue = config.peg_limits 
+  // Clamp the incoming prop value to min/max
+  const clampedValue = config.peg_limits
     ? Math.max(config.min, Math.min(config.max, value))
     : value;
+
+  // displayValueRef holds the CURRENTLY DISPLAYED (smoothly animated) value.
+  // All draw functions read displayValueRef.current via closure.
+  const displayValueRef = useRef(clampedValue);
+
+  // targetRef holds the ANIMATION TARGET — updated by:
+  //   1. Direct Zustand store subscription (live ECU data, bypasses React render)
+  //   2. Prop changes when overrideStore is true (sweep/demo modes)
+  const targetRef = useRef(clampedValue);
+
+  // Ref to the "kick animation" function — set inside the main render effect.
+  // Called by the prop-sync effect when sweep/demo values change.
+  const startAnimationRef = useRef<(() => void) | null>(null);
+
+  // Track overrideStore in a ref so the animation loop closure always has current value.
+  const overrideStoreRef = useRef(overrideStore);
+  overrideStoreRef.current = overrideStore;
+
+  // Sync targetRef when overrideStore is true (sweep/demo mode).
+  useEffect(() => {
+    if (!overrideStore) return;
+    targetRef.current = clampedValue;
+    if (startAnimationRef.current) startAnimationRef.current();
+  }, [clampedValue, overrideStore]);
 
   // Load embedded fonts and images
   useEffect(() => {
@@ -164,20 +189,20 @@ function TsGaugeInner({ config, value, embeddedImages, legacyMode = false, histo
   /** Get color based on value thresholds */
   const getValueColor = useCallback((): TsColor => {
     // Use != null to catch both null and undefined
-    if (config.high_critical != null && clampedValue >= config.high_critical) {
+    if (config.high_critical != null && displayValueRef.current >= config.high_critical) {
       return config.critical_color;
     }
-    if (config.low_critical != null && clampedValue <= config.low_critical) {
+    if (config.low_critical != null && displayValueRef.current <= config.low_critical) {
       return config.critical_color;
     }
-    if (config.high_warning != null && clampedValue >= config.high_warning) {
+    if (config.high_warning != null && displayValueRef.current >= config.high_warning) {
       return config.warn_color;
     }
-    if (config.low_warning != null && clampedValue <= config.low_warning) {
+    if (config.low_warning != null && displayValueRef.current <= config.low_warning) {
       return config.warn_color;
     }
     return config.font_color;
-  }, [config, clampedValue]);
+  }, [config]);
 
   /** Create a metallic gradient for bezels */
   const createMetallicGradient = useCallback((
@@ -215,130 +240,267 @@ function TsGaugeInner({ config, value, embeddedImages, legacyMode = false, histo
     return `#${(0x1000000 + R * 0x10000 + G * 0x100 + B).toString(16).slice(1)}`;
   };
 
-  // Ref to track pending rAF and last drawn value
+  // Ref to track the pending animation frame ID
   const rafIdRef = useRef<number | null>(null);
-  const lastDrawnValueRef = useRef<number | null>(null);
 
+  // Frame limiter: cap drawing to ~30fps per gauge to avoid overwhelming the GPU.
+  // With 10+ gauges each running at 60fps, the browser can't keep up with 600+ canvas
+  // draws per second (each AnalogGauge draw creates gradients, arcs, text = 2-5ms).
+  // By limiting to 30fps per gauge, total draws drop to ~300/sec, well within budget.
+  const DRAW_INTERVAL_MS = 33; // ~30fps per gauge
+  const lastDrawTimeRef = useRef(0);
+
+  // Cached canvas dimensions — updated only by ResizeObserver, NOT every frame.
+  // Setting canvas.width/height destroys and reallocates the GPU buffer, so we must
+  // avoid doing it on every animation frame.  With 10-20 gauges at 60fps that would
+  // mean 600-1200 buffer re-creations/sec, which freezes the browser completely.
+  const canvasSizeRef = useRef<{ w: number; h: number; cssW: number; cssH: number }>({
+    w: 0, h: 0, cssW: 0, cssH: 0,
+  });
+
+  // ResizeObserver: watches the canvas element and updates the backing-store size
+  // only when the actual CSS size changes.
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const syncSize = () => {
+      const rect = canvas.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) return;
+      const dpr = window.devicePixelRatio || 1;
+      const newW = Math.round(rect.width * dpr);
+      const newH = Math.round(rect.height * dpr);
+      const cur = canvasSizeRef.current;
+      if (cur.w !== newW || cur.h !== newH) {
+        canvas.width = newW;
+        canvas.height = newH;
+        canvasSizeRef.current = { w: newW, h: newH, cssW: rect.width, cssH: rect.height };
+        // Kick animation to redraw at new size
+        if (startAnimationRef.current) startAnimationRef.current();
+      }
+    };
+
+    // Initial size sync
+    syncSize();
+
+    const ro = new ResizeObserver(() => syncSize());
+    ro.observe(canvas);
+    return () => ro.disconnect();
+  }, []);
+
+  // Main animation/render effect.
+  // Self-contained: the animation loop reads the store value imperatively each frame
+  // (via getState(), NOT via subscribe). This eliminates the fragile cross-effect ref
+  // sharing that caused gauges to freeze when the animation effect re-ran and the
+  // subscription still held a stale startAnimationRef.
+  //
+  // When overrideStore is true (sweep/demo), targetRef is driven by the prop-sync
+  // effect above instead. The loop always runs regardless; it just doesn't read the
+  // store during sweep/demo.
   useEffect(() => {
     if (!fontsReady || !imagesReady) return;
-    
+
     const canvas = canvasRef.current;
     if (!canvas) return;
 
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    // Skip redraw if value hasn't changed significantly (within threshold)
-    const range = config.max - config.min;
-    const threshold = range * (VALUE_CHANGE_THRESHOLD_PERCENT / 100);
-    if (lastDrawnValueRef.current !== null && 
-        Math.abs(clampedValue - lastDrawnValueRef.current) < threshold) {
-      return;
-    }
-
-    // Cancel any pending rAF to avoid redundant redraws
+    // Cancel any in-progress animation for this gauge
     if (rafIdRef.current !== null) {
       cancelAnimationFrame(rafIdRef.current);
+      rafIdRef.current = null;
     }
 
-    // Schedule draw on next animation frame (throttles to 60fps max)
-    rafIdRef.current = requestAnimationFrame(() => {
-      rafIdRef.current = null;
-      lastDrawnValueRef.current = clampedValue;
+    // Channel lookup variables — cached after first successful resolution.
+    const channel = config.output_channel || '';
+    const channelLower = channel.toLowerCase();
+    let resolvedKey: string | null = null;
 
-      // Set canvas size to match container
-      const rect = canvas.getBoundingClientRect();
-      const dpr = window.devicePixelRatio || 1;
-      canvas.width = rect.width * dpr;
-      canvas.height = rect.height * dpr;
-      
-      // Reset transform before scaling to prevent accumulation
+    // Stop animating when within 0.1% of the gauge range of the target
+    const epsilon = Math.max((config.max - config.min) * 0.001, 0.01);
+
+    /** Look up the channel value in the store (case-insensitive with caching). */
+    const readStoreValue = (): number | undefined => {
+      const channels = useRealtimeStore.getState().channels;
+      if (resolvedKey !== null) {
+        return channels[resolvedKey];
+      }
+      // Try exact match
+      let val = channels[channel];
+      if (val !== undefined) { resolvedKey = channel; return val; }
+      // Try lowercase
+      val = channels[channelLower];
+      if (val !== undefined) { resolvedKey = channelLower; return val; }
+      // One-time full scan (O(n) keys, happens only once per gauge instance)
+      for (const key of Object.keys(channels)) {
+        if (key.toLowerCase() === channelLower) {
+          resolvedKey = key;
+          return channels[key];
+        }
+      }
+      return undefined;
+    };
+
+    /** Draw one frame using displayValueRef.current as the gauge value */
+    const drawFrame = () => {
+      const { w, h, cssW, cssH } = canvasSizeRef.current;
+      if (w === 0 || h === 0) return;
+      const dpr = w / cssW;
+      // DO NOT set canvas.width/height here — that destroys the GPU buffer.
+      // ResizeObserver handles resizing when the container size actually changes.
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.scale(dpr, dpr);
-
-      // Clear canvas
-      ctx.clearRect(0, 0, rect.width, rect.height);
-
-      // Enable anti-aliasing for smoother rendering
+      ctx.clearRect(0, 0, cssW, cssH);
       if (config.antialiasing_on === false) {
         ctx.imageSmoothingEnabled = false;
       } else {
         ctx.imageSmoothingEnabled = true;
         ctx.imageSmoothingQuality = 'high';
       }
-    
-      // Get needle image if configured
       const needleImage = getEmbeddedImage(config.needle_image_file_name);
-      
-      // Get background image if configured
       const bgImage = getEmbeddedImage(config.background_image_file_name);
-
-      // Render based on gauge painter type
+      // All draw functions read displayValueRef.current via closure
       switch (config.gauge_painter) {
         case 'BasicReadout':
-          drawBasicReadout(ctx, rect.width, rect.height, bgImage);
+          drawBasicReadout(ctx, cssW, cssH, bgImage);
           break;
         case 'HorizontalBarGauge':
-          drawHorizontalBar(ctx, rect.width, rect.height);
+          drawHorizontalBar(ctx, cssW, cssH);
           break;
         case 'VerticalBarGauge':
-          drawVerticalBar(ctx, rect.width, rect.height);
+          drawVerticalBar(ctx, cssW, cssH);
           break;
         case 'AnalogGauge':
         case 'BasicAnalogGauge':
         case 'CircleAnalogGauge':
-          drawAnalogGauge(ctx, rect.width, rect.height, needleImage, bgImage);
+          drawAnalogGauge(ctx, cssW, cssH, needleImage, bgImage);
           break;
         case 'AsymmetricSweepGauge':
-          drawSweepGauge(ctx, rect.width, rect.height);
+          drawSweepGauge(ctx, cssW, cssH);
           break;
         case 'HorizontalLineGauge':
-          drawHorizontalLine(ctx, rect.width, rect.height);
+          drawHorizontalLine(ctx, cssW, cssH);
           break;
         case 'HorizontalDashedBar':
-          drawHorizontalDashedBar(ctx, rect.width, rect.height);
+          drawHorizontalDashedBar(ctx, cssW, cssH);
           break;
         case 'VerticalDashedBar':
-          drawVerticalDashedBar(ctx, rect.width, rect.height);
+          drawVerticalDashedBar(ctx, cssW, cssH);
           break;
         case 'Histogram':
-          drawHistogram(ctx, rect.width, rect.height);
+          drawHistogram(ctx, cssW, cssH);
           break;
         case 'LineGraph':
-          drawLineGraph(ctx, rect.width, rect.height);
+          drawLineGraph(ctx, cssW, cssH);
           break;
         case 'AnalogBarGauge':
-          drawAnalogBarGauge(ctx, rect.width, rect.height);
+          drawAnalogBarGauge(ctx, cssW, cssH);
           break;
         case 'AnalogMovingBarGauge':
-          drawAnalogMovingBarGauge(ctx, rect.width, rect.height);
+          drawAnalogMovingBarGauge(ctx, cssW, cssH);
           break;
         case 'RoundGauge':
-          drawRoundGauge(ctx, rect.width, rect.height);
+          drawRoundGauge(ctx, cssW, cssH);
           break;
         case 'RoundDashedGauge':
-          drawRoundDashedGauge(ctx, rect.width, rect.height);
+          drawRoundDashedGauge(ctx, cssW, cssH);
           break;
         case 'FuelMeter':
-          drawFuelMeter(ctx, rect.width, rect.height);
+          drawFuelMeter(ctx, cssW, cssH);
           break;
         case 'Tachometer':
-          drawTachometer(ctx, rect.width, rect.height);
+          drawTachometer(ctx, cssW, cssH);
           break;
         default:
-          // Fallback to basic readout for unimplemented types
-          drawBasicReadout(ctx, rect.width, rect.height, bgImage);
+          drawBasicReadout(ctx, cssW, cssH, bgImage);
       }
-    }); // End of requestAnimationFrame callback
+    };
 
-    // Cleanup: cancel pending rAF on unmount or re-render
+    /** Animation loop: runs continuously while the gauge is mounted.
+     *  In normal mode: reads latest value from the store each frame (imperatively via getState).
+     *  In override mode (sweep/demo): targetRef is set by the prop-sync effect instead.
+     *  Drawing is throttled to ~30fps to avoid overwhelming the GPU.
+     *  The loop idles (stops rAF) when displayValue has converged to target—
+     *  but a 100ms watchdog interval re-checks the store to catch new values.
+     */
+    let loopActive = true;
+
+    const animate = (timestamp: number) => {
+      if (!loopActive) return;
+
+      // In normal mode, read the store each frame to pick up new data.
+      if (!overrideStoreRef.current && channel) {
+        const raw = readStoreValue();
+        if (raw !== undefined) {
+          const peg = config.peg_limits;
+          const clamped = peg ? Math.max(config.min, Math.min(config.max, raw)) : raw;
+          targetRef.current = clamped;
+        }
+      }
+
+      const target = targetRef.current;
+      const diff = target - displayValueRef.current;
+      if (Math.abs(diff) > epsilon) {
+        displayValueRef.current = displayValueRef.current + diff * ANIMATION_LERP;
+        // Only draw if enough time has passed since last draw
+        if (timestamp - lastDrawTimeRef.current >= DRAW_INTERVAL_MS) {
+          drawFrame();
+          lastDrawTimeRef.current = timestamp;
+        }
+        rafIdRef.current = requestAnimationFrame(animate);
+      } else {
+        // Snap to target and always draw final frame
+        displayValueRef.current = target;
+        drawFrame();
+        lastDrawTimeRef.current = timestamp;
+        // Loop goes idle — the watchdog interval below will restart if needed.
+        rafIdRef.current = null;
+      }
+    };
+
+    /** Kick the animation loop if it is not already running. */
+    const kickAnimation = () => {
+      if (loopActive && rafIdRef.current === null) {
+        rafIdRef.current = requestAnimationFrame(animate);
+      }
+    };
+
+    // Expose kickAnimation so the prop-sync effect can restart it during sweep.
+    startAnimationRef.current = kickAnimation;
+
+    // Initial animation kick
+    rafIdRef.current = requestAnimationFrame(animate);
+
+    // Watchdog: when the rAF loop is idle (converged), periodically check the store
+    // for new values. This is the safety net — costs nothing when values are stable
+    // (one hash lookup per gauge every 100ms = ~100 lookups/sec total for 10 gauges).
+    const watchdog = setInterval(() => {
+      if (!loopActive || overrideStoreRef.current || !channel) return;
+      if (rafIdRef.current !== null) return; // Already animating
+      const raw = readStoreValue();
+      if (raw !== undefined) {
+        const peg = config.peg_limits;
+        const clamped = peg ? Math.max(config.min, Math.min(config.max, raw)) : raw;
+        if (Math.abs(clamped - displayValueRef.current) > epsilon) {
+          targetRef.current = clamped;
+          kickAnimation();
+        }
+      }
+    }, 100);
+
     return () => {
+      loopActive = false;
+      startAnimationRef.current = null;
+      clearInterval(watchdog);
       if (rafIdRef.current !== null) {
         cancelAnimationFrame(rafIdRef.current);
         rafIdRef.current = null;
       }
     };
-  }, [config, clampedValue, value, embeddedImages, fontsReady, imagesReady, legacyMode, getValueColor, createMetallicGradient, getEmbeddedImage, getFontFamily]);
+    // Note: clampedValue intentionally NOT in deps — target is driven by targetRef,
+    // updated by store subscription (live data) and clampedValue sync effect (sweep/demo).
+  }, [config, embeddedImages, fontsReady, imagesReady, legacyMode, getValueColor, createMetallicGradient, getEmbeddedImage, getFontFamily]);
 
   /** Draw digital readout (LCD style) with improved visuals */
   const drawBasicReadout = (
@@ -410,7 +572,7 @@ function TsGaugeInner({ config, value, embeddedImages, legacyMode = false, histo
 
     // Value in center (large, LCD-style)
     const valueColor = getValueColor();
-    const valueText = clampedValue.toFixed(config.value_digits);
+    const valueText = displayValueRef.current.toFixed(config.value_digits);
     
     // Value glow effect for active values
     if (valueColor !== config.font_color) {
@@ -487,7 +649,7 @@ function TsGaugeInner({ config, value, embeddedImages, legacyMode = false, histo
     ctx.shadowColor = 'transparent';
 
     // Bar fill with gradient
-    const fillPercent = (clampedValue - config.min) / (config.max - config.min);
+    const fillPercent = (displayValueRef.current - config.min) / (config.max - config.min);
     const fillWidth = barWidth * Math.max(0, Math.min(1, fillPercent));
     if (fillWidth > 0) {
       const valueColor = getValueColor();
@@ -519,7 +681,7 @@ function TsGaugeInner({ config, value, embeddedImages, legacyMode = false, histo
     ctx.font = getFontSpec(Math.max(11, height * 0.18), { bold: true, monospace: true });
     ctx.textAlign = 'right';
     ctx.textBaseline = 'top';
-    ctx.fillText(`${clampedValue.toFixed(config.value_digits)} ${config.units}`, width - padding, 3);
+    ctx.fillText(`${displayValueRef.current.toFixed(config.value_digits)} ${config.units}`, width - padding, 3);
     ctx.shadowColor = 'transparent';
   };
 
@@ -568,7 +730,7 @@ function TsGaugeInner({ config, value, embeddedImages, legacyMode = false, histo
     ctx.shadowColor = 'transparent';
 
     // Bar fill (from bottom) with gradient
-    const fillPercent = (clampedValue - config.min) / (config.max - config.min);
+    const fillPercent = (displayValueRef.current - config.min) / (config.max - config.min);
     const fillHeight = barHeight * Math.max(0, Math.min(1, fillPercent));
     if (fillHeight > 0) {
       const valueColor = getValueColor();
@@ -612,7 +774,7 @@ function TsGaugeInner({ config, value, embeddedImages, legacyMode = false, histo
     ctx.font = getFontSpec(Math.max(11, labelHeight * 0.9), { bold: true, monospace: true });
     ctx.textAlign = 'center';
     ctx.textBaseline = 'bottom';
-    ctx.fillText(`${clampedValue.toFixed(config.value_digits)}`, width / 2, height - 2);
+    ctx.fillText(`${displayValueRef.current.toFixed(config.value_digits)}`, width / 2, height - 2);
     ctx.shadowColor = 'transparent';
   };
 
@@ -794,7 +956,7 @@ function TsGaugeInner({ config, value, embeddedImages, legacyMode = false, histo
     }
 
     // Draw needle with shadow
-    const valuePercent = (clampedValue - config.min) / (config.max - config.min);
+    const valuePercent = (displayValueRef.current - config.min) / (config.max - config.min);
     const needleAngle = angleAt(valuePercent);
     // Use config.needle_length if present, otherwise use a visually correct default
     let needleLength: number;
@@ -882,7 +1044,7 @@ function TsGaugeInner({ config, value, embeddedImages, legacyMode = false, histo
 
     // Value display with background (move down to avoid overlap)
     const valueFontSize = Math.max(11, faceRadius * 0.16);
-    const valueText = `${clampedValue.toFixed(config.value_digits)} ${config.units}`;
+    const valueText = `${displayValueRef.current.toFixed(config.value_digits)} ${config.units}`;
     ctx.font = getFontSpec(valueFontSize, { bold: true, monospace: true });
     const valueWidth = ctx.measureText(valueText).width;
     const valueY = centerY + faceRadius * 0.55;
@@ -968,7 +1130,7 @@ function TsGaugeInner({ config, value, embeddedImages, legacyMode = false, histo
     }
 
     // Draw filled arc with gradient
-    const valuePercent = Math.max(0, Math.min(1, (clampedValue - config.min) / (config.max - config.min)));
+    const valuePercent = Math.max(0, Math.min(1, (displayValueRef.current - config.min) / (config.max - config.min)));
     const valueAngle = angleAt(valuePercent);
     const valueColor = getValueColor();
     const valueHex = tsColorToHex(valueColor);
@@ -1072,7 +1234,7 @@ function TsGaugeInner({ config, value, embeddedImages, legacyMode = false, histo
     const sweepValueY = config.display_value_at_180
       ? centerY + radius * 0.25
       : centerY;
-    ctx.fillText(clampedValue.toFixed(config.value_digits), centerX, sweepValueY);
+    ctx.fillText(displayValueRef.current.toFixed(config.value_digits), centerX, sweepValueY);
     ctx.shadowColor = 'transparent';
 
     // Title below value
@@ -1124,7 +1286,7 @@ function TsGaugeInner({ config, value, embeddedImages, legacyMode = false, histo
     ctx.shadowColor = 'transparent';
 
     // Filled portion
-    const fillPercent = Math.max(0, Math.min(1, (clampedValue - config.min) / (config.max - config.min)));
+    const fillPercent = Math.max(0, Math.min(1, (displayValueRef.current - config.min) / (config.max - config.min)));
     const fillLength = lineWidth * fillPercent;
     const valueColor = getValueColor();
     const valueHex = tsColorToHex(valueColor);
@@ -1165,7 +1327,7 @@ function TsGaugeInner({ config, value, embeddedImages, legacyMode = false, histo
     ctx.font = getFontSpec(Math.max(11, height * 0.22), { bold: true, monospace: true });
     ctx.textAlign = 'right';
     ctx.textBaseline = 'top';
-    ctx.fillText(`${clampedValue.toFixed(config.value_digits)} ${config.units}`, width - padding, 3);
+    ctx.fillText(`${displayValueRef.current.toFixed(config.value_digits)} ${config.units}`, width - padding, 3);
     ctx.shadowColor = 'transparent';
 
     // Min/max labels
@@ -1210,7 +1372,7 @@ function TsGaugeInner({ config, value, embeddedImages, legacyMode = false, histo
     ctx.shadowColor = 'transparent';
 
     // Draw segments
-    const fillPercent = (clampedValue - config.min) / (config.max - config.min);
+    const fillPercent = (displayValueRef.current - config.min) / (config.max - config.min);
     const filledSegments = Math.ceil(fillPercent * numSegments);
 
     for (let i = 0; i < numSegments; i++) {
@@ -1260,7 +1422,7 @@ function TsGaugeInner({ config, value, embeddedImages, legacyMode = false, histo
     ctx.font = getFontSpec(Math.max(11, labelHeight * 0.9), { bold: true, monospace: true });
     ctx.textAlign = 'center';
     ctx.textBaseline = 'bottom';
-    ctx.fillText(`${clampedValue.toFixed(config.value_digits)}`, width / 2, height - 2);
+    ctx.fillText(`${displayValueRef.current.toFixed(config.value_digits)}`, width / 2, height - 2);
     ctx.shadowColor = 'transparent';
   };
 
@@ -1296,7 +1458,7 @@ function TsGaugeInner({ config, value, embeddedImages, legacyMode = false, histo
     ctx.fillText(config.title, width / 2, 2);
     ctx.shadowColor = 'transparent';
 
-    const fillPercent = (clampedValue - config.min) / (config.max - config.min);
+    const fillPercent = (displayValueRef.current - config.min) / (config.max - config.min);
     const filledSegments = Math.ceil(fillPercent * numSegments);
 
     for (let i = 0; i < numSegments; i++) {
@@ -1349,7 +1511,7 @@ function TsGaugeInner({ config, value, embeddedImages, legacyMode = false, histo
     ctx.font = getFontSpec(Math.max(11, valueHeight * 0.6), { bold: true, monospace: true });
     ctx.textAlign = 'center';
     ctx.textBaseline = 'bottom';
-    ctx.fillText(`${clampedValue.toFixed(config.value_digits)}`, width / 2, height - 2);
+    ctx.fillText(`${displayValueRef.current.toFixed(config.value_digits)}`, width / 2, height - 2);
     ctx.shadowColor = 'transparent';
   };
 
@@ -1404,7 +1566,7 @@ function TsGaugeInner({ config, value, embeddedImages, legacyMode = false, histo
 
     // Generate histogram data based on current value position
     // This simulates a distribution centered around the current value
-    const valuePercent = (clampedValue - config.min) / (config.max - config.min);
+    const valuePercent = (displayValueRef.current - config.min) / (config.max - config.min);
     const centerBar = Math.floor(valuePercent * numBars);
     const normalColor = tsColorToHex(config.needle_color); // Use needle_color for normal range
     const warnColor = tsColorToHex(config.warn_color);
@@ -1455,7 +1617,7 @@ function TsGaugeInner({ config, value, embeddedImages, legacyMode = false, histo
     ctx.font = getFontSpec(Math.max(10, valueHeight * 0.9), { bold: true, monospace: true });
     ctx.textAlign = 'right';
     ctx.textBaseline = 'top';
-    ctx.fillText(`${clampedValue.toFixed(config.value_digits)} ${config.units}`, width - padding, 3);
+    ctx.fillText(`${displayValueRef.current.toFixed(config.value_digits)} ${config.units}`, width - padding, 3);
   };
 
   /** Draw line graph gauge - shows value over time */
@@ -1486,7 +1648,7 @@ function TsGaugeInner({ config, value, embeddedImages, legacyMode = false, histo
     ctx.fillStyle = tsColorToHex(config.font_color);
     ctx.font = getFontSpec(Math.max(10, titleHeight * 0.9), { bold: true, monospace: true });
     ctx.textAlign = 'right';
-    ctx.fillText(`${clampedValue.toFixed(config.value_digits)} ${config.units}`, width - padding, 3);
+    ctx.fillText(`${displayValueRef.current.toFixed(config.value_digits)} ${config.units}`, width - padding, 3);
     ctx.shadowColor = 'transparent';
 
     // Graph background with inset
@@ -1510,6 +1672,8 @@ function TsGaugeInner({ config, value, embeddedImages, legacyMode = false, histo
     }
 
     // Build points from history (or generate sample data if no history)
+    // Read history imperatively from the non-reactive buffer — no React re-renders needed.
+    const history = getChannelHistoryBuffer(config.output_channel);
     const points: { x: number; y: number }[] = [];
     
     if (history && history.length > 0) {
@@ -1529,7 +1693,7 @@ function TsGaugeInner({ config, value, embeddedImages, legacyMode = false, histo
     } else {
       // No history available - show simulated data for demo
       const numPoints = 50;
-      const valuePercent = (clampedValue - config.min) / (config.max - config.min);
+      const valuePercent = (displayValueRef.current - config.min) / (config.max - config.min);
       
       for (let i = 0; i < numPoints; i++) {
         const t = i / (numPoints - 1);
@@ -1626,7 +1790,7 @@ function TsGaugeInner({ config, value, embeddedImages, legacyMode = false, histo
     
     // Calculate value angle
     const range = config.max - config.min;
-    const normalizedValue = Math.max(0, Math.min(1, (clampedValue - config.min) / range));
+    const normalizedValue = Math.max(0, Math.min(1, (displayValueRef.current - config.min) / range));
     const valueAngle = startAngle - (normalizedValue * totalSweep);
     
     // Value bar with gradient
@@ -1675,7 +1839,7 @@ function TsGaugeInner({ config, value, embeddedImages, legacyMode = false, histo
     ctx.font = getFontSpec(fontSize, { bold: true, monospace: true });
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(clampedValue.toFixed(config.value_digits), centerX, centerY - radius * 0.3);
+    ctx.fillText(displayValueRef.current.toFixed(config.value_digits), centerX, centerY - radius * 0.3);
     
     // Units below value
     if (config.units) {
@@ -1747,7 +1911,7 @@ function TsGaugeInner({ config, value, embeddedImages, legacyMode = false, histo
     drawZone(dangerStart, config.max, tsColorToHex(config.critical_color));
     
     // Calculate value angle
-    const normalizedValue = Math.max(0, Math.min(1, (clampedValue - config.min) / range));
+    const normalizedValue = Math.max(0, Math.min(1, (displayValueRef.current - config.min) / range));
     const valueAngle = startAngle - normalizedValue * totalSweep;
     
     // Moving bar (filled from start to current value)
@@ -1814,7 +1978,7 @@ function TsGaugeInner({ config, value, embeddedImages, legacyMode = false, histo
     ctx.font = getFontSpec(fontSize, { bold: true, monospace: true });
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(clampedValue.toFixed(config.value_digits), centerX, centerY - radius * 0.35);
+    ctx.fillText(displayValueRef.current.toFixed(config.value_digits), centerX, centerY - radius * 0.35);
     
     // Units
     if (config.units) {
@@ -1880,7 +2044,7 @@ function TsGaugeInner({ config, value, embeddedImages, legacyMode = false, histo
       }
       
       // Dim segments beyond current value
-      if (segmentValue > clampedValue) {
+      if (segmentValue > displayValueRef.current) {
         ctx.fillStyle = lightenColor(segmentColor, -60);
       } else {
         ctx.fillStyle = segmentColor;
@@ -1895,7 +2059,7 @@ function TsGaugeInner({ config, value, embeddedImages, legacyMode = false, histo
     ctx.font = getFontSpec(fontSize, { bold: true, monospace: true });
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(clampedValue.toFixed(config.value_digits), centerX, centerY);
+    ctx.fillText(displayValueRef.current.toFixed(config.value_digits), centerX, centerY);
     
     // Units below value
     if (config.units) {
@@ -1969,7 +2133,7 @@ function TsGaugeInner({ config, value, embeddedImages, legacyMode = false, histo
       ctx.lineWidth = segmentWidth;
       ctx.lineCap = 'round';
       
-      if (segmentValue <= clampedValue) {
+      if (segmentValue <= displayValueRef.current) {
         ctx.strokeStyle = segmentColor;
         ctx.shadowColor = segmentColor;
         ctx.shadowBlur = 4;
@@ -1988,7 +2152,7 @@ function TsGaugeInner({ config, value, embeddedImages, legacyMode = false, histo
     ctx.font = getFontSpec(fontSize, { bold: true, monospace: true });
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(clampedValue.toFixed(config.value_digits), centerX, centerY);
+    ctx.fillText(displayValueRef.current.toFixed(config.value_digits), centerX, centerY);
     
     // Units
     if (config.units) {
@@ -2043,7 +2207,7 @@ function TsGaugeInner({ config, value, embeddedImages, legacyMode = false, histo
     ctx.stroke();
     
     // Filled arc based on value (0-100% as typical fuel gauge)
-    const normalizedValue = (clampedValue - config.min) / (config.max - config.min);
+    const normalizedValue = (displayValueRef.current - config.min) / (config.max - config.min);
     const fillAngle = arcStartAngle + arcSweep * normalizedValue;
     
     // Color gradient for fuel level
@@ -2087,7 +2251,7 @@ function TsGaugeInner({ config, value, embeddedImages, legacyMode = false, histo
     const fontSize = Math.max(10, radius * 0.2);
     ctx.fillStyle = tsColorToHex(valueTextColorTs);
     ctx.font = getFontSpec(fontSize, { bold: true, monospace: true });
-    ctx.fillText(`${clampedValue.toFixed(config.value_digits)}${config.units || '%'}`, centerX, centerY + radius * 0.35);
+    ctx.fillText(`${displayValueRef.current.toFixed(config.value_digits)}${config.units || '%'}`, centerX, centerY + radius * 0.35);
     
     // Title
     if (config.title) {
@@ -2206,7 +2370,7 @@ function TsGaugeInner({ config, value, embeddedImages, legacyMode = false, histo
     ctx.stroke();
     
     // Needle
-    const normalizedValue = (clampedValue - config.min) / (config.max - config.min);
+    const normalizedValue = (displayValueRef.current - config.min) / (config.max - config.min);
     const needleAngle = startAngle + totalSweep * normalizedValue;
     const needleLength = radius * 0.65;
     const needleWidth = radius * 0.03;
@@ -2256,7 +2420,7 @@ function TsGaugeInner({ config, value, embeddedImages, legacyMode = false, histo
     ctx.font = getFontSpec(fontSize, { bold: true, monospace: true });
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(clampedValue.toFixed(0), centerX, centerY + radius * 0.35);
+    ctx.fillText(displayValueRef.current.toFixed(0), centerX, centerY + radius * 0.35);
     
     // RPM label
     ctx.fillStyle = '#888888';
@@ -2289,29 +2453,18 @@ function TsGaugeInner({ config, value, embeddedImages, legacyMode = false, histo
  * 
  * Uses custom comparator to skip re-renders when:
  * - Config hasn't changed
- * - Value change is below threshold (0.5% of gauge range)
- * 
- * This prevents unnecessary canvas redraws during high-frequency realtime updates.
+ * For live data, the internal store subscription drives the animation loop
+ * directly (bypassing React rendering). The value prop only matters for
+ * sweep/demo mode (when overrideStore is true).
  */
 const TsGauge = React.memo(TsGaugeInner, (prevProps, nextProps) => {
-  // Always re-render if config changes
-  if (prevProps.config !== nextProps.config) {
-    return false;
-  }
-  
-  // Always re-render if embeddedImages change
-  if (prevProps.embeddedImages !== nextProps.embeddedImages) {
-    return false;
-  }
-  
-  // Skip re-render if value change is below threshold
-  const range = prevProps.config.max - prevProps.config.min;
-  const threshold = range * (VALUE_CHANGE_THRESHOLD_PERCENT / 100);
-  if (Math.abs(prevProps.value - nextProps.value) < threshold) {
-    return true; // Props are equal, skip re-render
-  }
-  
-  return false; // Props changed, re-render
+  return (
+    prevProps.value === nextProps.value &&
+    prevProps.config === nextProps.config &&
+    prevProps.embeddedImages === nextProps.embeddedImages &&
+    prevProps.legacyMode === nextProps.legacyMode &&
+    prevProps.overrideStore === nextProps.overrideStore
+  );
 });
 
 export default TsGauge;

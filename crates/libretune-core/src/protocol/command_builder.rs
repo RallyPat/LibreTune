@@ -66,6 +66,12 @@ impl CommandBuilder {
         self.build_command(format, page, offset, count, &[])
     }
 
+    /// Build an OCH (Output Channel) command from format string
+    /// e.g., "O%2o%2c" with offset=0, count=ochBlockSize
+    pub fn build_och_command(&self, format: &str, count: u16) -> Result<Vec<u8>, ProtocolError> {
+        self.build_command(format, 0, 0, count, &[])
+    }
+
     /// Generic command builder that parses format string and substitutes values
     fn build_command(
         &self,

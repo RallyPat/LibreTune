@@ -102,8 +102,8 @@ export default function GaugeContextMenu({
       try {
         const categories = await invoke<GaugeCategory[]>('get_gauge_categories');
         setGaugeCategories(categories);
-      } catch (e) {
-        console.error('Failed to load gauge categories:', e);
+      } catch (_e) {
+        // Backend command not yet implemented — use fallback defaults
         // Provide some default categories if backend doesn't have them yet
         setGaugeCategories([
           {

@@ -2,6 +2,7 @@ import {
   DashFile,
   DashFileInfo,
   TsGaugeConfig,
+  TsIndicatorConfig,
   SUPPORTED_GAUGE_PAINTERS,
   SUPPORTED_INDICATOR_PAINTERS,
   isGauge,
@@ -10,12 +11,44 @@ import {
   tsColorToRgba,
 } from './dashTypes';
 
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { useChannels, useChannelHistories } from '../../stores/realtimeStore';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useRealtimeStore, useChannelValue } from '../../stores/realtimeStore';
+
+/**
+ * DataFlowIndicator — diagnostic that polls the store every 500ms (bypasses subscribe).
+ * Shows whether data is reaching the store and when it last updated.
+ * TODO: remove once gauge rendering is confirmed working.
+ */
+function DataFlowIndicator() {
+  const [info, setInfo] = useState({ rpm: 0, keys: 0, lastUpdate: 0, age: 'never' });
+  useEffect(() => {
+    // Poll the store directly every 500ms — does NOT rely on subscribe() firing.
+    const interval = setInterval(() => {
+      const state = useRealtimeStore.getState();
+      const keys = Object.keys(state.channels);
+      const rpm = state.channels['rpm'] ?? state.channels['RPM'] ?? 0;
+      const lastUpdate = state.lastUpdateTime;
+      const ageMs = lastUpdate > 0 ? Date.now() - lastUpdate : -1;
+      const age = ageMs < 0 ? 'never' : ageMs < 1000 ? `${ageMs}ms` : `${(ageMs / 1000).toFixed(1)}s ago`;
+      setInfo({ rpm: Math.round(rpm), keys: keys.length, lastUpdate, age });
+      // Log when data gets stale
+      if (ageMs > 2000 && keys.length > 0) {
+        console.warn(`[DataFlow] STALE: last update ${(ageMs / 1000).toFixed(1)}s ago, ${keys.length} keys, rpm=${Math.round(rpm)}`);
+      }
+    }, 500);
+    return () => clearInterval(interval);
+  }, []);
+  if (info.keys === 0) return null;
+  const color = info.age === 'never' || info.age.includes('ago') ? '#f44' : '#0f0';
+  return (
+    <span style={{ fontSize: 11, color, fontFamily: 'monospace', marginLeft: 12, opacity: 0.8 }}>
+      [RPM: {info.rpm} | Keys: {info.keys} | Age: {info.age}]
+    </span>
+  );
+}
 import { invoke } from '@tauri-apps/api/core';
 import { listen, UnlistenFn } from '@tauri-apps/api/event';
 import { save } from '@tauri-apps/plugin-dialog';
-import { useRealtimeStore } from '../../stores/realtimeStore';
 import { createLibreTuneDefaultDashboard } from './LibreTuneDefaultDashboard';
 import TsGauge from '../gauges/TsGauge';
 import TsIndicator from '../gauges/TsIndicator';
@@ -23,6 +56,23 @@ import GaugeContextMenu, { ContextMenuState } from './GaugeContextMenu';
 import ImportDashboardDialog from '../dialogs/ImportDashboardDialog';
 import DashboardDesigner from './DashboardDesigner';
 import './TsDashboard.css';
+
+/**
+ * LiveTsIndicator — wraps TsIndicator with a per-channel store subscription.
+ * Each indicator subscribes to exactly one channel, so only THIS indicator
+ * re-renders when its channel value changes (not the entire dashboard).
+ */
+const LiveTsIndicator = React.memo(function LiveTsIndicator({
+  config,
+  embeddedImages,
+}: {
+  config: TsIndicatorConfig;
+  embeddedImages?: Map<string, string>;
+}) {
+  const liveValue = useChannelValue(config.output_channel, config.value);
+  const isOn = liveValue !== 0;
+  return <TsIndicator config={config} isOn={isOn} embeddedImages={embeddedImages} />;
+});
 
 /**
  * Props for the TsDashboard component.
@@ -75,13 +125,7 @@ export default function TsDashboard({ initialDashPath, isConnected = false }: Ts
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showSelector, setShowSelector] = useState(false);
-  const [rpmChannel, setRpmChannel] = useState<string | null>(null);
   const [channelInfoMap, setChannelInfoMap] = useState<Record<string, ChannelInfo>>({});
-
-  // Subscribe only to RPM channel value to avoid re-rendering on unrelated channel updates
-  useRealtimeStore((state) => (rpmChannel ? state.channels[rpmChannel] : undefined));
-  // For cases where we need an instant snapshot (on dashboard load), use the store getter
-  const realtimeStoreGet = useRealtimeStore.getState;
   
   // Gauge sweep animation state (sportscar-style min→max→min on load)
   const [sweepActive, setSweepActive] = useState(false);
@@ -126,28 +170,19 @@ export default function TsDashboard({ initialDashPath, isConnected = false }: Ts
   const dashboardWrapperRef = useRef<HTMLDivElement>(null);
   const initialSyncDoneRef = useRef(false);
 
-  // Build embedded images map
-  const embeddedImages = dashFile 
-    ? buildEmbeddedImageMap(dashFile.gauge_cluster.embedded_images)
-    : new Map<string, string>();
+  // Build embedded images map — memoized so TsGauge's React.memo and
+  // animation effect don't re-run on every TsDashboard render.
+  const embeddedImages = useMemo(
+    () => dashFile
+      ? buildEmbeddedImageMap(dashFile.gauge_cluster.embedded_images)
+      : new Map<string, string>(),
+    [dashFile]
+  );
 
-  // Determine which channels this dashboard uses (subscribe only to these)
-  const usedChannels = useMemo(() => {
-    if (!dashFile) return [] as string[];
-    const set = new Set<string>();
-    dashFile.gauge_cluster.components.forEach((comp) => {
-      if (isGauge(comp)) {
-        const g = comp.Gauge;
-        if (g.output_channel) set.add(g.output_channel);
-      }
-    });
-    return Array.from(set);
-  }, [dashFile]);
-
-  const channelValues = useChannels(usedChannels);
-  const channelHistories = useChannelHistories(usedChannels);
-
-  // Resolve RPM channel from INI output channels (INI-driven, no hardcoded names)
+  // NOTE: TsDashboard no longer subscribes to realtime channel data.
+  // Each TsGauge subscribes to its own channel directly via the Zustand store,
+  // and indicators use the LiveTsIndicator wrapper below.
+  // This eliminates the 20Hz re-render cascade that was freezing the UI.
   useEffect(() => {
     const loadChannels = async () => {
       try {
@@ -157,13 +192,8 @@ export default function TsDashboard({ initialDashPath, isConnected = false }: Ts
           map[ch.name] = ch;
         });
         setChannelInfoMap(map);
-        const rpmByUnits = channels.find((ch) => ch.units?.toLowerCase() === 'rpm');
-        const rpmByLabel = channels.find((ch) => ch.label?.toLowerCase().includes('rpm'));
-        const resolved = rpmByUnits?.name || rpmByLabel?.name || null;
-        setRpmChannel(resolved);
       } catch (e) {
         console.warn('[TsDashboard] Failed to load available channels:', e);
-        setRpmChannel(null);
         setChannelInfoMap({});
       }
     };
@@ -802,18 +832,23 @@ export default function TsDashboard({ initialDashPath, isConnected = false }: Ts
       });
   }, [dashFile]);
 
-  // On dashboard file load, decide whether to run the initial sweep using a snapshot of realtime data
+  // On dashboard file load, decide whether to run the initial sweep using a snapshot of realtime data.
+  // Uses a direct store read for RPM instead of the async rpmChannel state (which is null on mount,
+  // causing sweep to fire on every tab switch even when the engine is running).
   useEffect(() => {
     if (!dashFile) return;
 
-    // Snapshot current RPM value (no subscription) to avoid re-triggering on rapid realtime updates
-    const rpmSnapshot = rpmChannel ? realtimeStoreGet().channels[rpmChannel] : undefined;
-    const isEngineRunning = typeof rpmSnapshot === 'number' && rpmSnapshot > 50;
+    // Try common RPM channel names directly from the store (no async dependency)
+    const channels = useRealtimeStore.getState().channels;
+    const rpm = channels['rpm'] ?? channels['RPM'] ?? channels['RPMValue'] ?? channels['engineSpeed'] ?? undefined;
+    const isEngineRunning = typeof rpm === 'number' && rpm > 50;
 
     if (!isConnected || !isEngineRunning) {
       startGaugeSweep(dashFile);
     }
-  }, [dashFile, rpmChannel, isConnected]);
+    // Only trigger on dashFile load (not on every isConnected change)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dashFile]);
 
   const handleDashSelect = (path: string) => {
     setSelectedPath(path);
@@ -909,6 +944,7 @@ export default function TsDashboard({ initialDashPath, isConnected = false }: Ts
           >
             Change ▼
           </button>
+          <DataFlowIndicator />
         </div>
         <div className="ts-dashboard-header-right">
           <button 
@@ -1357,13 +1393,16 @@ export default function TsDashboard({ initialDashPath, isConnected = false }: Ts
 
           if (isGauge(component)) {
             const gauge = component.Gauge;
-            // Priority: sweep animation > demo mode > realtime data > default
-            const hasChannel = !!channelInfoMap[gauge.output_channel];
+            // TsGauge handles its own store subscription for live data.
+            // We only pass live values via props for sweep/demo mode.
+            // In normal mode, pass gauge.value (config default) — the prop is stable,
+            // so React.memo blocks re-renders and the internal store subscription
+            // drives the animation without causing the dashboard to cascade re-renders.
             const value = sweepActive
               ? (sweepValues[gauge.output_channel] ?? gauge.min)
               : gaugeDemoActive 
                 ? (demoValues[gauge.output_channel] ?? gauge.value)
-                : (hasChannel ? (channelValues[gauge.output_channel] ?? gauge.value) : gauge.value);
+                : gauge.value;
             
             // Build gauge style with shape_locked_to_aspect and shortest_size support
             const gaugeStyle: React.CSSProperties = {
@@ -1390,7 +1429,7 @@ export default function TsDashboard({ initialDashPath, isConnected = false }: Ts
                   value={value}
                   embeddedImages={embeddedImages}
                   legacyMode={legacyMode}
-                  history={channelHistories[gauge.output_channel]}
+                  overrideStore={sweepActive || gaugeDemoActive}
                 />
               </div>
             );
@@ -1398,10 +1437,6 @@ export default function TsDashboard({ initialDashPath, isConnected = false }: Ts
 
           if (isIndicator(component)) {
             const indicator = component.Indicator;
-            const hasChannel = !!channelInfoMap[indicator.output_channel];
-            // Use the subscribed channel values map instead of an undefined variable
-            const value = hasChannel ? (channelValues[indicator.output_channel] ?? indicator.value) : indicator.value;
-            const isOn = value !== 0;
             
             return (
               <div
@@ -1415,9 +1450,8 @@ export default function TsDashboard({ initialDashPath, isConnected = false }: Ts
                 }}
                 onContextMenu={(e) => handleContextMenu(e, indicator.id)}
               >
-                <TsIndicator
+                <LiveTsIndicator
                   config={indicator}
-                  isOn={isOn}
                   embeddedImages={embeddedImages}
                 />
               </div>

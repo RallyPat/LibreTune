@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import './IndicatorRow.css';
 import { useRealtimeStore } from '../../stores/realtimeStore';
+import { useShallow } from 'zustand/react/shallow';
 
 export interface FrontPageIndicator {
   expression: string;
@@ -124,14 +125,18 @@ export default function IndicatorRow({
     return Array.from(vars);
   }, [indicators]);
 
-  // Subscribe to only the used channels to avoid re-rendering when unrelated channels change
-  const realtimeData = useRealtimeStore((state) => {
-    const data: Record<string, number> = {};
-    for (const v of usedVars) {
-      data[v] = state.channels[v];
-    }
-    return data;
-  });
+  // Subscribe to only the used channels to avoid re-rendering when unrelated channels change.
+  // useShallow prevents re-renders when the same set of numeric values is returned.
+  const realtimeData = useRealtimeStore(
+    useShallow((state) => {
+      const data: Record<string, number> = {};
+      for (const v of usedVars) {
+        const val = state.channels[v];
+        if (val !== undefined) data[v] = val;
+      }
+      return data;
+    })
+  );
   
   const containerRef = useRef<HTMLDivElement>(null);
   const [actualCols, setActualCols] = useState(12);

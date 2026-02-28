@@ -7,23 +7,56 @@
  */
 import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
-import { useMemo } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 
 interface RealtimeState {
   /** All channel values keyed by channel name */
   channels: Record<string, number>;
   /** Timestamp of last update (for debugging/monitoring) */
   lastUpdateTime: number;
-  /** Channel history for strip chart visualization (last 60 seconds, max 300 points) */
-  channelHistory: Record<string, number[]>;
   
   // Actions
   /** Update all channels with new data (called from event listener) */
   updateChannels: (data: Record<string, number>) => void;
   /** Clear all channel data */
   clearChannels: () => void;
-  /** Get channel history, creating if needed */
-  getChannelHistory: (channelName: string) => number[];
+}
+
+/**
+ * Non-reactive channel history buffer.
+ * Stored outside Zustand state so history mutations never trigger React re-renders.
+ * Uses circular buffer pattern (fixed-size Float64Array + write index) to avoid
+ * Array.shift() which is O(n) per call — with 500 channels that meant 150K element
+ * copies per event (3M/sec at 20Hz), enough to freeze the UI.
+ *
+ * Components that need history (e.g. LineGraph gauges) read this imperatively
+ * each animation frame via getChannelHistoryBuffer().
+ */
+const HISTORY_SIZE = 300;
+
+interface CircularBuffer {
+  data: Float64Array;
+  /** Next write position (0..HISTORY_SIZE-1, wraps around) */
+  writeIdx: number;
+  /** Number of valid entries (0..HISTORY_SIZE) */
+  count: number;
+}
+
+const _channelHistoryBuffer: Record<string, CircularBuffer> = {};
+
+/** Read channel history imperatively (never triggers re-renders).
+ *  Returns an array ordered oldest→newest.
+ */
+export function getChannelHistoryBuffer(channelName: string): number[] {
+  const buf = _channelHistoryBuffer[channelName];
+  if (!buf || buf.count === 0) return EMPTY_HISTORY;
+  // Unroll circular buffer into a plain array (oldest first)
+  const result = new Array<number>(buf.count);
+  const start = (buf.writeIdx - buf.count + HISTORY_SIZE) % HISTORY_SIZE;
+  for (let i = 0; i < buf.count; i++) {
+    result[i] = buf.data[(start + i) % HISTORY_SIZE];
+  }
+  return result;
 }
 
 /**
@@ -35,44 +68,39 @@ interface RealtimeState {
  * - In event listener: `useRealtimeStore.getState().updateChannels(data);`
  */
 export const useRealtimeStore = create<RealtimeState>()(
-  subscribeWithSelector((set, get) => ({
+  subscribeWithSelector((set) => ({
     channels: {},
     lastUpdateTime: 0,
-    channelHistory: {},
     
     updateChannels: (data) => {
-      const state = get();
-      const newHistory = { ...state.channelHistory };
-      
-      // Update history for each channel (max 300 points, ~60s at 5Hz)
+      // Update non-reactive circular history buffer (O(1) per channel, no GC pressure)
       for (const [name, value] of Object.entries(data)) {
-        if (!newHistory[name]) {
-          newHistory[name] = [];
+        let buf = _channelHistoryBuffer[name];
+        if (!buf) {
+          buf = { data: new Float64Array(HISTORY_SIZE), writeIdx: 0, count: 0 };
+          _channelHistoryBuffer[name] = buf;
         }
-        const history = newHistory[name];
-        history.push(value);
-        // Keep only last 300 points (60 seconds at 5 Hz, or 120 seconds at 2.5 Hz)
-        if (history.length > 300) {
-          history.shift();
-        }
+        buf.data[buf.writeIdx] = value;
+        buf.writeIdx = (buf.writeIdx + 1) % HISTORY_SIZE;
+        if (buf.count < HISTORY_SIZE) buf.count++;
       }
       
+      // Only reactive state update: channel values + timestamp (lightweight)
       set({ 
         channels: data,
-        channelHistory: newHistory,
         lastUpdateTime: Date.now() 
       });
     },
     
-    clearChannels: () => set({
-      channels: {},
-      channelHistory: {},
-      lastUpdateTime: 0
-    }),
-    
-    getChannelHistory: (channelName: string) => {
-      const state = get();
-      return state.channelHistory[channelName] ?? [];
+    clearChannels: () => {
+      // Clear non-reactive circular history buffers
+      for (const key of Object.keys(_channelHistoryBuffer)) {
+        delete _channelHistoryBuffer[key];
+      }
+      set({
+        channels: {},
+        lastUpdateTime: 0
+      });
     },
   }))
 );
@@ -131,25 +159,23 @@ export const useChannelValue = (name: string, defaultValue = 0): number =>
  * }
  */
 export const useChannels = (names: string[]): Record<string, number> => {
-  // Get the full channels object from the store
-  const channels = useRealtimeStore((state) => state.channels);
-  
-  // Create a stable key from names array for dependency comparison
-  // This avoids the hooks rule violation of spreading array into deps
-  const namesKey = names.join(',');
-  
-  // Use useMemo to create a stable result object that only changes when values change
-  return useMemo(() => {
-    const result: Record<string, number> = {};
-    for (const name of names) {
-      const value = channels[name];
-      if (value !== undefined) {
-        result[name] = value;
+  // useShallow wraps the selector so Zustand uses shallow comparison on the
+  // returned object.  The component only re-renders when a requested channel's
+  // numeric VALUE actually changes — not on every store set() call.
+  // This is critical because App.tsx calls this hook; without shallow equality
+  // the 3500-line App component would re-render 20x/sec and freeze the UI.
+  return useRealtimeStore(
+    useShallow((state: RealtimeState) => {
+      const result: Record<string, number> = {};
+      for (const name of names) {
+        const value = state.channels[name];
+        if (value !== undefined) {
+          result[name] = value;
+        }
       }
-    }
-    return result;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [channels, namesKey]); // Use namesKey instead of spreading names
+      return result;
+    }),
+  );
 };
 
 /**
@@ -166,49 +192,7 @@ export const useChannels = (names: string[]): Record<string, number> => {
  *   return <LineChart data={history} />;
  * }
  */
-export const useChannelHistory = (name: string): number[] =>
-  useRealtimeStore((state) => state.channelHistory[name] ?? []);
-
-/**
- * Hook to get histories for multiple channels.
- * Component re-renders when ANY of the specified channels' histories change.
- * Uses shallow equality comparison for the returned object.
- * 
- * @param names - Array of channel names
- * @returns Object mapping channel names to history arrays
- * 
- * @example
- * function DashboardWithTrends() {
- *   const histories = useChannelHistories(['rpm', 'map', 'afr']);
- *   return (
- *     <div>
- *       {Object.entries(histories).map(([name, history]) => (
- *         <TrendChart key={name} channel={name} data={history} />
- *       ))}
- *     </div>
- *   );
- * }
- */
-export const useChannelHistories = (names: string[]): Record<string, number[]> => {
-  // Get the full history object from the store
-  const channelHistory = useRealtimeStore((state) => state.channelHistory);
-  
-  // Create a stable key from names array for dependency comparison
-  const namesKey = names.join(',');
-  
-  // Use useMemo to create a stable result object that only changes when values change
-  return useMemo(() => {
-    const result: Record<string, number[]> = {};
-    for (const name of names) {
-      const history = channelHistory[name];
-      if (history) {
-        result[name] = history;
-      }
-    }
-    return result;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [channelHistory, namesKey]); // Use namesKey instead of spreading names
-};
+const EMPTY_HISTORY: number[] = [];
 
 /**
  * Hook to check if realtime data is being received.

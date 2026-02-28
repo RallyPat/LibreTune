@@ -854,7 +854,10 @@ fn evaluate_function(
                 ));
             }
             let arg = evaluate(&args[0], context, string_context)?;
-            Ok(Value::Number(arg.as_f64().log10()))
+            let x = arg.as_f64();
+            // log10(0) = -Infinity, log10(negative) = NaN — clamp to 0.0
+            let result = x.log10();
+            Ok(Value::Number(if result.is_finite() { result } else { 0.0 }))
         }
         // recip(x) - reciprocal (1/x)
         "recip" => {
@@ -867,7 +870,7 @@ fn evaluate_function(
             let arg = evaluate(&args[0], context, string_context)?;
             let x = arg.as_f64();
             if x == 0.0 {
-                Ok(Value::Number(f64::INFINITY))
+                Ok(Value::Number(0.0))
             } else {
                 Ok(Value::Number(1.0 / x))
             }
@@ -1021,7 +1024,14 @@ pub fn evaluate(
                         Ok(Value::Number(l.as_f64() / rv))
                     }
                 }
-                BinOp::Mod => Ok(Value::Number(l.as_f64() % r.as_f64())),
+                BinOp::Mod => {
+                    let rv = r.as_f64();
+                    if rv == 0.0 {
+                        Ok(Value::Number(0.0))
+                    } else {
+                        Ok(Value::Number(l.as_f64() % rv))
+                    }
+                }
                 BinOp::Eq => {
                     // String comparison if both are strings
                     if let (Value::String(ref ls), Value::String(ref rs)) = (&l, &r) {

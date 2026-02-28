@@ -1,5 +1,14 @@
 import '@testing-library/jest-dom';
 
+// Provide a minimal ResizeObserver stub for jsdom (not available in JSDOM)
+if (typeof globalThis.ResizeObserver === 'undefined') {
+  globalThis.ResizeObserver = class ResizeObserver {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  } as unknown as typeof globalThis.ResizeObserver;
+}
+
 // Provide a minimal CanvasRenderingContext2D stub to silence jsdom warnings
 // Install a robust stub unconditionally so gauge components don't trigger 'Not implemented'
 // errors in CI/jsdom environments.

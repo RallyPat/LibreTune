@@ -7,7 +7,7 @@
 //! - N bytes: Payload
 //! - 4 bytes: CRC32 (of payload only, NOT length+payload)
 
-use byteorder::{BigEndian, ByteOrder};
+use byteorder::{BigEndian, ByteOrder, LittleEndian};
 use crc32fast::Hasher;
 
 use super::{ProtocolError, MAX_PACKET_SIZE};
@@ -49,21 +49,116 @@ impl Packet {
         // Extract payload
         let payload = data[2..2 + length].to_vec();
 
-        // Read CRC
-        let received_crc = BigEndian::read_u32(&data[2 + length..2 + length + 4]);
+        // Read CRC bytes
+        let crc_bytes = &data[2 + length..2 + length + 4];
 
-        // Calculate expected CRC (of payload only - rusEFI format)
-        let mut hasher = Hasher::new();
-        hasher.update(&payload);
-        let expected_crc = hasher.finalize();
+        // Try every plausible CRC scope and byte-order combination:
+        //
+        // Scope A: CRC over full payload (status_byte + data)     — msEnvelope_1.0 strict
+        // Scope B: CRC over data only (payload[1..])              — some rusEFI builds
+        // Scope C: CRC over length_bytes + payload                — some msEnvelope variants
+        // Scope D: CRC over length_bytes + data (payload[1..])    — combined variant
+        //
+        // Each scope tried in both big-endian and little-endian received-CRC interpretation.
 
-        // Verify CRC
-        if received_crc != expected_crc {
+        let length_bytes = &data[0..2];
+
+        let crc_a = {
+            let mut h = Hasher::new();
+            h.update(&payload);
+            h.finalize()
+        };
+        let crc_b = if payload.len() > 1 {
+            let mut h = Hasher::new();
+            h.update(&payload[1..]);
+            h.finalize()
+        } else {
+            0
+        };
+        let crc_c = {
+            let mut h = Hasher::new();
+            h.update(length_bytes);
+            h.update(&payload);
+            h.finalize()
+        };
+        let crc_d = if payload.len() > 1 {
+            let mut h = Hasher::new();
+            h.update(length_bytes);
+            h.update(&payload[1..]);
+            h.finalize()
+        } else {
+            0
+        };
+
+        let received_crc_be = BigEndian::read_u32(crc_bytes);
+        let received_crc_le = LittleEndian::read_u32(crc_bytes);
+
+        let match_a_be = received_crc_be == crc_a;
+        let match_a_le = received_crc_le == crc_a;
+        let match_b_be = received_crc_be == crc_b;
+        let match_b_le = received_crc_le == crc_b;
+        let match_c_be = received_crc_be == crc_c;
+        let match_c_le = received_crc_le == crc_c;
+        let match_d_be = received_crc_be == crc_d;
+        let match_d_le = received_crc_le == crc_d;
+
+        let matched = match_a_be
+            || match_a_le
+            || match_b_be
+            || match_b_le
+            || match_c_be
+            || match_c_le
+            || match_d_be
+            || match_d_le;
+
+        if !matched {
+            // Print enough detail to uniquely identify the CRC algorithm the ECU uses
+            let raw_preview: Vec<String> =
+                data.iter().take(12).map(|b| format!("{:02x}", b)).collect();
+            eprintln!(
+                "[CRC MISMATCH] raw_first12=[{}] recv_be={:08x} \
+                 crc_A(full/BE)={:08x} crc_B(data/BE)={:08x} \
+                 crc_C(len+full/BE)={:08x} crc_D(len+data/BE)={:08x}",
+                raw_preview.join(" "),
+                received_crc_be,
+                crc_a,
+                crc_b,
+                crc_c,
+                crc_d
+            );
             return Err(ProtocolError::CrcMismatch {
-                expected: expected_crc,
-                actual: received_crc,
+                expected: crc_a,
+                actual: received_crc_be,
             });
         }
+
+        // Determine which scope matched so we can log on first occurrence
+        static LOGGED_CRC_SCOPE: std::sync::atomic::AtomicBool =
+            std::sync::atomic::AtomicBool::new(false);
+        if !LOGGED_CRC_SCOPE.swap(true, std::sync::atomic::Ordering::Relaxed) {
+            let scope = if match_a_be || match_a_le {
+                "A: full payload"
+            } else if match_b_be || match_b_le {
+                "B: data-only (no status byte)"
+            } else if match_c_be || match_c_le {
+                "C: length+payload"
+            } else {
+                "D: length+data"
+            };
+            let endian = if match_a_be || match_b_be || match_c_be || match_d_be {
+                "BE"
+            } else {
+                "LE"
+            };
+            eprintln!("[CRC] scope={} endian={}", scope, endian);
+        }
+
+        // Use whichever interpretation matched for the stored crc value
+        let received_crc = if match_a_be || match_b_be || match_c_be || match_d_be {
+            received_crc_be
+        } else {
+            received_crc_le
+        };
 
         Ok(Self {
             payload,

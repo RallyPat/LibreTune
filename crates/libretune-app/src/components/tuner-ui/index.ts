@@ -23,6 +23,7 @@ export { Sidebar } from './Sidebar';
 
 // Status bar
 export { StatusBar, StatusIndicator, LoggingIndicator } from './StatusBar';
+export type { ChannelInfoForStatusBar } from './StatusBar';
 
 // Table editor
 export { TableEditor } from './TableEditor';

@@ -75,6 +75,81 @@ fn parse_command_string(s: &str) -> Vec<u8> {
     result
 }
 
+/// Determine whether a response payload contains a leading status byte and return the data portion.
+///
+/// msEnvelope_1.0 responses *should* always start with a status byte (0x00 = success).
+/// However, some rusEFI/epicEFI firmware variants omit the status byte from OCH/Burst
+/// responses, sending exactly `expected_data_len` bytes of raw channel data instead.
+///
+/// Detection strategy (in priority order):
+///   1. payload.len() == expected_data_len + 1 AND payload[0] == 0  → status byte present, strip it
+///   2. payload.len() == expected_data_len                           → no status byte, use as-is
+///   3. payload[0] == 0                                              → assume status byte, strip it
+///   4. otherwise                                                    → use full payload (best-effort)
+fn strip_status_byte(payload: &[u8], expected_data_len: usize, label: &str) -> Vec<u8> {
+    if payload.is_empty() {
+        return Vec::new();
+    }
+    if expected_data_len > 0 {
+        if payload.len() == expected_data_len + 1 && payload[0] == 0 {
+            // Status byte present and indicates success
+            return payload[1..].to_vec();
+        }
+        if payload.len() == expected_data_len {
+            // No status byte — firmware sent raw data directly
+            return payload.to_vec();
+        }
+        if payload.len() == expected_data_len + 1 && payload[0] != 0 {
+            eprintln!(
+                "[WARN] {} response: ECU status=0x{:02x} (non-zero), using data anyway",
+                label, payload[0]
+            );
+            return payload[1..].to_vec();
+        }
+    }
+    // Fallback: use old behaviour (strip if starts with 0x00, else keep all)
+    if payload[0] == 0 {
+        payload[1..].to_vec()
+    } else {
+        // Don't error — just return the full payload; channel offsets will be relative to byte 0
+        eprintln!(
+            "[WARN] {} response: unexpected first byte 0x{:02x} (expected_len={}), using full payload",
+            label, payload[0], expected_data_len
+        );
+        payload.to_vec()
+    }
+}
+
+/// Drain up to `remaining` bytes from the channel within `deadline`, discarding all data.
+///
+/// Called after a partial-read timeout inside `send_packet` to flush the rest of the
+/// ECU's response from the OS TCP/serial receive buffer so the next request starts at
+/// a clean packet boundary.
+fn drain_input_with_timeout(
+    channel: &mut Box<dyn CommunicationChannel>,
+    remaining: usize,
+    deadline: Duration,
+    poll_ms: u64,
+) {
+    let start = std::time::Instant::now();
+    let mut buf = [0u8; 256];
+    let mut drained = 0usize;
+    while drained < remaining && start.elapsed() < deadline {
+        let available = channel.bytes_to_read().unwrap_or(0) as usize;
+        if available == 0 {
+            std::thread::sleep(Duration::from_millis(poll_ms));
+            continue;
+        }
+        let to_read = std::cmp::min(available, std::cmp::min(remaining - drained, buf.len()));
+        match channel.read(&mut buf[..to_read]) {
+            Ok(n) => drained += n,
+            Err(_) => break,
+        }
+    }
+    // After draining the known remainder, do one more flush to catch any trailing bytes
+    let _ = channel.clear_input_buffer();
+}
+
 /// Write bytes to serial port and ensure they are transmitted.
 /// Since the serialport crate's flush() calls tcdrain which blocks in this environment,
 /// we use write_all + a calculated time delay based on baud rate.
@@ -243,7 +318,9 @@ impl Connection {
             signature: None,
             use_modern_protocol: true,
             protocol_settings: None,
-            command_builder: CommandBuilder::new(true), // Default little-endian for rusEFI
+            // When no INI is loaded, default to big-endian command parameters (safe default;
+            // overridden to match the INI endianness when with_protocol/set_protocol is called).
+            command_builder: CommandBuilder::new(false),
             endianness: Endianness::Little,
             adaptive_timing: None,
             tx_bytes: 0,
@@ -259,8 +336,13 @@ impl Connection {
         protocol: ProtocolSettings,
         endianness: Endianness,
     ) -> Self {
-        let use_little_endian = endianness == Endianness::Little;
         let use_modern = protocol.uses_modern_protocol();
+
+        // Protocol command arguments (%2o, %2c, %2i) must match the INI
+        // endianness.  rusEFI / epicEFI / FOME use little-endian command
+        // parameters (the INI declares `endianness = little`), while Speeduino
+        // and MS2/MS3 use big-endian command parameters.
+        let cmd_le = endianness == Endianness::Little;
         Self {
             channel: None,
             state: ConnectionState::Disconnected,
@@ -268,7 +350,7 @@ impl Connection {
             signature: None,
             use_modern_protocol: use_modern,
             protocol_settings: Some(protocol),
-            command_builder: CommandBuilder::new(use_little_endian),
+            command_builder: CommandBuilder::new(cmd_le),
             endianness,
             adaptive_timing: None,
             tx_bytes: 0,
@@ -281,6 +363,7 @@ impl Connection {
     /// Set protocol settings after connection (for signature matching)
     pub fn set_protocol(&mut self, protocol: ProtocolSettings, endianness: Endianness) {
         self.use_modern_protocol = protocol.uses_modern_protocol();
+        // Use LE command parameters when INI specifies little-endian (rusEFI/epicEFI/FOME).
         self.command_builder = CommandBuilder::new(endianness == Endianness::Little);
         self.endianness = endianness;
         self.protocol_settings = Some(protocol);
@@ -863,31 +946,21 @@ impl Connection {
 
         let channel = self.channel.as_mut().ok_or(ProtocolError::NotConnected)?;
 
-        // Clear buffers before sending
-        eprintln!("[DEBUG] send_packet: clearing buffers");
-        let _ = channel.clear_input_buffer();
-        let _ = channel.clear_output_buffer();
+        // NOTE: Do NOT call clear_input_buffer() here. This is a length-prefixed framed
+        // protocol; every response is fully consumed by read_exact_timeout. On fast local
+        // TCP connections, clearing between packets can accidentally drain the response that
+        // already arrived, desynchronizing the stream and producing CRC mismatches.
 
         // Start timing for adaptive timing
         let send_start = Instant::now();
 
         // Send packet and wait for transmission
         let bytes = packet.to_bytes();
-        eprintln!(
-            "[DEBUG] send_packet: sending {} bytes: {:02x?}",
-            bytes.len(),
-            bytes
-        );
         // Use write_and_wait which avoids the blocking tcdrain issue
         self.tx_bytes = self.tx_bytes.saturating_add(bytes.len() as u64);
         self.tx_packets = self.tx_packets.saturating_add(1);
         write_and_wait(channel, &bytes, baud_rate, min_wait)
             .map_err(|e| ProtocolError::SerialError(e.to_string()))?;
-
-        eprintln!(
-            "[DEBUG] send_packet: packet sent, timeout={}ms",
-            timeout.as_millis()
-        );
 
         // Helper to read exact bytes with timeout
         // Uses bytes_to_read() polling to avoid blocking read() calls on Linux
@@ -903,7 +976,7 @@ impl Connection {
             while offset < buf.len() {
                 if start.elapsed() > timeout {
                     eprintln!(
-                        "[DEBUG] read_exact_timeout: timed out after reading {} of {} bytes",
+                        "[WARN] read_exact_timeout: timed out after reading {} of {} bytes",
                         offset,
                         buf.len()
                     );
@@ -926,15 +999,10 @@ impl Connection {
                 let to_read = std::cmp::min(available, buf.len() - offset);
                 match channel.read(&mut buf[offset..offset + to_read]) {
                     Ok(0) => {
-                        eprintln!("[DEBUG] read_exact_timeout: EOF after {} bytes", offset);
+                        eprintln!("[WARN] read_exact_timeout: EOF after {} bytes", offset);
                         return Err(ProtocolError::Timeout);
                     }
                     Ok(n) => {
-                        eprintln!(
-                            "[DEBUG] read_exact_timeout: read {} bytes: {:02x?}",
-                            n,
-                            &buf[offset..offset + n]
-                        );
                         offset += n;
                     }
                     Err(ref e)
@@ -944,7 +1012,7 @@ impl Connection {
                         continue;
                     }
                     Err(e) => {
-                        eprintln!("[DEBUG] read_exact_timeout: error: {}", e);
+                        eprintln!("[WARN] read_exact_timeout: error: {}", e);
                         return Err(ProtocolError::SerialError(e.to_string()));
                     }
                 }
@@ -954,17 +1022,21 @@ impl Connection {
 
         // Read response header (2 bytes for length)
         let mut header = [0u8; 2];
-        eprintln!("[DEBUG] send_packet: waiting for response header...");
         if let Err(e) = read_exact_timeout(channel, &mut header, timeout, poll_interval_ms) {
+            // Drain any buffered bytes first (uses channel borrow), then reset timing
+            let _ = channel.clear_input_buffer();
             self.reset_adaptive_timing_on_error();
             return Err(e);
         }
-        eprintln!("[DEBUG] send_packet: got header {:02x?}", header);
 
         // Parse length
         let length = u16::from_be_bytes(header) as usize;
-        eprintln!("[DEBUG] send_packet: response length = {}", length);
         if length > super::MAX_PACKET_SIZE {
+            eprintln!(
+                "[WARN] send_packet: response length {} exceeds MAX_PACKET_SIZE",
+                length
+            );
+            let _ = channel.clear_input_buffer();
             return Err(ProtocolError::BufferOverflow);
         }
 
@@ -972,13 +1044,19 @@ impl Connection {
         let mut payload_and_crc = vec![0u8; length + 4];
         if let Err(e) = read_exact_timeout(channel, &mut payload_and_crc, timeout, poll_interval_ms)
         {
+            // Drain the rest of the packet body (uses channel borrow), then reset timing
+            drain_input_with_timeout(
+                channel,
+                length + 4,
+                Duration::from_millis(500),
+                poll_interval_ms,
+            );
             self.reset_adaptive_timing_on_error();
             return Err(e);
         }
 
         // Record response time for adaptive timing
         let elapsed = send_start.elapsed();
-        eprintln!("[DEBUG] send_packet: complete in {}ms", elapsed.as_millis());
         self.record_response_time(elapsed);
 
         // Reconstruct full packet for parsing
@@ -986,6 +1064,13 @@ impl Connection {
         full_packet.extend_from_slice(&header);
         full_packet.extend_from_slice(&payload_and_crc);
 
+        // Track received bytes/packets for metrics display
+        self.rx_bytes = self.rx_bytes.saturating_add(full_packet.len() as u64);
+        self.rx_packets = self.rx_packets.saturating_add(1);
+
+        // If CRC parsing fails, the full packet was already consumed from the TCP
+        // stream (exact bytes read = 2 + length + 4), so the stream IS aligned.
+        // No drain needed on CRC mismatch — just return the error.
         Packet::from_bytes(&full_packet)
     }
 
@@ -1083,16 +1168,21 @@ impl Connection {
 
     /// Get real-time data from ECU
     pub fn get_realtime_data(&mut self) -> Result<Vec<u8>, ProtocolError> {
-        let (choice, reason) = self.choose_runtime_command();
-        eprintln!("[INFO] get_realtime_data: mode selected: {}", reason);
+        let (choice, _reason) = self.choose_runtime_command();
 
         match choice {
             RuntimeFetch::Burst(cmd) => {
                 if self.use_modern_protocol {
+                    let expected_len = self
+                        .protocol_settings
+                        .as_ref()
+                        .map(|p| p.och_block_size as usize)
+                        .unwrap_or(0);
                     let cmd_bytes = cmd.as_bytes().to_vec();
                     let packet = Packet::new(cmd_bytes);
                     let response = self.send_packet(packet)?;
-                    Ok(response.payload)
+                    let payload = &response.payload;
+                    Ok(strip_status_byte(payload, expected_len, "Burst"))
                 } else {
                     let cmd_byte = cmd.as_bytes().first().copied().unwrap_or(b'A');
                     self.send_raw_command(&[cmd_byte])
@@ -1100,14 +1190,71 @@ impl Connection {
             }
             RuntimeFetch::OCH(cmd) => {
                 // OCH: expect block response of och_block_size; send command accordingly
+                let cmd_bytes = if cmd.contains('%') {
+                    // If format string provided (e.g. "O%2o%2c"), build command with proper values
+                    let block_size = self
+                        .protocol_settings
+                        .as_ref()
+                        .map(|p| {
+                            if p.och_block_size > 0 {
+                                p.och_block_size
+                            } else {
+                                0
+                            }
+                        })
+                        .unwrap_or(0) as u16;
+
+                    if block_size == 0 {
+                        eprintln!("[WARN] get_realtime_data: OCH selected but block size is 0! Defaulting to 256.");
+                        // Fallback to 256 if 0, but log warning
+                    }
+                    let effective_size = if block_size > 0 { block_size } else { 256 };
+
+                    self.command_builder
+                        .build_och_command(&cmd, effective_size)?
+                } else {
+                    // Otherwise assume raw ASCII command (e.g. "A" or "O")
+                    cmd.as_bytes().to_vec()
+                };
+
+                // Log the final command bytes for debugging
+                {
+                    static OCH_LOG_COUNT: std::sync::atomic::AtomicU64 =
+                        std::sync::atomic::AtomicU64::new(0);
+                    let n = OCH_LOG_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    if n < 3 || n % 100 == 0 {
+                        eprintln!(
+                            "[OCH] tick={} use_modern={} cmd_bytes={:02x?} och_block_size={}",
+                            n,
+                            self.use_modern_protocol,
+                            cmd_bytes,
+                            self.protocol_settings
+                                .as_ref()
+                                .map(|p| p.och_block_size)
+                                .unwrap_or(0),
+                        );
+                    }
+                }
+
                 if self.use_modern_protocol {
-                    let cmd_bytes = cmd.as_bytes().to_vec();
+                    let expected_och_len = self
+                        .protocol_settings
+                        .as_ref()
+                        .map(|p| p.och_block_size as usize)
+                        .unwrap_or(0);
                     let packet = Packet::new(cmd_bytes);
                     let response = self.send_packet(packet)?;
-                    Ok(response.payload)
+                    let payload = &response.payload;
+                    Ok(strip_status_byte(payload, expected_och_len, "OCH"))
                 } else {
-                    let cmd_byte = cmd.as_bytes().first().copied().unwrap_or(b'A');
-                    self.send_raw_command(&[cmd_byte])
+                    // For legacy protocol, usually single byte command
+                    // If cmd_bytes > 1, send all bytes (rare case for legacy but possible)
+                    if cmd_bytes.len() > 1 {
+                        self.send_raw_command(&cmd_bytes)
+                    } else {
+                        let cmd_byte = cmd_bytes.first().copied().unwrap_or(b'A');
+                        self.send_raw_command(&[cmd_byte])
+                    }
                 }
             }
         }

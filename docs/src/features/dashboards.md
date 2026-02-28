@@ -33,9 +33,12 @@ Calibration-focused layout:
 
 ## Opening a Dashboard
 
-1. Click the **Dashboard** tab, or
-2. Go to **View → Dashboard**, or
-3. Press `Ctrl+D`
+The Dashboard tab is always present when a project is loaded. If it's ever missing:
+
+1. Go to **View → Dashboard** to reopen it, or
+2. The Dashboard tab is automatically created when you open a project
+
+> **Note**: The Dashboard tab is protected from accidental closing. The close button (×) is hidden, and middle-click will not close it.
 
 ## Switching Dashboards
 
@@ -52,17 +55,23 @@ When connected to an ECU:
 
 ## Gauge Types
 
-LibreTune supports all standard gauge styles:
+LibreTune supports all 13 standard gauge styles:
 
 | Type | Description |
 |------|-------------|
-| **Analog Gauge** | Classic circular dial with needle |
-| **Digital Readout** | LCD-style numeric display |
-| **Bar Gauge** | Horizontal or vertical progress bar |
-| **Sweep Gauge** | Curved arc indicator |
-| **Line Graph** | Time-series history chart |
-| **Histogram** | Distribution bar chart |
-| **Tachometer** | RPM-specific gauge with redline |
+| **Analog Gauge** | Classic circular dial with metallic bezel and gradient needle |
+| **Digital Readout** | LCD-style numeric display with metallic frame |
+| **Horizontal Bar Gauge** | Horizontal progress bar with rounded corners and gradient fill |
+| **Vertical Bar Gauge** | Vertical progress bar with tick marks and 3D effects |
+| **Sweep Gauge** | Curved arc indicator with glowing tip and warning zones |
+| **Horizontal Line Gauge** | Horizontal line indicator with gradient track |
+| **Vertical Dashed Bar** | Segmented vertical bar with per-segment zone coloring |
+| **Line Graph** | Time-series history chart with gradient fill |
+| **Histogram** | Distribution bar chart centered on current value |
+| **Round Gauge** | Circular gauge with 270° arc and tick marks |
+| **Round Dashed Gauge** | Circular gauge with segmented arc |
+| **Fuel Meter** | Specialized fuel level gauge |
+| **Tachometer** | RPM-specific gauge with redline zone |
 
 ## Gauge Zones
 

@@ -73,6 +73,8 @@ Pop out dashboards to separate monitors:
 3. Drag to desired monitor
 4. Click dock icon (↙️) to return
 
+> **Note**: The main Dashboard tab is protected and cannot be popped out or accidentally closed. To reopen it if missing, go to **View → Dashboard**.
+
 ## Tips
 
 ### Reduce Clutter

@@ -924,6 +924,34 @@ fn compare_signatures(ecu_sig: &str, ini_sig: &str) -> SignatureMatchType {
         return SignatureMatchType::Exact;
     }
 
+    // Check for common suffixes (hashes)
+    // RusEFI signatures often end with a hash or unique ID (e.g. "rusEFI master 2024.02.24.simulator.12345678")
+    // If both end with the same alphanumeric string > 6 chars, treat as Exact.
+    if let (Some(ecu_suffix), Some(ini_suffix)) = (
+        ecu_normalized.split('.').last(),
+        ini_normalized.split('.').last(),
+    ) {
+        if ecu_suffix.len() > 6
+            && ecu_suffix.chars().all(|c| c.is_alphanumeric())
+            && ecu_suffix == ini_suffix
+        {
+            return SignatureMatchType::Exact;
+        }
+    }
+
+    // Also check split by whitespace just in case hash is separated by space
+    if let (Some(ecu_suffix), Some(ini_suffix)) = (
+        ecu_normalized.split_whitespace().last(),
+        ini_normalized.split_whitespace().last(),
+    ) {
+        if ecu_suffix.len() > 6
+            && ecu_suffix.chars().all(|c| c.is_alphanumeric())
+            && ecu_suffix == ini_suffix
+        {
+            return SignatureMatchType::Exact;
+        }
+    }
+
     if ecu_normalized.contains(&ini_normalized) || ini_normalized.contains(&ecu_normalized) {
         return SignatureMatchType::Partial;
     }
@@ -1738,10 +1766,12 @@ async fn sync_ecu_data(
 
         // Read page data - wrapped in error handling for resilience
         let page_num = page;
+        set_conn_lock_holder("sync_ecu_data");
         let mut conn_guard = state.connection.lock().await;
         let conn = match conn_guard.as_mut() {
             Some(c) => c,
             None => {
+                set_conn_lock_holder("(none)");
                 errors.push(format!("Page {}: Not connected", page_num));
                 pages_failed += 1;
                 continue;
@@ -1785,6 +1815,7 @@ async fn sync_ecu_data(
         }
 
         drop(conn_guard);
+        set_conn_lock_holder("(none)");
     }
 
     // Store tune file in state (even if partial)
@@ -1972,8 +2003,8 @@ async fn get_adaptive_timing_stats(
 async fn get_connection_status(
     state: tauri::State<'_, AppState>,
 ) -> Result<ConnectionStatus, String> {
-    let conn_guard = state.connection.lock().await;
-    let def_guard = state.definition.lock().await;
+    // IMPORTANT: Acquire each lock independently and release before taking the next.
+    // Holding multiple locks simultaneously causes deadlocks with the realtime stream task.
     let demo_mode = *state.demo_mode.lock().await;
 
     let (state_val, signature) = if demo_mode {
@@ -1982,17 +2013,30 @@ async fn get_connection_status(
             Some("DEMO - Simulated EpicEFI".to_string()),
         )
     } else {
-        match &*conn_guard {
+        set_conn_lock_holder("get_connection_status");
+        let conn_guard = state.connection.lock().await;
+        let result = match &*conn_guard {
             Some(conn) => (conn.state(), conn.signature().map(|s| s.to_string())),
             None => (ConnectionState::Disconnected, None),
-        }
+        };
+        drop(conn_guard);
+        set_conn_lock_holder("(none)");
+        result
+    };
+
+    let (has_definition, ini_name) = {
+        let def_guard = state.definition.lock().await;
+        (
+            def_guard.is_some(),
+            def_guard.as_ref().map(|d| d.signature.clone()),
+        )
     };
 
     Ok(ConnectionStatus {
         state: state_val,
         signature,
-        has_definition: def_guard.is_some(),
-        ini_name: def_guard.as_ref().map(|d| d.signature.clone()),
+        has_definition,
+        ini_name,
         demo_mode,
     })
 }
@@ -2296,10 +2340,41 @@ async fn get_table_data(
             return Ok(vec![0.0; element_count]);
         }
 
-        // If connected to ECU, always read from ECU (live data)
+        // When connected, prefer TuneFile.pages (populated by sync_ecu_data) over a live
+        // ECU read. Static table data does not change unless the user edits it, so the synced
+        // cache is authoritative. Only fall back to a live ECU read if the page was never
+        // synced (e.g. user opened a table before syncing).
+        if let Some(tune_file) = tune {
+            if let Some(page_data) = tune_file.pages.get(&constant.page) {
+                let byte_offset = constant.offset as usize;
+                let total_bytes = element_count * element_size;
+                if byte_offset + total_bytes <= page_data.len() {
+                    eprintln!(
+                        "[DEBUG] read_const_from_source: '{}' from TuneFile cache (connected hit)",
+                        constant.name
+                    );
+                    let mut values = Vec::with_capacity(element_count);
+                    for i in 0..element_count {
+                        let elem_offset = byte_offset + i * element_size;
+                        if let Some(raw_val) =
+                            constant
+                                .data_type
+                                .read_from_bytes(page_data, elem_offset, endianness)
+                        {
+                            values.push(constant.raw_to_display(raw_val));
+                        } else {
+                            values.push(0.0);
+                        }
+                    }
+                    return Ok(values);
+                }
+            }
+        }
+
+        // Cache miss – fall back to a live ECU read (e.g. not yet synced)
         if let Some(ref mut conn_ptr) = conn {
             eprintln!(
-                "[DEBUG] read_const_from_source: reading '{}' from ECU (online mode)",
+                "[DEBUG] read_const_from_source: reading '{}' from ECU (cache miss, online)",
                 constant.name
             );
             let params = libretune_core::protocol::commands::ReadMemoryParams {
@@ -3106,6 +3181,77 @@ async fn update_curve_data(
 
 /// Retrieves current realtime data from the ECU.
 ///
+/// Diagnostic: perform a single realtime read and return raw + parsed info
+#[tauri::command]
+async fn debug_single_realtime_read(state: tauri::State<'_, AppState>) -> Result<String, String> {
+    let mut report = String::new();
+
+    // 1) Check definition
+    {
+        let def_guard = state.definition.lock().await;
+        if let Some(def) = &*def_guard {
+            report.push_str(&format!("INI loaded: sig={}\n", def.signature));
+            report.push_str(&format!(
+                "output_channels count: {}\n",
+                def.output_channels.len()
+            ));
+            report.push_str(&format!(
+                "och_get_command: {:?}\n",
+                def.protocol.och_get_command
+            ));
+            report.push_str(&format!(
+                "och_block_size: {}\n",
+                def.protocol.och_block_size
+            ));
+            report.push_str(&format!(
+                "message_envelope: {:?}\n",
+                def.protocol.message_envelope_format
+            ));
+            report.push_str(&format!("endianness: {:?}\n", def.endianness));
+        } else {
+            return Ok("ERROR: No definition loaded".to_string());
+        }
+    }
+
+    // 2) Check connection
+    {
+        let mut conn_guard = state.connection.lock().await;
+        if let Some(conn) = conn_guard.as_mut() {
+            report.push_str(&format!(
+                "Connected: sig={:?}, modern={}\n",
+                conn.signature(),
+                conn.is_modern_protocol()
+            ));
+
+            // 3) Try to read realtime data
+            match conn.get_realtime_data() {
+                Ok(raw) => {
+                    report.push_str(&format!("Raw data: {} bytes\n", raw.len()));
+                    if raw.len() >= 8 {
+                        report.push_str(&format!("First 8 bytes: {:02x?}\n", &raw[..8]));
+                    }
+                }
+                Err(e) => {
+                    report.push_str(&format!("get_realtime_data ERROR: {:?}\n", e));
+                }
+            }
+        } else {
+            report.push_str("ERROR: No connection\n");
+        }
+    }
+
+    // 4) Check streaming task
+    {
+        let task_guard = state.streaming_task.lock().await;
+        report.push_str(&format!(
+            "Streaming task active: {}\n",
+            task_guard.is_some()
+        ));
+    }
+
+    Ok(report)
+}
+
 /// Polls the ECU for current sensor values and computed channels.
 /// Used for gauges, status bar, and table highlighting.
 ///
@@ -3114,24 +3260,26 @@ async fn update_curve_data(
 async fn get_realtime_data(
     state: tauri::State<'_, AppState>,
 ) -> Result<HashMap<String, f64>, String> {
-    // Use cached output channels to avoid expensive cloning
+    // Use cached output channels to avoid expensive cloning.
+    // IMPORTANT: acquire each lock independently to avoid deadlocks.
     let (channels_arc, endianness) = {
-        let channels_cache_guard = state.cached_output_channels.lock().await;
-        if let Some(ref cached_channels) = *channels_cache_guard {
-            let def_guard = state.definition.lock().await;
+        let cached: Option<Arc<HashMap<String, libretune_core::ini::OutputChannel>>>;
+        {
+            let channels_cache_guard = state.cached_output_channels.lock().await;
+            cached = channels_cache_guard.as_ref().map(|c| Arc::clone(c));
+        } // cached_output_channels lock released
+
+        let def_guard = state.definition.lock().await;
+        if let Some(channels) = cached {
             let endianness = def_guard
                 .as_ref()
                 .map(|d| d.endianness)
                 .unwrap_or(libretune_core::ini::Endianness::Little);
-            (Arc::clone(cached_channels), endianness)
+            (channels, endianness)
+        } else if let Some(def) = &*def_guard {
+            (Arc::new(def.output_channels.clone()), def.endianness)
         } else {
-            // Fallback: clone from definition if cache not available
-            let def_guard = state.definition.lock().await;
-            if let Some(def) = &*def_guard {
-                (Arc::new(def.output_channels.clone()), def.endianness)
-            } else {
-                return Err("Connection or definition missing".to_string());
-            }
+            return Err("Connection or definition missing".to_string());
         }
     };
 
@@ -3338,6 +3486,38 @@ async fn feed_autotune_data(
     }
 }
 
+/// Helper to write stream diagnostic logs to /tmp/libretune-stream.log
+fn stream_log(msg: &str) {
+    use std::io::Write;
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open("/tmp/libretune-stream.log")
+    {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default();
+        let _ = writeln!(f, "[{:.3}] {}", now.as_secs_f64(), msg);
+    }
+}
+
+/// Global tracker for who currently holds the connection lock.
+/// Used for diagnostics only — helps identify which command is blocking the stream.
+static CONN_LOCK_HOLDER: std::sync::Mutex<&str> = std::sync::Mutex::new("(none)");
+
+fn set_conn_lock_holder(who: &'static str) {
+    if let Ok(mut guard) = CONN_LOCK_HOLDER.lock() {
+        *guard = who;
+    }
+}
+
+fn get_conn_lock_holder() -> String {
+    CONN_LOCK_HOLDER
+        .lock()
+        .map(|g| g.to_string())
+        .unwrap_or_else(|_| "(poisoned)".to_string())
+}
+
 /// Starts continuous realtime data streaming from the ECU.
 ///
 /// Spawns a background task that polls the ECU at the specified interval
@@ -3381,11 +3561,18 @@ async fn start_realtime_stream(
         }
     }
 
-    // Check if already running
+    // Always replace old task: previous stop_realtime_stream (fire-and-forget from
+    // React cleanup) may not have completed yet.  If we return early here,
+    // the deferred stop will abort the only task, leaving the stream dead.
     let mut task_guard = state.streaming_task.lock().await;
-    if task_guard.is_some() {
-        return Ok(());
+    if let Some(old_handle) = task_guard.take() {
+        stream_log("start: aborting old task");
+        old_handle.abort();
     }
+    stream_log(&format!(
+        "start: spawning new task (interval={}ms)",
+        interval
+    ));
 
     let app_handle = app.clone();
 
@@ -3397,10 +3584,55 @@ async fn start_realtime_stream(
         let mut demo_simulator: Option<DemoSimulator> = None;
         let start_time = std::time::Instant::now();
 
+        // Cache output channels + endianness once before the loop.
+        // These don't change during a session so there's no need to re-lock every tick.
+        let cached_def_data: Option<(
+            Arc<HashMap<String, libretune_core::ini::OutputChannel>>,
+            libretune_core::ini::Endianness,
+        )> = {
+            // Step A: clone the Arc from cache (lock, clone, release)
+            let cached_ch: Option<Arc<HashMap<String, libretune_core::ini::OutputChannel>>>;
+            {
+                let channels_cache = app_state.cached_output_channels.lock().await;
+                cached_ch = channels_cache.as_ref().map(|c| Arc::clone(c));
+            } // lock released
+
+            // Step B: get endianness from definition (separate lock)
+            if let Some(ch) = cached_ch {
+                let def_guard = app_state.definition.lock().await;
+                let endianness = def_guard
+                    .as_ref()
+                    .map(|d| d.endianness)
+                    .unwrap_or(libretune_core::ini::Endianness::Little);
+                Some((ch, endianness))
+            } else {
+                let def_guard = app_state.definition.lock().await;
+                def_guard
+                    .as_ref()
+                    .map(|def| (Arc::new(def.output_channels.clone()), def.endianness))
+            }
+        };
+        stream_log(&format!(
+            "task started, cached_def_data={}",
+            cached_def_data.is_some()
+        ));
+
+        let mut tick_count: u64 = 0;
         loop {
             ticker.tick().await;
+            tick_count += 1;
 
-            let is_demo = *app_state.demo_mode.lock().await;
+            // Trace: log which phase we're in so we can find deadlocks
+            if tick_count <= 25 || tick_count % 20 == 0 {
+                stream_log(&format!("tick #{}: T1-demo_mode", tick_count));
+            }
+            let is_demo = match app_state.demo_mode.try_lock() {
+                Ok(guard) => *guard,
+                Err(_) => {
+                    // demo_mode lock busy — skip tick
+                    continue;
+                }
+            };
             let current_time_ms = start_time.elapsed().as_millis() as u64;
 
             if is_demo {
@@ -3430,7 +3662,123 @@ async fn start_realtime_stream(
                         }
                     }
 
-                    let _ = app_handle.emit("realtime:update", &data);
+                    // Add common-name aliases so default dashboards work across ECUs.
+                    // Demo simulator uses names like rpm, afr, VE1, advance, pulseWidth —
+                    // same alias map as real ECU path ensures consistent channel names.
+                    {
+                        let alias_map: &[(&str, &[&str])] = &[
+                            (
+                                "rpm",
+                                &["RPMValue", "rpm", "RPM", "engineSpeed", "rpmSensor"],
+                            ),
+                            ("afr", &["AFRValue", "afr", "AFR", "afr1", "lambdaValue"]),
+                            (
+                                "coolant",
+                                &["coolant", "CLTValue", "clt", "CLT", "coolantTemp"],
+                            ),
+                            (
+                                "map",
+                                &["MAPValue", "map", "MAP", "manifoldPressure", "fuelLoad"],
+                            ),
+                            (
+                                "tps",
+                                &["TPSValue", "tps", "TPS", "throttlePosition", "throttle"],
+                            ),
+                            (
+                                "battery",
+                                &[
+                                    "VBatt",
+                                    "vBatt",
+                                    "battery",
+                                    "Battery",
+                                    "vbatt",
+                                    "batteryVoltage",
+                                ],
+                            ),
+                            (
+                                "iat",
+                                &["IATValue", "iat", "IAT", "intakeAirTemp", "intake"],
+                            ),
+                            (
+                                "advance",
+                                &[
+                                    "correctedIgnitionAdvance",
+                                    "baseIgnitionAdvance",
+                                    "SA",
+                                    "advance",
+                                    "timing",
+                                    "ignitionAdvance",
+                                    "ignAdv",
+                                    "Advance",
+                                ],
+                            ),
+                            (
+                                "ve",
+                                &[
+                                    "veValue", "VE1", "ve1", "veMain", "VEValue", "ve", "VE",
+                                    "veCurr",
+                                ],
+                            ),
+                            ("boost", &["boostPressure", "boost", "Boost"]),
+                            (
+                                "speed",
+                                &["vehicleSpeedKph", "speed", "Speed", "wheelSpeed"],
+                            ),
+                            ("oilPressure", &["oilPressure", "OilPressure", "oilpress"]),
+                            (
+                                "fuelLevel",
+                                &["fuelLevel", "FuelLevel", "fuel", "fuelTankLevel"],
+                            ),
+                            (
+                                "pulseWidth",
+                                &[
+                                    "actualLastInjection",
+                                    "pulseWidth1",
+                                    "pulseWidth",
+                                    "pw1",
+                                    "PW1",
+                                ],
+                            ),
+                            (
+                                "dutyCycle",
+                                &["injectorDutyCycle", "dutyCycle", "injDuty", "InjectorDuty"],
+                            ),
+                            ("lambda", &["lambda", "Lambda", "lambdaValue", "wbo2"]),
+                            (
+                                "dwell",
+                                &[
+                                    "sparkDwell",
+                                    "sparkDwellValue",
+                                    "dwell",
+                                    "Dwell",
+                                    "dwellAngle",
+                                    "baseDwell",
+                                ],
+                            ),
+                        ];
+                        for (alias, candidates) in alias_map {
+                            if !data.contains_key(*alias) {
+                                for &candidate in *candidates {
+                                    if let Some(&val) = data.get(candidate) {
+                                        data.insert(alias.to_string(), val);
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Sanitize NaN/Infinity — serde_json cannot serialize these,
+                    // which would silently break app_handle.emit().
+                    for v in data.values_mut() {
+                        if !v.is_finite() {
+                            *v = 0.0;
+                        }
+                    }
+
+                    if let Err(e) = app_handle.emit("realtime:update", &data) {
+                        stream_log(&format!("emit FAILED (demo): {}", e));
+                    }
 
                     // Check for RPM state transitions (key-on/off detection)
                     {
@@ -3465,43 +3813,74 @@ async fn start_realtime_stream(
                 demo_simulator = None; // Clear simulator if we switch modes
 
                 // Phase 1: Get raw data from ECU (hold connection lock only during I/O)
+                // Use try_lock() to avoid blocking forever if another command
+                // (e.g. get_all_constant_values) is holding the connection lock.
+                if tick_count <= 25 || tick_count % 20 == 0 {
+                    stream_log(&format!("tick #{}: T2-conn_lock", tick_count));
+                }
                 let raw_result: Result<Vec<u8>, String>;
                 {
-                    let mut conn_guard = app_state.connection.lock().await;
-                    if let Some(conn) = conn_guard.as_mut() {
-                        raw_result = conn.get_realtime_data().map_err(|e| e.to_string());
-                    } else {
-                        raw_result = Err("No connection".to_string());
+                    match app_state.connection.try_lock() {
+                        Ok(mut conn_guard) => {
+                            set_conn_lock_holder("stream_loop");
+                            if let Some(conn) = conn_guard.as_mut() {
+                                raw_result = conn.get_realtime_data().map_err(|e| e.to_string());
+                            } else {
+                                raw_result = Err("No connection".to_string());
+                            }
+                            set_conn_lock_holder("(none)");
+                        }
+                        Err(_) => {
+                            // Connection lock is busy (another command is using it) — skip this tick
+                            if tick_count <= 25 || tick_count % 20 == 0 {
+                                let holder = get_conn_lock_holder();
+                                stream_log(&format!(
+                                    "tick #{}: conn_lock busy (held by: {}), skipping",
+                                    tick_count, holder
+                                ));
+                            }
+                            continue;
+                        }
                     }
-                } // conn_guard dropped here - mutex released immediately after I/O
+                } // conn lock released via try_lock drop
 
-                // Phase 2: Get cached output channels and endianness (using Arc to avoid clone)
-                let def_data: Option<(
-                    Arc<HashMap<String, libretune_core::ini::OutputChannel>>,
-                    libretune_core::ini::Endianness,
-                )>;
-                {
-                    // Try cached channels first
-                    let channels_cache_guard = app_state.cached_output_channels.lock().await;
-                    if let Some(ref cached_channels) = *channels_cache_guard {
-                        // Get endianness from definition
-                        let def_guard = app_state.definition.lock().await;
-                        let endianness = def_guard
-                            .as_ref()
-                            .map(|d| d.endianness)
-                            .unwrap_or(libretune_core::ini::Endianness::Little);
-                        def_data = Some((Arc::clone(cached_channels), endianness));
-                    } else {
-                        // Fallback: clone from definition if cache not available
-                        let def_guard = app_state.definition.lock().await;
-                        def_data = def_guard
-                            .as_ref()
-                            .map(|def| (Arc::new(def.output_channels.clone()), def.endianness));
+                // Diagnostic logging for raw result
+                match &raw_result {
+                    Ok(raw) => {
+                        static STREAM_LOG_COUNTER: std::sync::atomic::AtomicU64 =
+                            std::sync::atomic::AtomicU64::new(0);
+                        let count =
+                            STREAM_LOG_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        if count < 5 || count % 100 == 0 {
+                            eprintln!(
+                                "[DEBUG] stream tick #{}: got {} raw bytes",
+                                count,
+                                raw.len()
+                            );
+                        }
                     }
-                } // locks dropped here
+                    Err(e) => {
+                        static ERR_LOG_COUNTER: std::sync::atomic::AtomicU64 =
+                            std::sync::atomic::AtomicU64::new(0);
+                        let count =
+                            ERR_LOG_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        if count < 10 || count % 50 == 0 {
+                            eprintln!(
+                                "[ERROR] stream tick #{}: get_realtime_data failed: {}",
+                                count, e
+                            );
+                        }
+                    }
+                }
+
+                // Phase 2: Use pre-cached output channels and endianness (no locks needed)
+                if tick_count <= 25 || tick_count % 20 == 0 {
+                    stream_log(&format!("tick #{}: T3-phase2(cached)", tick_count));
+                }
+                let def_data = &cached_def_data;
 
                 // Phase 3: Process data outside of any mutex locks
-                match (raw_result, def_data) {
+                match (&raw_result, def_data) {
                     (Ok(raw), Some((output_channels, endianness))) => {
                         // Two-pass approach for computed channels:
                         // Pass 1: Parse all non-computed channels
@@ -3511,21 +3890,24 @@ async fn start_realtime_stream(
                         for (name, channel) in output_channels.iter() {
                             if channel.is_computed() {
                                 computed_channels.push((name.clone(), channel.clone()));
-                            } else if let Some(val) = channel.parse(&raw, endianness) {
+                            } else if let Some(val) = channel.parse(&raw, *endianness) {
                                 data.insert(name.clone(), val);
                             }
                         }
 
                         // Pass 2: Evaluate computed channels using parsed values as context
                         for (name, channel) in computed_channels {
-                            if let Some(val) = channel.parse_with_context(&raw, endianness, &data) {
+                            if let Some(val) = channel.parse_with_context(&raw, *endianness, &data)
+                            {
                                 data.insert(name, val);
                             }
                         }
 
                         // Pass 3: User Math Channels Evaluation
-                        {
-                            let mut channels_guard = app_state.math_channels.lock().await;
+                        if tick_count <= 25 || tick_count % 20 == 0 {
+                            stream_log(&format!("tick #{}: T4-math_ch", tick_count));
+                        }
+                        if let Ok(mut channels_guard) = app_state.math_channels.try_lock() {
                             for channel in channels_guard.iter_mut() {
                                 if channel.cached_ast.is_none() {
                                     let _ = channel.compile();
@@ -3542,9 +3924,136 @@ async fn start_realtime_stream(
                             }
                         }
 
-                        let _ = app_handle.emit("realtime:update", &data);
+                        // Add common-name aliases so default dashboards work across ECUs.
+                        // FOME/rusEFI use names like RPMValue, TPSValue, MAPValue, AFRValue, VBatt
+                        // while default dashboard XMLs reference rpm, tps, map, afr, battery.
+                        // Only insert an alias when the canonical name is absent.
+                        {
+                            let alias_map: &[(&str, &[&str])] = &[
+                                (
+                                    "rpm",
+                                    &["RPMValue", "rpm", "RPM", "engineSpeed", "rpmSensor"],
+                                ),
+                                ("afr", &["AFRValue", "afr", "AFR", "afr1", "lambdaValue"]),
+                                (
+                                    "coolant",
+                                    &["coolant", "CLTValue", "clt", "CLT", "coolantTemp"],
+                                ),
+                                ("map", &["MAPValue", "map", "MAP", "manifoldPressure"]),
+                                ("tps", &["TPSValue", "tps", "TPS", "throttlePosition"]),
+                                (
+                                    "battery",
+                                    &["VBatt", "battery", "Battery", "vbatt", "vBatt"],
+                                ),
+                                (
+                                    "iat",
+                                    &["IATValue", "iat", "IAT", "intakeAirTemp", "intake"],
+                                ),
+                                (
+                                    "advance",
+                                    &[
+                                        "correctedIgnitionAdvance",
+                                        "baseIgnitionAdvance",
+                                        "SA",
+                                        "advance",
+                                        "ignitionAdvance",
+                                        "ignAdv",
+                                        "Advance",
+                                    ],
+                                ),
+                                (
+                                    "ve",
+                                    &[
+                                        "veValue", "VE1", "ve1", "veMain", "VEValue", "ve", "VE",
+                                        "veCurr",
+                                    ],
+                                ),
+                                ("boost", &["boostPressure", "boost", "Boost"]),
+                                (
+                                    "speed",
+                                    &["vehicleSpeedKph", "speed", "Speed", "wheelSpeed"],
+                                ),
+                                ("oilPressure", &["oilPressure", "OilPressure", "oilpress"]),
+                                (
+                                    "fuelLevel",
+                                    &["fuelLevel", "FuelLevel", "fuel", "fuelTankLevel"],
+                                ),
+                                (
+                                    "pulseWidth",
+                                    &[
+                                        "actualLastInjection",
+                                        "pulseWidth1",
+                                        "pulseWidth",
+                                        "pw1",
+                                        "PW1",
+                                    ],
+                                ),
+                                (
+                                    "dutyCycle",
+                                    &["injectorDutyCycle", "dutyCycle", "injDuty", "InjectorDuty"],
+                                ),
+                                ("lambda", &["lambda", "Lambda", "lambdaValue", "wbo2"]),
+                                (
+                                    "dwell",
+                                    &[
+                                        "sparkDwell",
+                                        "sparkDwellValue",
+                                        "dwell",
+                                        "Dwell",
+                                        "dwellAngle",
+                                        "baseDwell",
+                                    ],
+                                ),
+                            ];
+                            for (alias, candidates) in alias_map {
+                                if !data.contains_key(*alias) {
+                                    for &candidate in *candidates {
+                                        if let Some(&val) = data.get(candidate) {
+                                            data.insert(alias.to_string(), val);
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Sanitize NaN/Infinity — serde_json cannot serialize these,
+                        // which would silently break app_handle.emit().
+                        for v in data.values_mut() {
+                            if !v.is_finite() {
+                                *v = 0.0;
+                            }
+                        }
+
+                        if let Err(e) = app_handle.emit("realtime:update", &data) {
+                            stream_log(&format!("emit FAILED (real): {}", e));
+                        }
+
+                        // Log parsed channel count — every tick for the first 30, then every 20th (~1/sec)
+                        {
+                            static EMIT_LOG_COUNTER: std::sync::atomic::AtomicU64 =
+                                std::sync::atomic::AtomicU64::new(0);
+                            let count =
+                                EMIT_LOG_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                            if count < 30 || count % 20 == 0 {
+                                let rpm = data
+                                    .get("rpm")
+                                    .or_else(|| data.get("RPM"))
+                                    .copied()
+                                    .unwrap_or(-1.0);
+                                stream_log(&format!(
+                                    "emit #{}: {} ch, rpm={:.0}",
+                                    count,
+                                    data.len(),
+                                    rpm
+                                ));
+                            }
+                        }
 
                         // Check for RPM state transitions (key-on/off detection)
+                        if tick_count <= 25 || tick_count % 20 == 0 {
+                            stream_log(&format!("tick #{}: T5-rpm_state", tick_count));
+                        }
                         {
                             let rpm = data
                                 .get("rpm")
@@ -3552,27 +4061,40 @@ async fn start_realtime_stream(
                                 .copied()
                                 .unwrap_or(0.0);
 
-                            let settings = load_settings(&app_handle);
-                            let mut tracker = app_state.rpm_state_tracker.lock().await;
-
-                            if let Some(new_state) = tracker.update(
-                                rpm,
-                                settings.key_on_threshold_rpm,
-                                settings.key_off_timeout_sec,
-                            ) {
-                                // Emit event when state changes
-                                let state_str = match new_state {
-                                    RpmState::On => "on",
-                                    RpmState::Off => "off",
-                                };
-                                let _ = app_handle.emit("realtime:key_state_changed", &state_str);
+                            if let Ok(mut tracker) = app_state.rpm_state_tracker.try_lock() {
+                                let settings = load_settings(&app_handle);
+                                if let Some(new_state) = tracker.update(
+                                    rpm,
+                                    settings.key_on_threshold_rpm,
+                                    settings.key_off_timeout_sec,
+                                ) {
+                                    let state_str = match new_state {
+                                        RpmState::On => "on",
+                                        RpmState::Off => "off",
+                                    };
+                                    let _ =
+                                        app_handle.emit("realtime:key_state_changed", &state_str);
+                                }
                             }
                         }
 
                         // Feed data to AutoTune if running
+                        if tick_count <= 25 || tick_count % 20 == 0 {
+                            stream_log(&format!("tick #{}: T6-autotune", tick_count));
+                        }
                         feed_autotune_data(&app_state, &data, current_time_ms).await;
                     }
                     (Err(e), _) => {
+                        // Log errors to stream log so we can see Phase 1 failures
+                        {
+                            static ERR_STREAM_LOG: std::sync::atomic::AtomicU64 =
+                                std::sync::atomic::AtomicU64::new(0);
+                            let n =
+                                ERR_STREAM_LOG.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                            if n < 10 || n % 50 == 0 {
+                                stream_log(&format!("stream error #{}: {}", n, e));
+                            }
+                        }
                         let _ = app_handle.emit("realtime:error", &e);
                     }
                     _ => {}
@@ -3592,9 +4114,13 @@ async fn start_realtime_stream(
 /// Returns: Nothing on success
 #[tauri::command]
 async fn stop_realtime_stream(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    stream_log("stop called");
     let mut task_guard = state.streaming_task.lock().await;
     if let Some(handle) = task_guard.take() {
+        stream_log("stop: aborting task");
         handle.abort();
+    } else {
+        stream_log("stop: no task to abort");
     }
     Ok(())
 }
@@ -4876,6 +5402,11 @@ async fn update_constant(
 /// Used to get visibility condition context for menu items and dialogs.
 /// Only returns scalar constants, not arrays.
 ///
+/// IMPORTANT: This function NEVER reads from the ECU directly. It reads from
+/// the tune cache (populated during sync) or the tune file. Reading hundreds
+/// of constants individually over serial would hold the connection lock for
+/// many seconds, permanently starving the realtime stream.
+///
 /// Returns: HashMap of constant names to their current values
 #[tauri::command]
 async fn get_all_constant_values(
@@ -4884,7 +5415,7 @@ async fn get_all_constant_values(
     let def_guard = state.definition.lock().await;
     let def = def_guard.as_ref().ok_or("Definition not loaded")?;
 
-    let mut conn_guard = state.connection.lock().await;
+    // NO connection lock! Read from cache/tune only.
     let cache_guard = state.tune_cache.lock().await;
     let tune_guard = state.current_tune.lock().await;
 
@@ -4895,260 +5426,101 @@ async fn get_all_constant_values(
             continue;
         }
 
-        // Try to get the value - prioritize ECU if connected, otherwise tune file or cache
-        let value = if let Some(ref mut conn_ptr) = conn_guard.as_mut() {
-            // Online: read from ECU
-            let length = constant.size_bytes() as u16;
-            if length > 0 {
-                let params = libretune_core::protocol::commands::ReadMemoryParams {
-                    can_id: 0,
-                    page: constant.page,
-                    offset: constant.offset,
-                    length,
-                };
-                if let Ok(raw_data) = conn_ptr.read_memory(params) {
-                    if let Some(raw_val) =
-                        constant
-                            .data_type
-                            .read_from_bytes(&raw_data, 0, def.endianness)
-                    {
-                        constant.raw_to_display(raw_val)
-                    } else {
-                        0.0
-                    }
-                } else {
-                    0.0
-                }
-            } else if constant.data_type == DataType::Bits {
-                // Bits constant - read from byte and extract bits
-                let byte_offset = (constant.bit_position.unwrap_or(0) / 8) as u16;
-                let bit_in_byte = constant.bit_position.unwrap_or(0) % 8;
-                let bytes_needed =
-                    (bit_in_byte + constant.bit_size.unwrap_or(0)).div_ceil(8) as u16;
-                let params = libretune_core::protocol::commands::ReadMemoryParams {
-                    can_id: 0,
-                    page: constant.page,
-                    offset: constant.offset + byte_offset,
-                    length: bytes_needed.max(1),
-                };
-                if let Ok(raw_data) = conn_ptr.read_memory(params) {
-                    let mut bit_value = 0u64;
-                    for (i, &byte) in raw_data.iter().enumerate() {
-                        let bit_start = if i == 0 { bit_in_byte } else { 0 };
-                        let bit_end = if i == bytes_needed.saturating_sub(1) as usize {
-                            bit_in_byte + constant.bit_size.unwrap_or(0)
-                        } else {
-                            8
-                        };
-                        let bits = ((byte >> bit_start)
-                            & bit_mask_u8(bit_end.saturating_sub(bit_start)))
-                            as u64;
-                        bit_value |= bits << (i * 8);
-                    }
-                    bit_value as f64
-                } else {
-                    0.0
-                }
-            } else {
-                0.0
-            }
-        } else {
-            // Offline: read from TuneFile first, then cache
-            if let Some(tune) = tune_guard.as_ref() {
-                if let Some(tune_value) = tune.constants.get(name) {
-                    use libretune_core::tune::TuneValue;
-                    match tune_value {
-                        TuneValue::Scalar(v) => *v,
-                        TuneValue::Bool(b) if constant.data_type == DataType::Bits => {
-                            // Convert boolean to index (false = 0, true = 1)
-                            // This matches the typical bit_options pattern: ["false", "true"]
-                            if *b {
-                                1.0
-                            } else {
-                                0.0
-                            }
-                        }
-                        TuneValue::String(s) if constant.data_type == DataType::Bits => {
-                            // Look up string in bit_options
-                            if let Some(index) =
-                                constant.bit_options.iter().position(|opt| opt == s)
-                            {
-                                index as f64
-                            } else if let Some(index) = constant
-                                .bit_options
-                                .iter()
-                                .position(|opt| opt.eq_ignore_ascii_case(s))
-                            {
-                                index as f64
-                            } else {
-                                0.0
-                            }
-                        }
-                        _ => 0.0,
-                    }
-                } else if let Some(cache) = cache_guard.as_ref() {
-                    // Fall back to cache
-                    let length = constant.size_bytes() as u16;
-                    if length > 0 {
-                        if let Some(raw_data) =
-                            cache.read_bytes(constant.page, constant.offset, length)
-                        {
-                            if let Some(raw_val) =
-                                constant
-                                    .data_type
-                                    .read_from_bytes(raw_data, 0, def.endianness)
-                            {
-                                constant.raw_to_display(raw_val)
-                            } else {
-                                0.0
-                            }
-                        } else {
-                            0.0
-                        }
-                    } else if constant.data_type == DataType::Bits {
-                        // Bits constant from cache
-                        let byte_offset = (constant.bit_position.unwrap_or(0) / 8) as u16;
-                        let bit_in_byte = constant.bit_position.unwrap_or(0) % 8;
-                        let bytes_needed =
-                            (bit_in_byte + constant.bit_size.unwrap_or(0)).div_ceil(8) as u16;
-                        if let Some(raw_data) = cache.read_bytes(
-                            constant.page,
-                            constant.offset + byte_offset,
-                            bytes_needed.max(1),
-                        ) {
-                            let mut bit_value = 0u64;
-                            for (i, &byte) in raw_data.iter().enumerate() {
-                                let bit_start = if i == 0 { bit_in_byte } else { 0 };
-                                let bit_end = if i == bytes_needed.saturating_sub(1) as usize {
-                                    bit_in_byte + constant.bit_size.unwrap_or(0)
-                                } else {
-                                    8
-                                };
-                                let bits = ((byte >> bit_start)
-                                    & bit_mask_u8(bit_end.saturating_sub(bit_start)))
-                                    as u64;
-                                bit_value |= bits << (i * 8);
-                            }
-                            bit_value as f64
-                        } else {
-                            0.0
-                        }
-                    } else {
-                        0.0
-                    }
-                } else {
-                    // Not in TuneFile, try cache
-                    if let Some(cache) = cache_guard.as_ref() {
-                        let length = constant.size_bytes() as u16;
-                        if length > 0 {
-                            if let Some(raw_data) =
-                                cache.read_bytes(constant.page, constant.offset, length)
-                            {
-                                if let Some(raw_val) =
-                                    constant
-                                        .data_type
-                                        .read_from_bytes(raw_data, 0, def.endianness)
-                                {
-                                    constant.raw_to_display(raw_val)
-                                } else {
-                                    0.0
-                                }
-                            } else {
-                                0.0
-                            }
-                        } else if constant.data_type == DataType::Bits {
-                            // Bits constant from cache
-                            let byte_offset = (constant.bit_position.unwrap_or(0) / 8) as u16;
-                            let bit_in_byte = constant.bit_position.unwrap_or(0) % 8;
-                            let bytes_needed =
-                                (bit_in_byte + constant.bit_size.unwrap_or(0)).div_ceil(8) as u16;
-                            if let Some(raw_data) = cache.read_bytes(
-                                constant.page,
-                                constant.offset + byte_offset,
-                                bytes_needed.max(1),
-                            ) {
-                                let mut bit_value = 0u64;
-                                for (i, &byte) in raw_data.iter().enumerate() {
-                                    let bit_start = if i == 0 { bit_in_byte } else { 0 };
-                                    let bit_end = if i == bytes_needed.saturating_sub(1) as usize {
-                                        bit_in_byte + constant.bit_size.unwrap_or(0)
-                                    } else {
-                                        8
-                                    };
-                                    let bits = ((byte >> bit_start)
-                                        & bit_mask_u8(bit_end.saturating_sub(bit_start)))
-                                        as u64;
-                                    bit_value |= bits << (i * 8);
-                                }
-                                bit_value as f64
-                            } else {
-                                0.0
-                            }
-                        } else {
-                            0.0
-                        }
-                    } else {
-                        0.0
-                    }
-                }
-            } else if let Some(cache) = cache_guard.as_ref() {
-                // No tune file, try cache
-                let length = constant.size_bytes() as u16;
-                if length > 0 {
-                    if let Some(raw_data) = cache.read_bytes(constant.page, constant.offset, length)
-                    {
-                        if let Some(raw_val) =
-                            constant
-                                .data_type
-                                .read_from_bytes(raw_data, 0, def.endianness)
-                        {
-                            constant.raw_to_display(raw_val)
-                        } else {
-                            0.0
-                        }
-                    } else {
-                        0.0
-                    }
-                } else if constant.data_type == DataType::Bits {
-                    // Bits constant from cache
-                    let byte_offset = (constant.bit_position.unwrap_or(0) / 8) as u16;
-                    let bit_in_byte = constant.bit_position.unwrap_or(0) % 8;
-                    let bytes_needed =
-                        (bit_in_byte + constant.bit_size.unwrap_or(0)).div_ceil(8) as u16;
-                    if let Some(raw_data) = cache.read_bytes(
-                        constant.page,
-                        constant.offset + byte_offset,
-                        bytes_needed.max(1),
-                    ) {
-                        let mut bit_value = 0u64;
-                        for (i, &byte) in raw_data.iter().enumerate() {
-                            let bit_start = if i == 0 { bit_in_byte } else { 0 };
-                            let bit_end = if i == bytes_needed.saturating_sub(1) as usize {
-                                bit_in_byte + constant.bit_size.unwrap_or(0)
-                            } else {
-                                8
-                            };
-                            let bits = ((byte >> bit_start)
-                                & bit_mask_u8(bit_end.saturating_sub(bit_start)))
-                                as u64;
-                            bit_value |= bits << (i * 8);
-                        }
-                        bit_value as f64
-                    } else {
-                        0.0
-                    }
-                } else {
-                    0.0
-                }
-            } else {
-                0.0
-            }
-        };
+        let value = read_constant_from_cache_or_tune(
+            name,
+            constant,
+            def.endianness,
+            tune_guard.as_ref(),
+            cache_guard.as_ref(),
+        );
 
         values.insert(name.clone(), value);
     }
 
     Ok(values)
+}
+
+/// Read a single constant value from tune file or cache (no ECU connection needed).
+/// Priority: TuneFile → TuneCache → default 0.0
+fn read_constant_from_cache_or_tune(
+    name: &str,
+    constant: &libretune_core::ini::Constant,
+    endianness: libretune_core::ini::Endianness,
+    tune: Option<&libretune_core::tune::TuneFile>,
+    cache: Option<&libretune_core::tune::TuneCache>,
+) -> f64 {
+    // Try tune file first
+    if let Some(tune) = tune {
+        if let Some(tune_value) = tune.constants.get(name) {
+            use libretune_core::tune::TuneValue;
+            match tune_value {
+                TuneValue::Scalar(v) => return *v,
+                TuneValue::Bool(b) if constant.data_type == DataType::Bits => {
+                    return if *b { 1.0 } else { 0.0 };
+                }
+                TuneValue::String(s) if constant.data_type == DataType::Bits => {
+                    if let Some(index) = constant.bit_options.iter().position(|opt| opt == s) {
+                        return index as f64;
+                    } else if let Some(index) = constant
+                        .bit_options
+                        .iter()
+                        .position(|opt| opt.eq_ignore_ascii_case(s))
+                    {
+                        return index as f64;
+                    }
+                    return 0.0;
+                }
+                _ => {} // fall through to cache
+            }
+        }
+    }
+
+    // Try cache
+    if let Some(cache) = cache {
+        return read_constant_from_cache(constant, endianness, cache);
+    }
+
+    0.0
+}
+
+/// Read a constant value from the tune cache bytes.
+fn read_constant_from_cache(
+    constant: &libretune_core::ini::Constant,
+    endianness: libretune_core::ini::Endianness,
+    cache: &libretune_core::tune::TuneCache,
+) -> f64 {
+    let length = constant.size_bytes() as u16;
+    if length > 0 {
+        if let Some(raw_data) = cache.read_bytes(constant.page, constant.offset, length) {
+            if let Some(raw_val) = constant.data_type.read_from_bytes(raw_data, 0, endianness) {
+                return constant.raw_to_display(raw_val);
+            }
+        }
+    } else if constant.data_type == DataType::Bits {
+        let byte_offset = (constant.bit_position.unwrap_or(0) / 8) as u16;
+        let bit_in_byte = constant.bit_position.unwrap_or(0) % 8;
+        let bytes_needed = (bit_in_byte + constant.bit_size.unwrap_or(0)).div_ceil(8) as u16;
+        if let Some(raw_data) = cache.read_bytes(
+            constant.page,
+            constant.offset + byte_offset,
+            bytes_needed.max(1),
+        ) {
+            let mut bit_value = 0u64;
+            for (i, &byte) in raw_data.iter().enumerate() {
+                let bit_start = if i == 0 { bit_in_byte } else { 0 };
+                let bit_end = if i == bytes_needed.saturating_sub(1) as usize {
+                    bit_in_byte + constant.bit_size.unwrap_or(0)
+                } else {
+                    8
+                };
+                let bits =
+                    ((byte >> bit_start) & bit_mask_u8(bit_end.saturating_sub(bit_start))) as u64;
+                bit_value |= bits << (i * 8);
+            }
+            return bit_value as f64;
+        }
+    }
+    0.0
 }
 
 /// Starts AutoTune data collection and recommendation engine.
@@ -12624,6 +12996,7 @@ pub fn run() {
             clear_console_history,
             load_ini,
             get_realtime_data,
+            debug_single_realtime_read,
             start_realtime_stream,
             stop_realtime_stream,
             get_table_data,

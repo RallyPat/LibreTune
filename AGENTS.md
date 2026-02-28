@@ -276,6 +276,37 @@ Based on analysis of common ECU tuning software patterns:
 
 ## Recent Changes (Session History)
 
+### Realtime Stream Lock Contention Fix & Dashboard Tab Protection - Feb 28, 2026
+
+#### Realtime Stream Fix: get_all_constant_values Connection Lock Starvation
+- **Problem**: Dashboard gauges updated for ~2 seconds then froze permanently
+- **Root Cause**: `get_all_constant_values()` read every scalar constant from the ECU individually over serial while holding `connection.lock()`. With rusEFI's hundreds of constants, this took many seconds or hung permanently, starving the realtime stream.
+- **Evidence**: Stream log showed 80 `conn_lock busy` entries vs only 21 successful emits; connection lock was held permanently after ~2 seconds.
+- **Fix** (`lib.rs`):
+  - Rewrote `get_all_constant_values()` to **never acquire the connection lock**
+  - Now reads exclusively from tune cache and tune file (already populated during sync)
+  - Extracted reusable helpers: `read_constant_from_cache_or_tune()` and `read_constant_from_cache()`
+  - Removed ~200 lines of duplicated ECU read code, replaced with clean helper calls
+- **Diagnostics added** (`lib.rs`):
+  - `CONN_LOCK_HOLDER` global atomic tracker records which function currently holds the connection lock
+  - `set_conn_lock_holder()` / `get_conn_lock_holder()` helper functions
+  - Stream log now reports WHO is holding the lock when `try_lock()` fails (e.g., `conn_lock busy (held by: sync_ecu_data)`)
+  - Instrumented: `get_connection_status`, `sync_ecu_data`, `stream_loop`
+- **Impact**: Realtime stream no longer starved by constant reads; gauges should update continuously
+
+#### Dashboard Tab Protection
+- **Problem**: Dashboard tab could be accidentally closed via middle-click or popout, with no way to reopen it
+- **Fix 1** (`App.tsx` - `handleTabClose`):
+  - Added guard: tabs with `closable: false` are now protected from closing
+  - Checks the `closable` property before removing any tab
+- **Fix 2** (`TabBar.tsx` - `handleMiddleClick`):
+  - Middle-click close now checks `tab.closable !== false` before closing
+  - Changed handler signature from `(e, tabId: string)` to `(e, tab: Tab)` for property access
+- **Fix 3** (`App.tsx` - View menu):
+  - Added **"Dashboard"** menu item to View menu as first entry
+  - Re-creates dashboard tab if missing, or switches to it if present
+  - Users can always recover the dashboard via **View → Dashboard**
+
 ### Sprint 5 - Advanced Table Editing (Part 2) - Active Feb 9, 2026
 - **Feature**: Excel-style Row/Column Selection and Header Editing
 - **Goal**: Make table headers interactive selection tools (click to select row/col) instead of static inputs, while preserving ability to edit bins via double-click.
@@ -1056,9 +1087,10 @@ Based on analysis of common ECU tuning software patterns:
 - **Test Status**: 84+ tests passing, 2 ignored
 - **CI Status**: GitHub Actions workflow ready
 - **Trademark Status**: Clean - all proprietary terminology removed
-- **UI Status**: Gauges rendering correctly with live data
+- **UI Status**: Gauges rendering correctly with live data; Dashboard tab protected from accidental close
 - **Backend Status**: AutoTune module functional with heatmap support
-- **Realtime Streaming**: Event-based streaming implemented (100ms intervals)
+- **Realtime Streaming**: Event-based streaming (50ms intervals) with `try_lock()` contention handling and lock-holder diagnostics
+- **Connection Lock**: `get_all_constant_values` no longer holds connection lock; reads from cache/tune only
 - **Cross-Platform**: Fully cross-platform path handling (Windows/macOS/Linux)
 - **Dashboard Format**: TunerStudio XML format support with 3 default templates
 

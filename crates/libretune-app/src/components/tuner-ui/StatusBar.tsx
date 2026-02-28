@@ -1,21 +1,37 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { StatusItem } from './TunerLayout';
+import { useChannelValue } from '../../stores/realtimeStore';
 import './StatusBar.css';
+
+export interface ChannelInfoForStatusBar {
+  name: string;
+  label?: string | null;
+  units: string;
+}
 
 interface StatusBarProps {
   items: StatusItem[];
   connected: boolean;
   ecuName?: string;
   unitsSystem?: 'metric' | 'imperial';
+  /** Channel names to show live values for */
+  realtimeChannels?: string[];
+  /** Channel metadata (label, units) */
+  channelInfoMap?: Record<string, ChannelInfoForStatusBar>;
 }
 
-export function StatusBar({ items, connected, ecuName }: StatusBarProps) {
+export function StatusBar({ items, connected, ecuName, realtimeChannels, channelInfoMap }: StatusBarProps) {
   const [currentPage, setCurrentPage] = useState(0);
   const itemsPerPage = 6;
 
-  // Get center items (channel indicators)
+  // Get center items (non-realtime channel indicators)
   const centerItems = items.filter((item) => item.align === 'center' || !item.align);
   const rightItems = items.filter((item) => item.align === 'right');
+
+  // Realtime channel cells rendered individually to avoid parent re-renders
+  const realtimeCells = (connected && realtimeChannels && realtimeChannels.length > 0)
+    ? realtimeChannels
+    : [];
 
   // Calculate pagination for center items
   const totalPages = Math.ceil(centerItems.length / itemsPerPage);
@@ -57,7 +73,7 @@ export function StatusBar({ items, connected, ecuName }: StatusBarProps) {
 
       {/* Center items with pagination */}
       <div className="statusbar-section statusbar-section-center">
-        {centerItems.length > 0 ? (
+        {(realtimeCells.length > 0 || centerItems.length > 0) ? (
           <>
             {/* Pagination previous button */}
             {totalPages > 1 && (
@@ -71,7 +87,16 @@ export function StatusBar({ items, connected, ecuName }: StatusBarProps) {
               </button>
             )}
 
-            {/* Visible items */}
+            {/* Realtime channel indicators — each subscribes individually */}
+            {realtimeCells.map((channel) => (
+              <RealtimeChannelCell
+                key={`rt-${channel}`}
+                channel={channel}
+                info={channelInfoMap?.[channel]}
+              />
+            ))}
+
+            {/* Static center items (e.g. sync warning) */}
             {visibleItems.map((item) => (
               <StatusBarItem key={item.id} item={item} />
             ))}
@@ -201,3 +226,32 @@ export function LoggingIndicator({
     </span>
   );
 }
+
+/**
+ * Individual realtime channel cell.
+ * Each cell subscribes to a SINGLE channel via useChannelValue(),
+ * so only THIS cell re-renders when that channel's value changes.
+ * This prevents the 3500-line App.tsx from re-rendering at 20 Hz.
+ */
+const RealtimeChannelCell = React.memo(function RealtimeChannelCell({
+  channel,
+  info,
+}: {
+  channel: string;
+  info?: ChannelInfoForStatusBar;
+}) {
+  const value = useChannelValue(channel);
+  const label = info?.label || channel;
+  const unit = info?.units || undefined;
+  const formatted = Math.abs(value) >= 100 ? value.toFixed(0) : value.toFixed(1);
+
+  return (
+    <div className="statusbar-cell">
+      <span className="statusbar-cell-label">{label}</span>
+      <span className="statusbar-cell-value">
+        {formatted}
+        {unit && <span className="statusbar-cell-unit">{unit}</span>}
+      </span>
+    </div>
+  );
+});

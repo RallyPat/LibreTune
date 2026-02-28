@@ -30,4 +30,7 @@ pub const DEFAULT_BAUD_RATE: u32 = 115200;
 pub const DEFAULT_TIMEOUT_MS: u64 = 2000;
 
 /// Maximum packet size
-pub const MAX_PACKET_SIZE: usize = 8192;
+/// Maximum packet payload size. The 2-byte length field in msEnvelope_1.0 can hold up to
+/// 65535 bytes, so we allow that as the upper bound. The previous 8192 limit was arbitrary
+/// and caused BufferOverflow errors on large pages (e.g. rusEFI pageSize = 25924).
+pub const MAX_PACKET_SIZE: usize = 65535;

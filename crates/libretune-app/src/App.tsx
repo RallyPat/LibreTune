@@ -5,7 +5,7 @@ import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { open } from "@tauri-apps/plugin-dialog";
 import { ThemeProvider, useTheme, ThemeName, THEME_INFO } from "./themes";
 import { initializeHotkeyManager } from "./services/hotkeyService";
-import { useRealtimeStore, useChannels } from "./stores/realtimeStore";
+import { useRealtimeStore } from "./stores/realtimeStore";
 import {
   TunerLayout,
   MenuItem as TunerMenuItem,
@@ -15,7 +15,6 @@ import {
   Tab,
   TableEditor,
   TableData as TunerTableData,
-  StatusIndicator,
   LoggingIndicator,
   SaveDialog,
   LoadDialog,
@@ -54,6 +53,32 @@ import PortEditor, { PinConfig } from "./components/hardware/PortEditor";
 import { useLoading } from "./components/LoadingContext";
 import { useToast } from "./components/ToastContext";
 import "./styles";
+
+// ─── Module-level realtime event listener ───────────────────────────────────
+// Registered once and never unregistered.  This prevents the race condition
+// where React 18 StrictMode's mount→cleanup→mount cycle (or any effect re-run)
+// unregisters the listener and drops events.  The backend's start_realtime_stream
+// always replaces any existing task, so concurrent start calls are harmless.
+let _realtimeListenerPromise: Promise<void> | null = null;
+
+function ensureRealtimeListener(): Promise<void> {
+  if (_realtimeListenerPromise) return _realtimeListenerPromise;
+  _realtimeListenerPromise = (async () => {
+    let eventCount = 0;
+    await listen("realtime:update", (event) => {
+      eventCount++;
+      if (eventCount <= 5 || eventCount % 100 === 0) {
+        console.log(`[realtime] event #${eventCount}, keys=${Object.keys(event.payload as object).length}`);
+      }
+      useRealtimeStore.getState().updateChannels(event.payload as Record<string, number>);
+    });
+    await listen("realtime:error", (event) => {
+      console.error("Realtime error:", event.payload);
+    });
+    console.log("[realtime] Global event listener registered");
+  })();
+  return _realtimeListenerPromise;
+}
 
 // Backend types
 interface ConnectionStatus {
@@ -366,7 +391,9 @@ function AppContent() {
 
   // Realtime data - now managed by Zustand store for efficient per-channel subscriptions
   // Components use useChannelValue() or useChannels() hooks to subscribe to specific channels
-  const statusBarData = useChannels(statusBarChannels); // Only subscribe to status bar channels here
+  // NOTE: App.tsx does NOT subscribe to realtime channels — the StatusBar handles its own
+  // subscriptions via individual RealtimeChannelCell components to avoid re-rendering
+  // this 3500-line component at 20 Hz.
   const [isLogging, setIsLogging] = useState(false);
   const [logDuration, setLogDuration] = useState("");
 
@@ -450,6 +477,17 @@ function AppContent() {
     if (!inTauri) {
       console.warn("Running in browser mode. Use `npm run tauri dev` for full functionality.");
     }
+    // Expose debug helper to browser console
+    (window as any).__libretune_debug = async () => {
+      try {
+        const result = await invoke<string>('debug_single_realtime_read');
+        console.log('[DEBUG] Single realtime read result:\n' + result);
+        return result;
+      } catch (e) {
+        console.error('[DEBUG] debug_single_realtime_read failed:', e);
+        return e;
+      }
+    };
   }, []);
 
   // Initial data fetch - initialize INI repository and check for existing project
@@ -919,27 +957,48 @@ function AppContent() {
   }, [activeTabId]); // Only depend on activeTabId to avoid infinite loops
 
   // Realtime streaming - updates go directly to Zustand store (no React state change cascade)
+  //
+  // Architecture: The Tauri event listener is registered ONCE at module level
+  // (ensureRealtimeListener) and never unregistered. This eliminates all race
+  // conditions that plagued the previous approach where listen()/unlisten() was
+  // done inside useEffect — React 18 StrictMode's mount→cleanup→mount cycle
+  // caused two concurrent stop_realtime_stream IPC calls that non-deterministically
+  // killed the freshly started stream.
+  //
+  // The effect's only job is to start the backend stream (which always replaces any
+  // existing task) and clear channels on cleanup.
   useEffect(() => {
-    let unlistenUpdate: UnlistenFn | null = null;
-    let unlistenErr: UnlistenFn | null = null;
+    console.log(`[Stream effect] status.state=${status.state} has_definition=${status.has_definition}`);
     let pollIntervalHandle: NodeJS.Timeout | null = null;
+    let heartbeatHandle: NodeJS.Timeout | null = null;
+    let cancelled = false;
 
     if (status.state === "Connected" && status.has_definition) {
+      console.log("[Stream effect] Condition met, starting IIFE");
       (async () => {
+        // Ensure the global event listener is registered (no-op if already done)
+        console.log("[Stream effect] Registering listener...");
+        await ensureRealtimeListener();
+        if (cancelled) { console.log("[Stream effect] cancelled after listener"); return; }
+
+        // Start the backend stream. start_realtime_stream always aborts any
+        // existing task before creating a new one, so concurrent calls from
+        // StrictMode double-mount are harmless — the last one wins.
         try {
-          await invoke("start_realtime_stream", { intervalMs: 100 });
+          console.log("[Stream effect] Calling start_realtime_stream...");
+          await invoke("start_realtime_stream", { intervalMs: 50 });
+          console.log("[Stream effect] Stream started successfully");
         } catch (e) {
           console.warn("Realtime stream failed, falling back to polling with backoff:", e);
-          // Use exponential backoff to reduce load if streaming fails
-          let pollInterval = 500; // Start with 500ms
+          if (cancelled) return;
+          let pollInterval = 500;
           let failureCount = 0;
-          const maxInterval = 2000; // Cap at 2s
+          const maxInterval = 2000;
           
           const startPolling = () => {
             pollIntervalHandle = setInterval(async () => {
               try {
                 await fetchRealtimeData();
-                // Success - reduce interval gradually
                 if (pollInterval > 100) {
                   pollInterval = Math.max(100, pollInterval / 1.5);
                   if (pollIntervalHandle) clearInterval(pollIntervalHandle);
@@ -947,7 +1006,6 @@ function AppContent() {
                 }
                 failureCount = 0;
               } catch (error) {
-                // Failure - increase interval with exponential backoff
                 failureCount++;
                 if (failureCount >= 3) {
                   pollInterval = Math.min(maxInterval, pollInterval * 1.5);
@@ -960,36 +1018,32 @@ function AppContent() {
           };
           
           startPolling();
-          unlistenUpdate = () => {
-            if (pollIntervalHandle) clearInterval(pollIntervalHandle);
-          };
         }
 
-        try {
-          unlistenUpdate = await listen("realtime:update", (event) => {
-            // Update Zustand store directly - no React setState, no cascade re-renders
-            useRealtimeStore.getState().updateChannels(event.payload as Record<string, number>);
-          });
-          unlistenErr = await listen("realtime:error", (event) => {
-            console.error("Realtime error:", event.payload);
-          });
-        } catch (e) {
-          console.error("Failed to listen for realtime events:", e);
-        }
+        // Heartbeat: if no store update arrives for 2 seconds, restart the stream.
+        // Add cooldown to prevent thundering herd (max one restart per 10 seconds).
+        let lastRestartTime = 0;
+        heartbeatHandle = setInterval(() => {
+          if (cancelled) return;
+          const lastUpdate = useRealtimeStore.getState().lastUpdateTime;
+          const now = Date.now();
+          if (lastUpdate > 0 && now - lastUpdate > 2000 && now - lastRestartTime > 10000) {
+            console.warn("[Heartbeat] No realtime update for 2s, restarting stream (cooldown 10s)");
+            lastRestartTime = now;
+            invoke("start_realtime_stream", { intervalMs: 50 }).catch(() => {});
+          }
+        }, 2000);
       })();
     }
 
     return () => {
-      if (unlistenUpdate) unlistenUpdate();
-      if (unlistenErr) unlistenErr();
+      console.log("[Stream effect] CLEANUP running");
+      cancelled = true;
+      // Do NOT unregister the event listener — it lives at module level.
+      // Do NOT call stop_realtime_stream — it races with the next mount's start.
       if (pollIntervalHandle) clearInterval(pollIntervalHandle);
-      // Clear realtime data when disconnecting
+      if (heartbeatHandle) clearInterval(heartbeatHandle);
       useRealtimeStore.getState().clearChannels();
-      try {
-        invoke("stop_realtime_stream");
-      } catch {
-        /* ignore */
-      }
     };
   }, [status.state, status.has_definition]);
 
@@ -1040,7 +1094,7 @@ function AppContent() {
             const demoEnabled = Boolean(event.payload as unknown as boolean);
             if (demoEnabled) {
               // Start realtime streaming for demo
-              try { await invoke('start_realtime_stream', { intervalMs: 100 }); } catch (e) { /* ignore */ }
+              try { await invoke('start_realtime_stream', { intervalMs: 50 }); } catch (e) { /* ignore */ }
             } else {
               try { await invoke('stop_realtime_stream'); } catch (e) { /* ignore */ }
             }
@@ -1195,17 +1249,17 @@ function AppContent() {
       }
       
       // Compare tunes after successful sync
-      if (result.pages_synced > 0) {
-        try {
-          const differs = await invoke<boolean>("compare_project_and_ecu_tunes");
-          if (differs) {
-            setTuneComparisonOpen(true);
-          }
-        } catch (e) {
-          console.error("Failed to compare tunes:", e);
-          // Don't block on comparison failure
-        }
-      }
+      // if (result.pages_synced > 0) {
+      //   try {
+      //     const differs = await invoke<boolean>("compare_project_and_ecu_tunes");
+      //     if (differs) {
+      //       setTuneComparisonOpen(true);
+      //     }
+      //   } catch (e) {
+      //     console.error("Failed to compare tunes:", e);
+      //     // Don't block on comparison failure
+      //   }
+      // }
       
       return result;
     } catch (e) {
@@ -1317,6 +1371,7 @@ function AppContent() {
 
   async function disconnect() {
     try {
+      await invoke("stop_realtime_stream").catch(() => {});
       await invoke("disconnect_ecu");
       await checkStatus();
     } catch (e) {
@@ -1795,6 +1850,10 @@ function AppContent() {
 
   const handleTabClose = useCallback(
     (tabId: string) => {
+      // Don't close tabs marked as non-closable (e.g. Dashboard)
+      const tab = tabs.find((t) => t.id === tabId);
+      if (tab && tab.closable === false) return;
+
       const newTabs = tabs.filter((t) => t.id !== tabId);
       const newContents = { ...tabContents };
       delete newContents[tabId];
@@ -1984,6 +2043,14 @@ function AppContent() {
       id: "view",
       label: "&View",
       items: [
+        { id: "dashboard", label: "&Dashboard", onClick: () => {
+          // If dashboard tab doesn't exist, re-add it
+          if (!tabs.find(t => t.id === "dashboard")) {
+            setTabs(prev => [{ id: "dashboard", title: "Dashboard", icon: "dashboard", closable: false }, ...prev]);
+            setTabContents(prev => ({ ...prev, dashboard: { type: "dashboard" } }));
+          }
+          setActiveTabId("dashboard");
+        }},
         { id: "sidebar", label: "Toggle &Sidebar", onClick: () => setSidebarVisible(!sidebarVisible) },
         { id: "sep1", label: "", separator: true },
         {
@@ -2308,22 +2375,9 @@ function AppContent() {
     }
 
     if (status.state === "Connected" && statusBarChannels.length > 0) {
-      // Add indicators for each configured status bar channel
-      // statusBarData comes from useChannels() selector - only updates when these specific channels change
-      for (const channel of statusBarChannels) {
-        const value = statusBarData[channel];
-        const channelInfo = channelInfoMap[channel];
-        const label = channelInfo?.label || channel;
-        const unit = channelInfo?.units || undefined;
-        // Format value based on magnitude - integers for large values, 1 decimal for small
-        const formatted = value !== undefined 
-          ? (Math.abs(value) >= 100 ? value.toFixed(0) : value.toFixed(1))
-          : "--";
-        items.push({
-          id: `status-${channel}`,
-          content: <StatusIndicator label={label} value={formatted} unit={unit} />,
-        });
-      }
+      // Realtime channel indicators are now rendered by StatusBar internally
+      // (each RealtimeChannelCell subscribes to a single channel)
+      // Only static items like sync warnings are added here
     }
 
     items.push({
@@ -2333,7 +2387,7 @@ function AppContent() {
     });
 
     return items;
-  }, [status.state, statusBarData, statusBarChannels, channelInfoMap, isLogging, logDuration, syncStatus]);
+  }, [status.state, statusBarChannels, isLogging, logDuration, syncStatus]);
 
   // Render tab content
   const renderTabContent = () => {
@@ -2497,6 +2551,8 @@ function AppContent() {
         connected={status.state === "Connected"}
         ecuName={(status.state === "Connected" ? status.signature : (status.ini_name ? status.ini_name : undefined)) as string | undefined}
         unitsSystem={unitsSystem}
+        realtimeChannels={statusBarChannels}
+        channelInfoMap={channelInfoMap}
       >
         <ErrorBoundary>
           {renderTabContent()}
@@ -2808,7 +2864,7 @@ function SettingsView() {
       
       if (newValue) {
         // Start realtime streaming when demo mode is enabled
-        await invoke("start_realtime_stream", { intervalMs: 100 });
+        await invoke("start_realtime_stream", { intervalMs: 50 });
       } else {
         // Stop streaming when demo mode is disabled
         await invoke("stop_realtime_stream");

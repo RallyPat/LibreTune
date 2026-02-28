@@ -3,7 +3,7 @@ import { MenuBar } from './MenuBar';
 import { Toolbar } from './Toolbar';
 import { TabBar, Tab } from './TabBar';
 import { Sidebar } from './Sidebar';
-import { StatusBar } from './StatusBar';
+import { StatusBar, ChannelInfoForStatusBar } from './StatusBar';
 import './TunerLayout.css';
 
 export interface TunerLayoutProps {
@@ -39,6 +39,10 @@ export interface TunerLayoutProps {
 
   // Unit system
   unitsSystem?: 'metric' | 'imperial';
+
+  // Realtime channel data for status bar (subscriptions handled by StatusBar itself)
+  realtimeChannels?: string[];
+  channelInfoMap?: Record<string, ChannelInfoForStatusBar>;
 
   // Content
   children: ReactNode;
@@ -107,6 +111,8 @@ export function TunerLayout({
   connected,
   ecuName,
   unitsSystem,
+  realtimeChannels,
+  channelInfoMap,
   children,
 }: TunerLayoutProps) {
   const [sidebarWidth, setSidebarWidth] = useState(240);
@@ -161,6 +167,8 @@ export function TunerLayout({
         connected={connected}
         ecuName={ecuName}
         unitsSystem={unitsSystem}
+        realtimeChannels={realtimeChannels}
+        channelInfoMap={channelInfoMap}
       />
     </div>
   );

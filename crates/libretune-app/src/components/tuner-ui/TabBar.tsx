@@ -83,10 +83,10 @@ export function TabBar({
     setDropTargetId(null);
   }, []);
 
-  const handleMiddleClick = useCallback((e: MouseEvent, tabId: string) => {
-    if (e.button === 1) {
+  const handleMiddleClick = useCallback((e: MouseEvent, tab: Tab) => {
+    if (e.button === 1 && tab.closable !== false) {
       e.preventDefault();
-      onTabClose(tabId);
+      onTabClose(tab.id);
     }
   }, [onTabClose]);
 
@@ -117,7 +117,7 @@ export function TabBar({
             } ${tab.id === dropTargetId ? 'tab-drop-target' : ''}`}
             draggable
             onClick={() => onTabSelect(tab.id)}
-            onMouseDown={(e) => handleMiddleClick(e, tab.id)}
+            onMouseDown={(e) => handleMiddleClick(e, tab)}
             onDoubleClick={(e) => handleDoubleClick(e, tab.id)}
             onDragStart={(e) => handleDragStart(e, tab.id)}
             onDragOver={(e) => handleDragOver(e, tab.id)}

@@ -677,17 +677,37 @@ fn parse_megatune(def: &mut EcuDefinition, key: &str, value: &str) {
             def.version_info = value.trim_matches('"').to_string();
         }
         "delayafterportopen" => {
-            def.protocol.delay_after_port_open = value.parse().unwrap_or(0);
+            // Strip potential comments
+            let clean_val = value.split(';').next().unwrap_or("").trim();
+            def.protocol.delay_after_port_open = clean_val.parse().unwrap_or(0);
             eprintln!(
                 "[DEBUG] parse_megatune: delayAfterPortOpen = {}",
                 def.protocol.delay_after_port_open
             );
         }
         "interwritedelay" => {
-            def.protocol.inter_write_delay = value.parse().unwrap_or(0);
+            let clean_val = value.split(';').next().unwrap_or("").trim();
+            def.protocol.inter_write_delay = clean_val.parse().unwrap_or(0);
         }
         "pageactivationdelay" | "pageactivationdelayms" => {
-            def.protocol.page_activation_delay = value.parse().unwrap_or(500);
+            let clean_val = value.split(';').next().unwrap_or("").trim();
+            def.protocol.page_activation_delay = clean_val.parse().unwrap_or(500);
+        }
+        "ochgetcommand" => {
+            let clean_val = value.split(';').next().unwrap_or("").trim();
+            def.protocol.och_get_command = Some(clean_val.trim_matches('"').to_string());
+        }
+        "ochblocksize" => {
+            let clean_val = value.split(';').next().unwrap_or("").trim();
+            def.protocol.och_block_size = clean_val.parse().unwrap_or(0);
+            eprintln!(
+                "[DEBUG] parse_megatune: ochBlockSize = {}",
+                def.protocol.och_block_size
+            );
+        }
+        "maxunusedruntimerange" => {
+            let clean_val = value.split(';').next().unwrap_or("").trim();
+            def.protocol.max_unused_runtime_range = clean_val.parse().unwrap_or(0);
         }
         _ => {}
     }
@@ -734,17 +754,20 @@ fn parse_tunerstudio(def: &mut EcuDefinition, key: &str, value: &str) {
             def.protocol.default_ip_port = value.parse().unwrap_or(29001);
         }
         "delayafterportopen" => {
-            def.protocol.delay_after_port_open = value.parse().unwrap_or(0);
+            let clean_val = value.split(';').next().unwrap_or("").trim();
+            def.protocol.delay_after_port_open = clean_val.parse().unwrap_or(0);
             eprintln!(
                 "[DEBUG] parse_ts: delayAfterPortOpen = {}",
                 def.protocol.delay_after_port_open
             );
         }
         "interwritedelay" => {
-            def.protocol.inter_write_delay = value.parse().unwrap_or(0);
+            let clean_val = value.split(';').next().unwrap_or("").trim();
+            def.protocol.inter_write_delay = clean_val.parse().unwrap_or(0);
         }
         "pageactivationdelay" | "pageactivationdelayms" => {
-            def.protocol.page_activation_delay = value.parse().unwrap_or(500);
+            let clean_val = value.split(';').next().unwrap_or("").trim();
+            def.protocol.page_activation_delay = clean_val.parse().unwrap_or(500);
         }
         "messageenvelopeformat" => {
             def.protocol.message_envelope_format = Some(value.trim_matches('"').to_string());
@@ -754,10 +777,27 @@ fn parse_tunerstudio(def: &mut EcuDefinition, key: &str, value: &str) {
             );
         }
         "maxunusedruntimerange" => {
-            def.protocol.max_unused_runtime_range = value.parse().unwrap_or(0);
+            let clean_val = value.split(';').next().unwrap_or("").trim();
+            def.protocol.max_unused_runtime_range = clean_val.parse().unwrap_or(0);
             eprintln!(
                 "[DEBUG] parse_ts: maxUnusedRuntimeRange = {}",
                 def.protocol.max_unused_runtime_range
+            );
+        }
+        "ochgetcommand" => {
+            let clean_val = value.split(';').next().unwrap_or("").trim();
+            def.protocol.och_get_command = Some(clean_val.trim_matches('"').to_string());
+            eprintln!(
+                "[DEBUG] parse_ts: ochGetCommand = {:?}",
+                def.protocol.och_get_command
+            );
+        }
+        "ochblocksize" => {
+            let clean_val = value.split(';').next().unwrap_or("").trim();
+            def.protocol.och_block_size = clean_val.parse().unwrap_or(0);
+            eprintln!(
+                "[DEBUG] parse_ts: ochBlockSize = {}",
+                def.protocol.och_block_size
             );
         }
         _ => {}
@@ -851,15 +891,19 @@ fn parse_constants_entry(
             return;
         }
         "blockingfactor" => {
-            def.protocol.blocking_factor = value.parse().unwrap_or(256);
+            // Strip inline comments before parsing (e.g. "1350 ; max chunk size")
+            let clean = value.split(';').next().unwrap_or("").trim();
+            def.protocol.blocking_factor = clean.parse().unwrap_or(256);
             return;
         }
         "interwritedelay" => {
-            def.protocol.inter_write_delay = value.parse().unwrap_or(0);
+            let clean = value.split(';').next().unwrap_or("").trim();
+            def.protocol.inter_write_delay = clean.parse().unwrap_or(0);
             return;
         }
         "blockreadtimeout" => {
-            def.protocol.block_read_timeout = value.parse().unwrap_or(1000);
+            let clean = value.split(';').next().unwrap_or("").trim();
+            def.protocol.block_read_timeout = clean.parse().unwrap_or(1000);
             return;
         }
         "writeblocks" => {
@@ -978,11 +1022,13 @@ fn parse_output_channel_entry(def: &mut EcuDefinition, key: &str, value: &str) {
 
     // Handle metadata entries
     if key_lower == "ochblocksize" {
-        def.protocol.och_block_size = value.parse().unwrap_or(0);
+        let clean_val = value.split(';').next().unwrap_or("").trim();
+        def.protocol.och_block_size = clean_val.parse().unwrap_or(0);
         return;
     }
     if key_lower == "ochgetcommand" {
-        def.protocol.och_get_command = Some(value.trim_matches('"').to_string());
+        let clean_val = value.split(';').next().unwrap_or("").trim();
+        def.protocol.och_get_command = Some(clean_val.trim_matches('"').to_string());
         return;
     }
 
@@ -997,6 +1043,20 @@ fn parse_output_channel_entry(def: &mut EcuDefinition, key: &str, value: &str) {
 fn parse_burst_mode_entry(def: &mut EcuDefinition, key: &str, value: &str) {
     if key.eq_ignore_ascii_case("getcommand") {
         def.protocol.burst_get_command = Some(value.trim_matches('"').to_string());
+    } else if key.eq_ignore_ascii_case("ochgetcommand") {
+        let clean = value.trim_matches('"').to_string();
+        eprintln!(
+            "[DEBUG] parse_burst_mode_entry: ochGetCommand = {:?}",
+            clean
+        );
+        def.protocol.och_get_command = Some(clean);
+    } else if key.eq_ignore_ascii_case("ochblocksize") {
+        let clean = value.split(';').next().unwrap_or("").trim();
+        def.protocol.och_block_size = clean.parse().unwrap_or(0);
+        eprintln!(
+            "[DEBUG] parse_burst_mode_entry: ochBlockSize = {}",
+            def.protocol.och_block_size
+        );
     }
 }
 
