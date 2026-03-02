@@ -283,8 +283,7 @@ impl AnomalyDetector {
                 }
 
                 if max_local_gradient > threshold {
-                    let severity =
-                        ((max_local_gradient / threshold - 1.0) / 2.0).min(1.0);
+                    let severity = ((max_local_gradient / threshold - 1.0) / 2.0).min(1.0);
                     anomalies.push(TuneAnomaly {
                         row: r,
                         col: c,
@@ -467,7 +466,11 @@ mod tests {
             .iter()
             .filter(|a| a.anomaly_type != AnomalyType::FlatRegion)
             .collect();
-        assert!(non_flat.is_empty(), "Smooth table should have no anomalies (except maybe flat), got {:?}", non_flat);
+        assert!(
+            non_flat.is_empty(),
+            "Smooth table should have no anomalies (except maybe flat), got {:?}",
+            non_flat
+        );
     }
 
     #[test]
@@ -490,7 +493,9 @@ mod tests {
         let anomalies = detector.detect_anomalies(&table, &x_bins, &y_bins);
         let outliers: Vec<_> = anomalies
             .iter()
-            .filter(|a| a.anomaly_type == AnomalyType::StatisticalOutlier && a.row == 1 && a.col == 1)
+            .filter(|a| {
+                a.anomaly_type == AnomalyType::StatisticalOutlier && a.row == 1 && a.col == 1
+            })
             .collect();
         assert!(!outliers.is_empty(), "Should detect the outlier at (1,1)");
     }
@@ -515,7 +520,10 @@ mod tests {
             .iter()
             .filter(|a| a.anomaly_type == AnomalyType::MonotonicityViolation)
             .collect();
-        assert!(!monotonic.is_empty(), "Should detect monotonicity violations");
+        assert!(
+            !monotonic.is_empty(),
+            "Should detect monotonicity violations"
+        );
     }
 
     #[test]
@@ -553,7 +561,7 @@ mod tests {
         let table = vec![
             vec![50.0, 52.0, 54.0, 250.0], // 250 is above max
             vec![52.0, 54.0, 56.0, 58.0],
-            vec![1.0, 56.0, 58.0, 60.0],   // 1.0 is below min
+            vec![1.0, 56.0, 58.0, 60.0], // 1.0 is below min
             vec![56.0, 58.0, 60.0, 62.0],
         ];
         let x_bins = vec![1000.0, 2000.0, 3000.0, 4000.0];
@@ -564,7 +572,10 @@ mod tests {
             .iter()
             .filter(|a| a.anomaly_type == AnomalyType::PhysicallyUnreasonable)
             .collect();
-        assert!(unreasonable.len() >= 2, "Should detect at least 2 physically unreasonable values");
+        assert!(
+            unreasonable.len() >= 2,
+            "Should detect at least 2 physically unreasonable values"
+        );
     }
 
     #[test]

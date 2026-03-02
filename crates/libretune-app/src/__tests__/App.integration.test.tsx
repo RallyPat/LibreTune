@@ -6,6 +6,9 @@ vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }));
 vi.mock('@tauri-apps/api/event', () => ({
   listen: vi.fn(),
 }));
+vi.mock('@tauri-apps/api/window', () => ({
+  getCurrentWindow: () => ({ setTitle: vi.fn().mockResolvedValue(undefined) }),
+}));
 
 
 import { LoadingProvider } from '../components/LoadingContext';

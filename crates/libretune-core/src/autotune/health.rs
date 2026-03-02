@@ -143,12 +143,7 @@ impl HealthScorer {
         // Score each region
         let mut regions: Vec<RegionHealth> = Vec::new();
         for (name, region_type, row_range, col_range) in &regions_def {
-            let score = self.score_region(
-                table_values,
-                hit_counts,
-                *row_range,
-                *col_range,
-            );
+            let score = self.score_region(table_values, hit_counts, *row_range, *col_range);
             regions.push(RegionHealth {
                 name: name.clone(),
                 region_type: region_type.clone(),
@@ -424,11 +419,8 @@ impl HealthScorer {
         }
 
         let mean = gradients.iter().sum::<f64>() / gradients.len() as f64;
-        let variance = gradients
-            .iter()
-            .map(|g| (g - mean).powi(2))
-            .sum::<f64>()
-            / gradients.len() as f64;
+        let variance =
+            gradients.iter().map(|g| (g - mean).powi(2)).sum::<f64>() / gradients.len() as f64;
         let std_dev = variance.sqrt();
 
         // CV (coefficient of variation) — lower is smoother
@@ -518,7 +510,9 @@ mod tests {
             vec![65.0, 67.0, 69.0, 71.0, 73.0, 75.0, 77.0, 79.0],
         ];
         let hits = make_hits(8, 8, 20); // Full coverage
-        let x_bins = vec![800.0, 1200.0, 1800.0, 2500.0, 3500.0, 4500.0, 5500.0, 6500.0];
+        let x_bins = vec![
+            800.0, 1200.0, 1800.0, 2500.0, 3500.0, 4500.0, 5500.0, 6500.0,
+        ];
         let y_bins = vec![20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 100.0];
 
         let report = scorer.score_table(&table, &hits, &x_bins, &y_bins);
@@ -549,7 +543,10 @@ mod tests {
         let report = scorer.score_table(&table, &hits, &x_bins, &y_bins);
         assert_eq!(report.data_coverage_cells, 0);
         assert_eq!(report.data_coverage_percent, 0.0);
-        assert!(report.recommendations.iter().any(|r| r.contains("coverage")));
+        assert!(report
+            .recommendations
+            .iter()
+            .any(|r| r.contains("coverage")));
     }
 
     #[test]

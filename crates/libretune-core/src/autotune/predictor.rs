@@ -139,7 +139,8 @@ impl VePredictor {
                     }
                 }
 
-                if let Some(pred) = self.try_neighbor_weighted(r, c, rows, cols, &known, table_values)
+                if let Some(pred) =
+                    self.try_neighbor_weighted(r, c, rows, cols, &known, table_values)
                 {
                     if pred.confidence >= self.config.min_confidence {
                         predictions.push(pred);
@@ -157,8 +158,7 @@ impl VePredictor {
                 }
 
                 // Physics model as last resort
-                if let Some(pred) = self.try_physics_model(r, c, rows, cols, table_values, y_bins)
-                {
+                if let Some(pred) = self.try_physics_model(r, c, rows, cols, table_values, y_bins) {
                     if pred.confidence >= self.config.min_confidence {
                         predictions.push(pred);
                     }
@@ -167,7 +167,11 @@ impl VePredictor {
         }
 
         // Sort by confidence (highest first)
-        predictions.sort_by(|a, b| b.confidence.partial_cmp(&a.confidence).unwrap_or(std::cmp::Ordering::Equal));
+        predictions.sort_by(|a, b| {
+            b.confidence
+                .partial_cmp(&a.confidence)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         predictions
     }
 
@@ -218,7 +222,8 @@ impl VePredictor {
 
         // Confidence based on: number of corners and max distance
         let corner_factor = corners.len() as f64 / 4.0;
-        let distance_factor = (1.0 - max_dist / (self.config.max_search_radius as f64 * 1.5)).max(0.0);
+        let distance_factor =
+            (1.0 - max_dist / (self.config.max_search_radius as f64 * 1.5)).max(0.0);
         let confidence = corner_factor * 0.7 + distance_factor * 0.3;
 
         // Apply axis-based sanity check: VE should be physically reasonable

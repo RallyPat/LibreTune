@@ -23,8 +23,7 @@ use libretune_core::plugin_system::{
 use libretune_core::project::{
     format_commit_message, load_math_channels, save_math_channels, BranchInfo, CommitDiff,
     CommitInfo, ConnectionSettings, IniRepository, IniSource, OnlineIniEntry, OnlineIniRepository,
-    Project, ProjectConfig, ProjectSettings, UserMathChannel,
-    VersionControl,
+    Project, ProjectConfig, ProjectSettings, UserMathChannel, VersionControl,
 };
 use libretune_core::protocol::serial::list_ports;
 use libretune_core::protocol::{Connection, ConnectionConfig, ConnectionState};
@@ -6298,7 +6297,12 @@ async fn get_predicted_fills(
 
     let predictor = VePredictor::new(config);
 
-    Ok(predictor.predict_cells(table_values, &hit_counts, &table_data.x_bins, &table_data.y_bins))
+    Ok(predictor.predict_cells(
+        table_values,
+        &hit_counts,
+        &table_data.x_bins,
+        &table_data.y_bins,
+    ))
 }
 
 /// Detect anomalies in a VE/fuel table.
@@ -6367,7 +6371,12 @@ async fn get_tune_health_report(
 
     let scorer = HealthScorer::new(HealthConfig::default());
 
-    Ok(scorer.score_table(table_values, &hit_counts, &table_data.x_bins, &table_data.y_bins))
+    Ok(scorer.score_table(
+        table_values,
+        &hit_counts,
+        &table_data.x_bins,
+        &table_data.y_bins,
+    ))
 }
 
 // ============================================================================
@@ -6508,10 +6517,7 @@ async fn get_table_annotations(
 
 /// Delete an annotation
 #[tauri::command]
-async fn delete_annotation(
-    state: tauri::State<'_, AppState>,
-    key: String,
-) -> Result<bool, String> {
+async fn delete_annotation(state: tauri::State<'_, AppState>, key: String) -> Result<bool, String> {
     let mut tune_guard = state.current_tune.lock().await;
     let tune = tune_guard.as_mut().ok_or("No tune loaded")?;
     Ok(tune.delete_annotation(&key))
@@ -6543,9 +6549,7 @@ async fn load_dyno_run(
 
 /// Detect CSV column headers for dyno import
 #[tauri::command]
-async fn detect_dyno_headers(
-    path: String,
-) -> Result<Vec<String>, String> {
+async fn detect_dyno_headers(path: String) -> Result<Vec<String>, String> {
     libretune_core::datalog::dyno::detect_csv_headers(&path)
         .map_err(|e| format!("Failed to read CSV headers: {}", e))
 }
@@ -6556,7 +6560,9 @@ async fn compare_dyno_runs(
     run_a: libretune_core::datalog::dyno::DynoRun,
     run_b: libretune_core::datalog::dyno::DynoRun,
 ) -> Result<libretune_core::datalog::dyno::DynoComparison, String> {
-    Ok(libretune_core::datalog::dyno::DynoComparison::compare(run_a, run_b))
+    Ok(libretune_core::datalog::dyno::DynoComparison::compare(
+        run_a, run_b,
+    ))
 }
 
 /// Map dyno data onto a table for overlay visualization
@@ -9565,7 +9571,7 @@ async fn start_composite_logger(
     if signature.contains("speeduino") || signature.contains("202") {
         // Speeduino composite logger commands:
         // 'J' = Start composite logger
-        // 'O' = Get composite data  
+        // 'O' = Get composite data
         // 'X' = Stop composite logger
         // Response to 'O': Raw bytes, each entry is 1 byte of packed flags:
         //   bit 0: primary trigger state
@@ -12173,8 +12179,12 @@ async fn apply_base_map(
 
     // Deserialize engine_spec from the base map so we can re-generate at correct dimensions
     let engine_spec: EngineSpec = serde_json::from_value(
-        base_map.get("engine_spec").cloned().ok_or("Missing engine_spec in base map")?,
-    ).map_err(|e| format!("Invalid engine_spec: {}", e))?;
+        base_map
+            .get("engine_spec")
+            .cloned()
+            .ok_or("Missing engine_spec in base map")?,
+    )
+    .map_err(|e| format!("Invalid engine_spec: {}", e))?;
 
     let req_fuel: Option<f64> = base_map.get("req_fuel").and_then(|v| v.as_f64());
     let scalars: Option<serde_json::Map<String, serde_json::Value>> =
@@ -12184,8 +12194,19 @@ async fn apply_base_map(
     // Speeduino names: veTable1Tbl, sparkTbl, afrTable1Tbl
     // rusEFI/FOME names: veTableTbl, ignitionTableTbl, lambdaTableTbl/afrTableTbl
     let ve_table_names = ["veTable1Tbl", "veTableTbl", "fuelTable1Tbl", "fuelTableTbl"];
-    let ign_table_names = ["sparkTbl", "ignitionTableTbl", "advTable1Tbl", "ignitionTbl", "spark1Tbl"];
-    let afr_table_names = ["afrTable1Tbl", "lambdaTableTbl", "afrTableTbl", "lambdaTable1Tbl"];
+    let ign_table_names = [
+        "sparkTbl",
+        "ignitionTableTbl",
+        "advTable1Tbl",
+        "ignitionTbl",
+        "spark1Tbl",
+    ];
+    let afr_table_names = [
+        "afrTable1Tbl",
+        "lambdaTableTbl",
+        "afrTableTbl",
+        "lambdaTable1Tbl",
+    ];
 
     let mut applied = Vec::<String>::new();
     let mut errors = Vec::<String>::new();
@@ -12202,10 +12223,12 @@ async fn apply_base_map(
         let table = def
             .get_table_by_name_or_map(table_name)
             .ok_or_else(|| format!("Table '{}' not found", table_name))?;
-        let constant = def
-            .constants
-            .get(&table.map)
-            .ok_or_else(|| format!("Constant '{}' not found for table '{}'", table.map, table_name))?;
+        let constant = def.constants.get(&table.map).ok_or_else(|| {
+            format!(
+                "Constant '{}' not found for table '{}'",
+                table.map, table_name
+            )
+        })?;
 
         let flat: Vec<f64> = values_2d.iter().flatten().cloned().collect();
         let expected = constant.shape.element_count();
@@ -12213,7 +12236,9 @@ async fn apply_base_map(
         if flat.len() != expected {
             return Err(format!(
                 "Table '{}' dimension mismatch: generated {} cells but INI expects {}",
-                table_name, flat.len(), expected
+                table_name,
+                flat.len(),
+                expected
             ));
         }
 
@@ -12222,14 +12247,22 @@ async fn apply_base_map(
         for (i, val) in flat.iter().enumerate() {
             let raw_val = constant.display_to_raw(*val);
             let offset = i * element_size;
-            constant.data_type.write_to_bytes(&mut raw_data, offset, raw_val, endianness);
+            constant
+                .data_type
+                .write_to_bytes(&mut raw_data, offset, raw_val, endianness);
         }
 
         cache.write_bytes(constant.page, constant.offset, &raw_data);
 
         // Also update tune file page data
         let page_data = tune.pages.entry(constant.page).or_insert_with(|| {
-            vec![0u8; def.page_sizes.get(constant.page as usize).copied().unwrap_or(256) as usize]
+            vec![
+                0u8;
+                def.page_sizes
+                    .get(constant.page as usize)
+                    .copied()
+                    .unwrap_or(256) as usize
+            ]
         });
         let start = constant.offset as usize;
         let end = start + raw_data.len();
@@ -12263,13 +12296,21 @@ async fn apply_base_map(
         for (i, val) in final_values.iter().enumerate() {
             let raw_val = constant.display_to_raw(*val);
             let offset = i * element_size;
-            constant.data_type.write_to_bytes(&mut raw_data, offset, raw_val, endianness);
+            constant
+                .data_type
+                .write_to_bytes(&mut raw_data, offset, raw_val, endianness);
         }
 
         cache.write_bytes(constant.page, constant.offset, &raw_data);
 
         let page_data = tune.pages.entry(constant.page).or_insert_with(|| {
-            vec![0u8; def.page_sizes.get(constant.page as usize).copied().unwrap_or(256) as usize]
+            vec![
+                0u8;
+                def.page_sizes
+                    .get(constant.page as usize)
+                    .copied()
+                    .unwrap_or(256) as usize
+            ]
         });
         let start = constant.offset as usize;
         let end = start + raw_data.len();
@@ -12299,7 +12340,10 @@ async fn apply_base_map(
                             }
                         }
                         libretune_core::ini::Shape::Array1D(size) => {
-                            eprintln!("[DEBUG] find_table_with_dims: '{}' map '{}' shape Array1D({})", name, table.map, size);
+                            eprintln!(
+                                "[DEBUG] find_table_with_dims: '{}' map '{}' shape Array1D({})",
+                                name, table.map, size
+                            );
                             return Some((table, *size, 1));
                         }
                         _ => {}
@@ -12323,7 +12367,10 @@ async fn apply_base_map(
                 // Last resort: TableDefinition x_size/y_size
                 let cols = if cols > 0 { cols } else { table.x_size };
                 let rows = if rows > 0 { rows } else { table.y_size.max(1) };
-                eprintln!("[DEBUG] find_table_with_dims: '{}' fallback dims {}x{}", name, cols, rows);
+                eprintln!(
+                    "[DEBUG] find_table_with_dims: '{}' fallback dims {}x{}",
+                    name, cols, rows
+                );
                 if cols > 0 && rows > 0 {
                     return Some((table, cols, rows));
                 }
@@ -12349,7 +12396,10 @@ async fn apply_base_map(
         let title = table_def.title.clone();
         let x_bins_name = table_def.x_bins.clone();
         let y_bins_name = table_def.y_bins.clone();
-        eprintln!("[INFO] apply_base_map: VE table '{}' has {}x{} (cols x rows)", table_name, cols, rows);
+        eprintln!(
+            "[INFO] apply_base_map: VE table '{}' has {}x{} (cols x rows)",
+            table_name, cols, rows
+        );
 
         let rpm_bins = generate_rpm_bins(engine_spec.idle_rpm, engine_spec.redline_rpm, cols);
         let load_bins = generate_load_bins(engine_spec.max_load_kpa(), rows);
@@ -12373,7 +12423,10 @@ async fn apply_base_map(
         let title = table_def.title.clone();
         let x_bins_name = table_def.x_bins.clone();
         let y_bins_name = table_def.y_bins.clone();
-        eprintln!("[INFO] apply_base_map: Ignition table '{}' has {}x{} (cols x rows)", table_name, cols, rows);
+        eprintln!(
+            "[INFO] apply_base_map: Ignition table '{}' has {}x{} (cols x rows)",
+            table_name, cols, rows
+        );
 
         let rpm_bins = generate_rpm_bins(engine_spec.idle_rpm, engine_spec.redline_rpm, cols);
         let load_bins = generate_load_bins(engine_spec.max_load_kpa(), rows);
@@ -12397,7 +12450,10 @@ async fn apply_base_map(
         let title = table_def.title.clone();
         let x_bins_name = table_def.x_bins.clone();
         let y_bins_name = table_def.y_bins.clone();
-        eprintln!("[INFO] apply_base_map: AFR table '{}' has {}x{} (cols x rows)", table_name, cols, rows);
+        eprintln!(
+            "[INFO] apply_base_map: AFR table '{}' has {}x{} (cols x rows)",
+            table_name, cols, rows
+        );
 
         let rpm_bins = generate_rpm_bins(engine_spec.idle_rpm, engine_spec.redline_rpm, cols);
         let load_bins = generate_load_bins(engine_spec.max_load_kpa(), rows);
@@ -12423,10 +12479,18 @@ async fn apply_base_map(
                 let raw_val = constant.display_to_raw(rf);
                 let element_size = constant.data_type.size_bytes();
                 let mut raw_data = vec![0u8; element_size];
-                constant.data_type.write_to_bytes(&mut raw_data, 0, raw_val, endianness);
+                constant
+                    .data_type
+                    .write_to_bytes(&mut raw_data, 0, raw_val, endianness);
                 cache.write_bytes(constant.page, constant.offset, &raw_data);
                 let page_data = tune.pages.entry(constant.page).or_insert_with(|| {
-                    vec![0u8; def.page_sizes.get(constant.page as usize).copied().unwrap_or(256) as usize]
+                    vec![
+                        0u8;
+                        def.page_sizes
+                            .get(constant.page as usize)
+                            .copied()
+                            .unwrap_or(256) as usize
+                    ]
                 });
                 let start = constant.offset as usize;
                 let end = start + raw_data.len();
@@ -12447,10 +12511,18 @@ async fn apply_base_map(
                     let raw_val = constant.display_to_raw(v);
                     let element_size = constant.data_type.size_bytes();
                     let mut raw_data = vec![0u8; element_size];
-                    constant.data_type.write_to_bytes(&mut raw_data, 0, raw_val, endianness);
+                    constant
+                        .data_type
+                        .write_to_bytes(&mut raw_data, 0, raw_val, endianness);
                     cache.write_bytes(constant.page, constant.offset, &raw_data);
                     let page_data = tune.pages.entry(constant.page).or_insert_with(|| {
-                        vec![0u8; def.page_sizes.get(constant.page as usize).copied().unwrap_or(256) as usize]
+                        vec![
+                            0u8;
+                            def.page_sizes
+                                .get(constant.page as usize)
+                                .copied()
+                                .unwrap_or(256) as usize
+                        ]
                     });
                     let start = constant.offset as usize;
                     let end = start + raw_data.len();
@@ -12498,7 +12570,10 @@ async fn apply_base_map(
     let mut result = serde_json::Map::new();
     result.insert("applied".to_string(), serde_json::json!(applied));
     result.insert("errors".to_string(), serde_json::json!(errors));
-    eprintln!("[INFO] apply_base_map: applied={:?}, errors={:?}", applied, errors);
+    eprintln!(
+        "[INFO] apply_base_map: applied={:?}, errors={:?}",
+        applied, errors
+    );
     Ok(serde_json::Value::Object(result))
 }
 
@@ -12534,9 +12609,7 @@ async fn get_msq_info(path: String) -> Result<serde_json::Value, String> {
     info.insert(
         "file_size".to_string(),
         serde_json::Value::Number(serde_json::Number::from(
-            std::fs::metadata(file_path)
-                .map(|m| m.len())
-                .unwrap_or(0),
+            std::fs::metadata(file_path).map(|m| m.len()).unwrap_or(0),
         )),
     );
 

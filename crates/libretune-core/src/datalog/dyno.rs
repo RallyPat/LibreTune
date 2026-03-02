@@ -193,7 +193,11 @@ impl DynoRun {
         }
 
         // Sort by RPM
-        run.data.sort_by(|a, b| a.rpm.partial_cmp(&b.rpm).unwrap_or(std::cmp::Ordering::Equal));
+        run.data.sort_by(|a, b| {
+            a.rpm
+                .partial_cmp(&b.rpm)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
 
         // Compute peaks
         run.compute_peaks();
@@ -232,15 +236,34 @@ impl DynoRun {
 
             run.data.push(DynoDataPoint {
                 rpm,
-                hp: col_map.hp_col.and_then(|c| fields.get(c)).and_then(|s| s.trim().parse().ok()),
-                torque: col_map.torque_col.and_then(|c| fields.get(c)).and_then(|s| s.trim().parse().ok()),
-                afr: col_map.afr_col.and_then(|c| fields.get(c)).and_then(|s| s.trim().parse().ok()),
-                boost: col_map.boost_col.and_then(|c| fields.get(c)).and_then(|s| s.trim().parse().ok()),
-                time: col_map.time_col.and_then(|c| fields.get(c)).and_then(|s| s.trim().parse().ok()),
+                hp: col_map
+                    .hp_col
+                    .and_then(|c| fields.get(c))
+                    .and_then(|s| s.trim().parse().ok()),
+                torque: col_map
+                    .torque_col
+                    .and_then(|c| fields.get(c))
+                    .and_then(|s| s.trim().parse().ok()),
+                afr: col_map
+                    .afr_col
+                    .and_then(|c| fields.get(c))
+                    .and_then(|s| s.trim().parse().ok()),
+                boost: col_map
+                    .boost_col
+                    .and_then(|c| fields.get(c))
+                    .and_then(|s| s.trim().parse().ok()),
+                time: col_map
+                    .time_col
+                    .and_then(|c| fields.get(c))
+                    .and_then(|s| s.trim().parse().ok()),
             });
         }
 
-        run.data.sort_by(|a, b| a.rpm.partial_cmp(&b.rpm).unwrap_or(std::cmp::Ordering::Equal));
+        run.data.sort_by(|a, b| {
+            a.rpm
+                .partial_cmp(&b.rpm)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         run.compute_peaks();
 
         Ok(run)
@@ -312,7 +335,10 @@ impl DynoRun {
         for row in 0..rows {
             for col in 0..cols {
                 let idx = row * cols + col;
-                let count = hp_sums[idx].len().max(tq_sums[idx].len()).max(afr_sums[idx].len());
+                let count = hp_sums[idx]
+                    .len()
+                    .max(tq_sums[idx].len())
+                    .max(afr_sums[idx].len());
                 if count > 0 {
                     cell_data.push(DynoCellOverlay {
                         row,
@@ -346,7 +372,10 @@ impl DynoRun {
         if self.data.is_empty() {
             return None;
         }
-        Some((self.data.first().unwrap().rpm, self.data.last().unwrap().rpm))
+        Some((
+            self.data.first().unwrap().rpm,
+            self.data.last().unwrap().rpm,
+        ))
     }
 
     /// Get data count
@@ -547,9 +576,10 @@ where
 /// Detect CSV headers from file content without parsing all data
 pub fn detect_csv_headers<P: AsRef<Path>>(path: P) -> io::Result<Vec<String>> {
     let content = std::fs::read_to_string(path)?;
-    let first_line = content.lines().next().ok_or_else(|| {
-        io::Error::new(io::ErrorKind::InvalidData, "Empty file")
-    })?;
+    let first_line = content
+        .lines()
+        .next()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "Empty file"))?;
     Ok(parse_csv_line(first_line))
 }
 
@@ -583,7 +613,7 @@ mod tests {
     #[test]
     fn test_find_nearest_bin() {
         let bins = vec![500.0, 1000.0, 1500.0, 2000.0];
-        assert_eq!(find_nearest_bin(&bins, 800.0), 1);  // closer to 1000
+        assert_eq!(find_nearest_bin(&bins, 800.0), 1); // closer to 1000
         assert_eq!(find_nearest_bin(&bins, 500.0), 0);
         assert_eq!(find_nearest_bin(&bins, 1999.0), 3);
         assert_eq!(find_nearest_bin(&bins, 1250.0), 1); // equidistant → first match (1000)
@@ -592,9 +622,30 @@ mod tests {
     #[test]
     fn test_interpolate_at_rpm() {
         let data = vec![
-            DynoDataPoint { rpm: 1000.0, hp: Some(50.0), torque: None, afr: None, boost: None, time: None },
-            DynoDataPoint { rpm: 2000.0, hp: Some(100.0), torque: None, afr: None, boost: None, time: None },
-            DynoDataPoint { rpm: 3000.0, hp: Some(150.0), torque: None, afr: None, boost: None, time: None },
+            DynoDataPoint {
+                rpm: 1000.0,
+                hp: Some(50.0),
+                torque: None,
+                afr: None,
+                boost: None,
+                time: None,
+            },
+            DynoDataPoint {
+                rpm: 2000.0,
+                hp: Some(100.0),
+                torque: None,
+                afr: None,
+                boost: None,
+                time: None,
+            },
+            DynoDataPoint {
+                rpm: 3000.0,
+                hp: Some(150.0),
+                torque: None,
+                afr: None,
+                boost: None,
+                time: None,
+            },
         ];
 
         let hp = interpolate_at_rpm(&data, 1500.0, |p| p.hp).unwrap();
@@ -608,10 +659,38 @@ mod tests {
     fn test_dyno_run_peaks() {
         let mut run = DynoRun::new("Test Run", "#ff0000");
         run.data = vec![
-            DynoDataPoint { rpm: 3000.0, hp: Some(100.0), torque: Some(175.0), afr: None, boost: None, time: None },
-            DynoDataPoint { rpm: 4000.0, hp: Some(150.0), torque: Some(197.0), afr: None, boost: None, time: None },
-            DynoDataPoint { rpm: 5000.0, hp: Some(200.0), torque: Some(210.0), afr: None, boost: None, time: None },
-            DynoDataPoint { rpm: 6000.0, hp: Some(220.0), torque: Some(192.0), afr: None, boost: None, time: None },
+            DynoDataPoint {
+                rpm: 3000.0,
+                hp: Some(100.0),
+                torque: Some(175.0),
+                afr: None,
+                boost: None,
+                time: None,
+            },
+            DynoDataPoint {
+                rpm: 4000.0,
+                hp: Some(150.0),
+                torque: Some(197.0),
+                afr: None,
+                boost: None,
+                time: None,
+            },
+            DynoDataPoint {
+                rpm: 5000.0,
+                hp: Some(200.0),
+                torque: Some(210.0),
+                afr: None,
+                boost: None,
+                time: None,
+            },
+            DynoDataPoint {
+                rpm: 6000.0,
+                hp: Some(220.0),
+                torque: Some(192.0),
+                afr: None,
+                boost: None,
+                time: None,
+            },
         ];
         run.compute_peaks();
 
@@ -623,14 +702,42 @@ mod tests {
     fn test_dyno_comparison() {
         let mut run_a = DynoRun::new("Baseline", "#ff0000");
         run_a.data = vec![
-            DynoDataPoint { rpm: 3000.0, hp: Some(100.0), torque: Some(175.0), afr: None, boost: None, time: None },
-            DynoDataPoint { rpm: 5000.0, hp: Some(200.0), torque: Some(210.0), afr: None, boost: None, time: None },
+            DynoDataPoint {
+                rpm: 3000.0,
+                hp: Some(100.0),
+                torque: Some(175.0),
+                afr: None,
+                boost: None,
+                time: None,
+            },
+            DynoDataPoint {
+                rpm: 5000.0,
+                hp: Some(200.0),
+                torque: Some(210.0),
+                afr: None,
+                boost: None,
+                time: None,
+            },
         ];
 
         let mut run_b = DynoRun::new("After Tune", "#00ff00");
         run_b.data = vec![
-            DynoDataPoint { rpm: 3000.0, hp: Some(110.0), torque: Some(185.0), afr: None, boost: None, time: None },
-            DynoDataPoint { rpm: 5000.0, hp: Some(215.0), torque: Some(225.0), afr: None, boost: None, time: None },
+            DynoDataPoint {
+                rpm: 3000.0,
+                hp: Some(110.0),
+                torque: Some(185.0),
+                afr: None,
+                boost: None,
+                time: None,
+            },
+            DynoDataPoint {
+                rpm: 5000.0,
+                hp: Some(215.0),
+                torque: Some(225.0),
+                afr: None,
+                boost: None,
+                time: None,
+            },
         ];
 
         let cmp = DynoComparison::compare(run_a, run_b);
@@ -644,9 +751,30 @@ mod tests {
     fn test_map_to_table() {
         let mut run = DynoRun::new("Test", "#ff0000");
         run.data = vec![
-            DynoDataPoint { rpm: 2000.0, hp: Some(50.0), torque: Some(131.0), afr: Some(14.7), boost: None, time: None },
-            DynoDataPoint { rpm: 3000.0, hp: Some(100.0), torque: Some(175.0), afr: Some(13.5), boost: None, time: None },
-            DynoDataPoint { rpm: 4000.0, hp: Some(150.0), torque: Some(197.0), afr: Some(12.8), boost: None, time: None },
+            DynoDataPoint {
+                rpm: 2000.0,
+                hp: Some(50.0),
+                torque: Some(131.0),
+                afr: Some(14.7),
+                boost: None,
+                time: None,
+            },
+            DynoDataPoint {
+                rpm: 3000.0,
+                hp: Some(100.0),
+                torque: Some(175.0),
+                afr: Some(13.5),
+                boost: None,
+                time: None,
+            },
+            DynoDataPoint {
+                rpm: 4000.0,
+                hp: Some(150.0),
+                torque: Some(197.0),
+                afr: Some(12.8),
+                boost: None,
+                time: None,
+            },
         ];
 
         let x_bins = vec![1000.0, 2000.0, 3000.0, 4000.0, 5000.0];

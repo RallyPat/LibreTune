@@ -252,8 +252,10 @@ pub fn generate_ignition_table(
             let mut advance = (rpm_advance - load_retard) * stroke_factor;
 
             // Extra retard for boosted engines above atmospheric
-            if matches!(spec.aspiration, Aspiration::Turbo | Aspiration::Supercharged)
-                && load > 101.0
+            if matches!(
+                spec.aspiration,
+                Aspiration::Turbo | Aspiration::Supercharged
+            ) && load > 101.0
             {
                 let boost_pct = (load - 101.0) / (max_load - 101.0);
                 advance -= boost_pct * 8.0; // Up to 8° more retard under boost
@@ -278,11 +280,7 @@ pub fn generate_ignition_table(
 /// - Cruise: lean for economy (15.0-15.5 for gasoline)
 /// - WOT: safe rich (12.0-12.5 for gasoline)
 /// - Transition zones smoothly interpolated
-pub fn generate_afr_table(
-    spec: &EngineSpec,
-    rpm_bins: &[f64],
-    load_bins: &[f64],
-) -> Vec<Vec<f64>> {
+pub fn generate_afr_table(spec: &EngineSpec, rpm_bins: &[f64], load_bins: &[f64]) -> Vec<Vec<f64>> {
     let rows = load_bins.len();
     let cols = rpm_bins.len();
     let idle = spec.idle_rpm as f64;
