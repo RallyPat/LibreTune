@@ -41,6 +41,7 @@
 
 pub mod action_scripting;
 pub mod autotune;
+pub mod basemap;
 pub mod dash;
 pub mod dashboard;
 pub mod datalog;

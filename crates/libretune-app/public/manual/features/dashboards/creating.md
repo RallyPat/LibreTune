@@ -27,6 +27,18 @@ Enter Designer Mode to edit layout:
 4. Select data channel
 5. Gauge appears at click location
 
+### Drag and Drop from Sidebar
+1. Make sure **Designer Mode** is active
+2. In the sidebar channel list, find the channel you want to display
+3. **Drag** the channel name onto the dashboard canvas
+4. **Drop** it where you want the gauge to appear
+5. The gauge is created automatically with the correct channel, units, min/max, and warning zones from the INI definition
+
+Dropped gauges automatically:
+- Snap to the dashboard grid (if snap is enabled)
+- Inherit INI metadata (units, min, max, warning thresholds)
+- Get added to the undo/redo history so you can undo the placement
+
 ### From Gauge Browser
 1. Open gauge browser (View → Gauge Browser)
 2. Drag gauge onto dashboard

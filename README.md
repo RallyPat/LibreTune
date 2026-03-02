@@ -89,10 +89,18 @@ See [docs/src/technical/plugin-system.md](docs/src/technical/plugin-system.md) f
 - **Log Playback**: Play/pause, seek slider, variable speed (0.25x-4x)
 - **CSV Support**: Load logs from LibreTune or TunerStudio format
 - **Channel Selection**: Choose which channels to display
+- **Smart Recording**: Automatic log capture triggered by configurable conditions (RPM, TPS, etc.)
+- **Data Statistics**: Min/max/average/standard deviation analysis per channel
+- **Alert Rules**: Configurable notifications when channel values exceed thresholds
+- **Math Channels**: Expression engine for calculated channels (AFR error, VE efficiency, boost delta)
+
+### Scripting & Automation
+- **Lua Scripting**: Embedded Lua engine for custom calculations, testing sequences, and data processing
 
 ### Diagnostic Tools
 - **Tooth Logger**: Crank/cam trigger pattern analysis with RPM detection
 - **Composite Logger**: Multi-channel waveform display with sync status
+- **ECU Console**: Text-based command interface for rusEFI/FOME/epicEFI ECUs with command history, color-coded output, and FOME fast comms optimization
 - **CSV Export**: Export diagnostic captures for analysis
 
 ### Data Management
@@ -100,6 +108,8 @@ See [docs/src/technical/plugin-system.md](docs/src/technical/plugin-system.md) f
 - **Reset to Defaults**: Restore all values to INI defaults
 - **Restore Points**: Create, load, and manage tune backups
 - **TunerStudio Import**: Import existing TunerStudio projects
+- **Tune Migration**: Automatic INI version tracking with migration report when opening tunes saved with a different firmware version
+- **Change Annotations**: Annotate tune changes with notes explaining modifications
 
 ### Action Scripting
 - **Record Actions**: Automatic capture of all table edits and constant adjustments

@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
 import { ThemeProvider, useTheme, ThemeName, THEME_INFO } from "./themes";
 import { initializeHotkeyManager } from "./services/hotkeyService";
@@ -47,6 +48,9 @@ import MathChannelsDialog from "./components/dialogs/MathChannelsDialog";
 import MigrationReportDialog from "./components/dialogs/MigrationReportDialog";
 import TuneFileDiffDialog from "./components/dialogs/TuneFileDiffDialog";
 import DynoOverlay from "./components/tuner-ui/DynoOverlay";
+import WelcomeView from "./components/WelcomeView";
+import NewProjectDialog from "./components/dialogs/NewProjectDialog";
+import BaseMapDialog, { BaseMapResult } from "./components/dialogs/BaseMapDialog";
 import TuneHistoryPanel from "./components/TuneHistoryPanel";
 import ErrorDetailsDialog, { useErrorDialog } from "./components/dialogs/ErrorDetailsDialog";
 import ErrorBoundary from "./components/common/ErrorBoundary";
@@ -276,8 +280,8 @@ function AppContent() {
   const [currentProject, setCurrentProject] = useState<CurrentProject | null>(null);
   const [availableProjects, setAvailableProjects] = useState<ProjectInfo[]>([]);
   const [repositoryInis, setRepositoryInis] = useState<IniEntry[]>([]);
-  const [projectDialogOpen, setProjectDialogOpen] = useState(false);
-  const [openProjectDialogOpen, setOpenProjectDialogOpen] = useState(false);
+  const [newProjectDialogOpen, setNewProjectDialogOpen] = useState(false);
+  const [baseMapDialogOpen, setBaseMapDialogOpen] = useState(false);
 
   // Connection state
   const [status, setStatus] = useState<ConnectionStatus>({
@@ -506,6 +510,20 @@ function AppContent() {
       return () => clearInterval(statusInterval);
     }
   }, [isTauri]);
+
+  // Update window title with project name
+  useEffect(() => {
+    const base = "LibreTune";
+    if (currentProject) {
+      const title = `${currentProject.name} — ${base}`;
+      document.title = title;
+      // Also update Tauri window title
+      getCurrentWindow().setTitle(title).catch(() => {});
+    } else {
+      document.title = base;
+      getCurrentWindow().setTitle(base).catch(() => {});
+    }
+  }, [currentProject]);
 
   // Persist active tab state
   useEffect(() => {
@@ -1130,7 +1148,7 @@ function AppContent() {
         switch (e.key.toLowerCase()) {
           case 'n':
             e.preventDefault();
-            setNewTuneDialogOpen(true);
+            setNewProjectDialogOpen(true);
             break;
           case 'o':
             e.preventDefault();
@@ -1455,16 +1473,28 @@ function AppContent() {
   }
 
   // Project management functions
-  async function createProject(name: string, iniId: string, tunePath?: string) {
+  async function createProject(name: string, iniId: string): Promise<boolean> {
     try {
+      // Close previous project if one is open
+      if (currentProject) {
+        try {
+          await invoke("close_project");
+          setCurrentProject(null);
+          setBackendMenus([]);
+          setTabs([]);
+          setTabContents({});
+          setActiveTabId(null);
+        } catch (closeErr) {
+          console.warn("Failed to close previous project:", closeErr);
+        }
+      }
+
       const project = await invoke<CurrentProject>("create_project", { 
         name, 
         iniId,
-        tunePath: tunePath || null 
+        tunePath: null 
       });
       
-      // Close dialog IMMEDIATELY after project is created (before any other async calls)
-      setProjectDialogOpen(false);
       setCurrentProject(project);
       
       // Show loading spinner while we fetch menus and initialize
@@ -1480,27 +1510,45 @@ function AppContent() {
         // Refresh projects list
         const projects = await invoke<ProjectInfo[]>("list_projects");
         setAvailableProjects(projects);
+        
+        showToast(`Project "${name}" created successfully`, "success");
       } catch (menuError) {
         console.error("Failed to load menus:", menuError);
         showToast("Project created but menu loading failed. Some features may be unavailable.", "warning");
       } finally {
         hideLoading();
       }
+      return true;
     } catch (e) {
       const { message, details } = formatError(e);
       if (details) {
-        // Complex error - show detailed dialog for bug reporting
         showError("Failed to Create Project", message, details);
       } else {
-        // Simple error - use toast
         showToast("Failed to create project: " + message, "error");
       }
+      return false;
+    }
+  }
+
+  /** Import an existing tune file (.msq) into the currently open project */
+  async function handleImportTuneIntoProject(tunePath: string) {
+    if (!currentProject) return;
+    try {
+      showLoading("Loading tune file...");
+      await invoke("load_tune", { path: tunePath });
+      // Refresh constants so UI reflects the loaded tune
+      await fetchConstants();
+      showToast("Tune file loaded successfully", "success");
+    } catch (e) {
+      showToast("Failed to load tune: " + e, "error");
+    } finally {
+      hideLoading();
     }
   }
 
   async function openProject(path: string) {
-    // Close dialog immediately
-    setOpenProjectDialogOpen(false);
+    // Close any open dialogs
+    setNewProjectDialogOpen(false);
     showLoading("Loading project...");
     
     try {
@@ -1571,6 +1619,44 @@ function AppContent() {
       showToast(`Restore point created: ${result.filename}`, "success");
     } catch (e) {
       showToast("Failed to create restore point: " + e, "error");
+    }
+  }
+
+  async function handleDeleteProject(projectName: string) {
+    try {
+      await invoke("delete_project", { projectName });
+      showToast(`Project "${projectName}" deleted`, "success");
+      // Refresh project list
+      const projects = await invoke<ProjectInfo[]>("list_projects");
+      setAvailableProjects(projects);
+    } catch (e) {
+      showToast("Failed to delete project: " + e, "error");
+    }
+  }
+
+  async function handleBaseMapApply(baseMap: BaseMapResult) {
+    try {
+      if (currentProject) {
+        const result = await invoke<{ applied: string[]; errors: string[] }>("apply_base_map", {
+          baseMap: baseMap,
+        });
+        if (result.applied.length > 0) {
+          showToast(`Base map applied: ${result.applied.join(", ")}`, "success");
+          // Refresh table data so UI shows new values
+          await fetchConstants();
+        } else {
+          showToast("No matching tables found in the loaded INI — base map could not be applied", "warning");
+        }
+        if (result.errors.length > 0) {
+          showToast(`Base map warnings: ${result.errors.join("; ")}`, "warning");
+          console.warn("Base map apply errors:", result.errors);
+        }
+      } else {
+        showToast("Please create a project first before generating a base map", "info");
+      }
+      setBaseMapDialogOpen(false);
+    } catch (e) {
+      showToast("Failed to apply base map: " + e, "error");
     }
   }
 
@@ -2012,14 +2098,13 @@ function AppContent() {
     const fileMenuItems: TunerMenuItem["items"] = currentProject
       ? [
           // Project open - show full menu
-          { id: "new-project", label: "&New Project...", onClick: () => setProjectDialogOpen(true) },
-          { id: "open-project", label: "&Open Project...", onClick: () => setOpenProjectDialogOpen(true) },
+          { id: "new-project", label: "&New Project...\tCtrl+N", onClick: () => setNewProjectDialogOpen(true) },
           { id: "import-project", label: "&Import TS Project...", onClick: () => setImportProjectOpen(true) },
           { id: "close-project", label: "&Close Project", onClick: closeProject },
           { id: "sep1", label: "", separator: true },
           { id: "save", label: "&Save Tune\tCtrl+S", onClick: () => setSaveDialogOpen(true) },
           { id: "saveas", label: "Save Tune &As...", onClick: () => setSaveDialogOpen(true) },
-          { id: "load", label: "&Load Tune...\tCtrl+O", onClick: () => setLoadDialogOpen(true) },
+          { id: "load", label: "&Load Tune...", onClick: () => setLoadDialogOpen(true) },
           { id: "sep2", label: "", separator: true },
           { id: "create-restore", label: "Create &Restore Point", onClick: handleCreateRestorePoint },
           { id: "restore-points", label: "Restore &Points...", onClick: () => setRestorePointsOpen(true) },
@@ -2031,11 +2116,10 @@ function AppContent() {
         ]
       : [
           // No project open - limited menu
-          { id: "new-project", label: "&New Project...\tCtrl+N", onClick: () => setProjectDialogOpen(true) },
-          { id: "open-project", label: "&Open Project...\tCtrl+O", onClick: () => setOpenProjectDialogOpen(true) },
+          { id: "new-project", label: "&New Project...\tCtrl+N", onClick: () => setNewProjectDialogOpen(true) },
           { id: "import-project", label: "&Import TS Project...", onClick: () => setImportProjectOpen(true) },
           { id: "sep1", label: "", separator: true },
-          { id: "import-ini", label: "&Import ECU Definition...", onClick: importIniToRepository },
+          { id: "settings", label: "&Settings...", onClick: () => setSettingsDialogOpen(true) },
           { id: "sep2", label: "", separator: true },
           { id: "exit", label: "E&xit", onClick: () => window.close() },
         ];
@@ -2179,6 +2263,7 @@ function AppContent() {
     toolItems.push({ id: "tune-file-diff", label: "Tune File &Diff...", onClick: () => setTuneFileDiffOpen(true), disabled: !currentProject });
     toolItems.push({ id: "dyno-overlay", label: "D&yno Data...", onClick: () => setDynoOverlayOpen(true) });
     toolItems.push({ id: "math-channels", label: "&Math Channels...", onClick: () => setMathChannelsDialogOpen(true), disabled: !currentProject });
+    toolItems.push({ id: "base-map", label: "Generate &Base Map...", onClick: () => setBaseMapDialogOpen(true), disabled: !currentProject });
     toolItems.push({ id: "sep4", label: "", separator: true });
     toolItems.push(
       // { id: "plugins", label: "&Plugins...", onClick: () => setPluginPanelOpen(true) },
@@ -2401,13 +2486,15 @@ function AppContent() {
 
   // Render tab content
   const renderTabContent = () => {
-    // If no project is open, show the welcome/no project view
+    // If no project is open, show the welcome view
     if (!currentProject) {
-      return <NoProjectView 
+      return <WelcomeView 
         projects={availableProjects}
-        onNewProject={() => setProjectDialogOpen(true)}
         onOpenProject={(path) => openProject(path)}
-        onBrowseProject={() => setOpenProjectDialogOpen(true)}
+        onNewProject={() => setNewProjectDialogOpen(true)}
+        onConnect={() => setConnectionDialogOpen(true)}
+        onImportTsProject={() => setImportProjectOpen(true)}
+        onDeleteProject={handleDeleteProject}
       />;
     }
     
@@ -2560,6 +2647,7 @@ function AppContent() {
         statusItems={statusItems}
         connected={status.state === "Connected"}
         ecuName={(status.state === "Connected" ? status.signature : (status.ini_name ? status.ini_name : undefined)) as string | undefined}
+        projectName={currentProject?.name}
         unitsSystem={unitsSystem}
         realtimeChannels={statusBarChannels}
         channelInfoMap={channelInfoMap}
@@ -2643,17 +2731,19 @@ function AppContent() {
       
       {/* Project Dialogs */}
       <NewProjectDialog
-        isOpen={projectDialogOpen}
-        onClose={() => setProjectDialogOpen(false)}
+        isOpen={newProjectDialogOpen}
+        onClose={() => setNewProjectDialogOpen(false)}
         inis={repositoryInis}
         onImportIni={importIniToRepository}
-        onCreate={createProject}
+        onCreateProject={createProject}
+        onImportTune={handleImportTuneIntoProject}
+        onGenerateBaseMap={() => setBaseMapDialogOpen(true)}
       />
-      <OpenProjectDialog
-        isOpen={openProjectDialogOpen}
-        onClose={() => setOpenProjectDialogOpen(false)}
-        projects={availableProjects}
-        onOpen={openProject}
+      <BaseMapDialog
+        isOpen={baseMapDialogOpen}
+        onClose={() => setBaseMapDialogOpen(false)}
+        onApply={handleBaseMapApply}
+        hasProject={!!currentProject}
       />
       
       {/* Tune Comparison Dialog */}
@@ -3024,624 +3114,6 @@ function SettingsView() {
         }}>
           When disabled, help icons only appear for fields that have descriptions defined in the INI file.
         </p>
-      </div>
-    </div>
-  );
-}
-
-// No Project View - shown when no project is open (like TS startup)
-function NoProjectView({
-  projects,
-  onNewProject,
-  onOpenProject,
-  onBrowseProject,
-}: {
-  projects: ProjectInfo[];
-  onNewProject: () => void;
-  onOpenProject: (path: string) => void;
-  onBrowseProject: () => void;
-}) {
-  return (
-    <div style={{ 
-      display: "flex", 
-      flexDirection: "column", 
-      alignItems: "center", 
-      justifyContent: "center",
-      height: "100%",
-      padding: 40,
-      textAlign: "center",
-    }}>
-      <div style={{ marginBottom: 32 }}>
-        <h1 style={{ fontSize: 32, marginBottom: 8, color: "var(--text-primary)" }}>
-          LibreTune
-        </h1>
-        <p style={{ color: "var(--text-muted)", fontSize: 14 }}>
-          Open-source ECU tuning software
-        </p>
-      </div>
-      
-      <div style={{ display: "flex", gap: 16, marginBottom: 48 }}>
-        <button
-          onClick={onNewProject}
-          style={{
-            padding: "16px 32px",
-            fontSize: 16,
-            background: "var(--primary)",
-            color: "white",
-            border: "none",
-            borderRadius: 8,
-            cursor: "pointer",
-          }}
-        >
-          New Project
-        </button>
-        <button
-          onClick={onBrowseProject}
-          style={{
-            padding: "16px 32px",
-            fontSize: 16,
-            background: "var(--bg-elevated)",
-            color: "var(--text-primary)",
-            border: "1px solid var(--border-default)",
-            borderRadius: 8,
-            cursor: "pointer",
-          }}
-        >
-          Open Project
-        </button>
-      </div>
-      
-      {projects.length > 0 && (
-        <div style={{ maxWidth: 500, width: "100%" }}>
-          <h3 style={{ marginBottom: 16, color: "var(--text-secondary)" }}>Recent Projects</h3>
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {projects.slice(0, 5).map((project) => (
-              <div
-                key={project.path}
-                onClick={() => onOpenProject(project.path)}
-                style={{
-                  padding: 16,
-                  background: "var(--bg-elevated)",
-                  borderRadius: 8,
-                  cursor: "pointer",
-                  textAlign: "left",
-                  border: "1px solid var(--border-default)",
-                }}
-              >
-                <div style={{ fontWeight: 600, marginBottom: 4 }}>{project.name}</div>
-                <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{project.signature}</div>
-                <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>
-                  Last modified: {new Date(project.modified).toLocaleDateString()}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// Project template type
-interface ProjectTemplate {
-  id: string;
-  name: string;
-  description: string;
-  ecu_type: string;
-  ini_signature: string;
-  ini_pattern: string;
-  dashboard_preset: string;
-  icon: string;
-  connection_baud_rate: number;
-  connection_protocol: string;
-}
-
-// New Project Dialog
-function NewProjectDialog({
-  isOpen,
-  onClose,
-  inis,
-  onImportIni,
-  onCreate,
-}: {
-  isOpen: boolean;
-  onClose: () => void;
-  inis: IniEntry[];
-  onImportIni: () => void;
-  onCreate: (name: string, iniId: string, tunePath?: string) => void;
-}) {
-  const [mode, setMode] = useState<"select" | "template" | "scratch">("select");
-  const [templates, setTemplates] = useState<ProjectTemplate[]>([]);
-  const [selectedTemplate, setSelectedTemplate] = useState<ProjectTemplate | null>(null);
-  const [projectName, setProjectName] = useState("");
-  const [selectedIni, setSelectedIni] = useState<string>("");
-  const [tunePath, setTunePath] = useState<string>("");
-  const [tuneFileName, setTuneFileName] = useState<string>("");
-  const [creating, setCreating] = useState(false);
-  
-  // Load templates on mount
-  useEffect(() => {
-    if (isOpen) {
-      invoke<ProjectTemplate[]>("list_project_templates")
-        .then(setTemplates)
-        .catch(console.error);
-      // Reset state when dialog opens
-      setMode("select");
-      setSelectedTemplate(null);
-      setProjectName("");
-      setSelectedIni("");
-      setTunePath("");
-      setTuneFileName("");
-    }
-  }, [isOpen]);
-  
-  async function browseTune() {
-    try {
-      const path = await open({
-        multiple: false,
-        filters: [
-          { name: "Tune Files", extensions: ["xml", "msq"] },
-          { name: "LibreTune Tune", extensions: ["xml"] },
-          { name: "TS MSQ", extensions: ["msq"] },
-          { name: "All Files", extensions: ["*"] },
-        ],
-      });
-      if (path && typeof path === "string") {
-        setTunePath(path);
-        // Extract just the filename for display
-        const parts = path.split(/[\\/]/);
-        setTuneFileName(parts[parts.length - 1]);
-      }
-    } catch (e) {
-      console.error("Error browsing for tune:", e);
-    }
-  }
-  
-  async function createFromTemplate() {
-    if (!selectedTemplate || !projectName.trim()) return;
-    setCreating(true);
-    try {
-      await invoke("create_project_from_template", {
-        templateId: selectedTemplate.id,
-        projectName: projectName.trim(),
-      });
-      onClose();
-      // Trigger refresh - the App will handle this through the project state
-      window.location.reload();
-    } catch (e) {
-      console.error("Failed to create project from template:", e);
-      alert(`Failed to create project: ${e}`);
-    } finally {
-      setCreating(false);
-    }
-  }
-  
-  if (!isOpen) return null;
-  
-  // Template Selection Mode
-  if (mode === "select") {
-    return (
-      <div style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(0,0,0,0.6)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        zIndex: 1000,
-      }}>
-        <div style={{
-          background: "var(--bg-surface)",
-          borderRadius: 12,
-          padding: 24,
-          minWidth: 600,
-          maxWidth: 800,
-          maxHeight: "80vh",
-          overflow: "auto",
-        }}>
-          <h2 style={{ marginBottom: 8 }}>New Project</h2>
-          <p style={{ color: "var(--text-muted)", marginBottom: 24 }}>
-            Choose a template to get started quickly, or start from scratch.
-          </p>
-          
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 16, marginBottom: 24 }}>
-            {templates.map((template) => (
-              <div
-                key={template.id}
-                onClick={() => { setSelectedTemplate(template); setMode("template"); }}
-                style={{
-                  padding: 20,
-                  borderRadius: 8,
-                  border: "1px solid var(--border-default)",
-                  background: "var(--bg-elevated)",
-                  cursor: "pointer",
-                  transition: "all 0.2s",
-                }}
-                onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--primary)"; }}
-                onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--border-default)"; }}
-              >
-                <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12 }}>
-                  <div style={{
-                    width: 40,
-                    height: 40,
-                    borderRadius: 8,
-                    background: template.icon === "speeduino" ? "#4CAF50" : 
-                               template.icon === "rusefi" ? "#2196F3" : "#FF9800",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    color: "white",
-                    fontWeight: "bold",
-                    fontSize: 14,
-                  }}>
-                    {template.ecu_type.substring(0, 2).toUpperCase()}
-                  </div>
-                  <div>
-                    <div style={{ fontWeight: 600 }}>{template.name}</div>
-                    <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{template.ecu_type}</div>
-                  </div>
-                </div>
-                <p style={{ fontSize: 13, color: "var(--text-secondary)", margin: 0 }}>
-                  {template.description}
-                </p>
-              </div>
-            ))}
-            
-            {/* Start from Scratch card */}
-            <div
-              onClick={() => setMode("scratch")}
-              style={{
-                padding: 20,
-                borderRadius: 8,
-                border: "1px dashed var(--border-default)",
-                background: "transparent",
-                cursor: "pointer",
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                justifyContent: "center",
-                minHeight: 120,
-                transition: "all 0.2s",
-              }}
-              onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--primary)"; }}
-              onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--border-default)"; }}
-            >
-              <div style={{ fontSize: 24, marginBottom: 8 }}>➕</div>
-              <div style={{ fontWeight: 600 }}>Start from Scratch</div>
-              <div style={{ fontSize: 12, color: "var(--text-muted)" }}>Manual INI selection</div>
-            </div>
-          </div>
-          
-          <div style={{ display: "flex", gap: 12, justifyContent: "flex-end" }}>
-            <button onClick={onClose} style={{ padding: "10px 20px" }}>
-              Cancel
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-  
-  // Template Configuration Mode
-  if (mode === "template" && selectedTemplate) {
-    return (
-      <div style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(0,0,0,0.6)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        zIndex: 1000,
-      }}>
-        <div style={{
-          background: "var(--bg-surface)",
-          borderRadius: 12,
-          padding: 24,
-          minWidth: 500,
-          maxHeight: "80vh",
-          overflow: "auto",
-        }}>
-          <button 
-            onClick={() => setMode("select")}
-            style={{ padding: "4px 12px", marginBottom: 16, fontSize: 13 }}
-          >
-            ← Back
-          </button>
-          
-          <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 24 }}>
-            <div style={{
-              width: 48,
-              height: 48,
-              borderRadius: 8,
-              background: selectedTemplate.icon === "speeduino" ? "#4CAF50" : 
-                         selectedTemplate.icon === "rusefi" ? "#2196F3" : "#FF9800",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              color: "white",
-              fontWeight: "bold",
-              fontSize: 16,
-            }}>
-              {selectedTemplate.ecu_type.substring(0, 2).toUpperCase()}
-            </div>
-            <div>
-              <h2 style={{ margin: 0 }}>{selectedTemplate.name}</h2>
-              <p style={{ margin: "4px 0 0 0", color: "var(--text-muted)", fontSize: 13 }}>
-                {selectedTemplate.description}
-              </p>
-            </div>
-          </div>
-          
-          <div style={{ marginBottom: 20 }}>
-            <label style={{ display: "block", marginBottom: 8, fontWeight: 500 }}>
-              Project Name
-            </label>
-            <input
-              type="text"
-              value={projectName}
-              onChange={(e) => setProjectName(e.target.value)}
-              placeholder={`My ${selectedTemplate.ecu_type} Tune`}
-              style={{
-                width: "100%",
-                padding: 12,
-                borderRadius: 6,
-                border: "1px solid var(--border-default)",
-                background: "var(--bg-input)",
-                color: "var(--text-primary)",
-              }}
-            />
-          </div>
-          
-          <div style={{ 
-            background: "var(--bg-elevated)", 
-            borderRadius: 8, 
-            padding: 16, 
-            marginBottom: 20,
-            fontSize: 13,
-          }}>
-            <div style={{ fontWeight: 500, marginBottom: 12 }}>Template Settings</div>
-            <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "8px 16px" }}>
-              <span style={{ color: "var(--text-muted)" }}>ECU Signature:</span>
-              <span>{selectedTemplate.ini_signature}</span>
-              <span style={{ color: "var(--text-muted)" }}>Baud Rate:</span>
-              <span>{selectedTemplate.connection_baud_rate}</span>
-              <span style={{ color: "var(--text-muted)" }}>Dashboard:</span>
-              <span>{selectedTemplate.dashboard_preset}</span>
-            </div>
-          </div>
-          
-          <div style={{ display: "flex", gap: 12, justifyContent: "flex-end" }}>
-            <button onClick={onClose} style={{ padding: "10px 20px" }}>
-              Cancel
-            </button>
-            <button
-              onClick={createFromTemplate}
-              disabled={!projectName.trim() || creating}
-              style={{
-                padding: "10px 20px",
-                background: (!projectName.trim() || creating) ? "var(--bg-disabled)" : "var(--primary)",
-                color: "white",
-                border: "none",
-                borderRadius: 6,
-                cursor: (!projectName.trim() || creating) ? "not-allowed" : "pointer",
-              }}
-            >
-              {creating ? "Creating..." : "Create Project"}
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-  
-  // Manual "Start from Scratch" mode (original behavior)
-  return (
-    <div style={{
-      position: "fixed",
-      inset: 0,
-      background: "rgba(0,0,0,0.6)",
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
-      zIndex: 1000,
-    }}>
-      <div style={{
-        background: "var(--bg-surface)",
-        borderRadius: 12,
-        padding: 24,
-        minWidth: 500,
-        maxHeight: "80vh",
-        overflow: "auto",
-      }}>
-        <button 
-          onClick={() => setMode("select")}
-          style={{ padding: "4px 12px", marginBottom: 16, fontSize: 13 }}
-        >
-          ← Back
-        </button>
-        
-        <h2 style={{ marginBottom: 24 }}>New Project</h2>
-        
-        <div style={{ marginBottom: 20 }}>
-          <label style={{ display: "block", marginBottom: 8, fontWeight: 500 }}>
-            Project Name
-          </label>
-          <input
-            type="text"
-            value={projectName}
-            onChange={(e) => setProjectName(e.target.value)}
-            placeholder="My Engine Tune"
-            style={{
-              width: "100%",
-              padding: 12,
-              borderRadius: 6,
-              border: "1px solid var(--border-default)",
-              background: "var(--bg-input)",
-              color: "var(--text-primary)",
-            }}
-          />
-        </div>
-        
-        <div style={{ marginBottom: 20 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-            <label style={{ fontWeight: 500 }}>ECU Definition</label>
-            <button onClick={onImportIni} style={{ padding: "4px 12px", fontSize: 13 }}>
-              Import INI...
-            </button>
-          </div>
-          
-          {inis.length === 0 ? (
-            <div style={{ padding: 20, textAlign: "center", color: "var(--text-muted)", background: "var(--bg-elevated)", borderRadius: 6 }}>
-              No ECU definitions imported yet.<br/>
-              Click "Import INI..." to add an ECU definition file.
-            </div>
-          ) : (
-            <div style={{ maxHeight: 200, overflow: "auto", border: "1px solid var(--border-default)", borderRadius: 6 }}>
-              {inis.map((ini) => (
-                <div
-                  key={ini.id}
-                  onClick={() => setSelectedIni(ini.id)}
-                  style={{
-                    padding: 12,
-                    cursor: "pointer",
-                    background: selectedIni === ini.id ? "var(--primary)" : "transparent",
-                    color: selectedIni === ini.id ? "white" : "var(--text-primary)",
-                    borderBottom: "1px solid var(--border-default)",
-                  }}
-                >
-                  <div style={{ fontWeight: 500 }}>{ini.name}</div>
-                  <div style={{ fontSize: 12, opacity: 0.8 }}>{ini.signature}</div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-        
-        <div style={{ marginBottom: 20 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-            <label style={{ fontWeight: 500 }}>Import Existing Tune (Optional)</label>
-            <button onClick={browseTune} style={{ padding: "4px 12px", fontSize: 13 }}>
-              Browse...
-            </button>
-          </div>
-          <div style={{ 
-            padding: 12, 
-            background: "var(--bg-elevated)", 
-            borderRadius: 6,
-            border: "1px solid var(--border-default)",
-            color: tunePath ? "var(--text-primary)" : "var(--text-muted)",
-            fontSize: 13,
-          }}>
-            {tunePath ? (
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <span>{tuneFileName}</span>
-                <button 
-                  onClick={() => { setTunePath(""); setTuneFileName(""); }}
-                  style={{ padding: "2px 8px", fontSize: 12 }}
-                >
-                  Clear
-                </button>
-              </div>
-            ) : (
-              <span>Start with a blank tune, or import an existing .xml or .msq file</span>
-            )}
-          </div>
-        </div>
-        
-        <div style={{ display: "flex", gap: 12, justifyContent: "flex-end" }}>
-          <button onClick={onClose} style={{ padding: "10px 20px" }}>
-            Cancel
-          </button>
-          <button
-            onClick={() => onCreate(projectName, selectedIni, tunePath || undefined)}
-            disabled={!projectName.trim() || !selectedIni}
-            style={{
-              padding: "10px 20px",
-              background: (!projectName.trim() || !selectedIni) ? "var(--bg-disabled)" : "var(--primary)",
-              color: "white",
-              border: "none",
-              borderRadius: 6,
-              cursor: (!projectName.trim() || !selectedIni) ? "not-allowed" : "pointer",
-            }}
-          >
-            Create Project
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// Open Project Dialog
-function OpenProjectDialog({
-  isOpen,
-  onClose,
-  projects,
-  onOpen,
-}: {
-  isOpen: boolean;
-  onClose: () => void;
-  projects: ProjectInfo[];
-  onOpen: (path: string) => void;
-}) {
-  if (!isOpen) return null;
-  
-  return (
-    <div style={{
-      position: "fixed",
-      inset: 0,
-      background: "rgba(0,0,0,0.6)",
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
-      zIndex: 1000,
-    }}>
-      <div style={{
-        background: "var(--bg-surface)",
-        borderRadius: 12,
-        padding: 24,
-        minWidth: 500,
-        maxHeight: "80vh",
-        overflow: "auto",
-      }}>
-        <h2 style={{ marginBottom: 24 }}>Open Project</h2>
-        
-        {projects.length === 0 ? (
-          <div style={{ padding: 40, textAlign: "center", color: "var(--text-muted)" }}>
-            No projects found.<br/>
-            Create a new project to get started.
-          </div>
-        ) : (
-          <div style={{ maxHeight: 400, overflow: "auto" }}>
-            {projects.map((project) => (
-              <div
-                key={project.path}
-                onClick={() => onOpen(project.path)}
-                style={{
-                  padding: 16,
-                  cursor: "pointer",
-                  borderRadius: 8,
-                  marginBottom: 8,
-                  background: "var(--bg-elevated)",
-                  border: "1px solid var(--border-default)",
-                }}
-              >
-                <div style={{ fontWeight: 600, marginBottom: 4 }}>{project.name}</div>
-                <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{project.signature}</div>
-                <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>
-                  {project.path}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-        
-        <div style={{ display: "flex", gap: 12, justifyContent: "flex-end", marginTop: 20 }}>
-          <button onClick={onClose} style={{ padding: "10px 20px" }}>
-            Cancel
-          </button>
-        </div>
       </div>
     </div>
   );

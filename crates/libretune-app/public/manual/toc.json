@@ -133,6 +133,11 @@
         "children": []
       },
       {
+        "title": "Base Map Generator",
+        "path": "features/base-map",
+        "children": []
+      },
+      {
         "title": "Performance Calculator",
         "path": "features/performance-calculator",
         "children": []
@@ -145,6 +150,21 @@
       {
         "title": "Tools",
         "path": "features/tools",
+        "children": []
+      },
+      {
+        "title": "Pop-out Windows",
+        "path": "features/popout-windows",
+        "children": []
+      },
+      {
+        "title": "ECU Console",
+        "path": "features/ecu-console",
+        "children": []
+      },
+      {
+        "title": "Tune Migration",
+        "path": "features/tune-migration",
         "children": []
       },
       {

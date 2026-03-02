@@ -12,6 +12,8 @@ interface SidebarProps {
   onItemSelect: (item: SidebarNode, highlightTerm?: string) => void;
   /** Index of searchable content for deep search (target -> terms) */
   searchIndex?: Record<string, string[]>;
+  /** Current project name for display in header */
+  projectName?: string;
 }
 
 /** Recursively filter tree nodes by search query, preserving parent folders when children match */
@@ -98,7 +100,7 @@ function highlightMatch(label: string, query: string): React.ReactNode {
   );
 }
 
-export function Sidebar({ items, width, onResize, onItemSelect, searchIndex }: SidebarProps) {
+export function Sidebar({ items, width, onResize, onItemSelect, searchIndex, projectName }: SidebarProps) {
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [searchQuery, setSearchQuery] = useState('');
   const [savedExpandedIds, setSavedExpandedIds] = useState<Set<string> | null>(null);
@@ -279,7 +281,7 @@ export function Sidebar({ items, width, onResize, onItemSelect, searchIndex }: S
   return (
     <div className="sidebar" style={{ width }}>
       <div className="sidebar-header">
-        <span className="sidebar-title">Project</span>
+        <span className="sidebar-title">{projectName || 'Project'}</span>
       </div>
       <div className="sidebar-search">
         <svg className="search-icon" viewBox="0 0 16 16" fill="currentColor">

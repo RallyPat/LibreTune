@@ -108,6 +108,46 @@ Configure how LibreTune communicates with your ECU.
 
 ---
 
+## ECU Definitions
+
+The **ECU Definitions** tab lets you manage your library of INI definition files. These files describe how LibreTune communicates with your specific ECU firmware version.
+
+### Viewing Imported Definitions
+
+The tab displays a scrollable list of all INI files in your local repository. Each entry shows:
+- **Name** — The INI file name (e.g., `speeduino202310.ini`)
+- **Signature** — The ECU firmware signature string the INI matches
+
+### Importing a New INI File
+
+1. Click the **Import ECU Definition** button at the top of the list
+2. Browse to the `.ini` file on your computer
+3. The file is copied into LibreTune's definitions directory
+4. It immediately appears in the list and becomes available for project creation
+
+You can also import INI files:
+- During the [Open Tune File](./first-project.md#opening-a-tune-file) flow when no matching INI is found
+- Automatically when LibreTune downloads a matching INI from the online repository
+
+### Deleting an INI File
+
+To remove an INI definition you no longer need:
+
+1. Click the **✕** button next to the INI entry
+2. The button changes to **Confirm** — click again to permanently delete
+3. The INI file is removed from your local repository
+
+> **Note**: Deleting an INI does not affect existing projects that already use it. However, you won't be able to create new projects with that INI unless you re-import it.
+
+### Definition Storage Location
+
+INI files are stored in your application data directory:
+- **Linux**: `~/.local/share/LibreTune/definitions/`
+- **macOS**: `~/Library/Application Support/LibreTune/definitions/`
+- **Windows**: `%APPDATA%\LibreTune\definitions\`
+
+---
+
 ## Unit Preferences
 
 ### Temperature

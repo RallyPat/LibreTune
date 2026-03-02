@@ -37,6 +37,9 @@ export interface TunerLayoutProps {
   connected: boolean;
   ecuName?: string;
 
+  // Current project name (shown in sidebar header)
+  projectName?: string;
+
   // Unit system
   unitsSystem?: 'metric' | 'imperial';
 
@@ -110,6 +113,7 @@ export function TunerLayout({
   statusItems,
   connected,
   ecuName,
+  projectName,
   unitsSystem,
   realtimeChannels,
   channelInfoMap,
@@ -139,6 +143,7 @@ export function TunerLayout({
             onResize={handleSidebarResize}
             onItemSelect={onSidebarItemSelect}
             searchIndex={searchIndex}
+            projectName={projectName}
           />
         )}
         

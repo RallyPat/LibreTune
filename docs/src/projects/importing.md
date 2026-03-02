@@ -49,10 +49,16 @@ Import an MSQ file into existing project:
 ## Importing an INI File
 
 Add an INI to your local repository:
-1. **File → Import ECU Definition...**
-2. Select INI file
-3. INI copied to repository
-4. Available for new projects
+1. Open **Settings** (Ctrl+Comma) → **ECU Definitions** tab
+2. Click **Import ECU Definition**
+3. Select your INI file
+4. The file is copied to the repository and available for project creation
+
+You can also import INI files inline during the [Open Tune File](../getting-started/first-project.md#opening-a-tune-file) flow — if no matching INI is found, an "Import ECU Definition..." button appears directly in the dialog.
+
+### Managing Your INI Library
+
+To view or delete imported INI files, go to **Settings → ECU Definitions**. See [Settings — ECU Definitions](../getting-started/settings.md#ecu-definitions) for details.
 
 ## Importing Dashboards
 

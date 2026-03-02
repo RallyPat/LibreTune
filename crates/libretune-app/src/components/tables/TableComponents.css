@@ -4,46 +4,28 @@
   user-select: none;
 }
 
-/* Grid layout - scoped under .table-editor-2d for specificity over tuner-ui */
+/* Flat grid layout - headers and cells all in one grid for guaranteed alignment */
 .table-editor-2d .table-grid-container {
   display: grid;
-  grid-template-columns: auto 1fr;
-  grid-template-rows: auto 1fr;
-  grid-template-areas:
-    ". x-axis"
-    "y-axis cells";
-  gap: 2px;
-  overflow: auto;
-}
-
-.table-editor-2d .table-grid-container .y-axis-labels {
-  grid-area: y-axis;
-}
-
-.table-editor-2d .table-grid-container .x-axis-bins {
-  grid-area: x-axis;
-  margin-left: 0 !important;
-}
-
-.table-editor-2d .table-grid-container .table-cells {
-  grid-area: cells;
-}
-
-/* Table cells - scoped under .table-editor-2d to avoid collision with tuner-ui */
-.table-editor-2d .table-cells {
-  display: grid;
   gap: 1px;
-  background: var(--surface-dim);
-  border: 1px solid var(--border);
+  overflow: auto;
+  /* grid-template-columns set via inline style: auto repeat(N, 3rem) */
 }
 
-.table-editor-2d .table-row {
-  display: contents;
+/* Corner cell where axes meet */
+.table-editor-2d .axis-corner {
+  background: var(--surface);
+  position: sticky;
+  top: 0;
+  left: 0;
+  z-index: 3;
 }
 
 .table-editor-2d .table-cell {
   width: 3rem;
   height: 2rem;
+  padding: 0;
+  min-width: unset;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -112,23 +94,25 @@
   outline: none;
 }
 
-.table-editor-2d .y-axis-labels {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
+/* Y-axis labels - sticky left for horizontal scrolling */
+.table-editor-2d .axis-bin-label.y-bin {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  justify-content: flex-end;
   padding-right: 0.5rem;
 }
 
-.table-editor-2d .x-axis-bins {
-  display: flex;
-  flex-direction: row;
-  gap: 1px;
-  padding-bottom: 0.5rem;
+/* X-axis labels - sticky top for vertical scrolling */
+.table-editor-2d .axis-bin-label.x-bin {
+  position: sticky;
+  top: 0;
+  z-index: 2;
 }
 
 .table-editor-2d .axis-bin-label {
   width: 3rem;
-  height: 1.5rem;
+  height: 2rem;
   display: flex;
   align-items: center;
   justify-content: center;

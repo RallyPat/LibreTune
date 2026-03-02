@@ -1,4 +1,4 @@
-import { useState, useRef, useMemo, useCallback } from 'react';
+import { Fragment, useState, useRef, useMemo, useCallback } from 'react';
 import { valueToHeatmapColor, HeatmapScheme } from '../../utils/heatmapColors';
 
 export interface SelectionRange {
@@ -298,90 +298,81 @@ export default function TableGrid({
       className="table-grid-container"
       onMouseUp={handleMouseUp}
       onMouseMove={handleCellMouseMove}
+      style={{ gridTemplateColumns: `max-content repeat(${x_size}, 3rem)` }}
     >
-      <div className="y-axis-labels">
-        {y_bins.map((val, i) => {
-          const isEditingThis = editingAxis?.axis === 'y' && editingAxis.index === i;
-          const isHeaderSelected = selectionRange && 
-            i >= Math.min(selectionRange.start[1], selectionRange.end[1]) && 
-            i <= Math.max(selectionRange.start[1], selectionRange.end[1]);
-          
-          if (isEditingThis) {
-            return (
-              <input
-                key={`y-${i}`}
-                type="number"
-                step="any"
-                value={editValue}
-                className="axis-bin-label y-bin editing"
-                autoFocus
-                onChange={e => setEditValue(e.target.value)}
-                onBlur={handleHeaderBlur}
-                onKeyDown={handleHeaderKeyDown}
-              />
-            );
-          }
+      {/* Corner cell (row 0, col 0) */}
+      <div className="axis-corner" />
 
+      {/* X-axis headers (row 0, cols 1..N) */}
+      {x_bins.map((val, i) => {
+        const isEditingThis = editingAxis?.axis === 'x' && editingAxis.index === i;
+        const isHeaderSelected = selectionRange && 
+          i >= Math.min(selectionRange.start[0], selectionRange.end[0]) && 
+          i <= Math.max(selectionRange.start[0], selectionRange.end[0]);
+
+        if (isEditingThis) {
           return (
-            <div
-              key={`y-${i}`}
-              className={`axis-bin-label y-bin ${isHeaderSelected ? 'selected' : ''}`}
-              onMouseDown={e => handleHeaderMouseDown(e, 'y', i)}
-              onMouseEnter={() => handleHeaderMouseEnter('y', i)}
-              onDoubleClick={() => handleHeaderDoubleClick('y', i)}
-            >
-              {val}
-            </div>
-          );
-        })}
-      </div>
-
-      <div 
-        className="x-axis-bins"
-        style={{ marginLeft: '3.5rem' }}
-      >
-        {x_bins.map((val, i) => {
-          const isEditingThis = editingAxis?.axis === 'x' && editingAxis.index === i;
-          const isHeaderSelected = selectionRange && 
-            i >= Math.min(selectionRange.start[0], selectionRange.end[0]) && 
-            i <= Math.max(selectionRange.start[0], selectionRange.end[0]);
-
-          if (isEditingThis) {
-            return (
-              <input
-                key={`x-${i}`}
-                type="number"
-                step="any"
-                value={editValue}
-                className="axis-bin-label x-bin editing"
-                autoFocus
-                onChange={e => setEditValue(e.target.value)}
-                onBlur={handleHeaderBlur}
-                onKeyDown={handleHeaderKeyDown}
-              />
-            );
-          }
-
-          return (
-            <div
+            <input
               key={`x-${i}`}
-              className={`axis-bin-label x-bin ${isHeaderSelected ? 'selected' : ''}`}
-              onMouseDown={e => handleHeaderMouseDown(e, 'x', i)}
-              onMouseEnter={() => handleHeaderMouseEnter('x', i)}
-              onDoubleClick={() => handleHeaderDoubleClick('x', i)}
-            >
-              {val}
-            </div>
+              type="number"
+              step="any"
+              value={editValue}
+              className="axis-bin-label x-bin editing"
+              autoFocus
+              onChange={e => setEditValue(e.target.value)}
+              onBlur={handleHeaderBlur}
+              onKeyDown={handleHeaderKeyDown}
+            />
           );
-        })}
-      </div>
+        }
 
-      <div 
-        className="table-cells"
-        style={{ gridTemplateColumns: `repeat(${x_bins.length}, 3rem)` }}
-      >
-        {z_values.map((row, y) => (
-          <div key={`row-${y}`} className="table-row">
+        return (
+          <div
+            key={`x-${i}`}
+            className={`axis-bin-label x-bin ${isHeaderSelected ? 'selected' : ''}`}
+            onMouseDown={e => handleHeaderMouseDown(e, 'x', i)}
+            onMouseEnter={() => handleHeaderMouseEnter('x', i)}
+            onDoubleClick={() => handleHeaderDoubleClick('x', i)}
+          >
+            {val}
+          </div>
+        );
+      })}
+
+      {/* Data rows: each row = y-axis label + data cells */}
+      {z_values.map((row, y) => {
+        const isEditingYAxis = editingAxis?.axis === 'y' && editingAxis.index === y;
+        const isYHeaderSelected = selectionRange && 
+          y >= Math.min(selectionRange.start[1], selectionRange.end[1]) && 
+          y <= Math.max(selectionRange.start[1], selectionRange.end[1]);
+
+        const yLabel = isEditingYAxis ? (
+          <input
+            key={`y-${y}`}
+            type="number"
+            step="any"
+            value={editValue}
+            className="axis-bin-label y-bin editing"
+            autoFocus
+            onChange={e => setEditValue(e.target.value)}
+            onBlur={handleHeaderBlur}
+            onKeyDown={handleHeaderKeyDown}
+          />
+        ) : (
+          <div
+            key={`y-${y}`}
+            className={`axis-bin-label y-bin ${isYHeaderSelected ? 'selected' : ''}`}
+            onMouseDown={e => handleHeaderMouseDown(e, 'y', y)}
+            onMouseEnter={() => handleHeaderMouseEnter('y', y)}
+            onDoubleClick={() => handleHeaderDoubleClick('y', y)}
+          >
+            {y_bins[y]}
+          </div>
+        );
+
+        return (
+          <Fragment key={`row-${y}`}>
+            {yLabel}
             {row.map((value, x) => {
               const cellKey = `${x},${y}`;
               const isLocked = lockedCells?.has(cellKey);
@@ -433,9 +424,9 @@ export default function TableGrid({
                 </div>
               );
             })}
-          </div>
-        ))}
-      </div>
+          </Fragment>
+        );
+      })}
 
       {renderHistoryTrail()}
       

@@ -31,6 +31,7 @@
 - [Data Statistics](./features/data-statistics.md)
 - [Alert Rules](./features/alert-rules.md)
 - [Lua Scripting](./features/lua-scripting.md)
+- [Base Map Generator](./features/base-map.md)
 - [Performance Calculator](./features/performance-calculator.md)
 - [Diagnostic Loggers](./features/diagnostic-loggers.md)
 - [Tools](./features/tools.md)

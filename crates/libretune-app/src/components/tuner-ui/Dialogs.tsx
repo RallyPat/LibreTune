@@ -509,7 +509,12 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
   const [autoConnect, setAutoConnect] = useState(false);
   
   // Settings dialog tabs
-  const [currentTab, setCurrentTab] = useState<'general' | 'hotkeys'>('general');
+  const [currentTab, setCurrentTab] = useState<'general' | 'definitions' | 'hotkeys'>('general');
+
+  // ECU Definitions tab state
+  const [iniList, setIniList] = useState<{id: string; name: string; signature: string; path: string; imported: boolean; source: string}[]>([]);
+  const [iniLoading, setIniLoading] = useState(false);
+  const [deletingIni, setDeletingIni] = useState<string | null>(null);
   
   // Hotkey bindings
   const [hotkeyBindings, setHotkeyBindings] = useState<Record<string, string>>({});
@@ -767,6 +772,20 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
             aria-controls="general-panel"
           >
             General
+          </button>
+          <button 
+            className={`dialog-tab ${currentTab === 'definitions' ? 'active' : ''}`}
+            onClick={() => {
+              setCurrentTab('definitions');
+              setIniLoading(true);
+              invoke<any[]>('list_repository_inis').then(setIniList).catch(console.error).finally(() => setIniLoading(false));
+            }}
+            role="tab"
+            id="definitions-tab"
+            aria-selected={currentTab === 'definitions'}
+            aria-controls="definitions-panel"
+          >
+            ECU Definitions
           </button>
           <button 
             className={`dialog-tab ${currentTab === 'hotkeys' ? 'active' : ''}`}
@@ -1243,6 +1262,82 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
             />
             <span className="dialog-form-note">Warn if a cell changes by more than this percent</span>
           </div>
+            </div>
+          )}
+
+          {currentTab === 'definitions' && (
+            <div className="dialog-tab-content" id="definitions-panel" role="tabpanel" aria-labelledby="definitions-tab">
+              <div className="dialog-form-group">
+                <label>Imported ECU Definitions (INI Files)</label>
+                <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '4px 0 12px' }}>
+                  Manage the ECU definition files available for projects.
+                </p>
+                <button
+                  style={{ marginBottom: 12, padding: '6px 14px', background: 'var(--primary)', color: 'white', border: 'none', borderRadius: 6, cursor: 'pointer' }}
+                  onClick={async () => {
+                    try {
+                      const path = await import('@tauri-apps/plugin-dialog').then(d => d.open({
+                        multiple: false,
+                        filters: [{ name: 'INI Files', extensions: ['ini'] }],
+                      }));
+                      if (path && typeof path === 'string') {
+                        await invoke('import_ini', { path });
+                        const list = await invoke<any[]>('list_repository_inis');
+                        setIniList(list);
+                      }
+                    } catch (e) {
+                      console.error('Failed to import INI:', e);
+                    }
+                  }}
+                >
+                  Import INI File...
+                </button>
+
+                {iniLoading ? (
+                  <div style={{ padding: 20, textAlign: 'center', color: 'var(--text-muted)' }}>Loading...</div>
+                ) : iniList.length === 0 ? (
+                  <div style={{ padding: 20, textAlign: 'center', color: 'var(--text-muted)' }}>
+                    No ECU definitions imported yet.
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 400, overflowY: 'auto' }}>
+                    {iniList.map((ini) => (
+                      <div key={ini.id} style={{
+                        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                        padding: '10px 12px', background: 'var(--bg-elevated)', borderRadius: 6,
+                        border: '1px solid var(--border-default)',
+                      }}>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontWeight: 600, fontSize: 13 }}>{ini.name}</div>
+                          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>{ini.signature}</div>
+                        </div>
+                        <button
+                          style={{
+                            padding: '4px 10px', background: 'none', border: '1px solid var(--border-default)',
+                            borderRadius: 4, color: deletingIni === ini.id ? 'var(--error)' : 'var(--text-muted)',
+                            cursor: 'pointer', fontSize: 12, marginLeft: 8,
+                          }}
+                          onClick={async () => {
+                            if (deletingIni === ini.id) {
+                              try {
+                                await invoke('remove_ini', { iniId: ini.id });
+                                setIniList(prev => prev.filter(i => i.id !== ini.id));
+                              } catch (e) {
+                                console.error('Failed to remove INI:', e);
+                              }
+                              setDeletingIni(null);
+                            } else {
+                              setDeletingIni(ini.id);
+                            }
+                          }}
+                        >
+                          {deletingIni === ini.id ? 'Confirm Remove' : 'Remove'}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           )}
 

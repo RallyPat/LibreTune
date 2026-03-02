@@ -1,0 +1,106 @@
+.new-project-dialog {
+  background: var(--bg-surface);
+  border-radius: 12px;
+  padding: 28px;
+  min-width: 520px;
+  max-width: 640px;
+  max-height: 85vh;
+  overflow-y: auto;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+}
+
+/* Reuse shared dialog styles from OpenTuneDialog.css */
+
+.no-ini-available {
+  padding: 12px;
+  background: rgba(255, 165, 0, 0.08);
+  border: 1px solid rgba(255, 165, 0, 0.3);
+  border-radius: 8px;
+  margin-bottom: 8px;
+}
+
+.no-ini-available p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.import-ini-link {
+  display: inline-block;
+  margin-top: 8px;
+  padding: 0;
+  background: none;
+  border: none;
+  color: var(--primary);
+  cursor: pointer;
+  font-size: 13px;
+  text-decoration: none;
+  transition: opacity 0.15s;
+}
+
+.import-ini-link:hover {
+  opacity: 0.8;
+  text-decoration: underline;
+}
+
+/* Step 2: Tune choice cards */
+.tune-choice-cards {
+  display: flex;
+  gap: 16px;
+  margin: 20px 0;
+}
+
+.tune-choice-card {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 24px 16px;
+  background: var(--bg-elevated);
+  border: 2px solid var(--border-default);
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-align: center;
+}
+
+.tune-choice-card:hover {
+  border-color: var(--primary);
+  background: rgba(var(--primary-rgb, 59, 130, 246), 0.08);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.choice-icon {
+  font-size: 28px;
+  line-height: 1;
+}
+
+.choice-label {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.choice-desc {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.skip-btn {
+  padding: 8px 20px;
+  background: none;
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 13px;
+  transition: all 0.15s;
+}
+
+.skip-btn:hover {
+  color: var(--text-primary);
+  border-color: var(--text-muted);
+}

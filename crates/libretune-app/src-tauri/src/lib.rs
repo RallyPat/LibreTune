@@ -23,7 +23,7 @@ use libretune_core::plugin_system::{
 use libretune_core::project::{
     format_commit_message, load_math_channels, save_math_channels, BranchInfo, CommitDiff,
     CommitInfo, ConnectionSettings, IniRepository, IniSource, OnlineIniEntry, OnlineIniRepository,
-    Project, ProjectConfig, ProjectSettings, ProjectTemplate, TemplateManager, UserMathChannel,
+    Project, ProjectConfig, ProjectSettings, UserMathChannel,
     VersionControl,
 };
 use libretune_core::protocol::serial::list_ports;
@@ -10531,6 +10531,14 @@ async fn create_project(
         *cache_guard = Some(cache);
     }
 
+    // Always initialize current_tune so base map apply and other operations work
+    {
+        let mut tune_guard = state.current_tune.lock().await;
+        if tune_guard.is_none() {
+            *tune_guard = Some(TuneFile::new(&signature));
+        }
+    }
+
     // If a tune path was provided, import it and apply to cache
     if let Some(tune_file) = tune_path {
         let tune_path_ref = std::path::Path::new(&tune_file);
@@ -12060,176 +12068,541 @@ async fn validate_math_expression(expr: String) -> Result<String, String> {
 }
 
 // =====================================================
-// Project Template Commands
+// Base Map Generator & Project Utility Commands
 // =====================================================
 
-/// Response type for project template
-#[derive(Debug, Clone, Serialize)]
-struct ProjectTemplateResponse {
-    id: String,
-    name: String,
-    description: String,
-    ecu_type: String,
-    ini_signature: String,
-    ini_pattern: String,
-    dashboard_preset: String,
-    icon: String,
-    connection_baud_rate: u32,
-    connection_protocol: String,
-}
-
-impl From<ProjectTemplate> for ProjectTemplateResponse {
-    fn from(t: ProjectTemplate) -> Self {
-        Self {
-            id: t.id,
-            name: t.name,
-            description: t.description,
-            ecu_type: t.ecu_type,
-            ini_signature: t.ini_signature,
-            ini_pattern: t.ini_pattern,
-            dashboard_preset: t.dashboard_preset,
-            icon: t.icon,
-            connection_baud_rate: t.connection.baud_rate,
-            connection_protocol: t.connection.protocol,
-        }
-    }
-}
-
-/// List available project templates
+/// Generate a base map from engine specifications
 #[tauri::command]
-async fn list_project_templates() -> Result<Vec<ProjectTemplateResponse>, String> {
-    let templates = TemplateManager::list_templates();
-    Ok(templates
-        .into_iter()
-        .map(ProjectTemplateResponse::from)
-        .collect())
-}
-
-/// Create a new project from a template
-#[tauri::command]
-async fn create_project_from_template(
-    app: tauri::AppHandle,
-    state: tauri::State<'_, AppState>,
-    template_id: String,
-    project_name: String,
-) -> Result<CurrentProjectInfo, String> {
-    let template = TemplateManager::get_template(&template_id)
-        .ok_or_else(|| format!("Template not found: {}", template_id))?;
-
-    // Find matching INI in repository
-    let ini_entry = {
-        let repo_guard = state.ini_repository.lock().await;
-        let repo = repo_guard
-            .as_ref()
-            .ok_or_else(|| "INI repository not initialized".to_string())?;
-
-        // Try to find INI matching template signature
-        repo.list()
-            .iter()
-            .find(|e| {
-                e.signature.contains(&template.ini_signature)
-                    || e.name
-                        .to_lowercase()
-                        .contains(&template.ecu_type.to_lowercase())
-            })
-            .cloned()
-            .ok_or_else(|| {
-                format!(
-                    "No matching INI found for {}. Please import an INI file for {} first.",
-                    template.ini_signature, template.ecu_type
-                )
-            })?
+async fn generate_base_map(
+    cylinder_count: u8,
+    displacement_cc: f64,
+    injector_size_cc: f64,
+    fuel_type: String,
+    aspiration: String,
+    stroke_type: String,
+    injection_mode: String,
+    ignition_mode: String,
+    idle_rpm: u16,
+    redline_rpm: u16,
+    boost_target_kpa: Option<f64>,
+    target_wot_afr: Option<f64>,
+) -> Result<serde_json::Value, String> {
+    use libretune_core::basemap::{
+        Aspiration, EngineSpec, FuelType, IgnitionMode, InjectionMode, StrokeType,
     };
 
-    // Create project directory
+    let fuel = match fuel_type.to_lowercase().as_str() {
+        "gasoline" | "petrol" => FuelType::Gasoline,
+        "e85" => FuelType::E85,
+        "e100" => FuelType::E100,
+        "methanol" => FuelType::Methanol,
+        "lpg" | "propane" => FuelType::LPG,
+        _ => return Err(format!("Unknown fuel type: {}", fuel_type)),
+    };
+
+    let asp = match aspiration.to_lowercase().as_str() {
+        "na" | "naturally_aspirated" => Aspiration::NA,
+        "turbo" | "turbocharged" => Aspiration::Turbo,
+        "supercharged" => Aspiration::Supercharged,
+        _ => return Err(format!("Unknown aspiration: {}", aspiration)),
+    };
+
+    let stroke = match stroke_type.to_lowercase().as_str() {
+        "four_stroke" | "4stroke" | "4" => StrokeType::FourStroke,
+        "two_stroke" | "2stroke" | "2" => StrokeType::TwoStroke,
+        _ => return Err(format!("Unknown stroke type: {}", stroke_type)),
+    };
+
+    let inj = match injection_mode.to_lowercase().as_str() {
+        "sequential" => InjectionMode::Sequential,
+        "batch" => InjectionMode::Batch,
+        "simultaneous" => InjectionMode::Simultaneous,
+        "throttle_body" | "tbi" => InjectionMode::ThrottleBody,
+        _ => return Err(format!("Unknown injection mode: {}", injection_mode)),
+    };
+
+    let ign = match ignition_mode.to_lowercase().as_str() {
+        "wasted_spark" | "wastedspark" => IgnitionMode::WastedSpark,
+        "coil_on_plug" | "cop" => IgnitionMode::CoilOnPlug,
+        "distributor" => IgnitionMode::Distributor,
+        _ => return Err(format!("Unknown ignition mode: {}", ignition_mode)),
+    };
+
+    let spec = EngineSpec {
+        cylinder_count,
+        displacement_cc,
+        injector_size_cc,
+        fuel_type: fuel,
+        aspiration: asp,
+        stroke_type: stroke,
+        injection_mode: inj,
+        ignition_mode: ign,
+        idle_rpm,
+        redline_rpm,
+        boost_target_kpa,
+        target_wot_afr,
+    };
+
+    let base_map = libretune_core::basemap::generator::generate_base_map(&spec);
+
+    serde_json::to_value(&base_map).map_err(|e| format!("Failed to serialize base map: {}", e))
+}
+
+/// Apply a generated base map to the currently loaded project.
+///
+/// Searches the loaded INI definition for VE, ignition, and AFR tables by
+/// common naming patterns, reads each table's actual dimensions from the INI,
+/// then re-generates the base map data at the correct size before writing.
+/// Also updates axis bins and scalar constants (reqFuel, etc.).
+///
+/// Returns: Summary of what was applied
+#[tauri::command]
+async fn apply_base_map(
+    state: tauri::State<'_, AppState>,
+    base_map: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    use libretune_core::basemap::generator::{
+        generate_afr_table, generate_ignition_table, generate_load_bins, generate_rpm_bins,
+        generate_ve_table,
+    };
+    use libretune_core::basemap::EngineSpec;
+
+    let def_guard = state.definition.lock().await;
+    let def = def_guard.as_ref().ok_or("No ECU definition loaded")?;
+    let endianness = def.endianness;
+
+    // Deserialize engine_spec from the base map so we can re-generate at correct dimensions
+    let engine_spec: EngineSpec = serde_json::from_value(
+        base_map.get("engine_spec").cloned().ok_or("Missing engine_spec in base map")?,
+    ).map_err(|e| format!("Invalid engine_spec: {}", e))?;
+
+    let req_fuel: Option<f64> = base_map.get("req_fuel").and_then(|v| v.as_f64());
+    let scalars: Option<serde_json::Map<String, serde_json::Value>> =
+        base_map.get("scalars").and_then(|v| v.as_object()).cloned();
+
+    // Find tables by searching common naming patterns across ECU platforms
+    // Speeduino names: veTable1Tbl, sparkTbl, afrTable1Tbl
+    // rusEFI/FOME names: veTableTbl, ignitionTableTbl, lambdaTableTbl/afrTableTbl
+    let ve_table_names = ["veTable1Tbl", "veTableTbl", "fuelTable1Tbl", "fuelTableTbl"];
+    let ign_table_names = ["sparkTbl", "ignitionTableTbl", "advTable1Tbl", "ignitionTbl", "spark1Tbl"];
+    let afr_table_names = ["afrTable1Tbl", "lambdaTableTbl", "afrTableTbl", "lambdaTable1Tbl"];
+
+    let mut applied = Vec::<String>::new();
+    let mut errors = Vec::<String>::new();
+
+    // Helper: write a 2D table's Z values into cache
+    fn write_table_z(
+        def: &libretune_core::ini::EcuDefinition,
+        cache: &mut TuneCache,
+        tune: &mut TuneFile,
+        table_name: &str,
+        values_2d: &[Vec<f64>],
+        endianness: libretune_core::ini::Endianness,
+    ) -> Result<String, String> {
+        let table = def
+            .get_table_by_name_or_map(table_name)
+            .ok_or_else(|| format!("Table '{}' not found", table_name))?;
+        let constant = def
+            .constants
+            .get(&table.map)
+            .ok_or_else(|| format!("Constant '{}' not found for table '{}'", table.map, table_name))?;
+
+        let flat: Vec<f64> = values_2d.iter().flatten().cloned().collect();
+        let expected = constant.shape.element_count();
+
+        if flat.len() != expected {
+            return Err(format!(
+                "Table '{}' dimension mismatch: generated {} cells but INI expects {}",
+                table_name, flat.len(), expected
+            ));
+        }
+
+        let element_size = constant.data_type.size_bytes();
+        let mut raw_data = vec![0u8; constant.size_bytes()];
+        for (i, val) in flat.iter().enumerate() {
+            let raw_val = constant.display_to_raw(*val);
+            let offset = i * element_size;
+            constant.data_type.write_to_bytes(&mut raw_data, offset, raw_val, endianness);
+        }
+
+        cache.write_bytes(constant.page, constant.offset, &raw_data);
+
+        // Also update tune file page data
+        let page_data = tune.pages.entry(constant.page).or_insert_with(|| {
+            vec![0u8; def.page_sizes.get(constant.page as usize).copied().unwrap_or(256) as usize]
+        });
+        let start = constant.offset as usize;
+        let end = start + raw_data.len();
+        if end <= page_data.len() {
+            page_data[start..end].copy_from_slice(&raw_data);
+        }
+
+        Ok(table.title.clone())
+    }
+
+    // Helper: write axis bin values to a constant
+    fn write_axis_bins(
+        def: &libretune_core::ini::EcuDefinition,
+        cache: &mut TuneCache,
+        tune: &mut TuneFile,
+        const_name: &str,
+        values: &[f64],
+        endianness: libretune_core::ini::Endianness,
+    ) -> Result<(), String> {
+        let constant = match def.constants.get(const_name) {
+            Some(c) => c,
+            None => return Ok(()), // Axis constant not found, skip silently
+        };
+        let expected = constant.shape.element_count();
+        let mut final_values = values.to_vec();
+        final_values.resize(expected, *values.last().unwrap_or(&0.0));
+        final_values.truncate(expected);
+
+        let element_size = constant.data_type.size_bytes();
+        let mut raw_data = vec![0u8; constant.size_bytes()];
+        for (i, val) in final_values.iter().enumerate() {
+            let raw_val = constant.display_to_raw(*val);
+            let offset = i * element_size;
+            constant.data_type.write_to_bytes(&mut raw_data, offset, raw_val, endianness);
+        }
+
+        cache.write_bytes(constant.page, constant.offset, &raw_data);
+
+        let page_data = tune.pages.entry(constant.page).or_insert_with(|| {
+            vec![0u8; def.page_sizes.get(constant.page as usize).copied().unwrap_or(256) as usize]
+        });
+        let start = constant.offset as usize;
+        let end = start + raw_data.len();
+        if end <= page_data.len() {
+            page_data[start..end].copy_from_slice(&raw_data);
+        }
+        Ok(())
+    }
+
+    /// Look up a table definition by trying a list of candidate names.
+    /// Returns the matched table definition and the actual cols and rows.
+    /// Dimensions are resolved from the map constant's Shape (authoritative source),
+    /// falling back to TableDefinition x_size/y_size, then x_bins/y_bins constants.
+    fn find_table_with_dims<'a>(
+        def: &'a libretune_core::ini::EcuDefinition,
+        candidates: &[&str],
+    ) -> Option<(&'a libretune_core::ini::TableDefinition, usize, usize)> {
+        for name in candidates {
+            if let Some(table) = def.get_table_by_name_or_map(name) {
+                // Primary: get dimensions from the map constant's Shape
+                if let Some(map_const) = def.constants.get(&table.map) {
+                    match &map_const.shape {
+                        libretune_core::ini::Shape::Array2D { rows, cols } => {
+                            if *cols > 0 && *rows > 0 {
+                                eprintln!("[DEBUG] find_table_with_dims: '{}' map '{}' shape Array2D {}x{}", name, table.map, cols, rows);
+                                return Some((table, *cols, *rows));
+                            }
+                        }
+                        libretune_core::ini::Shape::Array1D(size) => {
+                            eprintln!("[DEBUG] find_table_with_dims: '{}' map '{}' shape Array1D({})", name, table.map, size);
+                            return Some((table, *size, 1));
+                        }
+                        _ => {}
+                    }
+                }
+                // Fallback: use x_bins/y_bins constant shapes
+                let cols = if let Some(xc) = def.constants.get(&table.x_bins) {
+                    xc.shape.x_size()
+                } else {
+                    table.x_size
+                };
+                let rows = if let Some(ref yb) = table.y_bins {
+                    if let Some(yc) = def.constants.get(yb) {
+                        yc.shape.x_size()
+                    } else {
+                        table.y_size
+                    }
+                } else {
+                    table.y_size
+                };
+                // Last resort: TableDefinition x_size/y_size
+                let cols = if cols > 0 { cols } else { table.x_size };
+                let rows = if rows > 0 { rows } else { table.y_size.max(1) };
+                eprintln!("[DEBUG] find_table_with_dims: '{}' fallback dims {}x{}", name, cols, rows);
+                if cols > 0 && rows > 0 {
+                    return Some((table, cols, rows));
+                }
+            }
+        }
+        None
+    }
+
+    // Acquire cache and tune locks
+    let mut cache_guard = state.tune_cache.lock().await;
+    let cache = cache_guard.as_mut().ok_or("Tune cache not initialized")?;
+    let mut tune_guard = state.current_tune.lock().await;
+    // Create an empty TuneFile if none exists (e.g. new project with no imported tune)
+    if tune_guard.is_none() {
+        let sig = def.signature.clone();
+        *tune_guard = Some(TuneFile::new(&sig));
+    }
+    let tune = tune_guard.as_mut().unwrap();
+
+    // Apply VE table — generate at the INI's actual table dimensions
+    if let Some((table_def, cols, rows)) = find_table_with_dims(def, &ve_table_names) {
+        let table_name = table_def.name.clone();
+        let title = table_def.title.clone();
+        let x_bins_name = table_def.x_bins.clone();
+        let y_bins_name = table_def.y_bins.clone();
+        eprintln!("[INFO] apply_base_map: VE table '{}' has {}x{} (cols x rows)", table_name, cols, rows);
+
+        let rpm_bins = generate_rpm_bins(engine_spec.idle_rpm, engine_spec.redline_rpm, cols);
+        let load_bins = generate_load_bins(engine_spec.max_load_kpa(), rows);
+        let ve_data = generate_ve_table(&engine_spec, &rpm_bins, &load_bins);
+
+        match write_table_z(def, cache, tune, &table_name, &ve_data, endianness) {
+            Ok(_) => {
+                let _ = write_axis_bins(def, cache, tune, &x_bins_name, &rpm_bins, endianness);
+                if let Some(ref y_name) = y_bins_name {
+                    let _ = write_axis_bins(def, cache, tune, y_name, &load_bins, endianness);
+                }
+                applied.push(format!("{} (VE {}x{})", title, cols, rows));
+            }
+            Err(e) => errors.push(format!("VE: {}", e)),
+        }
+    }
+
+    // Apply ignition table — generate at the INI's actual table dimensions
+    if let Some((table_def, cols, rows)) = find_table_with_dims(def, &ign_table_names) {
+        let table_name = table_def.name.clone();
+        let title = table_def.title.clone();
+        let x_bins_name = table_def.x_bins.clone();
+        let y_bins_name = table_def.y_bins.clone();
+        eprintln!("[INFO] apply_base_map: Ignition table '{}' has {}x{} (cols x rows)", table_name, cols, rows);
+
+        let rpm_bins = generate_rpm_bins(engine_spec.idle_rpm, engine_spec.redline_rpm, cols);
+        let load_bins = generate_load_bins(engine_spec.max_load_kpa(), rows);
+        let ign_data = generate_ignition_table(&engine_spec, &rpm_bins, &load_bins);
+
+        match write_table_z(def, cache, tune, &table_name, &ign_data, endianness) {
+            Ok(_) => {
+                let _ = write_axis_bins(def, cache, tune, &x_bins_name, &rpm_bins, endianness);
+                if let Some(ref y_name) = y_bins_name {
+                    let _ = write_axis_bins(def, cache, tune, y_name, &load_bins, endianness);
+                }
+                applied.push(format!("{} (Ignition {}x{})", title, cols, rows));
+            }
+            Err(e) => errors.push(format!("Ignition: {}", e)),
+        }
+    }
+
+    // Apply AFR table — generate at the INI's actual table dimensions
+    if let Some((table_def, cols, rows)) = find_table_with_dims(def, &afr_table_names) {
+        let table_name = table_def.name.clone();
+        let title = table_def.title.clone();
+        let x_bins_name = table_def.x_bins.clone();
+        let y_bins_name = table_def.y_bins.clone();
+        eprintln!("[INFO] apply_base_map: AFR table '{}' has {}x{} (cols x rows)", table_name, cols, rows);
+
+        let rpm_bins = generate_rpm_bins(engine_spec.idle_rpm, engine_spec.redline_rpm, cols);
+        let load_bins = generate_load_bins(engine_spec.max_load_kpa(), rows);
+        let afr_data = generate_afr_table(&engine_spec, &rpm_bins, &load_bins);
+
+        match write_table_z(def, cache, tune, &table_name, &afr_data, endianness) {
+            Ok(_) => {
+                let _ = write_axis_bins(def, cache, tune, &x_bins_name, &rpm_bins, endianness);
+                if let Some(ref y_name) = y_bins_name {
+                    let _ = write_axis_bins(def, cache, tune, y_name, &load_bins, endianness);
+                }
+                applied.push(format!("{} (AFR {}x{})", title, cols, rows));
+            }
+            Err(e) => errors.push(format!("AFR: {}", e)),
+        }
+    }
+
+    // Apply scalar constants (reqFuel, etc.)
+    if let Some(rf) = req_fuel {
+        // Try common reqFuel constant names
+        for name in &["reqFuel", "req_fuel", "required_fuel"] {
+            if let Some(constant) = def.constants.get(*name) {
+                let raw_val = constant.display_to_raw(rf);
+                let element_size = constant.data_type.size_bytes();
+                let mut raw_data = vec![0u8; element_size];
+                constant.data_type.write_to_bytes(&mut raw_data, 0, raw_val, endianness);
+                cache.write_bytes(constant.page, constant.offset, &raw_data);
+                let page_data = tune.pages.entry(constant.page).or_insert_with(|| {
+                    vec![0u8; def.page_sizes.get(constant.page as usize).copied().unwrap_or(256) as usize]
+                });
+                let start = constant.offset as usize;
+                let end = start + raw_data.len();
+                if end <= page_data.len() {
+                    page_data[start..end].copy_from_slice(&raw_data);
+                }
+                applied.push(format!("reqFuel = {:.1} ms", rf));
+                break;
+            }
+        }
+    }
+
+    // Apply other scalars from the map
+    if let Some(map) = scalars {
+        for (name, val) in &map {
+            if let Some(v) = val.as_f64() {
+                if let Some(constant) = def.constants.get(name.as_str()) {
+                    let raw_val = constant.display_to_raw(v);
+                    let element_size = constant.data_type.size_bytes();
+                    let mut raw_data = vec![0u8; element_size];
+                    constant.data_type.write_to_bytes(&mut raw_data, 0, raw_val, endianness);
+                    cache.write_bytes(constant.page, constant.offset, &raw_data);
+                    let page_data = tune.pages.entry(constant.page).or_insert_with(|| {
+                        vec![0u8; def.page_sizes.get(constant.page as usize).copied().unwrap_or(256) as usize]
+                    });
+                    let start = constant.offset as usize;
+                    let end = start + raw_data.len();
+                    if end <= page_data.len() {
+                        page_data[start..end].copy_from_slice(&raw_data);
+                    }
+                }
+            }
+        }
+    }
+
+    // Mark tune as modified
+    *state.tune_modified.lock().await = true;
+
+    // Auto-save the tune to the project directory so it exists on disk.
+    // This is critical for new projects that had no tune file — without this,
+    // "Use Project Tune" would fail with "Project tune file not found".
+    {
+        let project_guard = state.current_project.lock().await;
+        if let Some(project) = project_guard.as_ref() {
+            let tune_path = project.current_tune_path();
+            // Sync cache data into tune pages before saving
+            for page_num in 0..def.n_pages {
+                if let Some(page_data) = cache.get_page(page_num) {
+                    tune.pages.insert(page_num, page_data.to_vec());
+                }
+            }
+            if let Err(e) = tune.save(&tune_path) {
+                eprintln!("[WARN] apply_base_map: failed to auto-save tune: {}", e);
+                errors.push(format!("Failed to save tune to disk: {}", e));
+            } else {
+                eprintln!("[INFO] apply_base_map: auto-saved tune to {:?}", tune_path);
+                // Update the current tune path so future operations find it
+                drop(project_guard);
+                *state.current_tune_path.lock().await = Some(tune_path);
+                *state.tune_modified.lock().await = false;
+            }
+        }
+    }
+
+    if applied.is_empty() {
+        errors.push("No matching tables found in the loaded INI definition".to_string());
+    }
+
+    let mut result = serde_json::Map::new();
+    result.insert("applied".to_string(), serde_json::json!(applied));
+    result.insert("errors".to_string(), serde_json::json!(errors));
+    eprintln!("[INFO] apply_base_map: applied={:?}, errors={:?}", applied, errors);
+    Ok(serde_json::Value::Object(result))
+}
+
+/// Get info about an MSQ file without fully loading it (for the open dialog preview)
+#[tauri::command]
+async fn get_msq_info(path: String) -> Result<serde_json::Value, String> {
+    let file_path = std::path::Path::new(&path);
+    if !file_path.exists() {
+        return Err("File not found".to_string());
+    }
+
+    let tune = TuneFile::load(file_path).map_err(|e| format!("Failed to read MSQ: {}", e))?;
+
+    let mut info = serde_json::Map::new();
+    info.insert(
+        "signature".to_string(),
+        serde_json::Value::String(tune.signature.clone()),
+    );
+    info.insert(
+        "version".to_string(),
+        serde_json::Value::String(tune.version.clone()),
+    );
+    info.insert(
+        "file_name".to_string(),
+        serde_json::Value::String(
+            file_path
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string(),
+        ),
+    );
+    info.insert(
+        "file_size".to_string(),
+        serde_json::Value::Number(serde_json::Number::from(
+            std::fs::metadata(file_path)
+                .map(|m| m.len())
+                .unwrap_or(0),
+        )),
+    );
+
+    // Count constants
+    let constant_count = tune.constants.len();
+    info.insert(
+        "constant_count".to_string(),
+        serde_json::Value::Number(serde_json::Number::from(constant_count)),
+    );
+
+    // INI metadata if present
+    if let Some(ref meta) = tune.ini_metadata {
+        info.insert(
+            "ini_name".to_string(),
+            serde_json::Value::String(meta.name.clone()),
+        );
+        info.insert(
+            "saved_at".to_string(),
+            serde_json::Value::String(meta.saved_at.clone()),
+        );
+    }
+
+    // Author and description
+    if let Some(ref author) = tune.author {
+        info.insert(
+            "author".to_string(),
+            serde_json::Value::String(author.clone()),
+        );
+    }
+    if let Some(ref desc) = tune.description {
+        info.insert(
+            "description".to_string(),
+            serde_json::Value::String(desc.clone()),
+        );
+    }
+
+    Ok(serde_json::Value::Object(info))
+}
+
+/// Delete a project and all its files
+#[tauri::command]
+async fn delete_project(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    project_name: String,
+) -> Result<(), String> {
     let projects_dir = get_projects_dir(&app);
     let project_path = projects_dir.join(&project_name);
 
-    if project_path.exists() {
-        return Err(format!("Project '{}' already exists", project_name));
+    if !project_path.exists() {
+        return Err(format!("Project '{}' not found", project_name));
     }
 
-    std::fs::create_dir_all(&project_path)
-        .map_err(|e| format!("Failed to create project directory: {}", e))?;
-
-    // Create project config with template settings
-    let config = ProjectConfig {
-        version: "1.0".to_string(),
-        name: project_name.clone(),
-        created: chrono::Utc::now().to_rfc3339(),
-        modified: chrono::Utc::now().to_rfc3339(),
-        ecu_definition: ini_entry.path.clone(),
-        signature: ini_entry.signature.clone(),
-        connection: ConnectionSettings {
-            port: None,
-            baud_rate: template.connection.baud_rate,
-            timeout_ms: template.connection.timeout_ms as u32,
-        },
-        settings: ProjectSettings::default(),
-        dashboard: None,
-    };
-
-    // Save project config
-    let config_path = project_path.join("project.json");
-    let config_json = serde_json::to_string_pretty(&config)
-        .map_err(|e| format!("Failed to serialize config: {}", e))?;
-    std::fs::write(&config_path, config_json)
-        .map_err(|e| format!("Failed to write config: {}", e))?;
-
-    // Create subdirectories
-    std::fs::create_dir_all(project_path.join("datalogs")).ok();
-    std::fs::create_dir_all(project_path.join("dashboards")).ok();
-    std::fs::create_dir_all(project_path.join("restorePoints")).ok();
-    std::fs::create_dir_all(project_path.join("projectCfg")).ok();
-
-    // Copy INI to projectCfg
-    let definitions_dir = get_definitions_dir(&app);
-    let source_ini = definitions_dir.join(&ini_entry.path);
-    let dest_ini = project_path.join("projectCfg").join("definition.ini");
-    if source_ini.exists() {
-        std::fs::copy(&source_ini, &dest_ini).ok();
-    }
-
-    // Create initial tune with template baseline constants
-    let mut tune = TuneFile::new(&ini_entry.signature);
-    for (name, value_str) in &template.baseline_constants {
-        if let Ok(val) = value_str.parse::<f64>() {
-            tune.set_constant(name, TuneValue::Scalar(val));
+    // Don't allow deleting the currently open project
+    let proj_guard = state.current_project.lock().await;
+    if let Some(ref proj) = *proj_guard {
+        if proj.config.name == project_name {
+            return Err("Cannot delete the currently open project. Close it first.".to_string());
         }
     }
+    drop(proj_guard);
 
-    let tune_path = project_path.join("CurrentTune.msq");
-    tune.save(&tune_path)
-        .map_err(|e| format!("Failed to save initial tune: {}", e))?;
+    std::fs::remove_dir_all(&project_path)
+        .map_err(|e| format!("Failed to delete project: {}", e))?;
 
-    // Initialize git repository
-    let vc = VersionControl::init(&project_path)
-        .map_err(|e| format!("Failed to initialize git: {}", e))?;
-    vc.commit("Project created from template")
-        .map_err(|e| format!("Failed to create initial commit: {}", e))?;
-
-    // Open the project
-    let project =
-        Project::open(&project_path).map_err(|e| format!("Failed to open project: {}", e))?;
-
-    let response = CurrentProjectInfo {
-        name: project.config.name.clone(),
-        path: project.path.to_string_lossy().to_string(),
-        signature: project.config.signature.clone(),
-        has_tune: project.current_tune.is_some(),
-        tune_modified: project.dirty,
-        connection: ConnectionSettingsResponse {
-            port: project.config.connection.port.clone(),
-            baud_rate: project.config.connection.baud_rate,
-            auto_connect: project.config.settings.auto_connect,
-        },
-    };
-
-    // Store as current project
-    let mut proj_guard = state.current_project.lock().await;
-    *proj_guard = Some(project);
-
-    Ok(response)
+    Ok(())
 }
 
 // =====================================================
@@ -13773,9 +14146,11 @@ pub fn run() {
             git_switch_branch,
             git_current_branch,
             git_has_changes,
-            // Project template commands
-            list_project_templates,
-            create_project_from_template,
+            // Base map generator commands
+            generate_base_map,
+            apply_base_map,
+            get_msq_info,
+            delete_project,
             // INI signature management commands
             find_matching_inis,
             update_project_ini,

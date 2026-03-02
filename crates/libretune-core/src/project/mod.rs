@@ -27,7 +27,6 @@ mod online_repository;
 mod project;
 mod properties;
 mod repository;
-mod templates;
 mod version_control;
 
 pub use math_channels::{load_math_channels, save_math_channels, UserMathChannel};
@@ -37,7 +36,6 @@ pub use project::{
 };
 pub use properties::Properties;
 pub use repository::{IniEntry, IniRepository};
-pub use templates::{ProjectTemplate, TemplateManager};
 pub use version_control::{
     format_commit_message, BranchInfo, CommitDiff, CommitInfo, TuneChange, VersionControl,
 };
