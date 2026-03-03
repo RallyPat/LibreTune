@@ -111,6 +111,43 @@ export const EcuConsole: React.FC<EcuConsoleProps> = ({ ecuType, isConnected }) 
 
   const isFome = ecuType.includes('FOME');
 
+  const quickCommands = [
+    { label: 'help', tooltip: 'List all supported commands' },
+    { label: 'status', tooltip: 'Show ECU status' },
+    { label: 'hello', tooltip: 'Print firmware version' },
+    { label: 'triggerinfo', tooltip: 'Trigger state & diagnostics' },
+    { label: 'tsinfo', tooltip: 'TunerStudio comms summary' },
+    { label: 'tempinfo', tooltip: 'CLT & IAT sensor info' },
+    { label: 'tpsinfo', tooltip: 'TPS sensor info' },
+    { label: 'mapinfo', tooltip: 'MAP sensor info' },
+    { label: 'analoginfo', tooltip: 'ADC input values' },
+    { label: 'caninfo', tooltip: 'CAN subsystem stats' },
+    { label: 'sdinfo', tooltip: 'SD/MMC card usage' },
+  ];
+
+  const handleQuickCommand = (cmd: string) => {
+    setCommandInput(cmd);
+    // Execute immediately
+    setIsLoading(true);
+    setHistoryIndex(-1);
+    invoke<string>('send_console_command', { command: cmd })
+      .then((response) => {
+        const responseLines = response.split('\n').filter(line => line.trim().length > 0);
+        setHistory((prev) => [...prev, `> ${cmd}`, ...responseLines.map(l => `\u2190 ${l}`)]);
+        setHistoryCopy((prev) => [...prev, `> ${cmd}`, ...responseLines.map(l => `\u2190 ${l}`)]);
+      })
+      .catch((err: any) => {
+        const errorMsg = err?.message || String(err) || 'Unknown error';
+        setHistory((prev) => [...prev, `> ${cmd}`, `ERROR: ${errorMsg}`]);
+        setHistoryCopy((prev) => [...prev, `> ${cmd}`, `ERROR: ${errorMsg}`]);
+      })
+      .finally(() => {
+        setIsLoading(false);
+        setCommandInput('');
+        inputRef.current?.focus();
+      });
+  };
+
   return (
     <div className="ecu-console">
       <div className="console-header">
@@ -176,7 +213,7 @@ export const EcuConsole: React.FC<EcuConsoleProps> = ({ ecuType, isConnected }) 
           value={commandInput}
           onChange={(e) => setCommandInput(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="Enter command (help, status, set, get, etc.)"
+          placeholder="Enter command (help, status, hello, triggerinfo, etc.)"
           disabled={isLoading || !isConnected}
           autoFocus
         />
@@ -188,6 +225,20 @@ export const EcuConsole: React.FC<EcuConsoleProps> = ({ ecuType, isConnected }) 
         >
           {isLoading ? '⟳' : 'Send'}
         </button>
+      </div>
+
+      <div className="console-quick-commands">
+        {quickCommands.map((qc) => (
+          <button
+            key={qc.label}
+            className="quick-cmd-btn"
+            onClick={() => handleQuickCommand(qc.label)}
+            disabled={isLoading || !isConnected}
+            title={qc.tooltip}
+          >
+            {qc.label}
+          </button>
+        ))}
       </div>
 
       {!isConnected && (

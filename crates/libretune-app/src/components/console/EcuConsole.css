@@ -288,6 +288,46 @@
   cursor: not-allowed;
 }
 
+.console-quick-commands {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 12px;
+  background: rgba(0, 0, 0, 0.25);
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  flex-shrink: 0;
+}
+
+.quick-cmd-btn {
+  padding: 4px 10px;
+  background: rgba(0, 217, 255, 0.08);
+  border: 1px solid rgba(0, 217, 255, 0.2);
+  border-radius: 3px;
+  color: rgba(0, 217, 255, 0.75);
+  font-family: 'Courier New', monospace;
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.quick-cmd-btn:hover:not(:disabled) {
+  background: rgba(0, 217, 255, 0.18);
+  border-color: rgba(0, 217, 255, 0.5);
+  color: #00d9ff;
+  box-shadow: 0 0 6px rgba(0, 217, 255, 0.15);
+}
+
+.quick-cmd-btn:active:not(:disabled) {
+  transform: scale(0.96);
+  background: rgba(0, 217, 255, 0.25);
+}
+
+.quick-cmd-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
 .console-notice {
   padding: 12px;
   background: rgba(255, 170, 0, 0.1);
