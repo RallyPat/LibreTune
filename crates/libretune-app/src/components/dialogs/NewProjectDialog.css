@@ -2,14 +2,61 @@
   background: var(--bg-surface);
   border-radius: 12px;
   padding: 28px;
-  min-width: 520px;
-  max-width: 640px;
+  width: 90vw;
+  max-width: 580px;
   max-height: 85vh;
   overflow-y: auto;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  box-sizing: border-box;
 }
 
 /* Reuse shared dialog styles from OpenTuneDialog.css */
+
+.ini-select-row {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.ini-select-row .ini-select {
+  flex: 1;
+  min-width: 0;
+}
+
+.no-ini-placeholder {
+  flex: 1;
+  padding: 8px 12px;
+  background: rgba(255, 165, 0, 0.08);
+  border: 1px solid rgba(255, 165, 0, 0.3);
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+}
+
+.browse-ini-btn {
+  padding: 8px 14px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 13px;
+  white-space: nowrap;
+  transition: background 0.15s, border-color 0.15s;
+  flex-shrink: 0;
+}
+
+.browse-ini-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  border-color: var(--primary);
+}
+
+.browse-ini-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
 
 .no-ini-available {
   padding: 12px;
@@ -103,4 +150,20 @@
 .skip-btn:hover {
   color: var(--text-primary);
   border-color: var(--text-muted);
+}
+
+/* Responsive */
+@media (max-width: 600px) {
+  .new-project-dialog {
+    padding: 20px;
+    border-radius: 8px;
+  }
+
+  .ini-select-row {
+    flex-direction: column;
+  }
+
+  .tune-choice-cards {
+    flex-direction: column;
+  }
 }

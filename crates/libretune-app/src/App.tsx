@@ -3,7 +3,6 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { open } from "@tauri-apps/plugin-dialog";
 import { ThemeProvider, useTheme, ThemeName, THEME_INFO } from "./themes";
 import { initializeHotkeyManager } from "./services/hotkeyService";
 import { useRealtimeStore } from "./stores/realtimeStore";
@@ -1660,22 +1659,6 @@ function AppContent() {
     }
   }
 
-  async function importIniToRepository() {
-    try {
-      const selected = await open({
-        multiple: false,
-        filters: [{ name: "INI Definition", extensions: ["ini"] }],
-      });
-      if (selected && typeof selected === "string") {
-        const entry = await invoke<IniEntry>("import_ini", { sourcePath: selected });
-        setRepositoryInis([...repositoryInis, entry]);
-      }
-    } catch (e) {
-      console.error(e);
-      showToast("Failed to import INI: " + e, "error");
-    }
-  }
-
   // Open a table or dialog in a new tab
   const openTarget = useCallback(
     async (name: string, title?: string, highlightTerm?: string) => {
@@ -2734,7 +2717,7 @@ function AppContent() {
         isOpen={newProjectDialogOpen}
         onClose={() => setNewProjectDialogOpen(false)}
         inis={repositoryInis}
-        onImportIni={importIniToRepository}
+        onIniImported={(entry) => setRepositoryInis((prev) => [...prev, entry])}
         onCreateProject={createProject}
         onImportTune={handleImportTuneIntoProject}
         onGenerateBaseMap={() => setBaseMapDialogOpen(true)}

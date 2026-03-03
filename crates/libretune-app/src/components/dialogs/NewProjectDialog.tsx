@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import "./NewProjectDialog.css";
 
@@ -13,7 +14,8 @@ interface NewProjectDialogProps {
   isOpen: boolean;
   onClose: () => void;
   inis: IniEntry[];
-  onImportIni: () => void;
+  /** Called after an INI is imported via Browse, so parent can update the list */
+  onIniImported?: (entry: IniEntry) => void;
   /** Creates a project with the given INI. Returns true on success. */
   onCreateProject: (projectName: string, iniId: string) => Promise<boolean>;
   /** Called when user chooses to import an existing tune file */
@@ -28,7 +30,7 @@ export default function NewProjectDialog({
   isOpen,
   onClose,
   inis,
-  onImportIni,
+  onIniImported,
   onCreateProject,
   onImportTune,
   onGenerateBaseMap,
@@ -38,6 +40,7 @@ export default function NewProjectDialog({
   const [selectedIni, setSelectedIni] = useState("");
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState("");
+  const [browsing, setBrowsing] = useState(false);
 
   // Reset on open
   useEffect(() => {
@@ -47,6 +50,7 @@ export default function NewProjectDialog({
       setSelectedIni("");
       setCreating(false);
       setError("");
+      setBrowsing(false);
     }
   }, [isOpen]);
 
@@ -63,6 +67,27 @@ export default function NewProjectDialog({
       setError(`Failed to create project: ${e}`);
     } finally {
       setCreating(false);
+    }
+  }
+
+  async function handleBrowseIni() {
+    setBrowsing(true);
+    try {
+      const selected = await open({
+        multiple: false,
+        filters: [{ name: "INI Definition", extensions: ["ini"] }],
+      });
+      if (selected && typeof selected === "string") {
+        const entry = await invoke<IniEntry>("import_ini", { sourcePath: selected });
+        // Notify parent to update its INI list
+        onIniImported?.(entry);
+        // Auto-select the newly imported INI
+        setSelectedIni(entry.id);
+      }
+    } catch (e) {
+      setError(`Failed to import INI: ${e}`);
+    } finally {
+      setBrowsing(false);
     }
   }
 
@@ -109,30 +134,36 @@ export default function NewProjectDialog({
               Select an ECU definition (INI) and name your project.
             </p>
 
-            {/* INI selector */}
             <div className="field-group">
               <label className="field-label">ECU Definition (INI)</label>
-              {inis.length > 0 ? (
-                <select
-                  className="ini-select"
-                  value={selectedIni}
-                  onChange={(e) => setSelectedIni(e.target.value)}
+              <div className="ini-select-row">
+                {inis.length > 0 ? (
+                  <select
+                    className="ini-select"
+                    value={selectedIni}
+                    onChange={(e) => setSelectedIni(e.target.value)}
+                  >
+                    <option value="">Select ECU definition...</option>
+                    {inis.map((ini) => (
+                      <option key={ini.id} value={ini.id}>
+                        {ini.name} — {ini.signature}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <div className="no-ini-placeholder">
+                    No INI files found — browse to import one
+                  </div>
+                )}
+                <button
+                  className="browse-ini-btn"
+                  onClick={handleBrowseIni}
+                  disabled={browsing}
+                  title="Browse for an INI definition file"
                 >
-                  <option value="">Select ECU definition...</option>
-                  {inis.map((ini) => (
-                    <option key={ini.id} value={ini.id}>
-                      {ini.name} — {ini.signature}
-                    </option>
-                  ))}
-                </select>
-              ) : (
-                <div className="no-ini-available">
-                  <p>No ECU definitions available. Import one to get started.</p>
-                </div>
-              )}
-              <button className="import-ini-link" onClick={onImportIni}>
-                + Import ECU Definition...
-              </button>
+                  {browsing ? "..." : "Browse..."}
+                </button>
+              </div>
             </div>
 
             {/* Project name */}
