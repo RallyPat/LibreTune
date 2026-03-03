@@ -326,8 +326,6 @@ export function BurnDialog({ isOpen, onClose, connected, onBurned }: BurnDialogP
       await invoke('burn_to_ecu');
       setSuccess(true);
       onBurned?.();
-      // Auto-close after success
-      setTimeout(onClose, 1500);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -366,10 +364,10 @@ export function BurnDialog({ isOpen, onClose, connected, onBurned }: BurnDialogP
           <button onClick={onClose} disabled={isBurning}>Cancel</button>
           <button 
             onClick={handleBurn}
-            disabled={isBurning || !connected || success}
+            disabled={isBurning || !connected}
             className="dialog-primary dialog-burn"
           >
-            {isBurning ? 'Burning...' : success ? 'Done!' : '🔥 Burn to ECU'}
+            {isBurning ? 'Burning...' : '🔥 Burn to ECU'}
           </button>
         </div>
       </div>
