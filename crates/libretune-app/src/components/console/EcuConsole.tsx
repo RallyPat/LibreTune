@@ -54,9 +54,10 @@ export const EcuConsole: React.FC<EcuConsoleProps> = ({ ecuType, isConnected }) 
         command: cmd,
       });
 
-      // Add to history display
-      setHistory((prev) => [...prev, `> ${cmd}`, response]);
-      setHistoryCopy((prev) => [...prev, `> ${cmd}`, response]);
+      // Split multi-line responses into individual lines for display
+      const responseLines = response.split('\n').filter(line => line.trim().length > 0);
+      setHistory((prev) => [...prev, `> ${cmd}`, ...responseLines.map(l => `← ${l}`)]);
+      setHistoryCopy((prev) => [...prev, `> ${cmd}`, ...responseLines.map(l => `← ${l}`)]);
     } catch (err: any) {
       const errorMsg = err?.message || String(err) || 'Unknown error';
       setHistory((prev) => [...prev, `> ${cmd}`, `ERROR: ${errorMsg}`]);
@@ -153,7 +154,7 @@ export const EcuConsole: React.FC<EcuConsoleProps> = ({ ecuType, isConnected }) 
             {history.map((line, idx) => (
               <div key={idx} className={`console-line ${line.startsWith('>') ? 'command' : line.startsWith('ERROR') ? 'error' : 'response'}`}>
                 <span className="line-prefix">{line.startsWith('>') ? '→' : line.startsWith('ERROR') ? '✗' : '←'}</span>
-                <span className="line-content">{line}</span>
+                <span className="line-content">{line.startsWith('← ') ? line.slice(2) : line}</span>
               </div>
             ))}
             {isLoading && (

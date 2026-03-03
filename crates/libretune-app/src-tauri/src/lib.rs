@@ -2058,11 +2058,13 @@ async fn get_ecu_type(state: tauri::State<'_, AppState>) -> Result<String, Strin
 /// - No error propagation for fallback (transparent to user)
 ///
 /// Returns the response from the ECU as a string with trailing whitespace trimmed.
-/// The command is automatically appended with a newline for transmission.
+///
+/// For modern CRC protocol (rusEFI/FOME/epicEFI): Uses TS_EXECUTE ('E') + TS_GET_TEXT ('G')
+/// For legacy protocol: Sends raw text + newline
 #[tauri::command]
 async fn send_console_command(
     state: tauri::State<'_, AppState>,
-    app: tauri::AppHandle,
+    _app: tauri::AppHandle,
     command: String,
 ) -> Result<String, String> {
     let mut conn_guard = state.connection.lock().await;
@@ -2079,30 +2081,10 @@ async fn send_console_command(
         ));
     }
 
-    // For FOME, try fast comms first if enabled
-    let settings = load_settings(&app);
-    let use_fome_fast = def.ecu_type.is_fome() && settings.fome_fast_comms_enabled;
-
-    let response = if use_fome_fast {
-        // Try faster FOME protocol first
-        eprintln!("[DEBUG] send_console_command: attempting FOME fast comms");
-        match conn.send_console_command(&libretune_core::protocol::ConsoleCommand::new(&command)) {
-            Ok(resp) => {
-                eprintln!("[DEBUG] send_console_command: FOME fast comms succeeded");
-                resp
-            }
-            Err(e) => {
-                // Fall back to standard protocol
-                eprintln!("[WARN] send_console_command: FOME fast comms failed ({}), falling back to standard protocol", e);
-                conn.send_console_command(&libretune_core::protocol::ConsoleCommand::new(&command))
-                    .map_err(|e| format!("Console command failed (even after fallback): {}", e))?
-            }
-        }
-    } else {
-        // Use standard console protocol
-        conn.send_console_command(&libretune_core::protocol::ConsoleCommand::new(&command))
-            .map_err(|e| format!("Console command failed: {}", e))?
-    };
+    // Connection internally chooses modern (CRC) or legacy protocol
+    let response = conn
+        .send_console_command(&libretune_core::protocol::ConsoleCommand::new(&command))
+        .map_err(|e| format!("Console command failed: {}", e))?;
 
     // Add to history
     let mut history = state.console_history.lock().await;

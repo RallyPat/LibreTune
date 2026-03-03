@@ -1606,13 +1606,304 @@ impl Connection {
     }
 
     /// Send a text console command to the ECU (rusEFI/FOME/epicEFI only)
-    /// Sends command followed by newline and reads back response until inter-char timeout
+    ///
+    /// For modern (CRC) protocol:
+    ///   Uses the rusEFI two-step console protocol:
+    ///   1. Send 'E' (TS_EXECUTE) + command text as a CRC-framed packet
+    ///   2. Poll 'G' (TS_GET_TEXT) to retrieve buffered text output
+    ///
+    /// For legacy protocol:
+    ///   Sends raw text + newline and reads back response until inter-char timeout
+    ///
     /// Returns the response as a String (with trailing whitespace trimmed)
     pub fn send_console_command(
         &mut self,
         cmd: &super::commands::ConsoleCommand,
     ) -> Result<String, ProtocolError> {
-        // Get timing parameters before borrowing port
+        eprintln!(
+            "[DEBUG] send_console_command: sending '{}' (modern={})",
+            cmd.command, self.use_modern_protocol
+        );
+
+        if self.use_modern_protocol {
+            self.send_console_command_modern(cmd)
+        } else {
+            self.send_console_command_legacy(cmd)
+        }
+    }
+
+    /// Send console command using the modern CRC binary protocol.
+    ///
+    /// rusEFI console protocol:
+    /// - 'E' (0x45) = TS_EXECUTE: Send text command. ECU executes it and responds with bare TS_RESPONSE_OK.
+    /// - 'G' (0x47) = TS_GET_TEXT: Poll buffered text output. ECU responds with status + text data.
+    ///
+    /// rusEFI text output format:
+    ///   Each efiPrintf() call produces: `msg`message text`` (backtick-delimited, "msg" protocol tag).
+    ///   Other protocols include `wave_chart`...``, table data, etc.
+    ///   We drain stale output before executing, then parse only `msg` entries from the response.
+    fn send_console_command_modern(
+        &mut self,
+        cmd: &super::commands::ConsoleCommand,
+    ) -> Result<String, ProtocolError> {
+        // Step 0: Drain any stale buffered text from the ECU.
+        // The ECU accumulates ALL efiPrintf output (boot messages, periodic status, wave charts, etc.)
+        // since the last 'G' poll. If we don't drain first, we'll get everything mixed in.
+        eprintln!("[DEBUG] send_console_command_modern: draining stale text buffer");
+        self.drain_text_buffer();
+
+        // Step 1: Send 'E' + command text as CRC-framed packet
+        let mut payload = Vec::with_capacity(1 + cmd.command.len());
+        payload.push(b'E'); // TS_EXECUTE command byte
+        payload.extend_from_slice(cmd.command.as_bytes());
+
+        let packet = Packet::new(payload);
+        let response = self.send_packet(packet)?;
+
+        // Verify the 'E' response - should be TS_RESPONSE_OK (status byte 0)
+        if !response.payload.is_empty() && response.payload[0] != 0 {
+            let status = response.payload[0];
+            eprintln!(
+                "[WARN] send_console_command_modern: 'E' command returned status {}",
+                status
+            );
+            // Status 0x83 = unrecognized command - ECU may not support console
+            if status == 0x83 {
+                return Err(ProtocolError::ProtocolError(
+                    "ECU does not support console commands (unrecognized 'E' command)".to_string(),
+                ));
+            }
+        }
+
+        eprintln!("[DEBUG] send_console_command_modern: 'E' command accepted, polling text output");
+
+        // Step 2: Poll 'G' (TS_GET_TEXT) to retrieve the command output
+        // The ECU buffers console output; we may need to poll multiple times.
+        let mut collected_text = String::new();
+        let poll_timeout = Duration::from_millis(cmd.get_timeout_ms());
+        let poll_start = Instant::now();
+        let max_polls = 10;
+        let mut empty_polls = 0;
+
+        // Give the ECU a moment to execute the command and buffer output
+        std::thread::sleep(Duration::from_millis(50));
+
+        for poll_idx in 0..max_polls {
+            if poll_start.elapsed() > poll_timeout {
+                eprintln!("[DEBUG] send_console_command_modern: poll timeout reached");
+                break;
+            }
+
+            // Send 'G' command
+            let get_text_packet = Packet::new(vec![b'G']); // TS_GET_TEXT
+            match self.send_packet(get_text_packet) {
+                Ok(text_response) => {
+                    // Response payload: [status_byte][text_data...]
+                    let text_data = if text_response.payload.len() > 1
+                        && text_response.payload[0] == 0
+                    {
+                        &text_response.payload[1..]
+                    } else if text_response.payload.is_empty() || text_response.payload[0] == 0 {
+                        // Empty response or just status byte
+                        &[]
+                    } else {
+                        // No status byte prefix (some firmware variations)
+                        &text_response.payload[..]
+                    };
+
+                    if text_data.is_empty() {
+                        empty_polls += 1;
+                        eprintln!(
+                            "[DEBUG] send_console_command_modern: poll {} empty (empty_count={})",
+                            poll_idx, empty_polls
+                        );
+                        // If we already have text and get an empty poll, output is complete
+                        if !collected_text.is_empty() || empty_polls >= 2 {
+                            break;
+                        }
+                        // Wait a bit more for output to accumulate
+                        std::thread::sleep(Duration::from_millis(50));
+                    } else {
+                        let text_chunk = String::from_utf8_lossy(text_data);
+                        eprintln!(
+                            "[DEBUG] send_console_command_modern: poll {} got {} bytes",
+                            poll_idx,
+                            text_data.len(),
+                        );
+                        collected_text.push_str(&text_chunk);
+                        empty_polls = 0;
+                        // Brief pause before next poll to let more output accumulate
+                        std::thread::sleep(Duration::from_millis(20));
+                    }
+                }
+                Err(e) => {
+                    eprintln!(
+                        "[WARN] send_console_command_modern: 'G' poll {} failed: {:?}",
+                        poll_idx, e
+                    );
+                    // If we already have some text, return what we have
+                    if !collected_text.is_empty() {
+                        break;
+                    }
+                    // Otherwise, the ECU might not support 'G'
+                    return Err(e);
+                }
+            }
+        }
+
+        // Step 3: Parse the rusEFI text output format into readable lines.
+        // Raw format: msg`message text`msg`another message`wave_chart`data`...
+        // We extract msg entries and format them as newline-separated text.
+        let result = Self::parse_rusefi_text_output(&collected_text);
+
+        eprintln!(
+            "[DEBUG] send_console_command_modern: parsed {} bytes from {} raw bytes",
+            result.len(),
+            collected_text.len(),
+        );
+
+        // Record metrics
+        self.tx_packets = self.tx_packets.saturating_add(2); // E + G packets
+        self.rx_packets = self.rx_packets.saturating_add(2);
+
+        if result.is_empty() {
+            // Command was accepted but produced no output
+            Ok("(command accepted, no output)".to_string())
+        } else {
+            Ok(result)
+        }
+    }
+
+    /// Drain the ECU's text output buffer by sending 'G' until empty.
+    /// This discards stale boot messages, periodic status, wave charts, etc.
+    fn drain_text_buffer(&mut self) {
+        for drain_idx in 0..3 {
+            let get_text_packet = Packet::new(vec![b'G']);
+            match self.send_packet(get_text_packet) {
+                Ok(response) => {
+                    let data_len = if response.payload.len() > 1 && response.payload[0] == 0 {
+                        response.payload.len() - 1
+                    } else {
+                        0
+                    };
+                    eprintln!(
+                        "[DEBUG] drain_text_buffer: poll {} drained {} bytes",
+                        drain_idx, data_len
+                    );
+                    if data_len == 0 {
+                        break; // Buffer is empty
+                    }
+                    // Brief sleep to let ECU swap buffers
+                    std::thread::sleep(Duration::from_millis(30));
+                }
+                Err(e) => {
+                    eprintln!(
+                        "[WARN] drain_text_buffer: poll {} failed: {:?}",
+                        drain_idx, e
+                    );
+                    break;
+                }
+            }
+        }
+    }
+
+    /// Parse rusEFI text output format into human-readable lines.
+    ///
+    /// rusEFI uses backtick (`) as LOG_DELIMITER and protocol tags like "msg", "wave_chart", etc.
+    /// Format: `protocol_tag`message content`protocol_tag`message content`...`
+    ///
+    /// We extract only `msg` entries (the standard efiPrintf output) and format
+    /// them as newline-separated text. Other protocol tags (wave_chart, table data,
+    /// outpin, etc.) are filtered out to keep console output clean.
+    fn parse_rusefi_text_output(raw: &str) -> String {
+        if raw.is_empty() {
+            return String::new();
+        }
+
+        // Known rusEFI protocol tags that we want to display as console messages
+        const MSG_TAGS: &[&str] = &["msg", "emu"];
+
+        // Known tags we want to silently filter out
+        const FILTER_TAGS: &[&str] = &[
+            "wave_chart",
+            "outpin",
+            "t|d_",
+            "map|u",
+            "maf|u",
+            "maf|d",
+            "hpfp|d",
+            "hpfp|u",
+            "hpfp2|d",
+            "pfp|u",
+            "wave",
+            "VVT|",
+        ];
+
+        let mut lines = Vec::new();
+
+        // Split on backtick delimiter — the rusEFI LOG_DELIMITER
+        let parts: Vec<&str> = raw.split('`').collect();
+
+        // The format alternates: [tag][content][tag][content]...
+        // parts[0] = protocol tag (e.g., "msg")
+        // parts[1] = message content
+        // parts[2] = next protocol tag
+        // parts[3] = next message content
+        // etc.
+        let mut i = 0;
+        while i + 1 < parts.len() {
+            let tag = parts[i].trim();
+            let content = parts[i + 1];
+            i += 2;
+
+            if tag.is_empty() && content.is_empty() {
+                continue;
+            }
+
+            // Check if this is a message tag we should display
+            let is_msg_tag = MSG_TAGS.iter().any(|t| tag.eq_ignore_ascii_case(t));
+
+            if is_msg_tag {
+                let trimmed = content.trim();
+                if !trimmed.is_empty() {
+                    lines.push(trimmed.to_string());
+                }
+                continue;
+            }
+
+            // Check if this is a known filterable tag
+            let is_filter_tag = FILTER_TAGS.iter().any(|t| tag.starts_with(t));
+
+            if is_filter_tag {
+                // Silently skip
+                continue;
+            }
+
+            // Unknown tag — if it has non-trivial content, show it as-is
+            // (some rusEFI commands output with custom tags)
+            if !tag.is_empty() && !content.trim().is_empty() {
+                let trimmed = content.trim();
+                // Only show if it looks like readable text (not binary table data)
+                if trimmed.len() > 2 && trimmed.chars().all(|c| c.is_ascii_graphic() || c == ' ') {
+                    lines.push(format!("[{}] {}", tag, trimmed));
+                }
+            }
+        }
+
+        // If nothing was parsed (maybe the output doesn't use backtick format),
+        // return the raw text with some basic cleanup
+        if lines.is_empty() && !raw.trim().is_empty() {
+            return raw.trim().to_string();
+        }
+
+        lines.join("\n")
+    }
+
+    /// Send console command using legacy raw text protocol (for ECUs without CRC framing)
+    fn send_console_command_legacy(
+        &mut self,
+        cmd: &super::commands::ConsoleCommand,
+    ) -> Result<String, ProtocolError> {
         let baud_rate = self.config.baud_rate;
         let min_wait = Some(self.get_effective_min_wait());
         let timeout = Duration::from_millis(cmd.get_timeout_ms());
@@ -1620,18 +1911,16 @@ impl Connection {
 
         let channel = self.channel.as_mut().ok_or(ProtocolError::NotConnected)?;
 
-        eprintln!("[DEBUG] send_console_command: sending '{}'", cmd.command);
-
         // Clear buffers before sending
         let _ = channel.clear_input_buffer();
         let _ = channel.clear_output_buffer();
 
-        // Convert command to bytes and send
+        // Convert command to bytes (adds newline) and send
         let cmd_bytes = cmd.to_bytes();
         write_and_wait(channel, &cmd_bytes, baud_rate, min_wait)
             .map_err(|e| ProtocolError::SerialError(e.to_string()))?;
 
-        eprintln!("[DEBUG] send_console_command: command sent, waiting for response");
+        eprintln!("[DEBUG] send_console_command_legacy: command sent, waiting for response");
 
         // Read response with timeout
         let mut response = Vec::new();
@@ -1641,15 +1930,17 @@ impl Connection {
 
         loop {
             if start.elapsed() > timeout {
-                eprintln!("[DEBUG] send_console_command: overall timeout reached");
+                eprintln!("[DEBUG] send_console_command_legacy: overall timeout reached");
                 break;
             }
 
-            // Check for available data
             let available = match channel.bytes_to_read() {
                 Ok(n) => n,
                 Err(e) => {
-                    eprintln!("[DEBUG] send_console_command: bytes_to_read error: {}", e);
+                    eprintln!(
+                        "[DEBUG] send_console_command_legacy: bytes_to_read error: {}",
+                        e
+                    );
                     return Err(ProtocolError::SerialError(e.to_string()));
                 }
             };
@@ -1657,18 +1948,10 @@ impl Connection {
             if available > 0 {
                 let to_read = std::cmp::min(available as usize, buffer.len());
                 match channel.read(&mut buffer[..to_read]) {
-                    Ok(0) => {
-                        eprintln!("[DEBUG] send_console_command: read returned 0 (EOF)");
-                        break;
-                    }
+                    Ok(0) => break,
                     Ok(n) => {
                         response.extend_from_slice(&buffer[..n]);
                         last_data_time = Instant::now();
-                        eprintln!(
-                            "[DEBUG] send_console_command: read {} bytes: {:?}",
-                            n,
-                            String::from_utf8_lossy(&buffer[..n])
-                        );
                     }
                     Err(ref e)
                         if e.kind() == std::io::ErrorKind::TimedOut
@@ -1677,30 +1960,22 @@ impl Connection {
                         // Non-blocking, continue
                     }
                     Err(e) => {
-                        eprintln!("[DEBUG] send_console_command: read error: {}", e);
                         return Err(ProtocolError::SerialError(e.to_string()));
                     }
                 }
             } else if response.is_empty() {
-                // No data yet, wait a bit
                 std::thread::sleep(Duration::from_millis(1));
+            } else if last_data_time.elapsed() > inter_char_timeout {
+                break;
             } else {
-                // We have data, check inter-character timeout
-                if last_data_time.elapsed() > inter_char_timeout {
-                    eprintln!(
-                        "[DEBUG] send_console_command: inter-character timeout, response complete"
-                    );
-                    break;
-                }
                 std::thread::sleep(Duration::from_millis(1));
             }
         }
 
-        // Convert response to string
         let response_str = String::from_utf8_lossy(&response).trim().to_string();
 
         eprintln!(
-            "[DEBUG] send_console_command: received {} bytes: '{}'",
+            "[DEBUG] send_console_command_legacy: received {} bytes: '{}'",
             response.len(),
             response_str
         );
@@ -1842,5 +2117,70 @@ mod tests {
             _ => panic!("Expected OCH due to adaptive timing, got {:?}", choice),
         }
         assert!(reason.starts_with("adaptive") || reason.contains("avg"));
+    }
+
+    #[test]
+    fn test_parse_rusefi_text_output_basic_msg() {
+        // Single msg entry
+        let raw = "msg`Hello from ECU`";
+        let result = Connection::parse_rusefi_text_output(raw);
+        assert_eq!(result, "Hello from ECU");
+    }
+
+    #[test]
+    fn test_parse_rusefi_text_output_multiple_msgs() {
+        // Multiple msg entries concatenated
+        let raw = "msg`First message`msg`Second message`msg`Third message`";
+        let result = Connection::parse_rusefi_text_output(raw);
+        assert_eq!(result, "First message\nSecond message\nThird message");
+    }
+
+    #[test]
+    fn test_parse_rusefi_text_output_filters_wave_chart() {
+        // wave_chart and table data should be filtered out
+        let raw = "msg`RPM=1200`wave_chart`some chart data here`msg`emu: running`";
+        let result = Connection::parse_rusefi_text_output(raw);
+        assert_eq!(result, "RPM=1200\nemu: running");
+    }
+
+    #[test]
+    fn test_parse_rusefi_text_output_filters_table_data() {
+        let raw = "msg`Status OK`t|d_123`456`msg`Done`";
+        let result = Connection::parse_rusefi_text_output(raw);
+        assert_eq!(result, "Status OK\nDone");
+    }
+
+    #[test]
+    fn test_parse_rusefi_text_output_empty_input() {
+        assert_eq!(Connection::parse_rusefi_text_output(""), "");
+    }
+
+    #[test]
+    fn test_parse_rusefi_text_output_no_backticks() {
+        // Plain text without backtick delimiters should be returned as-is
+        let raw = "Some plain text response";
+        let result = Connection::parse_rusefi_text_output(raw);
+        assert_eq!(result, "Some plain text response");
+    }
+
+    #[test]
+    fn test_parse_rusefi_text_output_real_boot_sequence() {
+        // Simulated rusEFI boot output (truncated)
+        let raw = "msg`custom board hello from simulator`msg`Storage INT_FLASH registered`msg`Flash: Reading storage ID 1 @0x1 ... 33984 bytes`msg`emu: RPM=1200`wave_chart`r1200`";
+        let result = Connection::parse_rusefi_text_output(raw);
+        let lines: Vec<&str> = result.lines().collect();
+        assert_eq!(lines.len(), 4);
+        assert_eq!(lines[0], "custom board hello from simulator");
+        assert_eq!(lines[1], "Storage INT_FLASH registered");
+        assert!(lines[2].contains("Flash: Reading storage ID 1"));
+        assert_eq!(lines[3], "emu: RPM=1200");
+    }
+
+    #[test]
+    fn test_parse_rusefi_text_output_emu_tag() {
+        // "emu" is a recognized message tag
+        let raw = "emu`RPM=1200`emu`shape update for ch0`";
+        let result = Connection::parse_rusefi_text_output(raw);
+        assert_eq!(result, "RPM=1200\nshape update for ch0");
     }
 }
