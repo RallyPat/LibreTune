@@ -4751,14 +4751,23 @@ async fn get_searchable_index(
 
     let mut index: HashMap<String, Vec<String>> = HashMap::new();
 
-    // Index dialogs - collect field labels, panel titles
-    for (dialog_name, dialog) in &def.dialogs {
-        let mut terms: Vec<String> = Vec::new();
+    // Recursively collect searchable terms from a dialog and its nested panels
+    fn collect_dialog_terms(
+        dialog_name: &str,
+        dialogs: &HashMap<String, libretune_core::ini::DialogDefinition>,
+        visited: &mut std::collections::HashSet<String>,
+        terms: &mut Vec<String>,
+    ) {
+        if !visited.insert(dialog_name.to_string()) {
+            return; // Already visited, avoid cycles
+        }
+        let dialog = match dialogs.get(dialog_name) {
+            Some(d) => d,
+            None => return,
+        };
 
-        // Add dialog title
         terms.push(dialog.title.clone());
 
-        // Collect from all components
         for component in &dialog.components {
             match component {
                 libretune_core::ini::DialogComponent::Label { text } => {
@@ -4769,7 +4778,8 @@ async fn get_searchable_index(
                     terms.push(name.clone());
                 }
                 libretune_core::ini::DialogComponent::Panel { name, .. } => {
-                    terms.push(name.clone());
+                    // Recurse into the referenced sub-dialog
+                    collect_dialog_terms(name, dialogs, visited, terms);
                 }
                 libretune_core::ini::DialogComponent::Table { name } => {
                     terms.push(name.clone());
@@ -4790,6 +4800,13 @@ async fn get_searchable_index(
                 }
             }
         }
+    }
+
+    // Index dialogs - collect field labels, panel titles, and nested panel content
+    for dialog_name in def.dialogs.keys() {
+        let mut terms: Vec<String> = Vec::new();
+        let mut visited = std::collections::HashSet::new();
+        collect_dialog_terms(dialog_name, &def.dialogs, &mut visited, &mut terms);
 
         if !terms.is_empty() {
             index.insert(dialog_name.clone(), terms);

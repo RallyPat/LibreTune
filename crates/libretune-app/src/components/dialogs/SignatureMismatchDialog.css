@@ -259,6 +259,33 @@
   margin: 0;
 }
 
+.browse-ini-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  background: var(--surface-darker, #161616);
+  color: var(--text-primary, #e0e0e0);
+  border: 1px solid var(--border-color, #3c3c3c);
+  border-radius: 6px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+  width: 100%;
+  justify-content: center;
+  margin-top: 16px;
+}
+
+.browse-ini-btn:hover {
+  background: var(--surface-hover, #2a2a2a);
+  border-color: var(--primary-color, #4a9eff);
+}
+
+.browse-ini-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .search-online-btn {
   display: inline-flex;
   align-items: center;

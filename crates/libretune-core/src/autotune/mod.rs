@@ -36,28 +36,30 @@ pub struct AutoTuneRecommendation {
 
 /// AutoTune settings
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct AutoTuneSettings {
-    pub target_table: String,
-    pub update_controller: bool,
-    pub auto_send_updates: bool,
-    pub send_interval_ms: u32,
+    pub target_afr: f64,
+    pub algorithm: String,
+    pub update_rate_ms: u32,
 }
 
 impl Default for AutoTuneSettings {
     fn default() -> Self {
         Self {
-            target_table: "veTable1".to_string(),
-            update_controller: false,
-            auto_send_updates: false,
-            send_interval_ms: 15000,
+            target_afr: 14.7,
+            algorithm: "simple".to_string(),
+            update_rate_ms: 100,
         }
     }
 }
 
 /// Authority limits to restrict VE changes
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct AutoTuneAuthorityLimits {
+    #[serde(alias = "max_change_per_cell")]
     pub max_cell_value_change: f64,
+    #[serde(alias = "max_total_change")]
     pub max_cell_percentage_change: f64,
 }
 

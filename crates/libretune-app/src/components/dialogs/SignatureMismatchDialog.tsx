@@ -5,7 +5,8 @@
 
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { AlertTriangle, Check, X, Download, RefreshCw, Globe, Wifi, WifiOff, Save, HelpCircle } from "lucide-react";
+import { open } from "@tauri-apps/plugin-dialog";
+import { AlertTriangle, Check, X, Download, RefreshCw, Globe, Wifi, WifiOff, Save, HelpCircle, FolderOpen } from "lucide-react";
 import "./SignatureMismatchDialog.css";
 
 export interface MatchingIniInfo {
@@ -58,6 +59,7 @@ export default function SignatureMismatchDialog({
   const [downloading, setDownloading] = useState<string | null>(null);
   const [hasInternet, setHasInternet] = useState<boolean | null>(null);
   const [searchError, setSearchError] = useState<string | null>(null);
+  const [browsing, setBrowsing] = useState(false);
 
   // Check internet connectivity when online search is opened
   useEffect(() => {
@@ -158,6 +160,33 @@ export default function SignatureMismatchDialog({
       alert(`✗ ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setSavingTune(false);
+    }
+  };
+
+  const handleBrowseIni = async () => {
+    setBrowsing(true);
+    try {
+      const selected = await open({
+        title: "Select INI Definition File",
+        filters: [{ name: "INI Files", extensions: ["ini"] }],
+        multiple: false,
+        directory: false,
+      });
+      if (!selected) return;
+
+      const filePath = selected as string;
+      // Import the file into the repository, then apply it
+      await invoke("import_ini", { sourcePath: filePath });
+      await invoke("update_project_ini", {
+        iniPath: filePath,
+        forceResync: true,
+      });
+      onSelectIni(filePath);
+    } catch (e) {
+      console.error("Failed to browse/import INI:", e);
+      alert(`Failed to load INI file: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setBrowsing(false);
     }
   };
 
@@ -290,6 +319,18 @@ export default function SignatureMismatchDialog({
                 </div>
               )}
               
+              <button
+                className="browse-ini-btn"
+                onClick={handleBrowseIni}
+                disabled={browsing}
+              >
+                {browsing ? (
+                  <><RefreshCw size={16} className="spinning" /> Importing...</>
+                ) : (
+                  <><FolderOpen size={16} /> Browse for INI File...</>
+                )}
+              </button>
+
               <button 
                 className="search-online-btn" 
                 onClick={() => setShowOnlineSearch(true)}

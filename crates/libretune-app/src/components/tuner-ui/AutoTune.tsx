@@ -249,14 +249,24 @@ export function AutoTune({ tableName: initialTableName = '', onClose }: AutoTune
       const tables = await invoke<TableInfo[]>('get_tables');
       setAvailableTables(tables);
 
-      // Auto-select from INI-defined VeAnalyze config if current selection not found
-      const currentExists = tables.some((t) => t.name === selectedTable);
+      // Auto-select table: prefer INI config, then common VE table names, then first table
+      const currentExists = selectedTable && tables.some((t) => t.name === selectedTable);
       if (!currentExists && tables.length > 0) {
-        const preferred = veAnalyzeConfig?.ve_table_name
+        // 1. Try INI-defined VeAnalyze config
+        const fromConfig = veAnalyzeConfig?.ve_table_name
           ? tables.find((t) => t.name === veAnalyzeConfig.ve_table_name)
           : null;
-        const fallback = preferred || tables[0];
-        setSelectedTable(fallback.name);
+        if (fromConfig) {
+          setSelectedTable(fromConfig.name);
+        } else {
+          // 2. Try common VE/fuel table name patterns
+          const vePatterns = [/^ve/i, /fuel/i, /lambda/i, /afr/i];
+          const veTable = vePatterns.reduce<TableInfo | undefined>(
+            (found, pat) => found || tables.find((t) => pat.test(t.name) || pat.test(t.title)),
+            undefined
+          );
+          setSelectedTable((veTable || tables[0]).name);
+        }
       }
 
       if (!secondaryTable && tables.length > 1) {

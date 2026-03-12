@@ -2618,7 +2618,7 @@ function AppContent() {
       case "autotune":
         return (
           <AutoTune 
-            tableName={content.data as string || "veTable1"} 
+            tableName={content.data as string || ''} 
             onClose={() => handleTabClose("autotune")} 
           />
         );
