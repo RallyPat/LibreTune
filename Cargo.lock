@@ -2411,6 +2411,7 @@ dependencies = [
  "chrono",
  "crc32fast",
  "dirs 5.0.1",
+ "encoding_rs",
  "evalexpr",
  "git2",
  "libc",

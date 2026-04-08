@@ -139,19 +139,20 @@ impl IniRepository {
     }
 
     /// Read an INI file, handling encoding issues
+    ///
+    /// Tries UTF-8 first, falls back to Windows-1252 decoding to preserve
+    /// accented characters in Western European languages.
     fn read_ini_file(path: &Path) -> io::Result<String> {
-        // Try UTF-8 first
-        match fs::read_to_string(path) {
-            Ok(content) => Ok(content),
-            Err(_) => {
-                // Try reading as bytes and converting from Windows-1252
-                let bytes = fs::read(path)?;
+        let bytes = fs::read(path)?;
 
-                // Use lossy conversion - replace invalid chars with ?
-                // This handles Windows-1252 and other encodings
-                Ok(String::from_utf8_lossy(&bytes).into_owned())
-            }
+        // Try UTF-8 first (most common modern encoding)
+        if let Ok(content) = std::str::from_utf8(&bytes) {
+            return Ok(content.to_string());
         }
+
+        // Fall back to Windows-1252 for legacy files with accented characters
+        let (decoded, _, _) = encoding_rs::WINDOWS_1252.decode(&bytes);
+        Ok(decoded.into_owned())
     }
 
     /// Extract the content between the first pair of double quotes in a value string.

@@ -89,21 +89,36 @@ pub fn parse_ini_from_path(path: &Path) -> Result<EcuDefinition, IniError> {
     parse_ini_internal(&content, &mut ctx)
 }
 
-/// Read an INI file with encoding fallback (UTF-8 first, then lossy)
+/// Read an INI file with encoding fallback (UTF-8 first, then Windows-1252)
+///
+/// ECU INI files may be encoded in Windows-1252 (common for Western European
+/// languages like Portuguese, Spanish, French, German). This function tries
+/// UTF-8 first and falls back to Windows-1252 decoding to preserve accented
+/// characters (e.g., ç, ã, õ, é) instead of replacing them with U+FFFD.
 fn read_ini_file(path: &Path) -> Result<String, IniError> {
-    match std::fs::read_to_string(path) {
-        Ok(content) => Ok(content),
-        Err(e) => {
-            if e.kind() == std::io::ErrorKind::InvalidData {
-                let bytes = std::fs::read(path).map_err(|e| IniError::IoError(e.to_string()))?;
-                Ok(String::from_utf8_lossy(&bytes).into_owned())
-            } else if e.kind() == std::io::ErrorKind::NotFound {
-                Err(IniError::IncludeNotFound(path.display().to_string()))
-            } else {
-                Err(IniError::IoError(e.to_string()))
-            }
+    let bytes = std::fs::read(path).map_err(|e| {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            IniError::IncludeNotFound(path.display().to_string())
+        } else {
+            IniError::IoError(e.to_string())
         }
+    })?;
+    Ok(decode_ini_bytes(&bytes))
+}
+
+/// Decode INI file bytes, trying UTF-8 first, then falling back to Windows-1252.
+///
+/// Windows-1252 is a superset of ISO-8859-1 (Latin-1) and is the most common
+/// encoding for legacy ECU definition files containing Western European text.
+fn decode_ini_bytes(bytes: &[u8]) -> String {
+    // Try UTF-8 first (most common modern encoding)
+    if let Ok(content) = std::str::from_utf8(bytes) {
+        return content.to_string();
     }
+
+    // Fall back to Windows-1252 decoding for legacy files
+    let (decoded, _, _) = encoding_rs::WINDOWS_1252.decode(bytes);
+    decoded.into_owned()
 }
 
 /// Internal parsing function that handles #include directives

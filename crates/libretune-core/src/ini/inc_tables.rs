@@ -51,8 +51,17 @@ enum IncTableData {
 impl IncTable {
     /// Load an .inc file from disk
     pub fn load_from_file(path: &Path) -> Result<Self, String> {
-        let content = fs::read_to_string(path)
+        let bytes = fs::read(path)
             .map_err(|e| format!("Failed to read .inc file '{}': {}", path.display(), e))?;
+
+        // Try UTF-8 first, fall back to Windows-1252 for legacy files
+        let content = match std::str::from_utf8(&bytes) {
+            Ok(s) => s.to_string(),
+            Err(_) => {
+                let (decoded, _, _) = encoding_rs::WINDOWS_1252.decode(&bytes);
+                decoded.into_owned()
+            }
+        };
 
         let name = path
             .file_stem()

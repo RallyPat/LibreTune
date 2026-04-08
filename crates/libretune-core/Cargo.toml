@@ -44,6 +44,9 @@ byteorder = "1.5"
 # Regex for INI parsing
 regex = "1.11"
 
+# Character encoding for INI files (Windows-1252, ISO-8859-1, etc.)
+encoding_rs = "0.8"
+
 # Expression evaluation for AutoTune custom filters
 evalexpr = "11.3"
 
