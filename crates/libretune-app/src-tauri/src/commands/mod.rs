@@ -32,6 +32,7 @@ pub mod project_lifecycle;
 pub mod realtime_stream;
 pub mod table_internals;
 pub mod dash_convert;
+pub mod app_settings;
 pub mod debug_realtime;
 pub mod realtime_get;
 pub mod annotations;
