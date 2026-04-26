@@ -35,6 +35,8 @@ pub mod table_ops;
 pub mod ts_import;
 pub mod tune_compare;
 pub mod tune_health;
+pub mod tune_info;
+pub mod tune_io;
 pub mod tune_migration;
 pub mod tune_misc;
 pub mod wasm_plugin;
