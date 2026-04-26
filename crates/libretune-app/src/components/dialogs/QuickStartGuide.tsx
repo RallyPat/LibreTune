@@ -1,4 +1,17 @@
 import { useState } from 'react';
+import {
+  Rocket,
+  FolderPlus,
+  Settings as SettingsIcon,
+  Plug,
+  Table2,
+  Bot,
+  LineChart,
+  Save,
+  BookOpen,
+  Lightbulb,
+  type LucideIcon,
+} from 'lucide-react';
 import { Dialog, Button } from '../common';
 import './QuickStartGuide.css';
 
@@ -6,7 +19,7 @@ interface QuickStartStep {
   id: string;
   title: string;
   description: string;
-  icon: string;
+  icon: LucideIcon;
   instructions: string[];
   tips?: string[];
 }
@@ -33,7 +46,7 @@ export default function QuickStartGuide({ isOpen, onClose }: QuickStartGuideProp
       id: 'welcome',
       title: 'Welcome to LibreTune',
       description: 'Quick-Start Guide',
-      icon: '🚀',
+      icon: Rocket,
       instructions: [
         'This guide will walk you through the essential steps to get started.',
         'You\'ll learn how to create a project, load a tune, and connect to your ECU.',
@@ -44,7 +57,7 @@ export default function QuickStartGuide({ isOpen, onClose }: QuickStartGuideProp
       id: 'create-project',
       title: 'Step 1: Create a Project',
       description: 'Organize your tuning work',
-      icon: '📁',
+      icon: FolderPlus,
       instructions: [
         '1. Click "File → New Project" (or press Ctrl+N)',
         '2. Give your project a descriptive name (e.g., "My 4-Cyl NA Speeduino")',
@@ -66,7 +79,7 @@ export default function QuickStartGuide({ isOpen, onClose }: QuickStartGuideProp
       id: 'load-tune',
       title: 'Step 2: Load or Create a Tune',
       description: 'Set up your ECU configuration',
-      icon: '⚙️',
+      icon: SettingsIcon,
       instructions: [
         'You have three options:',
         'Option A: Start with a new blank tune',
@@ -87,7 +100,7 @@ export default function QuickStartGuide({ isOpen, onClose }: QuickStartGuideProp
       id: 'connect-ecu',
       title: 'Step 3: Connect to ECU',
       description: 'Establish serial communication',
-      icon: '🔌',
+      icon: Plug,
       instructions: [
         '1. Connect your ECU to your computer via USB',
         '2. Click "Connect" button or File → Connect to ECU',
@@ -106,7 +119,7 @@ export default function QuickStartGuide({ isOpen, onClose }: QuickStartGuideProp
       id: 'explore-tables',
       title: 'Step 4: Explore Fuel & Ignition Maps',
       description: 'Understanding VE and timing tables',
-      icon: '📊',
+      icon: Table2,
       instructions: [
         '1. Click "Tables" in the sidebar',
         '2. Select a table from the menu (e.g., "Fuel → VE Table")',
@@ -133,7 +146,7 @@ export default function QuickStartGuide({ isOpen, onClose }: QuickStartGuideProp
       id: 'autotune',
       title: 'Step 5: Auto-Tune Your Tables',
       description: 'Data-driven optimization',
-      icon: '🤖',
+      icon: Bot,
       instructions: [
         '1. Click "Tuning → AutoTune"',
         '2. Configure AutoTune settings:',
@@ -158,7 +171,7 @@ export default function QuickStartGuide({ isOpen, onClose }: QuickStartGuideProp
       id: 'dashboard',
       title: 'Step 6: Monitor with Dashboard',
       description: 'Real-time data visualization',
-      icon: '📈',
+      icon: LineChart,
       instructions: [
         '1. Click "Dashboard" tab at the bottom',
         '2. View gauges showing live ECU data:',
@@ -183,7 +196,7 @@ export default function QuickStartGuide({ isOpen, onClose }: QuickStartGuideProp
       id: 'save-burn',
       title: 'Step 7: Save & Burn to ECU',
       description: 'Persist your changes',
-      icon: '💾',
+      icon: Save,
       instructions: [
         '1. Save your tune locally:',
         '   • File → Save Tune (or Ctrl+S)',
@@ -209,7 +222,7 @@ export default function QuickStartGuide({ isOpen, onClose }: QuickStartGuideProp
       id: 'next-steps',
       title: 'What\'s Next?',
       description: 'Continue learning',
-      icon: '📚',
+      icon: BookOpen,
       instructions: [
         'Congratulations! You now know the core workflow.',
         'To deepen your knowledge:',
@@ -250,9 +263,10 @@ export default function QuickStartGuide({ isOpen, onClose }: QuickStartGuideProp
   const isFirstStep = currentStep === 0;
   const progress = ((currentStep + 1) / steps.length) * 100;
 
+  const StepIcon = step.icon;
   const titleNode = (
     <div className="qs-title-row">
-      <div className="quick-start-icon">{step.icon}</div>
+      <div className="quick-start-icon"><StepIcon size={28} aria-hidden /></div>
       <div className="quick-start-title-block">
         <span className="qs-title-main">{step.title}</span>
         <span className="qs-title-sub">{step.description}</span>
@@ -278,7 +292,7 @@ export default function QuickStartGuide({ isOpen, onClose }: QuickStartGuideProp
 
         {step.tips && step.tips.length > 0 && (
           <div className="tips-section">
-            <h4>💡 Tips</h4>
+            <h4><Lightbulb size={14} aria-hidden /> Tips</h4>
             <ul className="tips-list">
               {step.tips.map((tip, idx) => (
                 <li key={idx}>{tip}</li>
@@ -295,10 +309,10 @@ export default function QuickStartGuide({ isOpen, onClose }: QuickStartGuideProp
 
         <div className="quick-start-controls">
           <Button variant="secondary" onClick={handlePrev} disabled={isFirstStep}>
-            ← Back
+            Back
           </Button>
           <Button variant="primary" onClick={handleNext}>
-            {isLastStep ? 'Finish' : 'Next →'}
+            {isLastStep ? 'Finish' : 'Next'}
           </Button>
         </div>
       </Dialog.Footer>

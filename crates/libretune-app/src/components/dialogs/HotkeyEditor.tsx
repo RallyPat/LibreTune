@@ -1,4 +1,5 @@
 import { useState, useCallback, useMemo, useEffect } from 'react';
+import { RotateCcw, Download, Lightbulb, AlertTriangle } from 'lucide-react';
 import './HotkeyEditor.css';
 
 export interface HotkeyEntry {
@@ -247,7 +248,7 @@ export default function HotkeyEditor({ onClose, onSave, bindings: initialBinding
     });
 
     if (conflicts.length > 0) {
-      setConflictWarning(`⚠ Key binding conflicts detected:\n${conflicts.join('\n')}`);
+      setConflictWarning(`Key binding conflicts detected:\n${conflicts.join('\n')}`);
     } else {
       setConflictWarning(null);
     }
@@ -315,8 +316,9 @@ export default function HotkeyEditor({ onClose, onSave, bindings: initialBinding
       </div>
 
       {conflictWarning && (
-        <div className="hotkey-conflict-warning">
-          {conflictWarning}
+        <div className="hotkey-conflict-warning" style={{ display: 'flex', alignItems: 'flex-start', gap: 6 }}>
+          <AlertTriangle size={16} aria-hidden style={{ flexShrink: 0, marginTop: 2 }} />
+          <span style={{ whiteSpace: 'pre-wrap' }}>{conflictWarning}</span>
         </div>
       )}
 
@@ -335,10 +337,10 @@ export default function HotkeyEditor({ onClose, onSave, bindings: initialBinding
           </select>
         </div>
         <button onClick={handleResetDefaults} className="hotkey-reset-btn">
-          ↻ Reset to Defaults
+          <RotateCcw size={14} /> Reset to Defaults
         </button>
         <button onClick={handleExport} className="hotkey-export-btn">
-          ⬇ Export Scheme
+          <Download size={14} /> Export Scheme
         </button>
       </div>
 
@@ -382,8 +384,9 @@ export default function HotkeyEditor({ onClose, onSave, bindings: initialBinding
                       className="hotkey-reset-single"
                       onClick={() => handleBindingChange(entry.id, entry.defaultBinding)}
                       title="Reset to default"
+                      aria-label="Reset to default"
                     >
-                      ↻
+                      <RotateCcw size={12} />
                     </button>
                   )}
                 </>
@@ -394,8 +397,8 @@ export default function HotkeyEditor({ onClose, onSave, bindings: initialBinding
       </div>
 
       <div className="hotkey-editor-footer">
-        <p className="hotkey-note">
-          💡 Tip: You can also use key combinations like Ctrl+Shift+Z or Alt+A
+        <p className="hotkey-note" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <Lightbulb size={14} aria-hidden /> Tip: You can also use key combinations like Ctrl+Shift+Z or Alt+A
         </p>
         <div className="hotkey-buttons">
           <button onClick={onClose} className="hotkey-cancel-btn">

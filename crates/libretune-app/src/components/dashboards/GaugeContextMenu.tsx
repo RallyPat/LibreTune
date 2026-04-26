@@ -9,6 +9,7 @@
  */
 
 import { useState, useEffect, useRef } from 'react';
+import { CheckSquare, Square } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { TsColor, tsColorToHex } from './dashTypes';
 import './GaugeContextMenu.css';
@@ -296,7 +297,7 @@ export default function GaugeContextMenu({
         onClick={() => onAntialiasingChange(!antialiasingEnabled)}
       >
         <span className={`checkbox-mark ${antialiasingEnabled ? 'checked' : ''}`}>
-          {antialiasingEnabled ? '☑' : '☐'}
+          {antialiasingEnabled ? <CheckSquare size={14} /> : <Square size={14} />}
         </span>
         Antialiasing Enabled
       </div>
@@ -307,7 +308,7 @@ export default function GaugeContextMenu({
         onClick={() => onDesignerModeChange(!designerMode)}
       >
         <span className={`checkbox-mark ${designerMode ? 'checked' : ''}`}>
-          {designerMode ? '☑' : '☐'}
+          {designerMode ? <CheckSquare size={14} /> : <Square size={14} />}
         </span>
         Designer Mode
       </div>

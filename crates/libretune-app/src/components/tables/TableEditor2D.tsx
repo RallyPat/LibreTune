@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { ArrowLeft, Save, Zap, ExternalLink } from 'lucide-react';
+import { ArrowLeft, Save, Zap, ExternalLink, AlertTriangle, Palette, MapPin, Crosshair } from 'lucide-react';
 import TableToolbar from './TableToolbar';
 import TableGrid, { SelectionRange } from './TableGrid';
 import TableContextMenu from './TableContextMenu';
@@ -998,11 +998,13 @@ export default function TableEditor2D({
 
     return (
       <div className="table-editor" style={{ padding: '20px', textAlign: 'center' }}>
-        <h3 style={{ color: 'var(--error)', marginBottom: '8px' }}>⚠️ Table Data Error</h3>
+        <h3 style={{ color: 'var(--error)', marginBottom: '8px', display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+          <AlertTriangle size={20} aria-hidden /> Table Data Error
+        </h3>
         <p style={{ color: 'var(--text-muted)' }}>{getErrorMessage()}</p>
         {onBack && (
-          <button onClick={onBack} style={{ marginTop: '16px' }} className="btn btn-secondary">
-            ← Go Back
+          <button onClick={onBack} style={{ marginTop: '16px', display: 'inline-flex', alignItems: 'center', gap: 6 }} className="btn btn-secondary">
+            <ArrowLeft size={14} /> Go Back
           </button>
         )}
       </div>
@@ -1019,8 +1021,9 @@ export default function TableEditor2D({
             className={`embedded-toggle ${showColorShade ? 'active' : ''}`}
             onClick={() => setShowColorShade(!showColorShade)}
             title="Toggle Color Shade"
+            aria-label="Toggle Color Shade"
           >
-            🎨
+            <Palette size={14} />
           </button>
           {onOpenInTab && (
             <button 
@@ -1047,22 +1050,25 @@ export default function TableEditor2D({
               className={`action-btn ${showColorShade ? 'active' : ''}`}
               onClick={() => setShowColorShade(!showColorShade)}
               title="Toggle Color Shade"
+              aria-label="Toggle Color Shade"
             >
-              <span className="action-icon">🎨</span>
+              <span className="action-icon"><Palette size={16} /></span>
             </button>
             <button 
               className={`action-btn ${showHistoryTrail ? 'active' : ''}`}
               onClick={() => setShowHistoryTrail(!showHistoryTrail)}
               title="Toggle History Trail"
+              aria-label="Toggle History Trail"
             >
-              <span className="action-icon">📍</span>
+              <span className="action-icon"><MapPin size={16} /></span>
             </button>
             <button 
               className={`action-btn ${followMode ? 'active' : ''}`}
               onClick={() => setFollowMode(!followMode)}
               title="Follow Mode (F)"
+              aria-label="Follow Mode"
             >
-              <span className="action-icon">🎯</span>
+              <span className="action-icon"><Crosshair size={16} /></span>
             </button>
             <button className="action-btn" onClick={handleSave} title="Save (S)">
               <Save size={18} />

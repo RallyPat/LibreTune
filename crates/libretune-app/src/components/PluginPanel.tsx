@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
+import { BookOpen, Pencil, Radio, Zap, ChevronDown, ChevronRight, type LucideIcon } from "lucide-react";
 import "./PluginPanel.css";
 
 interface Plugin {
@@ -94,14 +95,14 @@ export const PluginPanel: React.FC<PluginPanelProps> = ({ isConnected }) => {
   }, []);
 
   // Get permission display
-  const getPermissionDisplay = (perm: string) => {
-    const permMap: Record<string, string> = {
-      ReadTables: "📖 Read Tables",
-      WriteConstants: "✏️ Write Constants",
-      SubscribeChannels: "📡 Subscribe Channels",
-      ExecuteActions: "⚡ Execute Actions",
+  const getPermissionDisplay = (perm: string): { label: string; Icon: LucideIcon | null } => {
+    const permMap: Record<string, { label: string; Icon: LucideIcon }> = {
+      ReadTables: { label: "Read Tables", Icon: BookOpen },
+      WriteConstants: { label: "Write Constants", Icon: Pencil },
+      SubscribeChannels: { label: "Subscribe Channels", Icon: Radio },
+      ExecuteActions: { label: "Execute Actions", Icon: Zap },
     };
-    return permMap[perm] || perm;
+    return permMap[perm] || { label: perm, Icon: null };
   };
 
   // Get state color
@@ -224,18 +225,23 @@ export const PluginPanel: React.FC<PluginPanelProps> = ({ isConnected }) => {
                 <button
                   className="plugin-expand-btn"
                   onClick={() => setShowPermissions(!showPermissions)}
+                  aria-label={showPermissions ? "Collapse permissions" : "Expand permissions"}
                 >
-                  {showPermissions ? "▼" : "▶"}
+                  {showPermissions ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
                 </button>
               </label>
               {showPermissions && (
                 <div className="plugin-permissions-list">
                   {selected.permissions.length > 0 ? (
-                    selected.permissions.map((perm) => (
-                      <div key={perm} className="plugin-permission-item">
-                        {getPermissionDisplay(perm)}
-                      </div>
-                    ))
+                    selected.permissions.map((perm) => {
+                      const { label, Icon } = getPermissionDisplay(perm);
+                      return (
+                        <div key={perm} className="plugin-permission-item" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                          {Icon && <Icon size={14} aria-hidden />}
+                          <span>{label}</span>
+                        </div>
+                      );
+                    })
                   ) : (
                     <p className="plugin-no-perms">No permissions required</p>
                   )}

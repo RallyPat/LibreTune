@@ -1,5 +1,16 @@
 import { useState } from 'react';
 import { openUrl } from '@tauri-apps/plugin-opener';
+import {
+  Car,
+  FolderPlus,
+  Table2,
+  Bot,
+  LineChart,
+  Keyboard,
+  BookOpen,
+  ChevronLeft,
+  type LucideIcon,
+} from 'lucide-react';
 import { Dialog, Button } from '../common';
 import './OnboardingDialog.css';
 
@@ -7,8 +18,8 @@ interface OnboardingStep {
   id: string;
   title: string;
   description: string;
-  icon: string;
-  details: string[];
+  icon: LucideIcon;
+  details: React.ReactNode[];
   action?: {
     label: string;
     handler: () => void | Promise<void>;
@@ -34,7 +45,7 @@ export default function OnboardingDialog({ isOpen, onClose, onComplete }: Onboar
       id: 'welcome',
       title: 'Welcome to LibreTune',
       description: 'Professional ECU Tuning Software',
-      icon: '🚗',
+      icon: Car,
       details: [
         'LibreTune is an open-source ECU tuning platform supporting Speeduino, rusEFI, FOME, epicEFI, and MegaSquirt.',
         'Built with modern technology: Rust backend + React frontend + Tauri desktop framework.',
@@ -45,7 +56,7 @@ export default function OnboardingDialog({ isOpen, onClose, onComplete }: Onboar
       id: 'projects',
       title: 'Create Your First Project',
       description: 'Organize your tuning work',
-      icon: '📁',
+      icon: FolderPlus,
       details: [
         '1. Click "File → New Project" or use the welcome screen',
         '2. Select your ECU type (Speeduino, rusEFI, etc.)',
@@ -58,7 +69,7 @@ export default function OnboardingDialog({ isOpen, onClose, onComplete }: Onboar
       id: 'tables',
       title: 'Edit Fuel & Ignition Maps',
       description: 'Professional 2D/3D table editing',
-      icon: '📊',
+      icon: Table2,
       details: [
         '2D Editor: Click "Tables" to view and edit fuel, ignition, and auxiliary tables',
         'Toolbar: Use =, >, <, *, /, s for Set Equal, Increase, Decrease, Scale, Interpolate, Smooth',
@@ -71,7 +82,7 @@ export default function OnboardingDialog({ isOpen, onClose, onComplete }: Onboar
       id: 'autotune',
       title: 'Auto-Tune with AI Assistance',
       description: 'Data-driven fuel table optimization',
-      icon: '🤖',
+      icon: Bot,
       details: [
         '1. Click "Tuning → AutoTune" to start optimization',
         '2. Capture live data from your ECU during driving',
@@ -85,7 +96,7 @@ export default function OnboardingDialog({ isOpen, onClose, onComplete }: Onboar
       id: 'dashboard',
       title: 'Real-Time Monitoring',
       description: 'Professional dashboard with gauges',
-      icon: '📈',
+      icon: LineChart,
       details: [
         'Dashboard shows 13 gauge types: analog dials, bars, sweep gauges, line graphs, etc.',
         'Right-click to customize: change gauges, colors, positions',
@@ -98,7 +109,7 @@ export default function OnboardingDialog({ isOpen, onClose, onComplete }: Onboar
       id: 'keyboard',
       title: 'Keyboard Shortcuts',
       description: 'Power-user workflow',
-      icon: '⌨️',
+      icon: Keyboard,
       details: [
         'Customizable hotkeys: Settings → Keyboard Shortcuts',
         'Table editor: Arrow keys navigate, =,>,<,*,/,s operate',
@@ -111,13 +122,13 @@ export default function OnboardingDialog({ isOpen, onClose, onComplete }: Onboar
       id: 'resources',
       title: 'Helpful Resources',
       description: 'Learn more about LibreTune',
-      icon: '📚',
+      icon: BookOpen,
       details: [
-        '📖 User Manual: Click "Help → Manual" for comprehensive guides',
-        '🔧 Settings: File → Settings to configure preferences, units, hotkeys',
-        '💾 Git Integration: Auto-save your work with version control (File → Tune History)',
-        '🌐 Online Repos: Automatic INI and tune file downloads from GitHub',
-        '💬 Community: Join Discord for support and discussions',
+        'User Manual: Click "Help → Manual" for comprehensive guides',
+        'Settings: File → Settings to configure preferences, units, hotkeys',
+        'Git Integration: Auto-save your work with version control (File → Tune History)',
+        'Online Repos: Automatic INI and tune file downloads from GitHub',
+        'Community: Join Discord for support and discussions',
       ],
       action: {
         label: 'Open User Manual',
@@ -155,9 +166,10 @@ export default function OnboardingDialog({ isOpen, onClose, onComplete }: Onboar
   const isLastStep = currentStep === steps.length - 1;
   const isFirstStep = currentStep === 0;
 
+  const StepIcon = step.icon;
   const titleNode = (
     <div className="onboarding-title">
-      <div className="onboarding-icon">{step.icon}</div>
+      <div className="onboarding-icon"><StepIcon size={32} aria-hidden /></div>
       <div className="onboarding-title-text">
         <span className="onboarding-title-main">{step.title}</span>
         <span className="onboarding-title-sub">{step.description}</span>
@@ -217,11 +229,11 @@ export default function OnboardingDialog({ isOpen, onClose, onComplete }: Onboar
         </div>
 
         <div className="onboarding-controls">
-          <Button variant="secondary" onClick={handlePrev} disabled={isFirstStep}>
-            ← Previous
+          <Button variant="secondary" onClick={handlePrev} disabled={isFirstStep} leadingIcon={<ChevronLeft size={14} />}>
+            Previous
           </Button>
           <Button variant="primary" onClick={handleNext}>
-            {isLastStep ? 'Get Started' : 'Next →'}
+            {isLastStep ? 'Get Started' : 'Next'}
           </Button>
         </div>
       </Dialog.Footer>

@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { useTranslation } from "react-i18next";
+import { AlertTriangle } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { ThemeProvider, useTheme } from "./themes";
@@ -1231,7 +1232,7 @@ function AppContent() {
               gap: '4px'
             }}
           >
-            ⚠ Partial sync ({syncStatus.pages_synced}/{syncStatus.total_pages})
+            <AlertTriangle size={14} aria-hidden /> Partial sync ({syncStatus.pages_synced}/{syncStatus.total_pages})
           </span>
         ),
       });

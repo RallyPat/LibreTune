@@ -29,6 +29,7 @@
  */
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
+import { FolderOpen, Save, Square, Play, Upload, X, Lock, LockOpen } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { open, save } from '@tauri-apps/plugin-dialog';
 import { valueToHeatmapColor } from '../../utils/heatmapColors';
@@ -661,24 +662,24 @@ export function AutoTune({ tableName: initialTableName = '', onClose }: AutoTune
         </div>
         <div className="autotune-controls">
           <button onClick={loadReferenceTable} title="Load reference table from CSV">
-            📂 Load Ref
+            <FolderOpen size={14} /> Load Ref
           </button>
           <button onClick={saveReferenceTable} disabled={!tableData} title="Save current table as reference">
-            💾 Save Ref
+            <Save size={14} /> Save Ref
           </button>
           {isRunning ? (
             <button onClick={stopAutoTune} className="autotune-stop">
-              ⏹ Stop
+              <Square size={14} fill="currentColor" /> Stop
             </button>
           ) : (
             <button onClick={startAutoTune} className="autotune-start">
-              ▶ Start
+              <Play size={14} fill="currentColor" /> Start
             </button>
           )}
           <button onClick={sendRecommendations} disabled={!isRunning && heatmapData.length === 0}>
-            📤 Send to ECU
+            <Upload size={14} /> Send to ECU
           </button>
-          {onClose && <button onClick={onClose}>✕</button>}
+          {onClose && <button onClick={onClose} aria-label="Close"><X size={14} /></button>}
         </div>
       </div>
 
@@ -699,10 +700,10 @@ export function AutoTune({ tableName: initialTableName = '', onClose }: AutoTune
               <option value="none">Value Only</option>
             </select>
             <button onClick={lockSelectedCells} disabled={selectedCells.size === 0}>
-              🔒 Lock
+              <Lock size={14} /> Lock
             </button>
             <button onClick={unlockSelectedCells} disabled={selectedCells.size === 0}>
-              🔓 Unlock
+              <LockOpen size={14} /> Unlock
             </button>
           </div>
 
@@ -747,7 +748,7 @@ export function AutoTune({ tableName: initialTableName = '', onClose }: AutoTune
                           ) : (
                             value.toFixed(1)
                           )}
-                          {isLocked && <span className="cell-lock-icon">🔒</span>}
+                          {isLocked && <span className="cell-lock-icon"><Lock size={10} /></span>}
                           {entry && entry.hit_count > 0 && (
                             <span className="cell-hit-badge" title={`${entry.hit_count} hits`}>
                               {entry.hit_count > 99 ? '99+' : entry.hit_count}

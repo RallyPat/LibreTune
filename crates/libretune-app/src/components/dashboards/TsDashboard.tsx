@@ -12,6 +12,7 @@ import {
 } from './dashTypes';
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { Plus, Copy, Pencil, Trash2, Save, RotateCw, AlertTriangle, Compass, X, FolderOpen } from 'lucide-react';
 import { useRealtimeStore, useChannelValue } from '../../stores/realtimeStore';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, UnlistenFn } from '@tauri-apps/api/event';
@@ -920,14 +921,14 @@ export default function TsDashboard({ initialDashPath, isConnected = false }: Ts
             onClick={() => { setNewDashName(''); setShowNewDialog(true); }}
             title="New Dashboard"
           >
-            ➕ New
+            <Plus size={14} /> New
           </button>
           <button 
             className="ts-dashboard-action-btn"
             onClick={handleDuplicateDashboard}
             title="Duplicate Dashboard"
           >
-            📋 Duplicate
+            <Copy size={14} /> Duplicate
           </button>
           <button 
             className="ts-dashboard-action-btn"
@@ -938,28 +939,28 @@ export default function TsDashboard({ initialDashPath, isConnected = false }: Ts
             }}
             title="Rename Dashboard"
           >
-            ✏️ Rename
+            <Pencil size={14} /> Rename
           </button>
           <button 
             className="ts-dashboard-action-btn danger"
             onClick={() => setShowDeleteConfirm(true)}
             title="Delete Dashboard"
           >
-            🗑️ Delete
+            <Trash2 size={14} /> Delete
           </button>
           <button 
             className="ts-dashboard-action-btn"
             onClick={handleExportDashboard}
             title="Export Dashboard"
           >
-            💾 Export
+            <Save size={14} /> Export
           </button>
           <button 
             className="ts-dashboard-action-btn"
             onClick={handleSyncGaugeRanges}
             title="Sync gauge ranges from INI"
           >
-            🔄 Sync Ranges
+            <RotateCw size={14} /> Sync Ranges
           </button>
           {validationReport && (
             <button
@@ -973,7 +974,7 @@ export default function TsDashboard({ initialDashPath, isConnected = false }: Ts
               onClick={() => setShowValidationPanel((prev) => !prev)}
               title="Dashboard validation issues"
             >
-              ⚠ Validate ({validationReport.errors.length}E/{validationReport.warnings.length}W)
+              <AlertTriangle size={14} /> Validate ({validationReport.errors.length}E/{validationReport.warnings.length}W)
             </button>
           )}
           <button
@@ -981,7 +982,7 @@ export default function TsDashboard({ initialDashPath, isConnected = false }: Ts
             onClick={() => setLegacyMode(prev => !prev)}
             title={legacyMode ? 'Legacy TS layout enabled' : 'Enable legacy TS layout'}
           >
-            🧭 Legacy: {legacyMode ? 'On' : 'Off'}
+            <Compass size={14} /> Legacy: {legacyMode ? 'On' : 'Off'}
           </button>
         </div>
       </div>
@@ -996,8 +997,9 @@ export default function TsDashboard({ initialDashPath, isConnected = false }: Ts
               className="ts-dashboard-compat-close"
               onClick={() => setShowValidationPanel(false)}
               title="Dismiss"
+              aria-label="Dismiss"
             >
-              ✕
+              <X size={14} />
             </button>
           </div>
           {validationReport.errors.length === 0 && validationReport.warnings.length === 0 ? (
@@ -1038,8 +1040,9 @@ export default function TsDashboard({ initialDashPath, isConnected = false }: Ts
             className="ts-dashboard-compat-close"
             onClick={() => setCompatBarVisible(false)}
             title="Dismiss"
+            aria-label="Dismiss"
           >
-            ✕
+            <X size={14} />
           </button>
         </div>
       )}
@@ -1104,7 +1107,7 @@ export default function TsDashboard({ initialDashPath, isConnected = false }: Ts
                   setShowImportDialog(true);
                 }}
               >
-                📁 Import TS Dashboard Files...
+                <FolderOpen size={14} /> Import TS Dashboard Files...
               </button>
             </div>
           </div>

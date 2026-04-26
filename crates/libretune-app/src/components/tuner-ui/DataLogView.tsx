@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { BarChart3, Circle, FolderOpen, Key, Square, CircleDot, Trash2, Save, Pause, Play } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { save, open } from '@tauri-apps/plugin-dialog';
@@ -564,9 +565,9 @@ export const DataLogView: React.FC = () => {
     <div className="datalog-view">
       <div className="datalog-header">
         <div className="header-left">
-          <h2>📊 Data Logging</h2>
-          <span className={`mode-badge ${viewMode}`}>
-            {viewMode === 'live' ? '🔴 Live' : '📂 Playback'}
+          <h2 style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}><BarChart3 size={20} /> Data Logging</h2>
+          <span className={`mode-badge ${viewMode}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+            {viewMode === 'live' ? <><Circle size={12} fill="currentColor" /> Live</> : <><FolderOpen size={12} /> Playback</>}
           </span>
           {loadedFileName && (
             <span className="loaded-file" title={loadedFileName}>
@@ -602,8 +603,8 @@ export const DataLogView: React.FC = () => {
                   disabled={isRecording}
                   title="Auto-start/stop recording on key-on/off"
                 />
-                <span className={`toggle-label ${autoRecordEnabled ? 'active' : ''} ${keyState}`}>
-                  🔑 Auto {autoRecordEnabled && `[${keyState}]`}
+                <span className={`toggle-label ${autoRecordEnabled ? 'active' : ''} ${keyState}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                  <Key size={12} /> Auto {autoRecordEnabled && `[${keyState}]`}
                 </span>
               </label>
               
@@ -611,7 +612,7 @@ export const DataLogView: React.FC = () => {
                 className={`log-button ${isRecording ? 'stop' : 'start'}`}
                 onClick={isRecording ? handleStopLogging : handleStartLogging}
               >
-                {isRecording ? '⏹ Stop' : '⏺ Record'}
+                {isRecording ? <><Square size={14} fill="currentColor" /> Stop</> : <><CircleDot size={14} /> Record</>}
               </button>
               
               <button 
@@ -619,7 +620,7 @@ export const DataLogView: React.FC = () => {
                 onClick={handleClearLog}
                 disabled={isRecording}
               >
-                🗑️ Clear
+                <Trash2 size={14} /> Clear
               </button>
               
               <button 
@@ -627,7 +628,7 @@ export const DataLogView: React.FC = () => {
                 onClick={handleSaveLog}
                 disabled={isRecording || logData.length === 0}
               >
-                💾 Save
+                <Save size={14} /> Save
               </button>
               
               <button 
@@ -635,7 +636,7 @@ export const DataLogView: React.FC = () => {
                 onClick={handleLoadLog}
                 disabled={isRecording}
               >
-                📂 Load
+                <FolderOpen size={14} /> Load
               </button>
             </>
           ) : (
@@ -644,7 +645,7 @@ export const DataLogView: React.FC = () => {
                 className={`log-button ${isPlaying ? 'stop' : 'start'}`}
                 onClick={handlePlayPause}
               >
-                {isPlaying ? '⏸ Pause' : '▶ Play'}
+                {isPlaying ? <><Pause size={14} fill="currentColor" /> Pause</> : <><Play size={14} fill="currentColor" /> Play</>}
               </button>
               
               <div className="control-group">
@@ -665,14 +666,14 @@ export const DataLogView: React.FC = () => {
                 className="log-button secondary"
                 onClick={handleLoadLog}
               >
-                📂 Load Another
+                <FolderOpen size={14} /> Load Another
               </button>
               
               <button 
                 className="log-button secondary"
                 onClick={handleBackToLive}
               >
-                🔴 Back to Live
+                <Circle size={14} fill="currentColor" /> Back to Live
               </button>
             </>
           )}
@@ -702,8 +703,8 @@ export const DataLogView: React.FC = () => {
       
       {status && (
         <div className="log-status">
-          <span className={`status-indicator ${isRecording ? 'recording' : viewMode === 'playback' ? 'playback' : 'stopped'}`}>
-            {isRecording ? '🔴 Recording' : viewMode === 'playback' ? '📂 Loaded' : '⏸ Stopped'}
+          <span className={`status-indicator ${isRecording ? 'recording' : viewMode === 'playback' ? 'playback' : 'stopped'}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+            {isRecording ? <><Circle size={12} fill="currentColor" /> Recording</> : viewMode === 'playback' ? <><FolderOpen size={12} /> Loaded</> : <><Pause size={12} /> Stopped</>}
           </span>
           <span className="status-stat">{status.entry_count.toLocaleString()} samples</span>
           <span className="status-stat">{formatDuration(status.duration_ms)}</span>
@@ -771,7 +772,7 @@ export const DataLogView: React.FC = () => {
           onClick={() => setShowStats(!showStats)}
           title="Toggle statistics panel"
         >
-          📊 {showStats ? 'Hide' : 'Show'} Stats
+          <BarChart3 size={14} /> {showStats ? 'Hide' : 'Show'} Stats
         </button>
       </div>
     </div>

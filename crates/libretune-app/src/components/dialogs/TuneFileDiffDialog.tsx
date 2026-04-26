@@ -6,7 +6,7 @@
  */
 import { useState, useEffect, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { GitCompare, FolderOpen, GitMerge } from 'lucide-react';
+import { GitCompare, FolderOpen, GitMerge, Check, X } from 'lucide-react';
 import { Dialog, Button } from '../common';
 import './TuneFileDiffDialog.css';
 
@@ -262,8 +262,8 @@ export default function TuneFileDiffDialog({ isOpen, onClose, currentTunePath }:
             <div className="tune-diff-summary">
               <div className="tune-diff-stat">
                 <span className="stat-label">Signature Match</span>
-                <span className={`stat-value ${diff.signature_match ? 'match' : 'mismatch'}`}>
-                  {diff.signature_match ? '✓ Yes' : '✗ No'}
+                <span className={`stat-value ${diff.signature_match ? 'match' : 'mismatch'}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                  {diff.signature_match ? <><Check size={14} /> Yes</> : <><X size={14} /> No</>}
                 </span>
               </div>
               <div className="tune-diff-stat">

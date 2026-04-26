@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useCallback, ReactNode, useRef } from 'react';
+import { CheckCircle2, AlertTriangle, XCircle, Info } from 'lucide-react';
 import './ToastContext.css';
 
 export type ToastType = 'success' | 'warning' | 'error' | 'info';
@@ -75,17 +76,17 @@ function ToastContainer({ toasts, onDismiss }: ToastContainerProps) {
   );
 }
 
-function getToastIcon(type: ToastType): string {
+function getToastIcon(type: ToastType) {
   switch (type) {
     case 'success':
-      return '✓';
+      return <CheckCircle2 size={18} />;
     case 'warning':
-      return '⚠';
+      return <AlertTriangle size={18} />;
     case 'error':
-      return '✕';
+      return <XCircle size={18} />;
     case 'info':
     default:
-      return 'ℹ';
+      return <Info size={18} />;
   }
 }
 

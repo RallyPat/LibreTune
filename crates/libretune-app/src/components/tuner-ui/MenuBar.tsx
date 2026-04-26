@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback, KeyboardEvent } from 'react';
+import { Check } from 'lucide-react';
 import { MenuItem } from './TunerLayout';
 import './MenuBar.css';
 
@@ -300,7 +301,7 @@ function MenuDropdown({ items, onClose, level = 0 }: MenuDropdownProps) {
               aria-expanded={isOpen}
             >
               <span className="menu-item-check">
-                {item.checked && '✓'}
+                {item.checked && <Check size={12} />}
               </span>
               <span className="menu-item-label">
                 {parsed.before}

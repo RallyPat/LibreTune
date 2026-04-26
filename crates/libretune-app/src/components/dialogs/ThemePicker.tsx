@@ -1,3 +1,4 @@
+import { Check } from 'lucide-react';
 import { THEME_INFO, ThemeName } from '../../themes';
 import './ThemePicker.css';
 
@@ -34,7 +35,7 @@ export default function ThemePicker({ selectedTheme, onChange }: ThemePickerProp
           </div>
           <div className="theme-name">{theme.label}</div>
           {selectedTheme === themeKey && (
-            <div className="theme-checkmark">✓</div>
+            <div className="theme-checkmark"><Check size={14} /></div>
           )}
         </button>
       ))}

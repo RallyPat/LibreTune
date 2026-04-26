@@ -7,7 +7,7 @@
 
 import { useState, useEffect, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { GitCompare, ArrowRight, ArrowLeft } from "lucide-react";
+import { GitCompare, ArrowRight, ArrowLeft, Check } from "lucide-react";
 import { Dialog, Button } from "../common";
 import "./TableComparisonDialog.css";
 
@@ -209,8 +209,8 @@ export default function TableComparisonDialog({ isOpen, onClose }: Props) {
               </div>
 
               {result.cells_changed === 0 ? (
-                <div className="no-differences">
-                  ✓ Tables are identical
+                <div className="no-differences" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                  <Check size={14} /> Tables are identical
                 </div>
               ) : (
                 <div className="diff-groups">

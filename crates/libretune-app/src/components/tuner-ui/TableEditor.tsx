@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef, useEffect, KeyboardEvent, useMemo } from 'react';
+import { Copy, Clipboard, Undo2, Redo2, Flame, Crosshair, Box, Check } from 'lucide-react';
 import { useChannels } from '../../stores/realtimeStore';
 import { useHeatmapSettings } from '../../utils/useHeatmapSettings';
 import './TableEditor.css';
@@ -1077,16 +1078,18 @@ function TableToolbar({
           onClick={onCopy}
           disabled={!hasSelection}
           title="Copy (Ctrl+C)"
+          aria-label="Copy"
         >
-          📋
+          <Copy size={14} />
         </button>
         <button
           className="table-toolbar-btn"
           onClick={onPaste}
           disabled={!hasClipboard}
           title="Paste (Ctrl+V)"
+          aria-label="Paste"
         >
-          📄
+          <Clipboard size={14} />
         </button>
       </div>
 
@@ -1098,16 +1101,18 @@ function TableToolbar({
           onClick={onUndo}
           disabled={!canUndo}
           title="Undo (Ctrl+Z)"
+          aria-label="Undo"
         >
-          ↩
+          <Undo2 size={14} />
         </button>
         <button
           className="table-toolbar-btn"
           onClick={onRedo}
           disabled={!canRedo}
           title="Redo (Ctrl+Y)"
+          aria-label="Redo"
         >
-          ↪
+          <Redo2 size={14} />
         </button>
       </div>
 
@@ -1119,7 +1124,7 @@ function TableToolbar({
             onClick={onBurn}
             title="Burn to ECU"
           >
-            🔥 Burn
+            <Flame size={14} /> Burn
           </button>
         </>
       )}
@@ -1132,7 +1137,7 @@ function TableToolbar({
         disabled={!hasOutputChannels}
         title={hasOutputChannels ? `Follow Mode (F) - ${followMode ? 'ON' : 'OFF'}` : 'Follow Mode unavailable (no output channels defined)'}
       >
-        🎯 Follow
+        <Crosshair size={14} /> Follow
       </button>
       
       <button
@@ -1140,7 +1145,7 @@ function TableToolbar({
         onClick={onToggle3D}
         title={`3D View - ${show3D ? 'ON' : 'OFF'}`}
       >
-        🧊 3D
+        <Box size={14} /> 3D
       </button>
     </div>
   );
@@ -1273,7 +1278,7 @@ function TableContextMenu({
       <div className="context-menu-separator" />
       
       <button className="context-menu-item" onClick={onToggleHeatmap}>
-        {heatmapEnabled ? '✓ ' : ''}Cell Color By Value
+        {heatmapEnabled && <Check size={12} style={{ marginRight: 4 }} />}Cell Color By Value
       </button>
     </div>
   );

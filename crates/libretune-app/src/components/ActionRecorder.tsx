@@ -1,4 +1,5 @@
 import React, { useState, useCallback } from 'react';
+import { Circle, Square, FolderOpen, Save, Play, Hourglass, X } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import './ActionRecorder.css';
 
@@ -143,7 +144,7 @@ return new_afr`;
       <div className="action-recorder-dialog" onClick={(e) => e.stopPropagation()}>
         <div className="action-recorder-header">
           <h2>Action Recorder</h2>
-          <button className="close-btn" onClick={onClose}>✕</button>
+          <button className="close-btn" onClick={onClose} aria-label="Close"><X size={16} /></button>
         </div>
 
         <div className="action-recorder-content">
@@ -180,7 +181,7 @@ return new_afr`;
                   onClick={handleStartRecording}
                   disabled={!recordingName.trim()}
                 >
-                  🔴 Start Recording
+                  <Circle size={14} fill="currentColor" /> Start Recording
                 </button>
               </>
             ) : (
@@ -193,7 +194,7 @@ return new_afr`;
                   className="btn btn-danger"
                   onClick={handleStopRecording}
                 >
-                  ⏹ Stop Recording
+                  <Square size={14} fill="currentColor" /> Stop Recording
                 </button>
               </>
             )}
@@ -229,12 +230,12 @@ return new_afr`;
 
             <div className="button-group">
               <button className="btn btn-secondary" onClick={handleImportActionSet}>
-                📁 Import .ltaction
+                <FolderOpen size={14} /> Import .ltaction
               </button>
               {selectedSet && (
                 <>
                   <button className="btn btn-secondary" onClick={() => handleExportActionSet(selectedSet)}>
-                    💾 Export
+                    <Save size={14} /> Export
                   </button>
                   <button
                     className="btn btn-secondary"
@@ -247,7 +248,7 @@ return new_afr`;
                     onClick={() => handlePlayAction(selectedSet)}
                     disabled={isPlaying}
                   >
-                    {isPlaying ? '⏳ Playing...' : '▶ Play'}
+                    {isPlaying ? <><Hourglass size={14} /> Playing...</> : <><Play size={14} /> Play</>}
                   </button>
                 </>
               )}

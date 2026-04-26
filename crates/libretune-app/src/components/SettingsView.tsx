@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { Gamepad2, AlertTriangle } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { useTheme, ThemeName, THEME_INFO } from "../themes";
 import { useToast } from "./ToastContext";
@@ -58,8 +59,8 @@ export function SettingsView() {
         borderRadius: 8 
       }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-          <label style={{ fontWeight: 600, fontSize: 14 }}>
-            🎮 Demo Mode (Simulated ECU)
+          <label style={{ fontWeight: 600, fontSize: 14, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            <Gamepad2 size={16} aria-hidden /> Demo Mode (Simulated ECU)
           </label>
           <button
             onClick={handleDemoToggle}
@@ -81,11 +82,15 @@ export function SettingsView() {
           color: demoMode ? '#ffb74d' : 'var(--text-muted)', 
           fontSize: 12, 
           margin: 0,
-          lineHeight: 1.5
+          lineHeight: 1.5,
+          display: 'flex',
+          alignItems: 'flex-start',
+          gap: 6,
         }}>
-          ⚠️ This generates <strong>fake sensor data</strong> for UI testing. 
+          <AlertTriangle size={14} aria-hidden style={{ flexShrink: 0, marginTop: 2 }} />
+          <span>This generates <strong>fake sensor data</strong> for UI testing. 
           You are <strong>NOT connected to a real ECU</strong>. 
-          The simulated engine idles at ~850 RPM with occasional throttle blips.
+          The simulated engine idles at ~850 RPM with occasional throttle blips.</span>
         </p>
       </div>
 

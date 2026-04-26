@@ -7,7 +7,7 @@
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { ArrowLeft, Save, Zap, Undo2, Redo2 } from 'lucide-react';
+import { ArrowLeft, Save, Zap, Undo2, Redo2, AlertTriangle } from 'lucide-react';
 import TsGauge from '../gauges/TsGauge';
 import { TsGaugeConfig } from '../dashboards/dashTypes';
 import { valueToHeatmapColor } from '../../utils/heatmapColors';
@@ -619,7 +619,9 @@ export default function CurveEditor({
 
     return (
       <div className="curve-editor curve-error-state" style={{ padding: '20px', textAlign: 'center' }}>
-        <h3 style={{ color: 'var(--error)', marginBottom: '8px' }}>⚠️ Curve Data Error</h3>
+        <h3 style={{ color: 'var(--error)', marginBottom: '8px', display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+          <AlertTriangle size={20} aria-hidden /> Curve Data Error
+        </h3>
         <p style={{ color: 'var(--text-muted)', marginBottom: '12px' }}>{errorInfo.summary}</p>
         <details style={{ textAlign: 'left', background: 'rgba(0,0,0,0.2)', padding: '12px', borderRadius: '6px', marginBottom: '12px' }}>
           <summary style={{ cursor: 'pointer', color: 'var(--text-muted)' }}>Diagnostic Details</summary>
@@ -630,8 +632,8 @@ Suggestion: {errorInfo.suggestion}
           </pre>
         </details>
         {onBack && (
-          <button onClick={onBack} style={{ marginTop: '8px' }} className="btn btn-secondary">
-            ← Go Back
+          <button onClick={onBack} style={{ marginTop: '8px', display: 'inline-flex', alignItems: 'center', gap: 6 }} className="btn btn-secondary">
+            <ArrowLeft size={14} /> Go Back
           </button>
         )}
       </div>

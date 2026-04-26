@@ -1,4 +1,19 @@
 import { useState, useRef, useEffect } from 'react';
+import {
+  ChevronUp,
+  ChevronDown,
+  Activity,
+  MoveHorizontal,
+  MoveVertical,
+  Waves,
+  ArrowRight,
+  ArrowDown,
+  Copy,
+  Clipboard,
+  Lock,
+  LockOpen,
+  Palette,
+} from 'lucide-react';
 
 interface TableContextProps {
   x: number;
@@ -162,12 +177,12 @@ export default function TableContextMenu({
       {/* Nudge Tools */}
       <div className="context-menu-section">
         <div className="context-menu-item" onClick={() => { onNudge(true, false); onClose(); }}>
-          <span className="icon">▲</span>
+          <span className="icon"><ChevronUp size={14} /></span>
           <span>Increase Value</span>
           <span className="shortcut">+</span>
         </div>
         <div className="context-menu-item" onClick={() => { onNudge(false, false); onClose(); }}>
-          <span className="icon">▼</span>
+          <span className="icon"><ChevronDown size={14} /></span>
           <span>Decrease Value</span>
           <span className="shortcut">-</span>
         </div>
@@ -178,20 +193,20 @@ export default function TableContextMenu({
       {/* Interpolation Tools */}
       <div className="context-menu-section">
         <div className="context-menu-item" onClick={() => { onInterpolate(); onClose(); }}>
-          <span className="icon">∿</span>
+          <span className="icon"><Activity size={14} /></span>
           <span>Interpolate (Linear)</span>
           <span className="shortcut">L</span>
         </div>
         <div className="context-menu-item" onClick={() => { onInterpolateLinear('row'); onClose(); }}>
-          <span className="icon">↔</span>
+          <span className="icon"><MoveHorizontal size={14} /></span>
           <span>Interpolate Horizontal</span>
         </div>
         <div className="context-menu-item" onClick={() => { onInterpolateLinear('col'); onClose(); }}>
-          <span className="icon">↕</span>
+          <span className="icon"><MoveVertical size={14} /></span>
           <span>Interpolate Vertical</span>
         </div>
         <div className="context-menu-item" onClick={() => { onSmooth(); onClose(); }}>
-          <span className="icon">≈</span>
+          <span className="icon"><Waves size={14} /></span>
           <span>Smooth Selection</span>
           <span className="shortcut">S</span>
         </div>
@@ -202,11 +217,11 @@ export default function TableContextMenu({
       {/* Fill Tools */}
       <div className="context-menu-section">
         <div className="context-menu-item" onClick={() => { onFill('right'); onClose(); }}>
-          <span className="icon">→</span>
+          <span className="icon"><ArrowRight size={14} /></span>
           <span>Fill Row Right</span>
         </div>
         <div className="context-menu-item" onClick={() => { onFill('down'); onClose(); }}>
-          <span className="icon">↓</span>
+          <span className="icon"><ArrowDown size={14} /></span>
           <span>Fill Col Down</span>
         </div>
       </div>
@@ -216,22 +231,22 @@ export default function TableContextMenu({
       {/* Clipboard / State */}
       <div className="context-menu-section">
         <div className="context-menu-item" onClick={() => { onCopy?.(); onClose(); }}>
-          <span className="icon">📋</span>
+          <span className="icon"><Copy size={14} /></span>
           <span>Copy</span>
           <span className="shortcut">Ctrl+C</span>
         </div>
         <div className="context-menu-item" onClick={() => { onPaste?.(); onClose(); }}>
-          <span className="icon">📌</span>
+          <span className="icon"><Clipboard size={14} /></span>
           <span>Paste</span>
           <span className="shortcut">Ctrl+V</span>
         </div>
         <div className="context-menu-item" onClick={() => { if (isLocked) onUnlock(); else onLock(); onClose(); }}>
-          <span className="icon">{isLocked ? '🔓' : '🔒'}</span>
+          <span className="icon">{isLocked ? <LockOpen size={14} /> : <Lock size={14} />}</span>
           <span>{isLocked ? 'Unlock Cells' : 'Lock Cells'}</span>
         </div>
         {onToggleHeatmap && (
           <div className="context-menu-item" onClick={() => { onToggleHeatmap(); onClose(); }}>
-            <span className="icon">🎨</span>
+            <span className="icon"><Palette size={14} /></span>
             <span>Toggle Heatmap</span>
           </div>
         )}

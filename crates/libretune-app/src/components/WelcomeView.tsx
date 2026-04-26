@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Check, FolderPlus, Plug, Download, X } from "lucide-react";
 import "./WelcomeView.css";
 
 interface ProjectInfo {
@@ -46,17 +47,17 @@ export default function WelcomeView({
 
       <div className="welcome-actions">
         <button className="welcome-action-btn primary" onClick={onNewProject}>
-          <span className="action-icon">📁</span>
+          <span className="action-icon"><FolderPlus size={32} /></span>
           <span className="action-label">New Project</span>
           <span className="action-desc">Create a new tuning project</span>
         </button>
         <button className="welcome-action-btn" onClick={onConnect}>
-          <span className="action-icon">🔌</span>
+          <span className="action-icon"><Plug size={32} /></span>
           <span className="action-label">Connect to ECU</span>
           <span className="action-desc">Connect via serial port</span>
         </button>
         <button className="welcome-action-btn" onClick={onImportTsProject}>
-          <span className="action-icon">📥</span>
+          <span className="action-icon"><Download size={32} /></span>
           <span className="action-label">Import TS Project</span>
           <span className="action-desc">Import from TunerStudio</span>
         </button>
@@ -84,7 +85,11 @@ export default function WelcomeView({
                   onClick={(e) => handleDelete(e, project.name)}
                   title={confirmDelete === project.name ? "Click again to confirm" : "Delete project"}
                 >
-                  {confirmDelete === project.name ? "✓ Confirm" : "✕"}
+                  {confirmDelete === project.name ? (
+                    <><Check size={14} /> Confirm</>
+                  ) : (
+                    <X size={14} />
+                  )}
                 </button>
               </div>
             ))}

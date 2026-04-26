@@ -1,4 +1,5 @@
 import { Component, ErrorInfo, ReactNode } from 'react';
+import { AlertTriangle } from 'lucide-react';
 
 interface Props {
   children: ReactNode;
@@ -62,8 +63,8 @@ class ErrorBoundary extends Component<Props, State> {
           borderRadius: '8px',
           color: '#e0e0e0',
         }}>
-          <h3 style={{ color: '#ff6b6b', marginTop: 0 }}>
-            ⚠️ Something went wrong
+          <h3 style={{ color: '#ff6b6b', marginTop: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <AlertTriangle size={20} aria-hidden /> Something went wrong
           </h3>
           <p style={{ color: '#b0b0b0' }}>
             An error occurred while rendering this component.

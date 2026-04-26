@@ -7,6 +7,7 @@
  */
 
 import React, { useState, useEffect, useRef, useCallback } from "react";
+import { Square, Play, Download, X } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import "./ToothLoggerView.css";
@@ -252,18 +253,18 @@ export const ToothLoggerView: React.FC<ToothLoggerViewProps> = ({ onClose }) => 
             className={`capture-btn ${isCapturing ? "capturing" : ""}`}
             onClick={isCapturing ? handleStop : handleCapture}
           >
-            {isCapturing ? "⏹ Stop" : "▶ Capture"}
+            {isCapturing ? <><Square size={14} fill="currentColor" /> Stop</> : <><Play size={14} fill="currentColor" /> Capture</>}
           </button>
           <button
             className="export-btn"
             onClick={handleExport}
             disabled={logData.length === 0}
           >
-            📥 Export CSV
+            <Download size={14} /> Export CSV
           </button>
           {onClose && (
-            <button className="close-btn" onClick={onClose}>
-              ✕
+            <button className="close-btn" onClick={onClose} aria-label="Close">
+              <X size={14} />
             </button>
           )}
         </div>

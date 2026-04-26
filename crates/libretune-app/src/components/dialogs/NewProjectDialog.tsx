@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
+import { FolderOpen, Wrench } from "lucide-react";
 import { Dialog, Button } from "../common";
 import "./NewProjectDialog.css";
 
@@ -200,7 +201,7 @@ export default function NewProjectDialog({
 
             <div className="tune-choice-cards">
               <button className="tune-choice-card" onClick={handleImportTune}>
-                <span className="choice-icon">📂</span>
+                <span className="choice-icon"><FolderOpen size={32} /></span>
                 <span className="choice-label">Import Existing Tune</span>
                 <span className="choice-desc">
                   Load an existing .msq or .xml tune file into this project
@@ -208,7 +209,7 @@ export default function NewProjectDialog({
               </button>
 
               <button className="tune-choice-card" onClick={handleGenerateBaseMap}>
-                <span className="choice-icon">🔧</span>
+                <span className="choice-icon"><Wrench size={32} /></span>
                 <span className="choice-label">Generate Base Map</span>
                 <span className="choice-desc">
                   Create a safe starting tune from your engine specifications

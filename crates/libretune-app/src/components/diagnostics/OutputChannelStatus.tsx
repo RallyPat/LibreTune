@@ -12,6 +12,7 @@
  */
 
 import { useEffect, useState, useCallback, useRef } from "react";
+import { AlertTriangle } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
 import "./OutputChannelStatus.css";
@@ -161,7 +162,7 @@ export function OutputChannelStatus() {
     return (
       <div className="och-status">
         <div className="och-status-error">
-          <span className="och-error-icon">⚠</span>
+          <span className="och-error-icon"><AlertTriangle size={14} /></span>
           <span>{error}</span>
         </div>
       </div>

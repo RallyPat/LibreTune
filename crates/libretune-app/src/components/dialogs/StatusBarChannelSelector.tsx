@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { RotateCcw, ChevronUp, ChevronDown, X, Plus, Lightbulb } from 'lucide-react';
 import './StatusBarChannelSelector.css';
 
 interface ChannelInfo {
@@ -129,7 +130,7 @@ export default function StatusBarChannelSelector({
             onClick={handleResetToDefaults}
             title="Reset to default channels"
           >
-            🔄 Reset to Defaults
+            <RotateCcw size={14} /> Reset to Defaults
           </button>
         </div>
 
@@ -165,7 +166,7 @@ export default function StatusBarChannelSelector({
                       title="Move up"
                       aria-label={`Move ${ch?.name} up`}
                     >
-                      ▲
+                      <ChevronUp size={14} />
                     </button>
                     <button
                       className="arrow-btn"
@@ -174,7 +175,7 @@ export default function StatusBarChannelSelector({
                       title="Move down"
                       aria-label={`Move ${ch?.name} down`}
                     >
-                      ▼
+                      <ChevronDown size={14} />
                     </button>
                     <button
                       className="remove-btn"
@@ -182,7 +183,7 @@ export default function StatusBarChannelSelector({
                       title="Remove channel"
                       aria-label={`Remove ${ch?.name}`}
                     >
-                      ✕
+                      <X size={14} />
                     </button>
                   </div>
                 </div>
@@ -228,7 +229,7 @@ export default function StatusBarChannelSelector({
                     title="Add channel"
                     aria-label={`Add ${ch.name}`}
                   >
-                    ＋
+                    <Plus size={14} />
                   </button>
                 </div>
               ))}
@@ -239,9 +240,10 @@ export default function StatusBarChannelSelector({
 
       {/* Info Box */}
       <div className="info-box">
-        <p>
-          💡 <strong>Tip:</strong> The status bar shows {Math.floor(12 / 1.5)} channels by default. 
-          More channels may require pagination when connected to ECU.
+        <p style={{ display: 'flex', alignItems: 'flex-start', gap: 6 }}>
+          <Lightbulb size={14} aria-hidden style={{ flexShrink: 0, marginTop: 2 }} />
+          <span><strong>Tip:</strong> The status bar shows {Math.floor(12 / 1.5)} channels by default. 
+          More channels may require pagination when connected to ECU.</span>
         </p>
       </div>
     </div>

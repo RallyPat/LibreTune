@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { AlertTriangle, Check, FileText, Flame, Wrench, RotateCw } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { open, save } from '@tauri-apps/plugin-dialog';
 import { openUrl } from '@tauri-apps/plugin-opener';
@@ -143,7 +144,9 @@ export function SaveDialog({ isOpen, onClose, onSaved, autoBurnOnClose }: SaveDi
               <p><strong>Current File:</strong> {tuneInfo.path.split('/').pop()}</p>
             )}
             {tuneInfo?.modified && (
-              <p className="dialog-warning">⚠ Tune has unsaved changes</p>
+              <p className="dialog-warning" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                <AlertTriangle size={14} /> Tune has unsaved changes
+              </p>
             )}
           </div>
 
@@ -175,7 +178,9 @@ export function SaveDialog({ isOpen, onClose, onSaved, autoBurnOnClose }: SaveDi
         >
           <Dialog.Body>
             <p>Tune saved successfully. Would you like to burn it to the ECU now?</p>
-            <p className="dialog-warning">⚠ This will write to ECU memory and may take several seconds.</p>
+            <p className="dialog-warning" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              <AlertTriangle size={14} /> This will write to ECU memory and may take several seconds.
+            </p>
           </Dialog.Body>
           <Dialog.Footer>
             <Button variant="secondary" onClick={handleBurnCancel}>Cancel</Button>
@@ -272,7 +277,7 @@ export function LoadDialog({ isOpen, onClose, onLoaded }: LoadDialogProps) {
                   onClick={() => setSelectedFile(file)}
                   onDoubleClick={() => handleLoad(file)}
                 >
-                  <span className="dialog-file-icon">📄</span>
+                  <span className="dialog-file-icon"><FileText size={14} /></span>
                   <div className="dialog-file-info">
                     <span className="dialog-file-name">{file.split('/').pop()}</span>
                     <span className="dialog-file-path">{file}</span>
@@ -338,11 +343,11 @@ export function BurnDialog({ isOpen, onClose, connected, onBurned }: BurnDialogP
     >
       <Dialog.Body>
         {error && <div className="dialog-error">{error}</div>}
-        {success && <div className="dialog-success">✓ Burn completed successfully!</div>}
+        {success && <div className="dialog-success" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Check size={14} /> Burn completed successfully!</div>}
 
         {!connected ? (
-          <div className="dialog-warning">
-            ⚠ Not connected to ECU. Please connect first.
+          <div className="dialog-warning" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            <AlertTriangle size={14} /> Not connected to ECU. Please connect first.
           </div>
         ) : (
           <div className="dialog-info">
@@ -360,7 +365,7 @@ export function BurnDialog({ isOpen, onClose, connected, onBurned }: BurnDialogP
           onClick={handleBurn}
           disabled={isBurning || !connected}
         >
-          {isBurning ? 'Burning...' : '🔥 Burn to ECU'}
+          {isBurning ? 'Burning...' : <><Flame size={14} /> Burn to ECU</>}
         </Button>
       </Dialog.Footer>
     </Dialog>
@@ -1395,7 +1400,7 @@ export function AboutDialog({ isOpen, onClose }: DialogProps) {
       size="sm"
     >
       <Dialog.Body className="dialog-about">
-        <div className="dialog-about-logo">🔧</div>
+        <div className="dialog-about-logo"><Wrench size={48} /></div>
         <h3>LibreTune</h3>
         <p className="dialog-version">
           Version {buildInfo?.version ?? 'unknown'}
@@ -1565,7 +1570,7 @@ export function ConnectionDialog({
                     )}
                   </select>
                   <button onClick={onRefreshPorts} disabled={connected}>
-                    🔄 Refresh
+                    <RotateCw size={14} /> Refresh
                   </button>
                 </div>
               </div>

@@ -6,6 +6,7 @@
  */
 
 import { useState, useEffect } from "react";
+import { Package, Plus, Save } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import "./TuneHistoryPanel.css";
 
@@ -183,7 +184,7 @@ export function TuneHistoryPanel({ isOpen, onClose }: TuneHistoryPanelProps) {
           <div className="tune-history-loading">Loading...</div>
         ) : !hasRepo ? (
           <div className="tune-history-init">
-            <div className="init-icon">📦</div>
+            <div className="init-icon"><Package size={48} aria-hidden /></div>
             <h3>Enable Version Control</h3>
             <p>Track changes to your tune over time with git-based versioning.</p>
             <button className="primary-btn" onClick={initRepo}>
@@ -209,15 +210,17 @@ export function TuneHistoryPanel({ isOpen, onClose }: TuneHistoryPanelProps) {
                 className="icon-btn" 
                 onClick={() => setShowBranchDialog(true)}
                 title="New Branch"
+                aria-label="New Branch"
               >
-                ➕
+                <Plus size={16} />
               </button>
               <button 
                 className="icon-btn" 
                 onClick={handleCommit}
                 title="Create Checkpoint"
+                aria-label="Create Checkpoint"
               >
-                💾
+                <Save size={16} />
               </button>
             </div>
 

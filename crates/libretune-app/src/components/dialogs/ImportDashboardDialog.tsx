@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
+import { Loader2, AlertTriangle, Check, CheckCircle2, XCircle, FolderOpen } from 'lucide-react';
 import { Dialog, Button } from '../common';
 import './ImportDashboardDialog.css';
 
@@ -280,7 +281,7 @@ export const ImportDashboardDialog: React.FC<ImportDashboardDialogProps> = ({
           {/* File selection area */}
           <div className="file-selection-area">
             <button className="select-files-btn" onClick={handleSelectFiles}>
-              <span className="icon">📁</span>
+              <span className="icon"><FolderOpen size={16} /></span>
               Select Dashboard Files
             </button>
             <span className="hint">.dash and .xml files supported</span>
@@ -308,13 +309,11 @@ export const ImportDashboardDialog: React.FC<ImportDashboardDialogProps> = ({
                   <div key={file.sourcePath} className={`file-entry status-${file.status}`}>
                     <div className="file-info">
                       <span className="status-icon">
-                        {file.status === 'checking' && '⏳'}
-                        {file.status === 'pending' && '⏳'}
-                        {file.status === 'conflict' && '⚠️'}
-                        {file.status === 'ready' && '✓'}
-                        {file.status === 'importing' && '⏳'}
-                        {file.status === 'success' && '✅'}
-                        {file.status === 'error' && '❌'}
+                        {(file.status === 'checking' || file.status === 'pending' || file.status === 'importing') && <Loader2 size={14} className="spinning" />}
+                        {file.status === 'conflict' && <AlertTriangle size={14} />}
+                        {file.status === 'ready' && <Check size={14} />}
+                        {file.status === 'success' && <CheckCircle2 size={14} />}
+                        {file.status === 'error' && <XCircle size={14} />}
                       </span>
                       <span className="file-name" title={file.sourcePath}>
                         {file.fileName}
@@ -382,13 +381,13 @@ export const ImportDashboardDialog: React.FC<ImportDashboardDialogProps> = ({
       <Dialog.Footer className="import-dashboard-footer">
         <div className="status-summary">
           {successCount > 0 && (
-            <span className="success-count">✅ {successCount} imported</span>
+            <span className="success-count"><CheckCircle2 size={14} /> {successCount} imported</span>
           )}
           {readyCount > 0 && (
-            <span className="ready-count">✓ {readyCount} ready</span>
+            <span className="ready-count"><Check size={14} /> {readyCount} ready</span>
           )}
           {conflictCount > 0 && (
-            <span className="conflict-count">⚠️ {conflictCount} conflicts</span>
+            <span className="conflict-count"><AlertTriangle size={14} /> {conflictCount} conflicts</span>
           )}
         </div>
         <div className="footer-buttons">

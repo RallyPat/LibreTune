@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useLayoutEffect, useRef, memo, useMemo } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { ArrowLeft, Activity, Grid3X3, HelpCircle } from 'lucide-react';
+import { ArrowLeft, Activity, Grid3X3, HelpCircle, AlertTriangle } from 'lucide-react';
 import CurveEditor, { SimpleGaugeInfo } from '../curves/CurveEditor';
 import TableEditor2D from '../tables/TableEditor2D';
 import './DialogRenderer.css';
@@ -709,7 +709,9 @@ function CommandButton({ comp, context }: { comp: DialogComponent; context: Reco
       {showWarning && (
         <div className="command-warning-overlay" onClick={() => setShowWarning(false)}>
           <div className="command-warning-dialog" onClick={(e) => e.stopPropagation()}>
-            <h3>⚠️ Controller Command Warning</h3>
+            <h3 style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+              <AlertTriangle size={20} aria-hidden /> Controller Command Warning
+            </h3>
             <p>
               This button sends raw commands directly to the ECU.
               These commands bypass normal memory synchronization and may:
@@ -1037,7 +1039,7 @@ const RecursivePanel = memo(function RecursivePanel({
   // Unknown panel type - show error feedback so users can report missing panels
   return (
     <div className="panel-load-error">
-      <span className="panel-error-icon">⚠</span>
+      <span className="panel-error-icon"><AlertTriangle size={16} /></span>
       <span>Panel "{name}" could not be loaded</span>
     </div>
   );

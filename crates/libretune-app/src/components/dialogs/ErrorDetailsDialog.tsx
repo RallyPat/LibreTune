@@ -1,4 +1,5 @@
 import { useState, useCallback } from 'react';
+import { AlertTriangle, Check, Clipboard } from 'lucide-react';
 import { Dialog, Button } from '../common';
 import './ErrorDetailsDialog.css';
 
@@ -42,7 +43,7 @@ UserAgent: ${navigator.userAgent}
 
   const titleNode = (
     <>
-      <span className="error-icon" aria-hidden="true">⚠</span>
+      <span className="error-icon" aria-hidden="true"><AlertTriangle size={18} /></span>
       {title}
     </>
   );
@@ -68,7 +69,7 @@ UserAgent: ${navigator.userAgent}
                 onClick={handleCopy}
                 title="Copy error details for bug report"
               >
-                {copied ? '✓ Copied!' : '📋 Copy for Bug Report'}
+                {copied ? <><Check size={14} /> Copied!</> : <><Clipboard size={14} /> Copy for Bug Report</>}
               </button>
             </div>
             <pre className="error-details-content">{details}</pre>

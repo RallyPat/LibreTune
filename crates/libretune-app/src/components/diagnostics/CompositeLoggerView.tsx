@@ -7,6 +7,7 @@
  */
 
 import React, { useState, useEffect, useRef, useCallback } from "react";
+import { Square, Play, Download, X, Check, XCircle } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import "./CompositeLoggerView.css";
@@ -312,7 +313,7 @@ export const CompositeLoggerView: React.FC<CompositeLoggerViewProps> = ({ onClos
             className={`capture-btn ${isCapturing ? "capturing" : ""}`}
             onClick={isCapturing ? handleStop : handleCapture}
           >
-            {isCapturing ? "⏹ Stop" : "▶ Capture"}
+            {isCapturing ? <><Square size={14} fill="currentColor" /> Stop</> : <><Play size={14} fill="currentColor" /> Capture</>}
           </button>
           <div className="zoom-controls">
             <label>Zoom:</label>
@@ -331,11 +332,11 @@ export const CompositeLoggerView: React.FC<CompositeLoggerViewProps> = ({ onClos
             onClick={handleExport}
             disabled={logData.length === 0}
           >
-            📥 Export
+            <Download size={14} /> Export
           </button>
           {onClose && (
-            <button className="close-btn" onClick={onClose}>
-              ✕
+            <button className="close-btn" onClick={onClose} aria-label="Close">
+              <X size={14} />
             </button>
           )}
         </div>
@@ -368,8 +369,8 @@ export const CompositeLoggerView: React.FC<CompositeLoggerViewProps> = ({ onClos
             </div>
             <div className="stat">
               <span className="stat-label">Sync Status:</span>
-              <span className={`stat-value ${stats.syncAcquired ? "sync-ok" : "sync-lost"}`}>
-                {stats.syncAcquired ? "✓ Acquired" : "✗ Not Acquired"}
+              <span className={`stat-value ${stats.syncAcquired ? "sync-ok" : "sync-lost"}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                {stats.syncAcquired ? <><Check size={14} /> Acquired</> : <><XCircle size={14} /> Not Acquired</>}
                 {stats.syncLostCount > 0 && ` (Lost ${stats.syncLostCount}x)`}
               </span>
             </div>

@@ -200,7 +200,7 @@ describe('App integration (toolbar connection-info)', () => {
 
     // Select port in dialog and click Connect
     // Refresh ports first (dialog shows 'No ports found' initially from global setup)
-    const refreshBtn = await screen.findByText('🔄 Refresh');
+    const refreshBtn = await screen.findByText(/Refresh/);
     refreshBtn.click();
 
     // Wait for the select to contain the refreshed port and choose it
@@ -268,7 +268,7 @@ describe('App integration (toolbar connection-info)', () => {
     expect(connectBtn).toBeTruthy();
     connectBtn.click();
 
-    const refreshBtn = await screen.findByText('🔄 Refresh');
+    const refreshBtn = await screen.findByText(/Refresh/);
     refreshBtn.click();
 
     await waitFor(() => {
