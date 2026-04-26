@@ -4,7 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { ThemeProvider, useTheme, ThemeName } from "./themes";
+import { ThemeProvider, useTheme } from "./themes";
 import { initializeHotkeyManager } from "./services/hotkeyService";
 import { useRealtimeStore } from "./stores/realtimeStore";
 import { LANGUAGE_STORAGE_KEY } from "./i18n/languages";
@@ -16,36 +16,16 @@ import {
   StatusItem,
   Tab,
   LoggingIndicator,
-  SaveDialog,
-  LoadDialog,
-  BurnDialog,
-  NewTuneDialog,
-  SettingsDialog,
-  AboutDialog,
-  ConnectionDialog,
 } from "./components/tuner-ui";
-import OnboardingDialog from './components/dialogs/OnboardingDialog';
 import { SimpleGaugeInfo } from "./components/curves/CurveEditor";
 import type { DialogDefinition as RendererDialogDef } from "./components/dialogs/DialogRenderer";
-import HelpViewer, { HelpTopicData } from "./components/dialogs/HelpViewer";
-import UserManualViewer from "./components/dialogs/UserManualViewer";
-import SignatureMismatchDialog, { SignatureMismatchInfo } from "./components/dialogs/SignatureMismatchDialog";
-import TuneMismatchDialog, { TuneMismatchInfo } from "./components/dialogs/TuneMismatchDialog";
-import TuneComparisonDialog from "./components/dialogs/TuneComparisonDialog";
-import TableComparisonDialog from "./components/dialogs/TableComparisonDialog";
-import PerformanceFieldsDialog from "./components/dialogs/PerformanceFieldsDialog";
-import RestorePointsDialog from "./components/dialogs/RestorePointsDialog";
-import ImportProjectWizard from "./components/dialogs/ImportProjectWizard";
-import MathChannelsDialog from "./components/dialogs/MathChannelsDialog";
-import MigrationReportDialog from "./components/dialogs/MigrationReportDialog";
-import TuneFileDiffDialog from "./components/dialogs/TuneFileDiffDialog";
-import DynoOverlay from "./components/tuner-ui/DynoOverlay";
-import NewProjectDialog from "./components/dialogs/NewProjectDialog";
-import BaseMapDialog, { BaseMapResult } from "./components/dialogs/BaseMapDialog";
-import TuneHistoryPanel from "./components/TuneHistoryPanel";
-import ErrorDetailsDialog, { useErrorDialog } from "./components/dialogs/ErrorDetailsDialog";
+import { HelpTopicData } from "./components/dialogs/HelpViewer";
+import { SignatureMismatchInfo } from "./components/dialogs/SignatureMismatchDialog";
+import { TuneMismatchInfo } from "./components/dialogs/TuneMismatchDialog";
+import { BaseMapResult } from "./components/dialogs/BaseMapDialog";
+import { useErrorDialog } from "./components/dialogs/ErrorDetailsDialog";
 import ErrorBoundary from "./components/common/ErrorBoundary";
-import { PluginPanel } from "./components/PluginPanel";
+import { DialogOverlays } from "./components/DialogOverlays";
 import { PinConfig } from "./components/hardware/PortEditor";
 import { useLoading } from "./components/LoadingContext";
 import { useToast } from "./components/ToastContext";
@@ -1850,292 +1830,115 @@ function AppContent() {
         </ErrorBoundary>
       </TunerLayout>
 
-      {/* Dialogs */}
-      <SaveDialog
-        isOpen={saveDialogOpen}
-        onClose={() => setSaveDialogOpen(false)}
-        autoBurnOnClose={autoBurnOnClose}
-      />
-      <LoadDialog 
-        isOpen={loadDialogOpen} 
-        onClose={() => setLoadDialogOpen(false)} 
-      />
-      <BurnDialog 
-        isOpen={burnDialogOpen} 
-        onClose={() => setBurnDialogOpen(false)} 
-        connected={status.state === "Connected"}
-      />
-      <NewTuneDialog 
-        isOpen={newTuneDialogOpen} 
-        onClose={() => setNewTuneDialogOpen(false)} 
-      />
-      <SettingsDialog
-        isOpen={settingsDialogOpen}
-        onClose={() => setSettingsDialogOpen(false)}
-        theme={theme}
-        onThemeChange={(t) => setTheme(t as ThemeName)}
+      <DialogOverlays
+        status={status}
         currentProject={currentProject}
-        onSettingsChange={(settings) => {
-          if (settings.units) setUnitsSystem(settings.units as 'metric' | 'imperial');
-          if (settings.autoBurnOnClose !== undefined) setAutoBurnOnClose(settings.autoBurnOnClose);
-          if (settings.demoMode !== undefined) setStatus(s => ({ ...s, demo_mode: settings.demoMode }));
-          if (settings.statusBarChannels !== undefined) setStatusBarChannels(settings.statusBarChannels);
-          if (settings.runtimePacketMode) setDefaultRuntimePacketMode(settings.runtimePacketMode as any);
-          // Legacy dashboard settings (removed with TabbedDashboard)
-          // if (settings.indicatorColumnCount !== undefined) { ... }
-          // if (settings.indicatorFillEmpty !== undefined) { ... }
-          // if (settings.indicatorTextFit) { ... }
-        }}
-      />
-      {mathChannelsDialogOpen && (
-        <MathChannelsDialog onClose={() => setMathChannelsDialogOpen(false)} />
-      )}
-      <AboutDialog 
-        isOpen={aboutDialogOpen} 
-        onClose={() => setAboutDialogOpen(false)} 
-      />
-      <ConnectionDialog 
-        isOpen={connectionDialogOpen}
-        onClose={() => setConnectionDialogOpen(false)}
+        theme={theme}
+        setTheme={setTheme}
+        showToast={showToast}
+        saveDialogOpen={saveDialogOpen}
+        setSaveDialogOpen={setSaveDialogOpen}
+        autoBurnOnClose={autoBurnOnClose}
+        loadDialogOpen={loadDialogOpen}
+        setLoadDialogOpen={setLoadDialogOpen}
+        burnDialogOpen={burnDialogOpen}
+        setBurnDialogOpen={setBurnDialogOpen}
+        newTuneDialogOpen={newTuneDialogOpen}
+        setNewTuneDialogOpen={setNewTuneDialogOpen}
+        settingsDialogOpen={settingsDialogOpen}
+        setSettingsDialogOpen={setSettingsDialogOpen}
+        setUnitsSystem={setUnitsSystem}
+        setAutoBurnOnClose={setAutoBurnOnClose}
+        setStatus={setStatus}
+        setStatusBarChannels={setStatusBarChannels}
+        setDefaultRuntimePacketMode={setDefaultRuntimePacketMode}
+        mathChannelsDialogOpen={mathChannelsDialogOpen}
+        setMathChannelsDialogOpen={setMathChannelsDialogOpen}
+        aboutDialogOpen={aboutDialogOpen}
+        setAboutDialogOpen={setAboutDialogOpen}
+        connectionDialogOpen={connectionDialogOpen}
+        setConnectionDialogOpen={setConnectionDialogOpen}
         ports={ports}
         selectedPort={selectedPort}
         baudRate={baudRate}
         timeoutMs={timeoutMs}
         connectionType={connectionType}
-        onConnectionTypeChange={setConnectionType}
+        setConnectionType={setConnectionType}
         tcpHost={tcpHost}
-        onTcpHostChange={setTcpHost}
+        setTcpHost={setTcpHost}
         tcpPort={tcpPort}
-        onTcpPortChange={setTcpPort}
-        connected={status.state === "Connected"}
-        connecting={connecting || syncing}
-        onPortChange={setSelectedPort}
-        onBaudChange={handleBaudChange}
-        onTimeoutChange={handleTimeoutChange}
-        onConnect={connect}
-        onDisconnect={disconnect}
-        onRefreshPorts={refreshPorts}
-        statusMessage={syncing && syncProgress ? `Syncing ECU data... ${syncProgress.percent}%` : undefined}
-        iniDefaults={iniDefaults ?? undefined}
-        onApplyIniDefaults={applyIniDefaults}
-        runtimePacketMode={connectionRuntimePacketMode}
-        onRuntimePacketModeChange={setConnectionRuntimePacketMode}
+        setTcpPort={setTcpPort}
+        setSelectedPort={setSelectedPort}
+        handleBaudChange={handleBaudChange}
+        handleTimeoutChange={handleTimeoutChange}
+        connect={connect}
+        disconnect={disconnect}
+        refreshPorts={refreshPorts}
+        connecting={connecting}
+        syncing={syncing}
+        syncProgress={syncProgress}
+        iniDefaults={iniDefaults}
+        applyIniDefaults={applyIniDefaults}
+        connectionRuntimePacketMode={connectionRuntimePacketMode}
+        setConnectionRuntimePacketMode={setConnectionRuntimePacketMode}
+        newProjectDialogOpen={newProjectDialogOpen}
+        setNewProjectDialogOpen={setNewProjectDialogOpen}
+        repositoryInis={repositoryInis}
+        setRepositoryInis={setRepositoryInis}
+        createProject={createProject}
+        handleImportTuneIntoProject={handleImportTuneIntoProject}
+        baseMapDialogOpen={baseMapDialogOpen}
+        setBaseMapDialogOpen={setBaseMapDialogOpen}
+        handleBaseMapApply={handleBaseMapApply}
+        tuneComparisonOpen={tuneComparisonOpen}
+        setTuneComparisonOpen={setTuneComparisonOpen}
+        checkStatus={checkStatus}
+        tableComparisonOpen={tableComparisonOpen}
+        setTableComparisonOpen={setTableComparisonOpen}
+        tuneFileDiffOpen={tuneFileDiffOpen}
+        setTuneFileDiffOpen={setTuneFileDiffOpen}
+        dynoOverlayOpen={dynoOverlayOpen}
+        setDynoOverlayOpen={setDynoOverlayOpen}
+        performanceDialogOpen={performanceDialogOpen}
+        setPerformanceDialogOpen={setPerformanceDialogOpen}
+        signatureMismatchOpen={signatureMismatchOpen}
+        signatureMismatchInfo={signatureMismatchInfo}
+        setSignatureMismatchOpen={setSignatureMismatchOpen}
+        setSignatureMismatchInfo={setSignatureMismatchInfo}
+        fetchConstants={fetchConstants}
+        fetchMenuTree={fetchMenuTree}
+        doSync={doSync}
+        helpTopic={helpTopic}
+        setHelpTopic={setHelpTopic}
+        userManualOpen={userManualOpen}
+        setUserManualOpen={setUserManualOpen}
+        userManualSection={userManualSection}
+        setUserManualSection={setUserManualSection}
+        tuneMismatchOpen={tuneMismatchOpen}
+        tuneMismatchInfo={tuneMismatchInfo}
+        setTuneMismatchOpen={setTuneMismatchOpen}
+        setTuneMismatchInfo={setTuneMismatchInfo}
+        errorDialogOpen={errorDialogOpen}
+        errorInfo={errorInfo}
+        hideError={hideError}
+        restorePointsOpen={restorePointsOpen}
+        setRestorePointsOpen={setRestorePointsOpen}
+        tuneHistoryOpen={tuneHistoryOpen}
+        setTuneHistoryOpen={setTuneHistoryOpen}
+        importProjectOpen={importProjectOpen}
+        setImportProjectOpen={setImportProjectOpen}
+        setAvailableProjects={setAvailableProjects}
+        setCurrentProject={setCurrentProject}
+        setTabs={setTabs}
+        setTabContents={setTabContents}
+        setActiveTabId={setActiveTabId}
+        migrationReportOpen={migrationReportOpen}
+        setMigrationReportOpen={setMigrationReportOpen}
+        onboardingOpen={onboardingOpen}
+        setOnboardingOpen={setOnboardingOpen}
+        pluginPanelOpen={pluginPanelOpen}
+        setPluginPanelOpen={setPluginPanelOpen}
       />
-      
-      {/* Project Dialogs */}
-      <NewProjectDialog
-        isOpen={newProjectDialogOpen}
-        onClose={() => setNewProjectDialogOpen(false)}
-        inis={repositoryInis}
-        onIniImported={(entry) => setRepositoryInis((prev) => [...prev, entry])}
-        onCreateProject={createProject}
-        onImportTune={handleImportTuneIntoProject}
-        onGenerateBaseMap={() => setBaseMapDialogOpen(true)}
-      />
-      <BaseMapDialog
-        isOpen={baseMapDialogOpen}
-        onClose={() => setBaseMapDialogOpen(false)}
-        onApply={handleBaseMapApply}
-        hasProject={!!currentProject}
-      />
-      
-      {/* Tune Comparison Dialog */}
-      <TuneComparisonDialog
-        isOpen={tuneComparisonOpen}
-        onClose={() => setTuneComparisonOpen(false)}
-        onUseProjectTune={async () => {
-          // Project tune has been written to ECU, refresh UI
-          await checkStatus();
-        }}
-        onUseEcuTune={async () => {
-          // ECU tune has been saved to project, refresh UI
-          await checkStatus();
-        }}
-      />
-      
-      {/* Table Comparison Dialog */}
-      <TableComparisonDialog
-        isOpen={tableComparisonOpen}
-        onClose={() => setTableComparisonOpen(false)}
-      />
-      
-      {/* Tune File Diff Dialog (cross-file comparison + cherry-pick merge) */}
-      <TuneFileDiffDialog
-        isOpen={tuneFileDiffOpen}
-        onClose={() => setTuneFileDiffOpen(false)}
-      />
-      
-      {/* Dyno Data Overlay */}
-      <DynoOverlay
-        isOpen={dynoOverlayOpen}
-        onClose={() => setDynoOverlayOpen(false)}
-      />
-      
-      {/* Performance Calculator Dialog */}
-      <PerformanceFieldsDialog
-        isOpen={performanceDialogOpen}
-        onClose={() => setPerformanceDialogOpen(false)}
-      />
-      
-      {/* Signature Mismatch Dialog */}
-      <SignatureMismatchDialog
-        isOpen={signatureMismatchOpen}
-        mismatchInfo={signatureMismatchInfo}
-        onClose={() => {
-          setSignatureMismatchOpen(false);
-          setSignatureMismatchInfo(null);
-        }}
-        onSelectIni={async (path) => {
-          console.log("Selected INI:", path);
-          setSignatureMismatchOpen(false);
-          setSignatureMismatchInfo(null);
-          // Re-fetch menus and constants for the new INI
-          const values = await fetchConstants();
-          fetchMenuTree(values);
-          // Sync with the new INI
-          await doSync();
-        }}
-        onContinue={async () => {
-          console.log("Continuing with mismatched INI - syncing anyway");
-          setSignatureMismatchOpen(false);
-          // User explicitly chose to continue - sync even though INI doesn't match
-          await doSync();
-        }}
-      />
-      
-      {/* Help Viewer */}
-      {helpTopic && (
-        <HelpViewer
-          topic={helpTopic}
-          onClose={() => setHelpTopic(null)}
-          onOpenManual={() => {
-            setHelpTopic(null);
-            setUserManualOpen(true);
-          }}
-        />
-      )}
-      
-      {/* User Manual */}
-      {userManualOpen && (
-        <UserManualViewer
-          section={userManualSection}
-          onClose={() => {
-            setUserManualOpen(false);
-            setUserManualSection(undefined);
-          }}
-        />
-      )}
-      
-      {/* Tune Mismatch Dialog */}
-      <TuneMismatchDialog
-        isOpen={tuneMismatchOpen}
-        mismatchInfo={tuneMismatchInfo}
-        onClose={() => {
-          setTuneMismatchOpen(false);
-          setTuneMismatchInfo(null);
-        }}
-        onUseProject={async () => {
-          // Refresh menus and constants after loading project tune
-          const values = await fetchConstants();
-          await fetchMenuTree(values);
-        }}
-        onUseECU={async () => {
-          // ECU tune is already loaded, just refresh UI
-          const values = await fetchConstants();
-          await fetchMenuTree(values);
-        }}
-      />
-      
-      {/* Error Details Dialog - for bug reporting */}
-      <ErrorDetailsDialog
-        isOpen={errorDialogOpen}
-        onClose={hideError}
-        title={errorInfo.title}
-        message={errorInfo.message}
-        details={errorInfo.details}
-      />
-      
-      {/* Restore Points Dialog */}
-      <RestorePointsDialog
-        isOpen={restorePointsOpen}
-        onClose={() => setRestorePointsOpen(false)}
-        tuneModified={currentProject?.tune_modified || false}
-        onRestorePointLoaded={async () => {
-          // Refresh UI after loading restore point
-          const values = await fetchConstants();
-          await fetchMenuTree(values);
-          showToast("Restore point loaded successfully", "success");
-        }}
-      />
-      
-      {/* Tune History Panel (Git versioning) */}
-      <TuneHistoryPanel
-        isOpen={tuneHistoryOpen}
-        onClose={() => setTuneHistoryOpen(false)}
-      />
-      
-      {/* Import Project Wizard */}
-      <ImportProjectWizard
-        isOpen={importProjectOpen}
-        onClose={() => setImportProjectOpen(false)}
-        onImportComplete={async (projectPath) => {
-          showToast("Project imported successfully", "success");
-          // Refresh project list
-          const projects = await invoke<ProjectInfo[]>("list_projects");
-          setAvailableProjects(projects);
-          // Open the imported project
-          try {
-            const project = await invoke<CurrentProject>("open_project", { path: projectPath });
-            setCurrentProject(project);
-            // Fetch menus for the project
-            const values = await fetchConstants();
-            await fetchMenuTree(values);
-            // Initialize dashboard tab
-            setTabs([{ id: "dashboard", title: "Dashboard", icon: "dashboard", closable: false }]);
-            setTabContents({ dashboard: { type: "dashboard" } });
-            setActiveTabId("dashboard");
-          } catch (e) {
-            console.error("Failed to open imported project:", e);
-            showToast("Project imported but failed to open: " + e, "error");
-          }
-        }}
-      />
-      
-      {/* Migration Report Dialog - shown when loading tune from different INI version */}
-      <MigrationReportDialog
-        isOpen={migrationReportOpen}
-        onClose={() => setMigrationReportOpen(false)}
-        onProceed={() => {
-          console.log("User proceeding with migration");
-        }}
-      />
-      
-      {/* Onboarding Dialog - shown on first run */}
-      <OnboardingDialog
-        isOpen={onboardingOpen}
-        onClose={() => setOnboardingOpen(false)}
-        onComplete={async () => {
-          try {
-            await invoke("mark_onboarding_completed");
-          } catch (e) {
-            console.error("Failed to mark onboarding as completed:", e);
-          }
-          setOnboardingOpen(false);
-        }}
-      />
-      
-      {/* WASM Plugin Panel Dialog */}
-      {pluginPanelOpen && (
-        <div className="dialog-overlay" onClick={() => setPluginPanelOpen(false)}>
-          <div 
-            className="dialog-content plugin-dialog" 
-            onClick={(e) => e.stopPropagation()}
-            style={{ width: '900px', maxWidth: '95vw', height: '600px', maxHeight: '85vh' }}
-          >
-            <PluginPanel isConnected={status.state === "Connected"} />
-          </div>
-        </div>
-      )}
     </>
   );
 }
