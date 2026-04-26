@@ -1,8 +1,6 @@
 use libretune_core::autotune::AutoTuneState;
 use libretune_core::datalog::DataLogger;
 use libretune_core::project::OnlineIniRepository;
-use libretune_core::protocol::ConnectionState;
-use serde::Serialize;
 use tokio::sync::Mutex;
 
 mod commands;
@@ -98,6 +96,10 @@ pub(crate) use commands::app_settings::{
 };
 pub(crate) use commands::signature_helpers::{
     call_connection_factory_and_build_result, compare_signatures, find_matching_inis_internal,
+};
+pub(crate) use commands::types::{
+    ConnectResult, ConnectionSettingsResponse, ConnectionStatus, ConstantInfo, CurrentProjectInfo,
+    MatchingIniInfo, SignatureMatchType, SignatureMismatchInfo, SyncProgress, SyncResult,
 };
 pub(crate) use commands::util_helpers::{
     clean_axis_label, get_conn_lock_holder, parse_runtime_packet_mode,
@@ -224,94 +226,6 @@ mod runtime_mode_tests {
     }
 }
 
-#[derive(Serialize)]
-pub(crate) struct ConnectionStatus {
-    pub state: ConnectionState,
-    pub signature: Option<String>,
-    pub has_definition: bool,
-    pub ini_name: Option<String>,
-    pub demo_mode: bool,
-}
-
-/// Signature match type for comparing ECU and INI signatures
-#[derive(Serialize, Clone, Debug, PartialEq)]
-#[serde(rename_all = "lowercase")]
-pub(crate) enum SignatureMatchType {
-    /// Signatures match exactly
-    Exact,
-    /// Signatures match partially (one contains the other, version diff)
-    Partial,
-    /// Signatures do not match
-    Mismatch,
-}
-
-/// Information about a signature mismatch for the frontend
-#[derive(Serialize, Clone)]
-pub(crate) struct SignatureMismatchInfo {
-    /// The signature reported by the ECU
-    ecu_signature: String,
-    /// The signature expected by the loaded INI file
-    ini_signature: String,
-    /// How closely the signatures match
-    match_type: SignatureMatchType,
-    /// Path to the currently loaded INI
-    current_ini_path: Option<String>,
-    /// List of INIs that might match the ECU signature
-    matching_inis: Vec<MatchingIniInfo>,
-}
-
-/// Information about an INI that matches the ECU signature
-#[derive(Serialize, Clone)]
-pub(crate) struct MatchingIniInfo {
-    /// Path to the INI file
-    pub path: String,
-    /// Display name of the INI
-    pub name: String,
-    /// Signature from this INI
-    pub signature: String,
-    /// How well it matches (exact or partial)
-    pub match_type: SignatureMatchType,
-}
-
-/// Result of ECU connection attempt
-#[derive(Serialize)]
-pub(crate) struct ConnectResult {
-    /// The signature reported by the ECU
-    signature: String,
-    /// Mismatch info if signatures don't match exactly
-    mismatch_info: Option<SignatureMismatchInfo>,
-}
-
-/// Result of ECU sync operation
-#[derive(Serialize)]
-pub(crate) struct SyncResult {
-    /// Whether all pages synced successfully
-    success: bool,
-    /// Number of pages successfully synced
-    pages_synced: u8,
-    /// Number of pages that failed to sync
-    pages_failed: u8,
-    /// Total number of pages attempted
-    total_pages: u8,
-    /// Error messages for failed pages (for logging)
-    errors: Vec<String>,
-}
-
-/// Extended constant info for frontend with value_type field
-#[derive(Serialize)]
-pub(crate) struct ConstantInfo {
-    pub name: String,
-    pub label: Option<String>,
-    pub units: String,
-    pub digits: u8,
-    pub min: f64,
-    pub max: f64,
-    pub value_type: String, // "scalar", "string", "bits", "array"
-    pub bit_options: Vec<String>,
-    pub help: Option<String>,
-    pub visibility_condition: Option<String>, // Expression for when field should be visible
-}
-
 // =============================================================================
 // Dashboard Format Conversion Helpers
 // =============================================================================
@@ -350,17 +264,6 @@ pub(crate) struct ConstantInfo {
 /// Returns: ConnectResult with ECU signature and optional mismatch info
 // connect_to_ecu extracted to commands/connect_to_ecu.rs
 
-/// Sync response with progress information
-#[derive(Serialize)]
-pub(crate) struct SyncProgress {
-    current_page: u8,
-    total_pages: u8,
-    bytes_read: usize,
-    total_bytes: usize,
-    complete: bool,
-    /// Optional: page that just failed (for partial sync indication)
-    failed_page: Option<u8>,
-}
 
 /// Read all ECU pages and store in TuneFile
 /// Returns SyncResult indicating success/partial/failure
@@ -519,22 +422,7 @@ pub(crate) struct SyncProgress {
 // Project Management Commands
 // =====================================================
 
-#[derive(Serialize)]
-pub(crate) struct CurrentProjectInfo {
-    pub name: String,
-    pub path: String,
-    pub signature: String,
-    pub has_tune: bool,
-    pub tune_modified: bool,
-    pub connection: ConnectionSettingsResponse,
-}
 
-#[derive(Serialize)]
-pub(crate) struct ConnectionSettingsResponse {
-    pub port: Option<String>,
-    pub baud_rate: u32,
-    pub auto_connect: bool,
-}
 
 /// Get the path to the projects directory
 

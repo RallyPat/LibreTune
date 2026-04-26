@@ -35,6 +35,7 @@ pub mod dash_convert;
 pub mod app_settings;
 pub mod signature_helpers;
 pub mod util_helpers;
+pub mod types;
 pub mod debug_realtime;
 pub mod realtime_get;
 pub mod annotations;
