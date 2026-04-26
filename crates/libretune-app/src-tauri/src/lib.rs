@@ -85,6 +85,10 @@ use commands::project_misc::{delete_project, get_msq_info};
 use commands::project_listing::{get_projects_path, list_projects};
 use commands::cache_status::{get_table_info, get_tune_cache_status};
 use commands::connection::{auto_load_last_ini, disconnect_ecu, get_connection_status};
+use commands::dash_files::{
+    create_new_dashboard, delete_dashboard, duplicate_dashboard, export_dashboard, get_dash_file,
+    load_tunerstudio_dash, rename_dashboard, save_dash_file, validate_dashboard,
+};
 use commands::debug_realtime::debug_single_realtime_read;
 use commands::realtime_get::get_realtime_data;
 use commands::metrics::{start_metrics_task, stop_metrics_task};
@@ -120,7 +124,7 @@ use commands::wasm_plugin::{
     execute_wasm_plugin, get_wasm_plugin_info, list_wasm_plugins, load_wasm_plugin,
     unload_wasm_plugin,
 };
-use paths::{get_dashboards_dir, get_definitions_dir, get_projects_dir, get_settings_path};
+use paths::{get_dashboards_dir, get_definitions_dir, get_settings_path};
 // port_editor module used by commands/ini_dialogs.rs
 use state::{
     is_maf_channel_name, AppState, AutoTuneConfig, AutoTuneLoadSource, AxisHint, RpmState,
@@ -551,7 +555,7 @@ fn convert_layout_to_dashfile(layout: &DashboardLayout) -> DashFile {
 }
 
 /// Convert TS DashFile to legacy DashboardLayout format
-fn convert_dashfile_to_layout(dash: &DashFile, name: &str) -> DashboardLayout {
+pub(crate) fn convert_dashfile_to_layout(dash: &DashFile, name: &str) -> DashboardLayout {
     use libretune_core::dashboard::GaugeType;
 
     let mut layout = DashboardLayout {
@@ -4911,277 +4915,7 @@ async fn create_default_dashboard(
     Ok(layout)
 }
 
-/// Load a TS .dash file directly from a path (for testing)
-#[tauri::command]
-async fn load_tunerstudio_dash(path: String) -> Result<DashboardLayout, String> {
-    println!("[load_ts_dash] Loading from: {}", path);
-
-    let content = std::fs::read_to_string(&path)
-        .map_err(|e| format!("Failed to read dashboard file: {}", e))?;
-
-    let dash_file = dash::parse_dash_file(&content)
-        .map_err(|e| format!("Failed to parse dashboard XML: {}", e))?;
-
-    let layout = convert_dashfile_to_layout(&dash_file, "TS Dashboard");
-    println!("[load_ts_dash] Loaded {} gauges", layout.gauges.len());
-    Ok(layout)
-}
-
-/// Load a TS .dash file and return the full DashFile structure
-#[tauri::command]
-async fn get_dash_file(path: String) -> Result<DashFile, String> {
-    println!("[get_dash_file] Loading from: {}", path);
-
-    let lower = path.to_lowercase();
-
-    let dash_file = if lower.ends_with(".gauge") {
-        let gauge_file = dash::load_gauge_file(Path::new(&path))
-            .map_err(|e| format!("Failed to parse gauge XML: {}", e))?;
-
-        let mut dash_file = DashFile {
-            bibliography: gauge_file.bibliography,
-            version_info: gauge_file.version_info,
-            ..Default::default()
-        };
-        dash_file.gauge_cluster.embedded_images = gauge_file.embedded_images;
-        dash_file
-            .gauge_cluster
-            .components
-            .push(DashComponent::Gauge(Box::new(gauge_file.gauge)));
-        dash_file
-    } else {
-        let content = std::fs::read_to_string(&path)
-            .map_err(|e| format!("Failed to read dashboard file: {}", e))?;
-
-        dash::parse_dash_file(&content)
-            .map_err(|e| format!("Failed to parse dashboard XML: {}", e))?
-    };
-
-    println!(
-        "[get_dash_file] Loaded {} components, {} embedded images",
-        dash_file.gauge_cluster.components.len(),
-        dash_file.gauge_cluster.embedded_images.len()
-    );
-    Ok(dash_file)
-}
-
-/// Validate a dashboard file and return a detailed report
-#[tauri::command]
-async fn validate_dashboard(
-    dash_file: DashFile,
-    project_name: Option<String>,
-    app: tauri::AppHandle,
-) -> Result<dash::ValidationReport, String> {
-    println!("[validate_dashboard] Validating dashboard");
-
-    // Load ECU definition if project name is provided
-    let ecu_def = if let Some(ref proj_name) = project_name {
-        let project_dir = get_projects_dir(&app).join(proj_name);
-        let ini_path = project_dir.join("definition.ini");
-
-        if ini_path.exists() {
-            match EcuDefinition::from_file(ini_path.to_string_lossy().as_ref()) {
-                Ok(def) => Some(def),
-                Err(e) => {
-                    println!(
-                        "[validate_dashboard] Warning: Could not load INI for validation: {}",
-                        e
-                    );
-                    None
-                }
-            }
-        } else {
-            None
-        }
-    } else {
-        None
-    };
-
-    let report = dash::validate_dashboard(&dash_file, ecu_def.as_ref());
-
-    println!(
-        "[validate_dashboard] Validation complete: {} errors, {} warnings",
-        report.errors.len(),
-        report.warnings.len()
-    );
-
-    Ok(report)
-}
-
-/// Save a TS .dash or .gauge file directly to a path
-#[tauri::command]
-async fn save_dash_file(path: String, dash_file: DashFile) -> Result<(), String> {
-    let lower = path.to_lowercase();
-    let path_buf = PathBuf::from(&path);
-
-    if lower.ends_with(".gauge") {
-        let gauge = dash_file
-            .gauge_cluster
-            .components
-            .iter()
-            .find_map(|comp| match comp {
-                DashComponent::Gauge(g) => Some((**g).clone()),
-                _ => None,
-            })
-            .ok_or_else(|| "Gauge file must contain a gauge component".to_string())?;
-
-        let gauge_file = dash::GaugeFile {
-            bibliography: dash_file.bibliography.clone(),
-            version_info: VersionInfo {
-                file_format: "1.0".to_string(),
-                firmware_signature: dash_file.version_info.firmware_signature.clone(),
-            },
-            embedded_images: dash_file.gauge_cluster.embedded_images.clone(),
-            gauge,
-        };
-
-        dash::save_gauge_file(&gauge_file, &path_buf)
-            .map_err(|e| format!("Failed to write gauge file: {}", e))?;
-    } else {
-        dash::save_dash_file(&dash_file, &path_buf)
-            .map_err(|e| format!("Failed to write dashboard file: {}", e))?;
-    }
-
-    Ok(())
-}
-
-/// Create a new dashboard file from a template in the user dashboards directory.
-#[tauri::command]
-async fn create_new_dashboard(
-    app: tauri::AppHandle,
-    name: String,
-    template: String,
-) -> Result<String, String> {
-    let dash_dir = get_dashboards_dir(&app);
-    if !dash_dir.exists() {
-        std::fs::create_dir_all(&dash_dir)
-            .map_err(|e| format!("Failed to create dashboards directory: {}", e))?;
-    }
-
-    let mut file_name = name.trim().to_string();
-    if file_name.is_empty() {
-        file_name = "Dashboard".to_string();
-    }
-    if !file_name.to_lowercase().ends_with(".ltdash.xml") {
-        file_name = format!("{}.ltdash.xml", file_name);
-    }
-
-    let target_name = if dash_dir.join(&file_name).exists() {
-        generate_unique_filename(&dash_dir, &file_name)
-    } else {
-        file_name
-    };
-
-    let dash_file = match template.as_str() {
-        "basic" => create_basic_dashboard(),
-        "racing" => create_racing_dashboard(),
-        "tuning" => create_tuning_dashboard(),
-        _ => create_basic_dashboard(),
-    };
-
-    let target_path = dash_dir.join(&target_name);
-    dash::save_dash_file(&dash_file, &target_path)
-        .map_err(|e| format!("Failed to write dashboard file: {}", e))?;
-
-    Ok(target_path.to_string_lossy().to_string())
-}
-
-/// Rename an existing dashboard file.
-#[tauri::command]
-async fn rename_dashboard(path: String, new_name: String) -> Result<String, String> {
-    let source = PathBuf::from(&path);
-    let parent = source
-        .parent()
-        .ok_or_else(|| "Invalid dashboard path".to_string())?
-        .to_path_buf();
-
-    let ext = if path.to_lowercase().ends_with(".ltdash.xml") {
-        ".ltdash.xml"
-    } else if path.to_lowercase().ends_with(".dash") {
-        ".dash"
-    } else if path.to_lowercase().ends_with(".gauge") {
-        ".gauge"
-    } else {
-        ""
-    };
-
-    let mut file_name = new_name.trim().to_string();
-    if file_name.is_empty() {
-        file_name = "Dashboard".to_string();
-    }
-    if !ext.is_empty() && !file_name.to_lowercase().ends_with(ext) {
-        file_name = format!("{}{}", file_name, ext);
-    }
-
-    let target_name = if parent.join(&file_name).exists() {
-        generate_unique_filename(&parent, &file_name)
-    } else {
-        file_name
-    };
-
-    let target_path = parent.join(&target_name);
-    std::fs::rename(&source, &target_path)
-        .map_err(|e| format!("Failed to rename dashboard: {}", e))?;
-
-    Ok(target_path.to_string_lossy().to_string())
-}
-
-/// Duplicate a dashboard file.
-#[tauri::command]
-async fn duplicate_dashboard(path: String, new_name: String) -> Result<String, String> {
-    let source = PathBuf::from(&path);
-    let parent = source
-        .parent()
-        .ok_or_else(|| "Invalid dashboard path".to_string())?
-        .to_path_buf();
-
-    let ext = if path.to_lowercase().ends_with(".ltdash.xml") {
-        ".ltdash.xml"
-    } else if path.to_lowercase().ends_with(".dash") {
-        ".dash"
-    } else if path.to_lowercase().ends_with(".gauge") {
-        ".gauge"
-    } else {
-        ""
-    };
-
-    let mut file_name = new_name.trim().to_string();
-    if file_name.is_empty() {
-        file_name = "Dashboard Copy".to_string();
-    }
-    if !ext.is_empty() && !file_name.to_lowercase().ends_with(ext) {
-        file_name = format!("{}{}", file_name, ext);
-    }
-
-    let target_name = if parent.join(&file_name).exists() {
-        generate_unique_filename(&parent, &file_name)
-    } else {
-        file_name
-    };
-
-    let target_path = parent.join(&target_name);
-    std::fs::copy(&source, &target_path)
-        .map_err(|e| format!("Failed to duplicate dashboard: {}", e))?;
-
-    Ok(target_path.to_string_lossy().to_string())
-}
-
-/// Export a dashboard to a specific path.
-#[tauri::command]
-async fn export_dashboard(path: String, dash_file: DashFile) -> Result<(), String> {
-    save_dash_file(path, dash_file).await
-}
-
-/// Delete a dashboard file.
-#[tauri::command]
-async fn delete_dashboard(path: String) -> Result<(), String> {
-    let path_buf = PathBuf::from(&path);
-    if !path_buf.exists() {
-        return Err("Dashboard file not found".to_string());
-    }
-    std::fs::remove_file(&path_buf).map_err(|e| format!("Failed to delete dashboard: {}", e))?;
-    Ok(())
-}
+// Dashboard file IO commands extracted to commands/dash_files.rs
 
 /// Info about an available dashboard file
 #[derive(Serialize)]
@@ -5336,7 +5070,7 @@ async fn check_dash_conflict(
 }
 
 /// Generate a unique filename by appending _2, _3, etc.
-fn generate_unique_filename(dir: &Path, original_name: &str) -> String {
+pub(crate) fn generate_unique_filename(dir: &Path, original_name: &str) -> String {
     // Split into base and extension(s)
     // Handle .ltdash.xml specially
     let (base, ext) = if original_name.ends_with(".ltdash.xml") {
