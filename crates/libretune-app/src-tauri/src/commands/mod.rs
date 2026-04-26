@@ -9,6 +9,7 @@ pub mod cache_status;
 pub mod connection;
 pub mod dash_files;
 pub mod dash_layout;
+pub mod autotune_misc;
 pub mod debug_realtime;
 pub mod realtime_get;
 pub mod annotations;
