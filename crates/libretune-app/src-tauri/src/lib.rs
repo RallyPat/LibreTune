@@ -101,6 +101,7 @@ use commands::table_update::update_table_data;
 use commands::constant_values::get_all_constant_values;
 use commands::constant_update::update_constant;
 use commands::realtime_stop::stop_realtime_stream;
+use commands::find_inis::find_matching_inis;
 use commands::debug_realtime::debug_single_realtime_read;
 use commands::realtime_get::get_realtime_data;
 use commands::metrics::{start_metrics_task, stop_metrics_task};
@@ -252,7 +253,7 @@ pub(crate) struct ConnectionStatus {
 /// Signature match type for comparing ECU and INI signatures
 #[derive(Serialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "lowercase")]
-enum SignatureMatchType {
+pub(crate) enum SignatureMatchType {
     /// Signatures match exactly
     Exact,
     /// Signatures match partially (one contains the other, version diff)
@@ -278,15 +279,15 @@ struct SignatureMismatchInfo {
 
 /// Information about an INI that matches the ECU signature
 #[derive(Serialize, Clone)]
-struct MatchingIniInfo {
+pub(crate) struct MatchingIniInfo {
     /// Path to the INI file
-    path: String,
+    pub path: String,
     /// Display name of the INI
-    name: String,
+    pub name: String,
     /// Signature from this INI
-    signature: String,
+    pub signature: String,
     /// How well it matches (exact or partial)
-    match_type: SignatureMatchType,
+    pub match_type: SignatureMatchType,
 }
 
 /// Result of ECU connection attempt
@@ -787,7 +788,7 @@ fn build_shallow_mismatch_info(
 }
 
 /// Find INI files that match the given ECU signature (uses tauri State wrapper)
-async fn find_matching_inis_internal(
+pub(crate) async fn find_matching_inis_internal(
     state: &tauri::State<'_, AppState>,
     ecu_signature: &str,
 ) -> Vec<MatchingIniInfo> {
@@ -4998,14 +4999,7 @@ async fn open_project(
 
 // Project management commands extracted to commands/project_mgmt.rs
 
-/// Find INI files that match a given ECU signature
-#[tauri::command]
-async fn find_matching_inis(
-    state: tauri::State<'_, AppState>,
-    ecu_signature: String,
-) -> Result<Vec<MatchingIniInfo>, String> {
-    Ok(find_matching_inis_internal(&state, &ecu_signature).await)
-}
+// find_matching_inis extracted to commands/find_inis.rs
 
 /// Update the project's INI file and optionally force re-sync
 #[tauri::command]
