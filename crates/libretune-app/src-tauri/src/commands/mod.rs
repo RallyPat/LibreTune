@@ -21,6 +21,7 @@ pub mod apply_base_map;
 pub mod update_project_ini;
 pub mod demo;
 pub mod available_inis;
+pub mod start_autotune;
 pub mod debug_realtime;
 pub mod realtime_get;
 pub mod annotations;
