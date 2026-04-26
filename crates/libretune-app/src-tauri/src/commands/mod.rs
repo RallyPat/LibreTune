@@ -15,6 +15,7 @@ pub mod load_pages;
 pub mod table_update;
 pub mod constant_values;
 pub mod constant_update;
+pub mod realtime_stop;
 pub mod debug_realtime;
 pub mod realtime_get;
 pub mod annotations;

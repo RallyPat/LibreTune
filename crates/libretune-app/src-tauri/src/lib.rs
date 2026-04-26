@@ -100,6 +100,7 @@ use commands::load_pages::load_all_pages;
 use commands::table_update::update_table_data;
 use commands::constant_values::get_all_constant_values;
 use commands::constant_update::update_constant;
+use commands::realtime_stop::stop_realtime_stream;
 use commands::debug_realtime::debug_single_realtime_read;
 use commands::realtime_get::get_realtime_data;
 use commands::metrics::{start_metrics_task, stop_metrics_task};
@@ -2177,7 +2178,7 @@ async fn feed_autotune_data(
 }
 
 /// Helper to write stream diagnostic logs to /tmp/libretune-stream.log
-fn stream_log(msg: &str) {
+pub(crate) fn stream_log(msg: &str) {
     use std::io::Write;
     if let Ok(mut f) = std::fs::OpenOptions::new()
         .create(true)
@@ -2855,23 +2856,7 @@ async fn start_realtime_stream(
     Ok(())
 }
 
-/// Stops the realtime data streaming task.
-///
-/// Aborts the background task started by `start_realtime_stream`.
-///
-/// Returns: Nothing on success
-#[tauri::command]
-async fn stop_realtime_stream(state: tauri::State<'_, AppState>) -> Result<(), String> {
-    stream_log("stop called");
-    let mut task_guard = state.streaming_task.lock().await;
-    if let Some(handle) = task_guard.take() {
-        stream_log("stop: aborting task");
-        handle.abort();
-    } else {
-        stream_log("stop: no task to abort");
-    }
-    Ok(())
-}
+// stop_realtime_stream extracted to commands/realtime_stop.rs
 
 // INI metadata commands extracted to commands/ini_meta.rs
 
