@@ -82,6 +82,7 @@ use commands::project_mgmt::{
     close_project, get_current_project, update_project_auto_connect, update_project_connection,
 };
 use commands::project_misc::{delete_project, get_msq_info};
+use commands::project_listing::{get_projects_path, list_projects};
 use commands::tune_info::{get_tune_info, new_tune, TuneInfo};
 use commands::tune_io::{burn_to_ecu, execute_controller_command, list_tune_files};
 use commands::tune_misc::{update_constant_string, use_ecu_tune, use_project_tune};
@@ -6883,14 +6884,6 @@ pub(crate) fn read_raw_value(bytes: &[u8], data_type: &DataType) -> Result<f64, 
 // =====================================================
 
 #[derive(Serialize)]
-struct ProjectInfoResponse {
-    name: String,
-    path: String,
-    signature: String,
-    modified: String,
-}
-
-#[derive(Serialize)]
 pub(crate) struct CurrentProjectInfo {
     pub name: String,
     pub path: String,
@@ -6908,34 +6901,6 @@ pub(crate) struct ConnectionSettingsResponse {
 }
 
 /// Get the path to the projects directory
-#[tauri::command]
-async fn get_projects_path() -> Result<String, String> {
-    let path =
-        Project::projects_dir().map_err(|e| format!("Failed to get projects directory: {}", e))?;
-
-    // Create if doesn't exist
-    std::fs::create_dir_all(&path)
-        .map_err(|e| format!("Failed to create projects directory: {}", e))?;
-
-    Ok(path.to_string_lossy().to_string())
-}
-
-/// List all available projects
-#[tauri::command]
-async fn list_projects() -> Result<Vec<ProjectInfoResponse>, String> {
-    let projects =
-        Project::list_projects().map_err(|e| format!("Failed to list projects: {}", e))?;
-
-    Ok(projects
-        .into_iter()
-        .map(|p| ProjectInfoResponse {
-            name: p.name,
-            path: p.path.to_string_lossy().to_string(),
-            signature: p.signature,
-            modified: p.modified,
-        })
-        .collect())
-}
 
 /// Create a new project
 ///
