@@ -29,6 +29,8 @@ import { useBackendEventListeners } from "./hooks/useBackendEventListeners";
 import { useRealtimeStream } from "./hooks/useRealtimeStream";
 import { useTabPopout } from "./hooks/useTabPopout";
 import { useIniDefaultsLoader } from "./hooks/useIniDefaultsLoader";
+import { useTableCurveRefresh } from "./hooks/useTableCurveRefresh";
+import { useGlobalShortcuts } from "./hooks/useGlobalShortcuts";
 import { PinConfig } from "./components/hardware/PortEditor";
 import { useLoading } from "./components/LoadingContext";
 import { useToast } from "./components/ToastContext";
@@ -561,113 +563,8 @@ function AppContent() {
     };
   }, [status.state, showLoading, hideLoading]);
 
-  // Listen for tune loaded events to refresh table data
-  useEffect(() => {
-    let unlisten: UnlistenFn | null = null;
-    
-    (async () => {
-      try {
-        unlisten = await listen<string>("tune:loaded", async (event) => {
-          console.log("Tune loaded from:", event.payload);
-          // Refresh ALL open tables when tune is loaded (INI updated or tune file loaded)
-          // Small delay to ensure state is current
-          await new Promise(resolve => setTimeout(resolve, 50));
-          
-          // Get current tabs and tabContents
-          const currentTabs = tabs;
-          const currentTabContents = tabContents;
-          const tablesToRefresh: string[] = [];
-          const curvesToRefresh: string[] = [];
-          
-          for (const tab of currentTabs) {
-            const tabContent = currentTabContents[tab.id];
-            if (tabContent && tabContent.type === "table") {
-              tablesToRefresh.push(tab.id);
-            } else if (tabContent && tabContent.type === "curve") {
-              curvesToRefresh.push(tab.id);
-            }
-          }
-          
-          const totalToRefresh = tablesToRefresh.length + curvesToRefresh.length;
-          if (totalToRefresh > 0) {
-            console.log(`[tune:loaded] Refreshing ${tablesToRefresh.length} table(s) and ${curvesToRefresh.length} curve(s)`);
-            const updatedTabs = { ...currentTabContents };
-            
-            // Refresh all tables and curves in parallel
-            await Promise.all([
-              ...tablesToRefresh.map(async (tabId) => {
-                try {
-                  const data = await invoke<BackendTableData>("get_table_data", { tableName: tabId });
-                  updatedTabs[tabId] = { type: "table", data: toTunerTableData(data) };
-                  console.log(`[tune:loaded] ✓ Refreshed table '${tabId}': ${data.z_values.length} values`);
-                } catch (e) {
-                  console.error(`[tune:loaded] ✗ Failed to refresh table '${tabId}':`, e);
-                }
-              }),
-              ...curvesToRefresh.map(async (tabId) => {
-                try {
-                  const data = await invoke<BackendCurveData>("get_curve_data", { curveName: tabId });
-                  updatedTabs[tabId] = { type: "curve", data: toCurveData(data) };
-                  console.log(`[tune:loaded] ✓ Refreshed curve '${tabId}': ${data.x_bins.length} points`);
-                } catch (e) {
-                  console.error(`[tune:loaded] ✗ Failed to refresh curve '${tabId}':`, e);
-                }
-              })
-            ]);
-            
-            setTabContents(updatedTabs);
-            console.log(`[tune:loaded] ✓ Completed refreshing ${totalToRefresh} item(s)`);
-          } else {
-            console.log("[tune:loaded] No open tables or curves to refresh");
-          }
-        });
-      } catch (e) {
-        console.error("Failed to listen for tune:loaded events:", e);
-      }
-    })();
-    
-    return () => {
-      if (unlisten) unlisten();
-    };
-  }, [tabs, tabContents]); // Depend on tabs and tabContents to access current state
-
-  // Refresh table/curve data when a table or curve tab is activated
-  useEffect(() => {
-    if (!activeTabId) return;
-    
-    // Check if the active tab is a table or curve using functional update
-    setTabContents((prev) => {
-      const tabContent = prev[activeTabId];
-      if (tabContent && tabContent.type === "table") {
-        // Refresh the active table to ensure it has fresh data
-        invoke<BackendTableData>("get_table_data", { tableName: activeTabId })
-          .then((data) => {
-            setTabContents((prevTabContents) => ({
-              ...prevTabContents,
-              [activeTabId]: { type: "table", data: toTunerTableData(data) },
-            }));
-            console.log(`[tab:activated] Refreshed table '${activeTabId}': ${data.z_values.length} values`);
-          })
-          .catch((e) => {
-            console.error(`[tab:activated] Failed to refresh table '${activeTabId}':`, e);
-          });
-      } else if (tabContent && tabContent.type === "curve") {
-        // Refresh the active curve to ensure it has fresh data
-        invoke<BackendCurveData>("get_curve_data", { curveName: activeTabId })
-          .then((data) => {
-            setTabContents((prevTabContents) => ({
-              ...prevTabContents,
-              [activeTabId]: { type: "curve", data: toCurveData(data) },
-            }));
-            console.log(`[tab:activated] Refreshed curve '${activeTabId}': ${data.x_bins.length} points`);
-          })
-          .catch((e) => {
-            console.error(`[tab:activated] Failed to refresh curve '${activeTabId}':`, e);
-          });
-      }
-      return prev; // Return unchanged, update happens in promise
-    });
-  }, [activeTabId]); // Only depend on activeTabId to avoid infinite loops
+  // Refresh table/curve data on tune:loaded events and tab activation (extracted to hook).
+  useTableCurveRefresh({ tabs, tabContents, setTabContents, activeTabId });
 
   // Realtime streaming - updates go directly to Zustand store (no React state change cascade)
   //
@@ -748,39 +645,14 @@ function AppContent() {
     };
   }, [isTauri]);
 
-  // Global keyboard shortcuts
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // Check for Ctrl/Cmd key
-      const isCtrl = e.ctrlKey || e.metaKey;
-      
-      if (isCtrl && !e.shiftKey) {
-        switch (e.key.toLowerCase()) {
-          case 'n':
-            e.preventDefault();
-            setNewProjectDialogOpen(true);
-            break;
-          case 'o':
-            e.preventDefault();
-            setLoadDialogOpen(true);
-            break;
-          case 's':
-            e.preventDefault();
-            setSaveDialogOpen(true);
-            break;
-          case 'b':
-            e.preventDefault();
-            if (status.state === "Connected") {
-              setBurnDialogOpen(true);
-            }
-            break;
-        }
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [status.state]);
+  // Global keyboard shortcuts (extracted to hook).
+  useGlobalShortcuts({
+    isConnected: status.state === "Connected",
+    setNewProjectDialogOpen,
+    setLoadDialogOpen,
+    setSaveDialogOpen,
+    setBurnDialogOpen,
+  });
 
   // API functions
   async function checkStatus() {
