@@ -1,8 +1,7 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
-import { listen, UnlistenFn } from "@tauri-apps/api/event";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { listen } from "@tauri-apps/api/event";
 import { ThemeProvider, useTheme } from "./themes";
 import { initializeHotkeyManager } from "./services/hotkeyService";
 import { useRealtimeStore } from "./stores/realtimeStore";
@@ -31,6 +30,7 @@ import { useTabPopout } from "./hooks/useTabPopout";
 import { useIniDefaultsLoader } from "./hooks/useIniDefaultsLoader";
 import { useTableCurveRefresh } from "./hooks/useTableCurveRefresh";
 import { useGlobalShortcuts } from "./hooks/useGlobalShortcuts";
+import { useEcuEventListeners } from "./hooks/useEcuEventListeners";
 import { PinConfig } from "./components/hardware/PortEditor";
 import { useLoading } from "./components/LoadingContext";
 import { useToast } from "./components/ToastContext";
@@ -258,26 +258,9 @@ function AppContent() {
   }, [isTauri]);
 
   // Update window title with project name
-  useEffect(() => {
-    const base = "LibreTune";
-    if (currentProject) {
-      const title = `${currentProject.name} — ${base}`;
-      document.title = title;
-      // Also update Tauri window title
-      getCurrentWindow().setTitle(title).catch(() => {});
-    } else {
-      document.title = base;
-      getCurrentWindow().setTitle(base).catch(() => {});
-    }
-  }, [currentProject]);
-
   // Persist active tab state
-  useEffect(() => {
-    if (activeTabId && currentProject) {
-      invoke("update_setting", { key: "last_active_tab", value: activeTabId })
-        .catch(e => console.warn("Failed to save last_active_tab", e));
-    }
-  }, [activeTabId, currentProject]);
+  // Listen for reconnect:request, ini:changed, demo:changed events
+  // (all extracted to a dedicated hook below).
 
   async function initializeApp() {
     showLoading("Initializing LibreTune...");
@@ -501,67 +484,7 @@ function AppContent() {
   });
 
   // Listen for frontend reconnect requests (dispatched by e.g., controller command flow)
-  useEffect(() => {
-    let unlisten: UnlistenFn | null = null;
-
-    (async () => {
-      try {
-        unlisten = await listen<any>("reconnect:request", async (event) => {
-          console.log('Reconnect requested from:', event.payload);
-
-          // Dev-only debug & telemetry hook
-          try {
-            if (typeof import.meta !== 'undefined' && (import.meta as any).env && (import.meta as any).env.MODE !== 'production') {
-              console.debug('reconnect:request received', event.payload);
-              try { (window as any).__libretuneTelemetry?.trackEvent?.('reconnect_request_received', { source: event.payload?.source ?? 'unknown' }); } catch (_e) { /* ignore */ }
-            }
-          } catch (dbgErr) {
-            console.error('Failed to log reconnect telemetry:', dbgErr);
-          }
-
-          if (!connecting) {
-            await connect();
-          } else {
-            showToast('Reconnect requested but connection is already in progress', 'info');
-          }
-        });
-      } catch (e) {
-        console.error('Failed to listen for reconnect:request events:', e);
-      }
-    })();
-
-    return () => {
-      if (unlisten) unlisten();
-    };
-  }, [connecting, selectedPort, baudRate, timeoutMs, connectionRuntimePacketMode, defaultRuntimePacketMode]);
-  
-  // Listen for INI change events (requires re-sync)
-  useEffect(() => {
-    let unlisten: UnlistenFn | null = null;
-    
-    (async () => {
-      try {
-        unlisten = await listen<string>("ini:changed", async (event) => {
-          console.log("INI changed:", event.payload);
-          if (event.payload === "resync_required" && status.state === "Connected") {
-            // Re-sync ECU data with new INI (uses resilient sync)
-            showLoading("Syncing with ECU...");
-            try {
-              await doSync();
-            } finally {
-              hideLoading();
-            }
-          }
-        });
-      } catch (e) {
-        console.error("Failed to listen for ini:changed events:", e);
-      }
-    })();
-    
-    return () => {
-      if (unlisten) unlisten();
-    };
-  }, [status.state, showLoading, hideLoading]);
+  // Extracted to useEcuEventListeners hook below.
 
   // Refresh table/curve data on tune:loaded events and tab activation (extracted to hook).
   useTableCurveRefresh({ tabs, tabContents, setTabContents, activeTabId });
@@ -612,38 +535,7 @@ function AppContent() {
   }, [status.has_definition]);
 
   // Listen for demo mode or definition changes and refresh UI accordingly
-  useEffect(() => {
-    if (!isTauri) return;
-    let unlistenDemo: UnlistenFn | null = null;
-
-    (async () => {
-      try {
-        unlistenDemo = await listen('demo:changed', async (event) => {
-          try {
-            await checkStatus();
-            const values = await fetchConstants();
-            await fetchMenuTree(values);
-
-            const demoEnabled = Boolean(event.payload as unknown as boolean);
-            if (demoEnabled) {
-              // Start realtime streaming for demo
-              try { await invoke('start_realtime_stream', { intervalMs: 50 }); } catch (e) { /* ignore */ }
-            } else {
-              try { await invoke('stop_realtime_stream'); } catch (e) { /* ignore */ }
-            }
-          } catch (e) {
-            console.error('Error handling demo:changed event', e);
-          }
-        });
-      } catch (e) {
-        console.error('Failed to listen for demo events', e);
-      }
-    })();
-
-    return () => {
-      if (unlistenDemo) unlistenDemo();
-    };
-  }, [isTauri]);
+  // Extracted to useEcuEventListeners hook below.
 
   // Global keyboard shortcuts (extracted to hook).
   useGlobalShortcuts({
@@ -652,6 +544,29 @@ function AppContent() {
     setLoadDialogOpen,
     setSaveDialogOpen,
     setBurnDialogOpen,
+  });
+
+  // App-level event listeners: window title, active-tab persistence,
+  // reconnect:request, ini:changed, demo:changed (extracted to hook).
+  useEcuEventListeners({
+    isTauri,
+    connecting,
+    selectedPort,
+    baudRate,
+    timeoutMs,
+    connectionRuntimePacketMode,
+    defaultRuntimePacketMode,
+    status,
+    currentProject,
+    activeTabId,
+    connect,
+    doSync,
+    checkStatus,
+    fetchConstants,
+    fetchMenuTree,
+    showLoading,
+    hideLoading,
+    showToast,
   });
 
   // API functions
