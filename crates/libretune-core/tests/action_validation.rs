@@ -1,5 +1,6 @@
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::vec_init_then_push)]
     use libretune_core::action_scripting::{Action, ActionMetadata, ActionPlayer, ActionSet};
     use libretune_core::ini::DataType;
     use libretune_core::ini::{

@@ -1,3 +1,4 @@
+#![allow(clippy::field_reassign_with_default)]
 use libretune_core::ini::{DataType, EcuDefinition, Endianness, OutputChannel};
 use libretune_core::realtime::evaluator::Evaluator;
 

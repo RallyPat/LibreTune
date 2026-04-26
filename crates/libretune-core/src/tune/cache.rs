@@ -267,6 +267,7 @@ impl TuneCache {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::field_reassign_with_default)]
     use super::*;
 
     fn create_test_cache() -> TuneCache {
