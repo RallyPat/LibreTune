@@ -1,4 +1,5 @@
 //! Tests for F64 data type support, MSQ page tracking, and computed channel evaluation
+#![allow(clippy::approx_constant)]
 
 use libretune_core::ini::{DataType, EcuDefinition};
 use libretune_core::tune::{TuneFile, TuneValue};
@@ -105,7 +106,7 @@ fn test_msq_page_tracking() {
 #[test]
 fn test_f64_precision_roundtrip() {
     // Test value that needs high precision (more than F32 can represent exactly)
-    let high_precision_value = 1.234567890123456789_f64;
+    let high_precision_value = 1.234_567_890_123_456_7_f64;
 
     // Format with our precision approach
     let formatted = format!("{:.17}", high_precision_value);
@@ -160,12 +161,10 @@ fn test_integer_value_formatting() {
 /// Test array formatting with high precision
 #[test]
 fn test_array_precision_formatting() {
-    let values = vec![
-        1.234567890123456_f64,
+    let values = [1.234567890123456_f64,
         0.000000001_f64,
         100.0_f64,
-        3.14159265358979_f64,
-    ];
+        3.14159265358979_f64];
 
     let formatted: Vec<String> = values
         .iter()

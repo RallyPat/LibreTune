@@ -517,7 +517,7 @@ mod tests {
         // All values should be positive (advance, not retard)
         for row in &ign {
             for &val in row {
-                assert!(val >= 0.0 && val <= 45.0, "Timing out of range: {}", val);
+                assert!((0.0..=45.0).contains(&val), "Timing out of range: {}", val);
             }
         }
         // Higher RPM should generally have more advance

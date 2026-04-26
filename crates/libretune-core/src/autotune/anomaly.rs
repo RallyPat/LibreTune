@@ -484,7 +484,7 @@ mod tests {
         };
         let detector = AnomalyDetector::new(config);
 
-        let mut table = vec![
+        let table = vec![
             vec![50.0, 52.0, 54.0, 56.0],
             vec![52.0, 120.0, 56.0, 58.0], // 120 is a huge outlier
             vec![54.0, 56.0, 58.0, 60.0],

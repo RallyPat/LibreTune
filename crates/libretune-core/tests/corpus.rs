@@ -37,7 +37,7 @@ fn test_parse_all_corpus_inis() {
         let entry = entry.expect("Failed to read directory entry");
         let path = entry.path();
 
-        if path.extension().map_or(false, |ext| ext == "ini") {
+        if path.extension().is_some_and(|ext| ext == "ini") {
             files_tested += 1;
             let filename = path.file_name().unwrap().to_string_lossy().to_string();
 
@@ -252,7 +252,7 @@ fn test_ini_capabilities_consistency() {
     for path in samples {
         let filename = path.file_name().unwrap().to_string_lossy();
         let def =
-            EcuDefinition::from_file(&path).expect(&format!("Should parse INI: {}", filename));
+            EcuDefinition::from_file(&path).unwrap_or_else(|_| panic!("Should parse INI: {}", filename));
         let caps = def.capabilities();
 
         assert_eq!(caps.has_constants, !def.constants.is_empty());
@@ -317,7 +317,7 @@ fn test_fome_ini_fields() {
     for path in &fome_files {
         let filename = path.file_name().unwrap().to_string_lossy();
         let def =
-            EcuDefinition::from_file(path).expect(&format!("Should parse FOME INI: {}", filename));
+            EcuDefinition::from_file(path).unwrap_or_else(|_| panic!("Should parse FOME INI: {}", filename));
 
         // FOME files should have VeAnalyze section
         assert!(
@@ -403,7 +403,7 @@ fn test_epicefi_ini_fields() {
     for path in &sample {
         let filename = path.file_name().unwrap().to_string_lossy();
         let def = EcuDefinition::from_file(path)
-            .expect(&format!("Should parse epicEFI INI: {}", filename));
+            .unwrap_or_else(|_| panic!("Should parse epicEFI INI: {}", filename));
 
         // Should have output channels
         assert!(
@@ -470,7 +470,7 @@ fn test_megasquirt_ini_fields() {
     for path in &ms_files {
         let filename = path.file_name().unwrap().to_string_lossy();
         let def = EcuDefinition::from_file(path)
-            .expect(&format!("Should parse MegaSquirt INI: {}", filename));
+            .unwrap_or_else(|_| panic!("Should parse MegaSquirt INI: {}", filename));
 
         // MegaSquirt typically has multiple pages
         println!("MegaSquirt INI successfully parsed: {}", filename);

@@ -1,3 +1,4 @@
+#![allow(clippy::approx_constant)]
 use libretune_core::tune::TuneValue;
 
 #[test]
@@ -56,6 +57,7 @@ fn test_tune_value_zero() {
 
 #[test]
 fn test_tune_value_precision() {
+    #[allow(clippy::approx_constant)]
     let value = TuneValue::Scalar(3.14159);
     match value {
         TuneValue::Scalar(v) => assert!((v - 3.14159).abs() < 0.00001),

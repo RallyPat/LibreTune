@@ -68,7 +68,7 @@ fn test_parse_basic_dash() {
     assert_eq!(rpm_gauge.max, 8000.0);
     assert_eq!(rpm_gauge.units, "rpm");
     assert!(matches!(rpm_gauge.gauge_painter, GaugePainter::Tachometer));
-    assert_eq!(rpm_gauge.peg_limits, true);
+    assert!(rpm_gauge.peg_limits);
 
     // Check coolant gauge
     let coolant_gauge = components

@@ -94,33 +94,30 @@ menu = "Test Menu"
 
     // Verify the space-separated items have correct labels (not conditions)
     for item in &menu.items {
-        match item {
-            libretune_core::ini::MenuItem::Dialog {
+        if let libretune_core::ini::MenuItem::Dialog {
                 label,
                 target,
                 enabled_condition,
                 ..
-            } => {
-                // Labels should NOT start with { - that would indicate the bug
-                assert!(
-                    !label.starts_with('{'),
-                    "Label '{}' looks like a condition - parsing bug!",
-                    label
-                );
+            } = item {
+            // Labels should NOT start with { - that would indicate the bug
+            assert!(
+                !label.starts_with('{'),
+                "Label '{}' looks like a condition - parsing bug!",
+                label
+            );
 
-                // Verify specific items
-                if target == "dwell_tblMap" {
-                    assert_eq!(label, "Dwell Map", "Wrong label for dwell_tblMap");
-                    assert_eq!(enabled_condition.as_deref(), Some("useDwellMap"));
-                } else if target == "stagingMap" {
-                    assert_eq!(label, "Fuel Staging", "Wrong label for stagingMap");
-                    assert_eq!(enabled_condition.as_deref(), Some("stagingMode == 0"));
-                } else if target == "normalMenu" {
-                    assert_eq!(label, "Normal Label", "Wrong label for normalMenu");
-                    assert_eq!(enabled_condition.as_deref(), Some("someCondition"));
-                }
+            // Verify specific items
+            if target == "dwell_tblMap" {
+                assert_eq!(label, "Dwell Map", "Wrong label for dwell_tblMap");
+                assert_eq!(enabled_condition.as_deref(), Some("useDwellMap"));
+            } else if target == "stagingMap" {
+                assert_eq!(label, "Fuel Staging", "Wrong label for stagingMap");
+                assert_eq!(enabled_condition.as_deref(), Some("stagingMode == 0"));
+            } else if target == "normalMenu" {
+                assert_eq!(label, "Normal Label", "Wrong label for normalMenu");
+                assert_eq!(enabled_condition.as_deref(), Some("someCondition"));
             }
-            _ => {}
         }
     }
 
@@ -338,7 +335,7 @@ signature = "1234"
 /// Ensures INI files with comments on section headers are correctly identified
 #[test]
 fn test_repository_extraction_with_comments() {
-    use libretune_core::project::IniRepository;
+    
 
     // We cannot access private static methods of IniRepository directly.
     // However, if we can trigger the same logic path...

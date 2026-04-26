@@ -579,7 +579,7 @@ mod tests {
         let report = scorer.score_table(&table, &hits, &x_bins, &y_bins);
 
         // Should have lower score due to monotonicity issues
-        let has_monotonicity_warning = report
+        let _has_monotonicity_warning = report
             .recommendations
             .iter()
             .any(|r| r.contains("decrease") || r.contains("monoton"));

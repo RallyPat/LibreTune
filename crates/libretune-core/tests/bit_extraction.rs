@@ -16,7 +16,7 @@ fn bit_mask_u8(bits: u8) -> u8 {
 
 /// Simulates the bit extraction logic used in get_constant_value and get_all_constant_values
 fn extract_bits(raw_data: &[u8], bit_in_byte: u8, bit_size: u8) -> u64 {
-    let bytes_needed = ((bit_in_byte + bit_size + 7) / 8) as u16;
+    let bytes_needed = (bit_in_byte + bit_size).div_ceil(8) as u16;
     let mut bit_value = 0u64;
 
     for (i, &byte) in raw_data
@@ -182,7 +182,7 @@ fn test_bytes_needed_zero_underflow() {
 /// Helper function that mirrors the bit write logic in update_constant
 /// Writes the given bit value to the specified position in the data buffer.
 fn write_bits(data: &mut [u8], bit_in_byte: u8, bit_size: u8, new_value: u32) {
-    let bytes_needed = ((bit_in_byte + bit_size + 7) / 8) as usize;
+    let bytes_needed = (bit_in_byte + bit_size).div_ceil(8) as usize;
 
     if bytes_needed == 0 || data.is_empty() {
         return;
