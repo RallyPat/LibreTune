@@ -8,7 +8,7 @@
 
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { Car, Gauge, Fuel, Timer, Calculator, Save, RotateCcw } from 'lucide-react';
-import { Dialog, Button } from '../common';
+import { Dialog, Button, FormField } from '../common';
 import './PerformanceFieldsDialog.css';
 import { useChannels } from '../../stores/realtimeStore';
 
@@ -296,106 +296,123 @@ export default function PerformanceFieldsDialog({ isOpen, onClose }: Props) {
           <div className="performance-section">
             <h3><Car size={16} /> Vehicle Specifications</h3>
             
-            <div className="form-row">
-              <label>Vehicle Weight</label>
-              <div className="input-with-unit">
+            <FormField label="Vehicle Weight" layout="inline">
+              {(id) => (
+                <div className="input-with-unit">
+                  <input
+                    id={id}
+                    type="number"
+                    value={weightLbs}
+                    onChange={(e) => setWeightLbs(parseFloat(e.target.value) || 0)}
+                    step={100}
+                  />
+                  <select value={weightUnit} onChange={(e) => setWeightUnit(e.target.value as WeightUnit)}>
+                    <option value="LBS">lbs</option>
+                    <option value="KG">kg</option>
+                  </select>
+                </div>
+              )}
+            </FormField>
+
+            <FormField label="Frontal Area (sq ft)" layout="inline">
+              {(id) => (
                 <input
+                  id={id}
                   type="number"
-                  value={weightLbs}
-                  onChange={(e) => setWeightLbs(parseFloat(e.target.value) || 0)}
-                  step={100}
+                  value={frontalAreaSqft}
+                  onChange={(e) => setFrontalAreaSqft(parseFloat(e.target.value) || 0)}
+                  step={0.5}
                 />
-                <select value={weightUnit} onChange={(e) => setWeightUnit(e.target.value as WeightUnit)}>
-                  <option value="LBS">lbs</option>
-                  <option value="KG">kg</option>
-                </select>
-              </div>
-            </div>
-            
-            <div className="form-row">
-              <label>Frontal Area (sq ft)</label>
-              <input
-                type="number"
-                value={frontalAreaSqft}
-                onChange={(e) => setFrontalAreaSqft(parseFloat(e.target.value) || 0)}
-                step={0.5}
-              />
-            </div>
-            
-            <div className="form-row">
-              <label>Drag Coefficient (Cd)</label>
-              <input
-                type="number"
-                value={dragCoefficient}
-                onChange={(e) => setDragCoefficient(parseFloat(e.target.value) || 0)}
-                step={0.01}
-                min={0.1}
-                max={1.0}
-              />
-            </div>
-            
-            <div className="form-row">
-              <label>Tire Diameter (in)</label>
-              <input
-                type="number"
-                value={tireDiameterIn}
-                onChange={(e) => setTireDiameterIn(parseFloat(e.target.value) || 0)}
-                step={0.5}
-              />
-            </div>
-            
-            <div className="form-row">
-              <label>Tire Pressure (PSI)</label>
-              <input
-                type="number"
-                value={tirePressurePsi}
-                onChange={(e) => setTirePressurePsi(parseFloat(e.target.value) || 0)}
-                step={1}
-              />
-            </div>
-            
-            <div className="form-row">
-              <label>Drivetrain Loss (%)</label>
-              <input
-                type="number"
-                value={drivetrainLoss}
-                onChange={(e) => setDrivetrainLoss(parseFloat(e.target.value) || 0)}
-                step={1}
-                min={0}
-                max={30}
-              />
-              <span className="form-hint">FWD ~12%, RWD ~15%, AWD ~18%</span>
-            </div>
-            
-            <div className="form-row">
-              <label>Final Drive Ratio</label>
-              <input
-                type="number"
-                value={finalDrive}
-                onChange={(e) => setFinalDrive(parseFloat(e.target.value) || 0)}
-                step={0.01}
-              />
-            </div>
-            
-            <div className="form-row">
-              <label>Gear Ratios (comma-sep)</label>
-              <input
-                type="text"
-                value={gearRatios}
-                onChange={(e) => setGearRatios(e.target.value)}
-                placeholder="2.97, 2.07, 1.43, 1.00, 0.84"
-              />
-            </div>
-            
-            <div className="form-row">
-              <label>Injector Size (cc)</label>
-              <input
-                type="number"
-                value={injectorSizeCc}
-                onChange={(e) => setInjectorSizeCc(parseFloat(e.target.value) || 0)}
-                step={10}
-              />
-            </div>
+              )}
+            </FormField>
+
+            <FormField label="Drag Coefficient (Cd)" layout="inline">
+              {(id) => (
+                <input
+                  id={id}
+                  type="number"
+                  value={dragCoefficient}
+                  onChange={(e) => setDragCoefficient(parseFloat(e.target.value) || 0)}
+                  step={0.01}
+                  min={0.1}
+                  max={1.0}
+                />
+              )}
+            </FormField>
+
+            <FormField label="Tire Diameter (in)" layout="inline">
+              {(id) => (
+                <input
+                  id={id}
+                  type="number"
+                  value={tireDiameterIn}
+                  onChange={(e) => setTireDiameterIn(parseFloat(e.target.value) || 0)}
+                  step={0.5}
+                />
+              )}
+            </FormField>
+
+            <FormField label="Tire Pressure (PSI)" layout="inline">
+              {(id) => (
+                <input
+                  id={id}
+                  type="number"
+                  value={tirePressurePsi}
+                  onChange={(e) => setTirePressurePsi(parseFloat(e.target.value) || 0)}
+                  step={1}
+                />
+              )}
+            </FormField>
+
+            <FormField label="Drivetrain Loss (%)" layout="inline" help="FWD ~12%, RWD ~15%, AWD ~18%">
+              {(id) => (
+                <input
+                  id={id}
+                  type="number"
+                  value={drivetrainLoss}
+                  onChange={(e) => setDrivetrainLoss(parseFloat(e.target.value) || 0)}
+                  step={1}
+                  min={0}
+                  max={30}
+                />
+              )}
+            </FormField>
+
+            <FormField label="Final Drive Ratio" layout="inline">
+              {(id) => (
+                <input
+                  id={id}
+                  type="number"
+                  value={finalDrive}
+                  onChange={(e) => setFinalDrive(parseFloat(e.target.value) || 0)}
+                  step={0.01}
+                />
+              )}
+            </FormField>
+
+            <FormField label="Gear Ratios (comma-sep)" layout="inline">
+              {(id) => (
+                <input
+                  id={id}
+                  type="text"
+                  value={gearRatios}
+                  onChange={(e) => setGearRatios(e.target.value)}
+                  placeholder="2.97, 2.07, 1.43, 1.00, 0.84"
+                />
+              )}
+            </FormField>
+
+            <FormField label="Injector Size (cc)" layout="inline">
+              {(id) => (
+                <input
+                  id={id}
+                  type="number"
+                  value={injectorSizeCc}
+                  onChange={(e) => setInjectorSizeCc(parseFloat(e.target.value) || 0)}
+                  step={10}
+                />
+              )}
+            </FormField>
             
             <div className="button-row">
               <Button variant="secondary" onClick={handleReset} leadingIcon={<RotateCcw size={14} />}>
@@ -421,40 +438,46 @@ export default function PerformanceFieldsDialog({ isOpen, onClose }: Props) {
                 Use Realtime Data
               </label>
             </div>
-            
+
             {!useRealtime && (
               <>
-                <div className="form-row">
-                  <label>RPM</label>
-                  <input
-                    type="number"
-                    value={manualRpm}
-                    onChange={(e) => setManualRpm(parseFloat(e.target.value) || 0)}
-                    step={100}
-                  />
-                </div>
-                
-                <div className="form-row">
-                  <label>Speed (mph)</label>
-                  <input
-                    type="number"
-                    value={manualSpeed}
-                    onChange={(e) => setManualSpeed(parseFloat(e.target.value) || 0)}
-                    step={5}
-                  />
-                </div>
-                
-                <div className="form-row">
-                  <label>Acceleration (g)</label>
-                  <input
-                    type="number"
-                    value={manualAccel}
-                    onChange={(e) => setManualAccel(parseFloat(e.target.value) || 0)}
-                    step={0.05}
-                    min={0}
-                    max={2}
-                  />
-                </div>
+                <FormField label="RPM" layout="inline">
+                  {(id) => (
+                    <input
+                      id={id}
+                      type="number"
+                      value={manualRpm}
+                      onChange={(e) => setManualRpm(parseFloat(e.target.value) || 0)}
+                      step={100}
+                    />
+                  )}
+                </FormField>
+
+                <FormField label="Speed (mph)" layout="inline">
+                  {(id) => (
+                    <input
+                      id={id}
+                      type="number"
+                      value={manualSpeed}
+                      onChange={(e) => setManualSpeed(parseFloat(e.target.value) || 0)}
+                      step={5}
+                    />
+                  )}
+                </FormField>
+
+                <FormField label="Acceleration (g)" layout="inline">
+                  {(id) => (
+                    <input
+                      id={id}
+                      type="number"
+                      value={manualAccel}
+                      onChange={(e) => setManualAccel(parseFloat(e.target.value) || 0)}
+                      step={0.05}
+                      min={0}
+                      max={2}
+                    />
+                  )}
+                </FormField>
               </>
             )}
             

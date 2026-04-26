@@ -55,7 +55,34 @@
   line-height: 1.4;
 }
 
-/* When in error state, give the inner control a red ring via :has() if available */
+/* Default styling for direct input/select/textarea descendants. Callers can override. */
+.lt-field__control > input[type='number'],
+.lt-field__control > input[type='text'],
+.lt-field__control > input[type='email'],
+.lt-field__control > input[type='password'],
+.lt-field__control > input[type='search'],
+.lt-field__control > input[type='url'],
+.lt-field__control > select,
+.lt-field__control > textarea {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  font-size: var(--font-size-sm);
+  transition: border-color var(--motion-fast) ease;
+  box-sizing: border-box;
+}
+
+.lt-field__control > input:focus,
+.lt-field__control > select:focus,
+.lt-field__control > textarea:focus {
+  outline: none;
+  border-color: var(--border-focus);
+}
+
+/* When in error state, give the inner control a red ring */
 .lt-field--error .lt-field__control input,
 .lt-field--error .lt-field__control select,
 .lt-field--error .lt-field__control textarea {
