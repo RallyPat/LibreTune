@@ -62,6 +62,7 @@ import { useToast } from "./components/ToastContext";
 import { SettingsView } from "./components/SettingsView";
 import { formatError } from "./utils/formatError";
 import { ensureRealtimeListener } from "./services/realtimeListener";
+import { buildSidebarItems } from "./utils/buildSidebarItems";
 import {
   type ConnectionStatus,
   type ConnectResult,
@@ -2182,47 +2183,6 @@ function AppContent() {
     return items;
   }, [status, isLogging, iniCapabilities, connectionRuntimePacketMode, defaultRuntimePacketMode]);
 
-  // Build sidebar tree from menus - recursively handle SubMenus (e.g., LUA, GDI groups)
-  const buildSidebarItems = useCallback((items: BackendMenuItem[], prefix: string): (SidebarNode & { itemType?: string })[] => {
-    return items
-      .filter((item) => item.type !== "Separator")
-      .map((item, idx) => {
-        // Determine if item is disabled (visible=false from visibility condition evaluation)
-        const isDisabled = item.visible === false;
-        const disabledReason = isDisabled && item.visibility_condition 
-          ? `Condition not met: ${item.visibility_condition}`
-          : undefined;
-        
-        if (item.type === "SubMenu" && item.items && item.items.length > 0) {
-          // Recursively build children for SubMenu
-          return {
-            id: `${prefix}-submenu-${idx}`,
-            label: item.label || "",
-            type: "folder" as const,
-            children: buildSidebarItems(item.items, `${prefix}-${idx}`),
-            disabled: isDisabled,
-            disabledReason,
-          };
-        }
-        // Leaf item - Table, Dialog, Std, or Help
-        // Map item type to sidebar node type
-        let nodeType: string = "dialog";
-        if (item.type === "Table") {
-          nodeType = "table";
-        } else if (item.type === "Help") {
-          nodeType = "help";
-        }
-        return {
-          id: item.target || `${prefix}-${idx}`,
-          label: item.label || "",
-          type: nodeType as "table" | "dialog" | "help",
-          itemType: item.type, // Store original type for click handling
-          disabled: isDisabled,
-          disabledReason,
-        };
-      });
-  }, []);
-
   const sidebarItems: SidebarNode[] = useMemo(() => {
     // Build menu-based sidebar items from INI menus
     // Curves are accessed via their parent dialogs (e.g., Fuel > Injection configuration)
@@ -2234,7 +2194,7 @@ function AppContent() {
     }));
     
     return menuItems;
-  }, [backendMenus, buildSidebarItems]);
+  }, [backendMenus]);
 
   const handleSidebarItemSelect = useCallback(
     (item: SidebarNode & { itemType?: string }, highlightTerm?: string) => {
