@@ -27,6 +27,7 @@ pub mod load_ini;
 pub mod save_tune;
 pub mod connect_to_ecu;
 pub mod sync_ecu_data;
+pub mod load_tune;
 pub mod debug_realtime;
 pub mod realtime_get;
 pub mod annotations;
