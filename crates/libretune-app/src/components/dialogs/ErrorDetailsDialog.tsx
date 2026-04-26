@@ -81,7 +81,7 @@ UserAgent: ${navigator.userAgent}
       </Dialog.Body>
 
       <Dialog.Footer>
-        <Button variant="primary" onClick={onClose}>OK</Button>
+        <Button variant="secondary" onClick={onClose}>Close</Button>
       </Dialog.Footer>
     </Dialog>
   );

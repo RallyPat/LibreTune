@@ -428,6 +428,12 @@ export default function SignatureMismatchDialog({
       </Dialog.Body>
 
       <Dialog.Footer>
+        <Button variant="secondary" onClick={onClose}>
+          Cancel
+        </Button>
+        <Button variant="secondary" onClick={onContinue}>
+          Continue Anyway
+        </Button>
         {selectedIni && !showOnlineSearch && (
           <Button
             variant="primary"
@@ -438,12 +444,6 @@ export default function SignatureMismatchDialog({
             {switching ? "Switching..." : "Use Selected INI"}
           </Button>
         )}
-        <Button variant="secondary" onClick={onContinue}>
-          Continue Anyway
-        </Button>
-        <Button variant="secondary" onClick={onClose}>
-          Cancel
-        </Button>
       </Dialog.Footer>
     </Dialog>
   );

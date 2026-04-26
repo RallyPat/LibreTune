@@ -1427,7 +1427,7 @@ export function AboutDialog({ isOpen, onClose }: DialogProps) {
       </Dialog.Body>
 
       <Dialog.Footer>
-        <Button variant="primary" onClick={onClose}>Close</Button>
+        <Button variant="secondary" onClick={onClose}>Close</Button>
       </Dialog.Footer>
     </Dialog>
   );

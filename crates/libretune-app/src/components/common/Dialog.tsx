@@ -115,6 +115,24 @@ function Body({ children, className }: { children: React.ReactNode; className?: 
   );
 }
 
+/**
+ * Dialog footer for action buttons.
+ *
+ * Convention (Western/macOS): place buttons in DOM order such that the
+ * primary/affirmative action is LAST. The footer is `flex` with
+ * `justify-content: flex-end`, so buttons render with the primary on the
+ * RIGHT and Cancel on the LEFT.
+ *
+ * Recommended:
+ *   <Dialog.Footer>
+ *     <Button variant="secondary" onClick={onClose}>Cancel</Button>
+ *     <Button variant="primary" onClick={onSave}>Save</Button>
+ *   </Dialog.Footer>
+ *
+ * Use `Close` (variant="secondary") for read-only/info dialogs.
+ * Avoid generic `OK` — use the verb that matches the action
+ * (Save / Apply / Create / Import / Delete / Continue).
+ */
 function Footer({ children, className }: { children: React.ReactNode; className?: string }) {
   return (
     <footer className={`lt-dialog__footer${className ? ` ${className}` : ''}`}>{children}</footer>
