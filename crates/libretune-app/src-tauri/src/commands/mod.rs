@@ -13,6 +13,7 @@ pub mod autotune_misc;
 pub mod curve_ops;
 pub mod load_pages;
 pub mod table_update;
+pub mod constant_values;
 pub mod debug_realtime;
 pub mod realtime_get;
 pub mod annotations;

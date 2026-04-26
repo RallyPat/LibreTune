@@ -3,7 +3,7 @@
 use libretune_core::ini::DataType;
 use libretune_core::tune::TuneValue;
 
-use crate::read_constant_from_cache_or_tune;
+use crate::commands::constant_values::read_constant_from_cache_or_tune;
 use crate::state::AppState;
 
 /// Reset all tune values to their INI-defined defaults
