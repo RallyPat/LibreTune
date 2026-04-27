@@ -9,7 +9,7 @@
 
 Modern, open-source ECU tuning software for Speeduino, rusEFI, EpicEFI, and other INI-compatible aftermarket engine control units. Built with a Rust core and a native desktop UI via Tauri.
 
-## Please note that this project is still very early days - these notes are largely agentically written, and may not be 100% accurate at this time.  We welcome public contribution, and want this to be a thriving publically developed effort. 
+> ⚠️ **Project status — early days.** These notes are largely agentically written and may not be 100% accurate. Public contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) and the [CHANGELOG](CHANGELOG.md) for what's landed recently.
 
 ## Downloads
 
@@ -44,10 +44,12 @@ Project-based workflow with restore points, Git-based tune versioning, CSV expor
 - **Multi-monitor**: Pop out any tab to its own window with bidirectional sync
 - **Unit preferences**: Temperature (°C/°F/K), pressure (kPa/PSI/bar/inHg), AFR/Lambda
 - **Performance calculator**: Estimated HP/torque curves and acceleration times
-- **Action scripting**: Record and replay tuning actions across tunes
+- **Action scripting**: Record and replay tuning actions across tunes, with INI-backed validation
 - **Extensible**: WASM plugin system with sandboxing and permission model
+- **Localization**: i18n scaffold with English and Brazilian Portuguese (`pt-BR`); add new locales under `crates/libretune-app/src/i18n/locales/`
+- **Demo mode**: Run the app without an ECU using the bundled simulator (Settings → Enable Demo Mode)
 
-For full documentation, see the [User Manual](https://rallypat.github.io/LibreTune/).
+For full documentation, see the [User Manual](https://rallypat.github.io/LibreTune/) or the [architecture overview](docs/architecture.md).
 
 ## Screenshots
 
@@ -71,8 +73,9 @@ Any ECU using the standard INI definition format should be compatible.
 
 ### Prerequisites
 
-- **Rust 1.75+** — Install via [rustup](https://rustup.rs)
+- **Rust (stable)** — Install via [rustup](https://rustup.rs)
 - **Node.js 20+** — For the Tauri frontend
+- **Platform build deps** — see the OS notes below
 
 ### Build & Run
 
@@ -86,6 +89,27 @@ npm run tauri dev
 ```
 
 <details>
+<summary><strong>Notes for Linux Users</strong></summary>
+
+Tauri 2 needs WebKitGTK and a few system libraries. On Debian/Ubuntu:
+
+```bash
+sudo apt install -y libwebkit2gtk-4.1-dev librsvg2-dev libssl-dev \
+  build-essential curl wget file libxdo-dev libayatana-appindicator3-dev
+```
+
+On Fedora:
+
+```bash
+sudo dnf install -y webkit2gtk4.1-devel openssl-devel curl wget file \
+  libxdo-devel libappindicator-gtk3-devel librsvg2-devel "@C Development Tools and Libraries"
+```
+
+See the [Tauri prerequisites guide](https://v2.tauri.app/start/prerequisites/) for other distros.
+
+</details>
+
+<details>
 <summary><strong>Notes for Windows Users</strong></summary>
 
 If `link.exe` is not found, install the Visual Studio Build Tools:
@@ -94,6 +118,19 @@ If `link.exe` is not found, install the Visual Studio Build Tools:
 2. During installation, enable **Desktop development with C++**
 3. Set the Rust toolchain: `rustup default stable-x86_64-pc-windows-msvc`
 4. Restart your terminal, then build as above
+
+</details>
+
+<details>
+<summary><strong>Notes for macOS Users</strong></summary>
+
+Install the Xcode command-line tools:
+
+```bash
+xcode-select --install
+```
+
+WebKit ships with macOS, so no extra system packages are required.
 
 </details>
 
@@ -109,37 +146,60 @@ npm run tauri build
 ```
 libretune/
 ├── crates/
-│   ├── libretune-core/    # Core Rust library
+│   ├── libretune-core/         # Core Rust library
 │   │   └── src/
-│   │       ├── ini/       # INI file parsing
-│   │       ├── protocol/  # Serial communication
-│   │       ├── ecu/       # ECU memory model
-│   │       ├── datalog/   # Data logging
-│   │       ├── autotune/  # AutoTune algorithms
-│   │       ├── tune/      # Tune file management
-│   │       ├── dash/      # Dashboard format parsing
-│   │       └── project/   # Project & restore points
-│   └── libretune-app/     # Tauri desktop application
-│       ├── src/           # React frontend (TypeScript)
-│       └── src-tauri/     # Tauri backend (Rust)
-├── docs/                  # User manual (mdBook)
-├── scripts/               # Build and development scripts
-└── Cargo.toml             # Workspace root
+│   │       ├── ini/            # INI file parsing
+│   │       ├── protocol/       # Serial communication
+│   │       ├── ecu/            # ECU memory model
+│   │       ├── datalog/        # Data logging
+│   │       ├── autotune/       # AutoTune algorithms
+│   │       ├── tune/           # Tune file management
+│   │       ├── dash/           # Dashboard format (incl. layout.rs defaults)
+│   │       └── project/        # Project, restore points, Git versioning
+│   └── libretune-app/          # Tauri desktop application
+│       ├── src/                # React frontend (TypeScript)
+│       │   ├── components/     # UI (dialogs, dashboards, gauges, tuner-ui, …)
+│       │   ├── contexts/       # Cross-cutting React providers
+│       │   ├── hooks/          # Reusable hooks (realtime, ECU events, …)
+│       │   ├── i18n/           # Localization (en, pt-BR)
+│       │   └── stores/         # State stores
+│       └── src-tauri/          # Tauri backend (Rust)
+│           └── src/
+│               ├── commands/   # Tauri commands (~70 sub-modules)
+│               └── state.rs    # Shared AppState
+├── docs/                       # User manual (mdBook) + architecture.md
+├── scripts/                    # Build and development scripts
+├── CHANGELOG.md                # Keep-a-Changelog history
+└── Cargo.toml                  # Workspace root
 ```
+
+For a deeper dive into module boundaries and Phase 1–8 cleanup history, see [docs/architecture.md](docs/architecture.md) and [CHANGELOG.md](CHANGELOG.md).
 
 ## Development
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and guidelines.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and guidelines, and [docs/architecture.md](docs/architecture.md) for a tour of the codebase.
+
+### Tests
 
 ```bash
+# Rust workspace
 cargo test --workspace
+
+# Frontend (vitest)
+cd crates/libretune-app && npm run test:run
 ```
 
-### Run Lints
+### Lints & type checks
 
 ```bash
-cargo clippy --workspace
+cargo clippy --workspace --all-targets -- -D warnings
+cargo fmt --all -- --check
+
+cd crates/libretune-app
+npm run typecheck
 ```
+
+The full pre-push pipeline (build + tests + clippy + fmt + frontend build/tests) is wrapped in [scripts/pre-push.sh](scripts/pre-push.sh) and runs automatically as a Git hook.
 
 ## License
 
