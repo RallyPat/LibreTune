@@ -43,7 +43,6 @@ pub mod action_scripting;
 pub mod autotune;
 pub mod basemap;
 pub mod dash;
-pub mod dashboard;
 pub mod datalog;
 pub mod demo;
 pub mod ecu;
@@ -65,7 +64,7 @@ pub mod prelude {
         AutoTuneAuthorityLimits, AutoTuneFilters, AutoTuneRecommendation, AutoTuneSettings,
         AutoTuneState,
     };
-    pub use crate::dashboard::{
+    pub use crate::dash::layout::{
         get_dashboard_file, get_dashboard_file_path, DashboardLayout, GaugeConfig, GaugeType,
     };
     pub use crate::datalog::{DataLogger, LogEntry};

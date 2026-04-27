@@ -1014,7 +1014,7 @@ Based on analysis of common ECU tuning software patterns:
 - **Added table_ops unit tests**:
   - File: `crates/libretune-core/tests/table_ops.rs`
   - Tests for: rebin_table, scale_cells, set_cells_equal, interpolate_cells
-  - 5 passing tests, 1 ignored (smooth_table bug discovered)
+  - 5 passing tests (smooth_table tests added once bug was fixed)
 
 - **Added platform-specific corpus tests** (Jan 2026):
   - File: `crates/libretune-core/tests/corpus.rs`
@@ -1027,11 +1027,7 @@ Based on analysis of common ECU tuning software patterns:
 - **Test results**: 84+ passed, 2 ignored across all test files
 
 ### Known Issues
-- **smooth_table bug**: Weight array indexing issue at line 115 in table_ops.rs
-  - `calculate_smoothing_weights` returns `kernel_size` elements
-  - `get_neighbors` returns up to 8 neighbors
-  - Index out of bounds when neighbor index >= weights.len()
-  - Test ignored until fix implemented
+- (none currently tracked at this level — see CHANGELOG / issue tracker)
 
 ### lastOffset Keyword Support - Completed Dec 31, 2025
 - **Root Cause**: Constants like `afrTable` use `lastOffset` keyword instead of numeric offset

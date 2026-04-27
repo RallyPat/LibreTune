@@ -7,7 +7,7 @@ use libretune_core::dash::{
     self, create_basic_dashboard, create_racing_dashboard, create_tuning_dashboard, DashComponent,
     DashFile, VersionInfo,
 };
-use libretune_core::dashboard::DashboardLayout;
+use libretune_core::dash::layout::DashboardLayout;
 use libretune_core::ini::EcuDefinition;
 use std::path::{Path, PathBuf};
 

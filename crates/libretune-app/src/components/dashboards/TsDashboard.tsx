@@ -17,7 +17,6 @@ import { useRealtimeStore, useChannelValue } from '../../stores/realtimeStore';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, UnlistenFn } from '@tauri-apps/api/event';
 import { save } from '@tauri-apps/plugin-dialog';
-import { createLibreTuneDefaultDashboard } from './LibreTuneDefaultDashboard';
 import TsGauge from '../gauges/TsGauge';
 import TsIndicator from '../gauges/TsIndicator';
 import GaugeContextMenu, { ContextMenuState } from './GaugeContextMenu';
@@ -549,33 +548,20 @@ export default function TsDashboard({ initialDashPath, isConnected = false }: Ts
   }, []);
 
   // Load/refresh available dashboards list
+  // Load/refresh available dashboards list. The Rust backend seeds the
+  // app data dir with default dashboards (Basic/Tuning/Racing) on first run,
+  // so list_available_dashes should always return at least these. If it does
+  // come back empty (e.g. seeding failed), we surface an empty list and let
+  // the empty-state UI / Reset to Defaults action recover.
   const refreshDashboardList = useCallback(async () => {
     try {
-      let dashes = await invoke<DashFileInfo[]>('list_available_dashes');
-      if (!dashes || dashes.length === 0) {
-        dashes = [{
-          name: 'LibreTune Default',
-          path: '__libretune_default__',
-          category: 'Bundled',
-        }];
-      }
-      setAvailableDashes(dashes);
-      return dashes;
+      const dashes = await invoke<DashFileInfo[]>('list_available_dashes');
+      setAvailableDashes(dashes ?? []);
+      return dashes ?? [];
     } catch (e) {
-      setAvailableDashes([
-        {
-          name: 'LibreTune Default',
-          path: '__libretune_default__',
-          category: 'Bundled',
-        },
-      ]);
-      return [
-        {
-          name: 'LibreTune Default',
-          path: '__libretune_default__',
-          category: 'Bundled',
-        },
-      ];
+      console.warn('[TsDashboard] list_available_dashes failed:', e);
+      setAvailableDashes([]);
+      return [];
     }
   }, []);
 
@@ -762,12 +748,7 @@ export default function TsDashboard({ initialDashPath, isConnected = false }: Ts
       setError(null);
 
       try {
-        let file: DashFile;
-        if (selectedPath === '__libretune_default__') {
-          file = createLibreTuneDefaultDashboard();
-        } else {
-          file = await invoke<DashFile>('get_dash_file', { path: selectedPath });
-        }
+        const file = await invoke<DashFile>('get_dash_file', { path: selectedPath });
         setDashFile(file);
         setLegacyMode(isLegacyPath);
         requestAnimationFrame(() => computeScale());

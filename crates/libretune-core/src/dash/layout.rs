@@ -1,4 +1,15 @@
-//! Dashboard Module
+//! LibreTune-native dashboard layout format.
+//!
+//! This is LibreTune's own simple dashboard layout representation, distinct
+//! from the TS-compatible XML format implemented elsewhere in this module
+//! (`types.rs`, `parser.rs`, `writer.rs`). The two formats coexist:
+//!
+//! - `DashboardLayout` (this file): simple JSON-friendly internal layout used
+//!   by LibreTune's own save/load commands and as a UI-level intermediate.
+//! - `DashFile`/`GaugeCluster` (sibling files): full TS XML schema for
+//!   import/export of `.dash` files.
+//!
+//! Conversion between the two is handled by `commands::dash_convert`.
 //!
 //! Dashboard persistence and configuration.
 //! Supports saving/loading dashboard layouts with gauge configurations.

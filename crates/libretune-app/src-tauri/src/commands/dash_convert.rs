@@ -3,12 +3,12 @@
 use libretune_core::dash::{
     self, Bibliography, DashComponent, DashFile, GaugePainter, TsColor, VersionInfo,
 };
-use libretune_core::dashboard::{DashboardLayout, GaugeConfig as DashboardGaugeConfig};
+use libretune_core::dash::layout::{DashboardLayout, GaugeConfig as DashboardGaugeConfig};
 
 /// Convert legacy DashboardLayout to TS DashFile format
 pub(crate) fn convert_layout_to_dashfile(layout: &DashboardLayout) -> DashFile {
     use libretune_core::dash::{BackgroundStyle, GaugeCluster};
-    use libretune_core::dashboard::GaugeType;
+    use libretune_core::dash::layout::GaugeType;
 
     let mut dash = DashFile {
         bibliography: Bibliography {
@@ -81,7 +81,7 @@ pub(crate) fn convert_layout_to_dashfile(layout: &DashboardLayout) -> DashFile {
 
 /// Convert TS DashFile to legacy DashboardLayout format
 pub(crate) fn convert_dashfile_to_layout(dash: &DashFile, name: &str) -> DashboardLayout {
-    use libretune_core::dashboard::GaugeType;
+    use libretune_core::dash::layout::GaugeType;
 
     let mut layout = DashboardLayout {
         name: name.to_string(),

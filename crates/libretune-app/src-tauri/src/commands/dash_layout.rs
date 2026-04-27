@@ -6,7 +6,7 @@ use crate::{convert_dashfile_to_layout, convert_layout_to_dashfile};
 use libretune_core::dash::{
     self, create_basic_dashboard, create_racing_dashboard, create_tuning_dashboard,
 };
-use libretune_core::dashboard::{get_dashboard_file_path, DashboardLayout};
+use libretune_core::dash::layout::{get_dashboard_file_path, DashboardLayout};
 use serde::Serialize;
 use std::path::Path;
 

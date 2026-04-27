@@ -1,3 +1,11 @@
+//! Derived-channel evaluator.
+//!
+//! This is a transform layer, not part of the streaming/transport stack: it
+//! takes a snapshot of raw output channels (already decoded from the ECU) plus
+//! the loaded `EcuDefinition`, and produces additional computed channels
+//! (e.g. AFR from lambda, derived ratios). Multi-pass dependency resolution
+//! lets computed channels reference each other.
+
 use crate::ini::EcuDefinition;
 use std::collections::HashMap;
 
