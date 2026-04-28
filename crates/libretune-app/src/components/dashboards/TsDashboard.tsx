@@ -2,9 +2,6 @@ import {
   DashFile,
   DashFileInfo,
   TsGaugeConfig,
-  TsIndicatorConfig,
-  SUPPORTED_GAUGE_PAINTERS,
-  SUPPORTED_INDICATOR_PAINTERS,
   isGauge,
   isIndicator,
   buildEmbeddedImageMap,
@@ -13,34 +10,27 @@ import {
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Plus, Copy, Pencil, Trash2, Save, RotateCw, AlertTriangle, Compass, X, FolderOpen } from 'lucide-react';
-import { useRealtimeStore, useChannelValue } from '../../stores/realtimeStore';
+import { useRealtimeStore } from '../../stores/realtimeStore';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, UnlistenFn } from '@tauri-apps/api/event';
 import { save } from '@tauri-apps/plugin-dialog';
 import TsGauge from '../gauges/TsGauge';
-import TsIndicator from '../gauges/TsIndicator';
 import GaugeContextMenu, { ContextMenuState } from './GaugeContextMenu';
 import ImportDashboardDialog from '../dialogs/ImportDashboardDialog';
 import DashboardDesigner from './DashboardDesigner';
 import { Dialog, Button } from '../common';
+import LiveTsIndicator from './components/LiveTsIndicator';
+import { buildDefaultGauge } from './utils/defaultGauge';
+import {
+  formatValidationIssue,
+  type ValidationReport,
+} from './utils/validation';
+import {
+  computeCompatibilityReport,
+  hasCompatibilityIssues as hasCompatIssues,
+} from './utils/compatibility';
+import { computeDashboardBounds } from './utils/dashboardBounds';
 import './TsDashboard.css';
-
-/**
- * LiveTsIndicator — wraps TsIndicator with a per-channel store subscription.
- * Each indicator subscribes to exactly one channel, so only THIS indicator
- * re-renders when its channel value changes (not the entire dashboard).
- */
-const LiveTsIndicator = React.memo(function LiveTsIndicator({
-  config,
-  embeddedImages,
-}: {
-  config: TsIndicatorConfig;
-  embeddedImages?: Map<string, string>;
-}) {
-  const liveValue = useChannelValue(config.output_channel, config.value);
-  const isOn = liveValue !== 0;
-  return <TsIndicator config={config} isOn={isOn} embeddedImages={embeddedImages} />;
-});
 
 /**
  * Props for the TsDashboard component.
@@ -72,18 +62,6 @@ interface GaugeInfo {
   low_danger: number;
   high_danger: number;
   digits: number;
-}
-
-interface ValidationReport {
-  errors: Record<string, any>[];
-  warnings: Record<string, any>[];
-  stats: {
-    gauge_count: number;
-    indicator_count: number;
-    unique_channels: number;
-    embedded_image_count: number;
-    has_embedded_fonts: boolean;
-  };
 }
 
 export default function TsDashboard({ initialDashPath, isConnected = false }: TsDashboardProps) {
@@ -168,109 +146,27 @@ export default function TsDashboard({ initialDashPath, isConnected = false }: Ts
     loadChannels();
   }, []);
 
-  // Calculate dashboard aspect ratio from gauge bounding box
-  // Find the maximum extent of all gauges to determine the design's aspect ratio
-  // NOTE: This must be before early returns to comply with React Rules of Hooks
-  const dashboardBounds = useMemo(() => {
-    if (!dashFile) {
-      return { maxX: 1.0, maxY: 1.0, aspectRatio: 1.0, minSize: 50 };
-    }
-    
-    const components = dashFile.gauge_cluster.components;
-    let maxX = 0;
-    let maxY = 0;
-    let minShortestSize = Infinity;
-    
-    components.forEach((comp) => {
-      if (isGauge(comp)) {
-        const g = comp.Gauge;
-        maxX = Math.max(maxX, (g.relative_x ?? 0) + (g.relative_width ?? 0.25));
-        maxY = Math.max(maxY, (g.relative_y ?? 0) + (g.relative_height ?? 0.25));
-        if (g.shortest_size > 0) {
-          minShortestSize = Math.min(minShortestSize, g.shortest_size);
-        }
-      } else if (isIndicator(comp)) {
-        const i = comp.Indicator;
-        maxX = Math.max(maxX, (i.relative_x ?? 0) + (i.relative_width ?? 0.1));
-        maxY = Math.max(maxY, (i.relative_y ?? 0) + (i.relative_height ?? 0.05));
-      }
-    });
-    
-    // Clamp to reasonable bounds (at least 1.0 to cover the full area)
-    maxX = Math.max(1.0, maxX);
-    maxY = Math.max(1.0, maxY);
-    
-    const forceAspect = dashFile.gauge_cluster.force_aspect
-      && dashFile.gauge_cluster.force_aspect_width > 0
-      && dashFile.gauge_cluster.force_aspect_height > 0;
-    const forcedRatio = forceAspect
-      ? dashFile.gauge_cluster.force_aspect_width / dashFile.gauge_cluster.force_aspect_height
-      : null;
-
-    // Aspect ratio is width / height (use forced aspect for legacy TunerStudio dashboards)
-    const aspectRatio = forcedRatio ?? (maxX / maxY);
-    
-    // Minimum dashboard size based on smallest gauge requirement
-    const minSize = minShortestSize === Infinity ? 50 : minShortestSize;
-    
-    return { maxX, maxY, aspectRatio, minSize };
-  }, [dashFile]);
+  // Calculate dashboard aspect ratio from gauge bounding box.
+  // Must be before any early returns to comply with React Rules of Hooks.
+  const dashboardBounds = useMemo(
+    () => computeDashboardBounds(dashFile),
+    [dashFile],
+  );
 
   const isLegacyPath = useMemo(() => {
     const lower = (selectedPath ?? '').toLowerCase();
     return lower.endsWith('.dash') || lower.endsWith('.gauge');
   }, [selectedPath]);
 
-  const compatibilityReport = useMemo(() => {
-    if (!dashFile) return null;
+  const compatibilityReport = useMemo(
+    () => (dashFile ? computeCompatibilityReport(dashFile) : null),
+    [dashFile],
+  );
 
-    const supportedGaugePainters = new Set(SUPPORTED_GAUGE_PAINTERS);
-    const supportedIndicatorPainters = new Set(SUPPORTED_INDICATOR_PAINTERS);
-
-    const gaugePainters: Record<string, number> = {};
-    const indicatorPainters: Record<string, number> = {};
-    const unsupportedGaugePainters = new Set<string>();
-    const unsupportedIndicatorPainters = new Set<string>();
-
-    let gauges = 0;
-    let indicators = 0;
-
-    dashFile.gauge_cluster.components.forEach((comp) => {
-      if (isGauge(comp)) {
-        gauges += 1;
-        const painter = comp.Gauge.gauge_painter || 'BasicReadout';
-        gaugePainters[painter] = (gaugePainters[painter] || 0) + 1;
-        if (!supportedGaugePainters.has(painter)) {
-          unsupportedGaugePainters.add(painter);
-        }
-      } else if (isIndicator(comp)) {
-        indicators += 1;
-        const painter = comp.Indicator.indicator_painter || 'BasicRectangleIndicator';
-        indicatorPainters[painter] = (indicatorPainters[painter] || 0) + 1;
-        if (!supportedIndicatorPainters.has(painter)) {
-          unsupportedIndicatorPainters.add(painter);
-        }
-      }
-    });
-
-    return {
-      total_components: dashFile.gauge_cluster.components.length,
-      gauges,
-      indicators,
-      gauge_painters: gaugePainters,
-      indicator_painters: indicatorPainters,
-      unsupported_gauge_painters: Array.from(unsupportedGaugePainters),
-      unsupported_indicator_painters: Array.from(unsupportedIndicatorPainters),
-    };
-  }, [dashFile]);
-
-  const hasCompatibilityIssues = useMemo(() => {
-    if (!compatibilityReport) return false;
-    return (
-      compatibilityReport.unsupported_gauge_painters.length > 0 ||
-      compatibilityReport.unsupported_indicator_painters.length > 0
-    );
-  }, [compatibilityReport]);
+  const hasCompatibilityIssues = useMemo(
+    () => hasCompatIssues(compatibilityReport),
+    [compatibilityReport],
+  );
 
 
 
@@ -805,19 +701,6 @@ export default function TsDashboard({ initialDashPath, isConnected = false }: Ts
     setShowSelector(false);
   };
 
-  const formatValidationIssue = useCallback((issue: Record<string, any>) => {
-    const entries = Object.entries(issue);
-    if (entries.length === 0) return 'Unknown issue';
-    const [kind, details] = entries[0];
-    if (details && typeof details === 'object') {
-      const parts = Object.entries(details)
-        .map(([key, value]) => `${key}: ${String(value)}`)
-        .join(', ');
-      return `${kind} (${parts})`;
-    }
-    return kind;
-  }, []);
-
   if (loading) {
     return (
       <div className="ts-dashboard ts-dashboard-loading">
@@ -1245,65 +1128,14 @@ export default function TsDashboard({ initialDashPath, isConnected = false }: Ts
             const label = info?.label || channel.label;
 
             // Create default gauge config
-            const defaultGauge: TsGaugeConfig = {
+            const defaultGauge: TsGaugeConfig = buildDefaultGauge({
               id: `gauge_${Date.now()}`,
-              gauge_painter: 'BasicReadout',
-              gauge_style: '',
-              output_channel: channel.id,
+              channel: channel.id,
               title: label || channel.label,
-              units: units,
-              value: 0,
-              min: 0,
-              max: 100,
-              min_vp: null,
-              max_vp: null,
-              default_min: null,
-              default_max: null,
-              peg_limits: false,
-              low_warning: null,
-              high_warning: null,
-              low_critical: null,
-              high_critical: null,
-              low_warning_vp: null,
-              high_warning_vp: null,
-              low_critical_vp: null,
-              high_critical_vp: null,
-              back_color: { alpha: 0, red: 40, green: 40, blue: 40 },
-              font_color: { alpha: 0, red: 255, green: 255, blue: 255 },
-              trim_color: { alpha: 0, red: 100, green: 100, blue: 100 },
-              warn_color: { alpha: 0, red: 255, green: 165, blue: 0 },
-              critical_color: { alpha: 0, red: 255, green: 0, blue: 0 },
-              needle_color: { alpha: 0, red: 200, green: 200, blue: 200 },
-              value_digits: 2,
-              label_digits: 0,
-              font_family: 'Arial',
-              font_size_adjustment: 0,
-              italic_font: false,
-              sweep_angle: 270,
-              start_angle: 225,
-              face_angle: 0,
-              sweep_begin_degree: 0,
-              counter_clockwise: false,
-              major_ticks: 5,
-              minor_ticks: 0,
-              relative_x: relX - 0.1,
-              relative_y: relY - 0.1,
-              relative_width: 0.2,
-              relative_height: 0.2,
-              border_width: 1,
-              shortest_size: 0,
-              shape_locked_to_aspect: false,
-              antialiasing_on: true,
-              background_image_file_name: null,
-              needle_image_file_name: null,
-              show_history: false,
-              history_value: 0,
-              history_delay: 0,
-              needle_smoothing: 0,
-              short_click_action: null,
-              long_click_action: null,
-              display_value_at_180: false,
-            };
+              units,
+              relativeX: relX - 0.1,
+              relativeY: relY - 0.1,
+            });
 
             // Add new gauge to dashboard
             const updatedComponents = [...dashFile.gauge_cluster.components, { Gauge: defaultGauge }];
