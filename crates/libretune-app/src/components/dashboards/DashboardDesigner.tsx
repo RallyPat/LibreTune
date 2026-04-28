@@ -12,18 +12,9 @@
  */
 
 import { useCallback, useRef, useEffect } from 'react';
-import { 
-  Grid3X3, 
-  Save, 
-  Undo2, 
-  Redo2, 
-  Copy, 
-  Clipboard, 
-  Trash2,
-  X,
-} from 'lucide-react';
 import { DashFile, TsGaugeConfig, DashComponent, isGauge, isIndicator } from './dashTypes';
 import PropertyEditor from './designer/PropertyEditor';
+import DesignerToolbar from './designer/DesignerToolbar';
 import { useDesignerHistory } from './designer/useDesignerHistory';
 import { useDesignerDragResize, ResizeHandle } from './designer/useDesignerDragResize';
 import './DashboardDesigner.css';
@@ -277,101 +268,23 @@ export default function DashboardDesigner({
 
   return (
     <div className="dashboard-designer">
-      {/* Toolbar */}
-      <div className="designer-toolbar">
-        <div className="toolbar-group">
-          <button 
-            className="toolbar-btn"
-            onClick={handleUndo}
-            disabled={!canUndo}
-            title="Undo (Ctrl+Z)"
-          >
-            <Undo2 size={16} />
-          </button>
-          <button 
-            className="toolbar-btn"
-            onClick={handleRedo}
-            disabled={!canRedo}
-            title="Redo (Ctrl+Y)"
-          >
-            <Redo2 size={16} />
-          </button>
-        </div>
-        
-        <div className="toolbar-separator" />
-        
-        <div className="toolbar-group">
-          <button 
-            className="toolbar-btn"
-            onClick={handleCopy}
-            disabled={!selectedGaugeId}
-            title="Copy (Ctrl+C)"
-          >
-            <Copy size={16} />
-          </button>
-          <button 
-            className="toolbar-btn"
-            onClick={handlePaste}
-            disabled={!hasClipboard}
-            title="Paste (Ctrl+V)"
-          >
-            <Clipboard size={16} />
-          </button>
-          <button 
-            className="toolbar-btn danger"
-            onClick={handleDelete}
-            disabled={!selectedGaugeId}
-            title="Delete (Del)"
-          >
-            <Trash2 size={16} />
-          </button>
-        </div>
-        
-        <div className="toolbar-separator" />
-        
-        <div className="toolbar-group">
-          <button 
-            className={`toolbar-btn ${showGrid ? 'active' : ''}`}
-            onClick={() => onShowGridChange(!showGrid)}
-            title="Toggle Grid"
-          >
-            <Grid3X3 size={16} />
-          </button>
-          <select 
-            className="toolbar-select"
-            value={gridSnap}
-            onChange={(e) => onGridSnapChange(parseInt(e.target.value))}
-            title="Grid Snap Size"
-          >
-            <option value={0}>No Snap</option>
-            <option value={1}>1%</option>
-            <option value={2}>2%</option>
-            <option value={5}>5%</option>
-            <option value={10}>10%</option>
-          </select>
-        </div>
-        
-        <div className="toolbar-separator" />
-        
-        <div className="toolbar-group">
-          <button 
-            className="toolbar-btn primary"
-            onClick={onSave}
-            title="Save Dashboard (Ctrl+S)"
-          >
-            <Save size={16} />
-            <span>Save</span>
-          </button>
-          <button 
-            className="toolbar-btn"
-            onClick={onExit}
-            title="Exit Designer Mode"
-          >
-            <X size={16} />
-            <span>Exit</span>
-          </button>
-        </div>
-      </div>
+      <DesignerToolbar
+        canUndo={canUndo}
+        canRedo={canRedo}
+        hasClipboard={hasClipboard}
+        hasSelection={!!selectedGaugeId}
+        showGrid={showGrid}
+        gridSnap={gridSnap}
+        onUndo={handleUndo}
+        onRedo={handleRedo}
+        onCopy={handleCopy}
+        onPaste={handlePaste}
+        onDelete={handleDelete}
+        onShowGridChange={onShowGridChange}
+        onGridSnapChange={onGridSnapChange}
+        onSave={onSave}
+        onExit={onExit}
+      />
 
       {/* Main designer area */}
       <div className="designer-content">
