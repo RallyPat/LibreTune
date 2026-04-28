@@ -12,6 +12,10 @@ import { verticalBarPainter } from './verticalBar';
 import { horizontalLinePainter } from './horizontalLine';
 import { verticalDashedBarPainter } from './verticalDashedBar';
 import { horizontalDashedBarPainter } from './horizontalDashedBar';
+import { histogramPainter } from './histogram';
+import { lineGraphPainter } from './lineGraph';
+import { roundGaugePainter } from './roundGauge';
+import { roundDashedGaugePainter } from './roundDashedGauge';
 
 export { painterRegistry, type Painter, type PainterContext } from './types';
 
@@ -31,4 +35,8 @@ export function ensurePaintersRegistered(): void {
   registerPainter('HorizontalLineGauge', horizontalLinePainter);
   registerPainter('VerticalDashedBar', verticalDashedBarPainter);
   registerPainter('HorizontalDashedBar', horizontalDashedBarPainter);
+  registerPainter('Histogram', histogramPainter);
+  registerPainter('LineGraph', lineGraphPainter);
+  registerPainter('RoundGauge', roundGaugePainter);
+  registerPainter('RoundDashedGauge', roundDashedGaugePainter);
 }
