@@ -23,13 +23,16 @@ import LiveTsIndicator from './components/LiveTsIndicator';
 import { buildDefaultGauge } from './utils/defaultGauge';
 import {
   formatValidationIssue,
-  type ValidationReport,
 } from './utils/validation';
 import {
   computeCompatibilityReport,
   hasCompatibilityIssues as hasCompatIssues,
 } from './utils/compatibility';
 import { computeDashboardBounds } from './utils/dashboardBounds';
+import { useGaugeSweep } from './hooks/useGaugeSweep';
+import { useGaugeDemo } from './hooks/useGaugeDemo';
+import { useDashboardScale } from './hooks/useDashboardScale';
+import { useDashboardValidation } from './hooks/useDashboardValidation';
 import './TsDashboard.css';
 
 /**
@@ -73,9 +76,8 @@ export default function TsDashboard({ initialDashPath, isConnected = false }: Ts
   const [showSelector, setShowSelector] = useState(false);
   const [channelInfoMap, setChannelInfoMap] = useState<Record<string, ChannelInfo>>({});
   
-  // Gauge sweep animation state (sportscar-style min→max→min on load)
-  const [sweepActive, setSweepActive] = useState(false);
-  const [sweepValues, setSweepValues] = useState<Record<string, number>>({});
+  // Gauge sweep animation (sportscar-style min→max→min on load)
+  const { sweepActive, sweepValues, startGaugeSweep } = useGaugeSweep();
 
   // Context menu state
   const [contextMenu, setContextMenu] = useState<ContextMenuState>({
@@ -88,7 +90,7 @@ export default function TsDashboard({ initialDashPath, isConnected = false }: Ts
   // Dashboard settings
   const [designerMode, setDesignerMode] = useState(false);
   const [gaugeDemoActive, setGaugeDemoActive] = useState(false);
-  const [demoValues, setDemoValues] = useState<Record<string, number>>({});
+  const demoValues = useGaugeDemo(gaugeDemoActive, dashFile);
   
   // Designer mode state
   const [selectedGaugeId, setSelectedGaugeId] = useState<string | null>(null);
@@ -108,12 +110,7 @@ export default function TsDashboard({ initialDashPath, isConnected = false }: Ts
   const [compatBarVisible, setCompatBarVisible] = useState(true);
   const [syncToken, setSyncToken] = useState(0);
   const [autoSyncGaugeRanges, setAutoSyncGaugeRanges] = useState(true);
-  const [validationReport, setValidationReport] = useState<ValidationReport | null>(null);
   const [showValidationPanel, setShowValidationPanel] = useState(false);
-  
-  // Dynamic scaling state for responsive dashboard sizing
-  const [scale, setScale] = useState(1);
-  const dashboardWrapperRef = useRef<HTMLDivElement>(null);
   const initialSyncDoneRef = useRef(false);
 
   // Build embedded images map — memoized so TsGauge's React.memo and
@@ -168,103 +165,14 @@ export default function TsDashboard({ initialDashPath, isConnected = false }: Ts
     [compatibilityReport],
   );
 
+  // Dynamic scaling: shrink the dashboard when the viewport is too small.
+  const { scale, wrapperRef: dashboardWrapperRef, recompute: computeScale } =
+    useDashboardScale(dashboardBounds.aspectRatio);
+
+  // Validation: re-runs whenever the dash file changes.
+  const validationReport = useDashboardValidation(dashFile);
 
 
-  // Gauge demo animation
-  useEffect(() => {
-    if (!gaugeDemoActive || !dashFile) return;
-
-    const interval = setInterval(() => {
-      const time = Date.now() / 1000;
-      const newValues: Record<string, number> = {};
-      
-      dashFile.gauge_cluster.components.forEach((comp) => {
-        if (isGauge(comp)) {
-          const gauge = comp.Gauge;
-          const range = gauge.max - gauge.min;
-          // Sinusoidal demo with random phase per gauge
-          const phase = gauge.id.charCodeAt(0) / 10;
-          const value = gauge.min + (range / 2) * (1 + Math.sin(time * 0.5 + phase));
-          newValues[gauge.output_channel] = value;
-        }
-      });
-      
-      setDemoValues(newValues);
-    }, 50);
-
-    return () => clearInterval(interval);
-  }, [gaugeDemoActive, dashFile]);
-
-  // Sportscar-style gauge sweep animation (min → max → min)
-  const sweepActiveRef = useRef(false);
-  const sweepAnimRef = useRef<number | null>(null);
-
-  const startGaugeSweep = useCallback((file: DashFile) => {
-    // Guard against overlapping sweeps
-    if (sweepActiveRef.current) return;
-    sweepActiveRef.current = true;
-    setSweepActive(true);
-
-    // Cancel any previous animation frame (cleanup)
-    if (sweepAnimRef.current !== null) {
-      cancelAnimationFrame(sweepAnimRef.current);
-      sweepAnimRef.current = null;
-    }
-
-    const duration = 1500; // 1.5 seconds total
-    const startTime = performance.now();
-
-    // Easing function: ease-in-out for smooth acceleration/deceleration
-    const easeInOut = (t: number) => t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
-
-    const animate = (currentTime: number) => {
-      const elapsed = currentTime - startTime;
-      const rawProgress = Math.min(elapsed / duration, 1);
-
-      // Convert to sweep position: 0→1 (rising) then 1→0 (falling)
-      // 0-0.5 progress = sweep up (0→1), 0.5-1 progress = sweep down (1→0)
-      const sweepPosition = rawProgress < 0.5 
-        ? easeInOut(rawProgress * 2) // 0→1 with easing
-        : easeInOut(1 - (rawProgress - 0.5) * 2); // 1→0 with easing
-
-      const newValues: Record<string, number> = {};
-
-      file.gauge_cluster.components.forEach((comp) => {
-        if (isGauge(comp)) {
-          const gauge = comp.Gauge;
-          const range = gauge.max - gauge.min;
-          // Interpolate from min to max based on sweep position
-          const value = gauge.min + range * sweepPosition;
-          newValues[gauge.output_channel] = value;
-        }
-      });
-
-      setSweepValues(newValues);
-
-      if (rawProgress < 1) {
-        sweepAnimRef.current = requestAnimationFrame(animate);
-      } else {
-        // Animation complete
-        sweepAnimRef.current = null;
-        sweepActiveRef.current = false;
-        setSweepActive(false);
-        setSweepValues({});
-      }
-    };
-
-    sweepAnimRef.current = requestAnimationFrame(animate);
-  }, []);
-
-  // Cleanup any running animation on unmount
-  useEffect(() => {
-    return () => {
-      if (sweepAnimRef.current !== null) {
-        cancelAnimationFrame(sweepAnimRef.current);
-        sweepAnimRef.current = null;
-      }
-      sweepActiveRef.current = false;
-    };
-  }, []);
 
   // Handle right-click context menu
   const handleContextMenu = useCallback((e: React.MouseEvent, gaugeId: string | null) => {
@@ -570,40 +478,6 @@ export default function TsDashboard({ initialDashPath, isConnected = false }: Ts
     }
   }, [dashFile, selectedPath]);
 
-  const computeScale = useCallback(() => {
-    const wrapper = dashboardWrapperRef.current;
-    if (!wrapper) return;
-
-    const { width: containerWidth, height: containerHeight } = wrapper.getBoundingClientRect();
-
-    // Calculate minimum size needed based on aspect ratio and minimum gauge sizes
-    // Assume dashboards need at least 600px width at scale 1.0 for readability
-    const minDashWidth = 600;
-    const minDashHeight = minDashWidth / Math.max(0.1, dashboardBounds.aspectRatio);
-
-    // Calculate scale factor based on container size
-    const scaleX = containerWidth / minDashWidth;
-    const scaleY = containerHeight / minDashHeight;
-    const newScale = Math.min(1, Math.min(scaleX, scaleY));
-
-    setScale(Math.max(0.5, newScale)); // Minimum 50% scale
-  }, [dashboardBounds.aspectRatio]);
-
-  // Dynamic scaling - scale dashboard down when viewport is too small
-  useEffect(() => {
-    if (!dashboardWrapperRef.current) return;
-
-    const wrapper = dashboardWrapperRef.current;
-
-    const resizeObserver = new ResizeObserver(() => {
-      computeScale();
-    });
-
-    resizeObserver.observe(wrapper);
-    computeScale();
-    return () => resizeObserver.disconnect();
-  }, [computeScale]);
-
   // Recompute scale when validation panel visibility changes
   useEffect(() => {
     // Small delay to ensure DOM has updated and layout has settled
@@ -659,24 +533,6 @@ export default function TsDashboard({ initialDashPath, isConnected = false }: Ts
 
     loadDashboard();
   }, [selectedPath, isLegacyPath, computeScale]);
-
-  useEffect(() => {
-    if (!dashFile) return;
-
-    invoke<ValidationReport>('validate_dashboard', {
-      dashFile,
-      projectName: null,
-    })
-      .then((report) => {
-        setValidationReport(report);
-        // Don't auto-show validation panel - let user click the button if they want to see issues
-        // User can see issue count in the button text: "⚠ Validate (2E/3W)"
-      })
-      .catch((err) => {
-        console.warn('[TsDashboard] Validation failed:', err);
-        setValidationReport(null);
-      });
-  }, [dashFile]);
 
   // On dashboard file load, decide whether to run the initial sweep using a snapshot of realtime data.
   // Uses a direct store read for RPM instead of the async rpmChannel state (which is null on mount,
