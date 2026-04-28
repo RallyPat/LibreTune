@@ -11,12 +11,13 @@
  * - Undo/redo support
  */
 
-import { useCallback, useRef, useEffect } from 'react';
+import { useCallback, useRef } from 'react';
 import { DashFile, TsGaugeConfig, DashComponent, isGauge, isIndicator } from './dashTypes';
 import PropertyEditor from './designer/PropertyEditor';
 import DesignerToolbar from './designer/DesignerToolbar';
 import { useDesignerHistory } from './designer/useDesignerHistory';
 import { useDesignerDragResize, ResizeHandle } from './designer/useDesignerDragResize';
+import { useDesignerKeyboard } from './designer/useDesignerKeyboard';
 import './DashboardDesigner.css';
 
 interface ChannelInfo {
@@ -97,35 +98,16 @@ export default function DashboardDesigner({
   });
 
   // Keyboard shortcuts
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Delete' || e.key === 'Backspace') {
-        handleDelete();
-      } else if (e.ctrlKey || e.metaKey) {
-        if (e.key === 'z' && !e.shiftKey) {
-          e.preventDefault();
-          handleUndo();
-        } else if ((e.key === 'z' && e.shiftKey) || e.key === 'y') {
-          e.preventDefault();
-          handleRedo();
-        } else if (e.key === 'c') {
-          e.preventDefault();
-          handleCopy();
-        } else if (e.key === 'v') {
-          e.preventDefault();
-          handlePaste();
-        } else if (e.key === 's') {
-          e.preventDefault();
-          onSave();
-        }
-      } else if (e.key === 'Escape') {
-        onSelectGauge(null);
-      }
-    };
-    
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handleDelete, handleUndo, handleRedo, handleCopy, handlePaste, onSave, onSelectGauge]);
+  const handleDeselect = useCallback(() => onSelectGauge(null), [onSelectGauge]);
+  useDesignerKeyboard({
+    onDelete: handleDelete,
+    onUndo: handleUndo,
+    onRedo: handleRedo,
+    onCopy: handleCopy,
+    onPaste: handlePaste,
+    onSave,
+    onDeselect: handleDeselect,
+  });
 
   // Handle drag-and-drop channel to canvas
   const handleDragOver = useCallback((e: React.DragEvent) => {
