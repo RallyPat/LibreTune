@@ -8,6 +8,10 @@
 import { registerPainter } from './types';
 import { basicReadoutPainter } from './basicReadout';
 import { horizontalBarPainter } from './horizontalBar';
+import { verticalBarPainter } from './verticalBar';
+import { horizontalLinePainter } from './horizontalLine';
+import { verticalDashedBarPainter } from './verticalDashedBar';
+import { horizontalDashedBarPainter } from './horizontalDashedBar';
 
 export { painterRegistry, type Painter, type PainterContext } from './types';
 
@@ -23,4 +27,8 @@ export function ensurePaintersRegistered(): void {
   registered = true;
   registerPainter('BasicReadout', basicReadoutPainter);
   registerPainter('HorizontalBarGauge', horizontalBarPainter);
+  registerPainter('VerticalBarGauge', verticalBarPainter);
+  registerPainter('HorizontalLineGauge', horizontalLinePainter);
+  registerPainter('VerticalDashedBar', verticalDashedBarPainter);
+  registerPainter('HorizontalDashedBar', horizontalDashedBarPainter);
 }
