@@ -5,12 +5,10 @@
  * with orbit controls, cell highlighting, and heatmap coloring.
  */
 
-import { useRef, useMemo, useState, useCallback } from 'react';
-import { Canvas, useFrame, ThreeEvent } from '@react-three/fiber';
-import { OrbitControls, Text, Html, PerspectiveCamera } from '@react-three/drei';
-import * as THREE from 'three';
+import { useRef, useState, useCallback } from 'react';
+import { Canvas } from '@react-three/fiber';
 import { ArrowLeft, Maximize2, Minimize2 } from 'lucide-react';
-import { valueToHeatmapColor, HeatmapScheme } from '../../utils/heatmapColors';
+import { HeatmapScheme } from '../../utils/heatmapColors';
 import './TableEditor3D.css';
 
 interface TableEditor3DProps {

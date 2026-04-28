@@ -5,7 +5,7 @@
 
 import { useRef, useMemo, useState, useCallback } from 'react';
 import { useFrame, ThreeEvent } from '@react-three/fiber';
-import { Text, Html } from '@react-three/drei';
+import { OrbitControls, Text, Html, PerspectiveCamera } from '@react-three/drei';
 import * as THREE from 'three';
 import { valueToHeatmapColor, HeatmapScheme } from '../../../utils/heatmapColors';
 
