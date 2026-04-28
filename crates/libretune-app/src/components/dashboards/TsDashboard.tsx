@@ -1,9 +1,7 @@
 import {
   DashFile,
   DashFileInfo,
-  TsGaugeConfig,
   isGauge,
-  isIndicator,
   buildEmbeddedImageMap,
   tsColorToRgba,
 } from './dashTypes';
@@ -11,17 +9,15 @@ import {
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useRealtimeStore } from '../../stores/realtimeStore';
 import { invoke } from '@tauri-apps/api/core';
-import TsGauge from '../gauges/TsGauge';
 import GaugeContextMenu, { ContextMenuState } from './GaugeContextMenu';
 import ImportDashboardDialog from '../dialogs/ImportDashboardDialog';
 import DashboardDesigner from './DashboardDesigner';
-import LiveTsIndicator from './components/LiveTsIndicator';
 import DashboardHeader from './components/DashboardHeader';
 import ValidationPanel from './components/ValidationPanel';
 import CompatibilityBar from './components/CompatibilityBar';
 import DashboardSelectorOverlay from './components/DashboardSelectorOverlay';
 import DashboardManagementDialogs from './components/DashboardManagementDialogs';
-import { buildDefaultGauge } from './utils/defaultGauge';
+import DashboardCanvas from './components/DashboardCanvas';
 import {
   computeCompatibilityReport,
   hasCompatibilityIssues as hasCompatIssues,
@@ -473,170 +469,27 @@ export default function TsDashboard({ initialDashPath, isConnected = false }: Ts
         />
       ) : (
         <>
-      {/* Dashboard scaling wrapper - handles dynamic scaling for small viewports */}
-      <div 
-        ref={dashboardWrapperRef}
-        className="ts-dashboard-wrapper"
-      >
-        {/* Dashboard canvas with derived aspect ratio */}
-        <div 
-          className={`ts-dashboard ${designerMode ? 'designer-mode' : ''}`}
-          style={{
-            backgroundColor: bgColor,
-            backgroundImage: backgroundImageLayers || undefined,
-            backgroundSize: backgroundSizeLayers,
-            backgroundRepeat: backgroundRepeatLayers,
-            backgroundPosition: 'center',
-            aspectRatio: `${dashboardBounds.aspectRatio}`,
-            transform: scale < 1 ? `scale(${scale})` : undefined,
-            transformOrigin: 'top center',
-        }}
-        onContextMenu={(e) => handleContextMenu(e, null)}
-        onDragOver={(e) => {
-          if (!designerMode) return;
-          e.preventDefault();
-          e.stopPropagation();
-          e.dataTransfer.dropEffect = 'copy';
-          e.currentTarget.style.opacity = '0.8';
-        }}
-        onDragLeave={(e) => {
-          if (!designerMode) return;
-          e.currentTarget.style.opacity = '1';
-        }}
-        onDrop={(e) => {
-          if (!designerMode) return;
-          e.preventDefault();
-          e.stopPropagation();
-          e.currentTarget.style.opacity = '1';
-
-          try {
-            const data = e.dataTransfer.getData('application/json');
-            if (!data) return;
-            
-            const channel = JSON.parse(data);
-            if (channel.type !== 'channel' || !dashFile) return;
-
-            // Calculate relative drop position (0.0-1.0)
-            const rect = e.currentTarget.getBoundingClientRect();
-            const relX = (e.clientX - rect.left) / rect.width;
-            const relY = (e.clientY - rect.top) / rect.height;
-
-            // Get channel info (units, label)
-            const info = channelInfoMap[channel.id];
-            const units = info?.units || '';
-            const label = info?.label || channel.label;
-
-            // Create default gauge config
-            const defaultGauge: TsGaugeConfig = buildDefaultGauge({
-              id: `gauge_${Date.now()}`,
-              channel: channel.id,
-              title: label || channel.label,
-              units,
-              relativeX: relX - 0.1,
-              relativeY: relY - 0.1,
-            });
-
-            // Add new gauge to dashboard
-            const updatedComponents = [...dashFile.gauge_cluster.components, { Gauge: defaultGauge }];
-            const updatedFile: DashFile = {
-              ...dashFile,
-              gauge_cluster: {
-                ...dashFile.gauge_cluster,
-                components: updatedComponents,
-              },
-            };
-            setDashFile(updatedFile);
-
-            // Auto-save
-            try {
-              invoke('save_dash_file', { 
-                path: selectedPath,
-                dashFile: updatedFile,
-              }).catch(err => console.error('Failed to auto-save dashboard:', err));
-            } catch (err) {
-              console.error('Failed to save dashboard:', err);
-            }
-          } catch (err) {
-            console.error('Failed to process dropped channel:', err);
-          }
-        }}
-      >
-        {cluster.components.map((component, index) => {
-          // Convert relative positions to percentages - allow values outside 0-1 range
-          // (TunerStudio dashboards can have negative positions or >1.0 for extending beyond bounds)
-          const toPercent = (v: number | undefined | null) => ((v ?? 0) * 100);
-
-          if (isGauge(component)) {
-            const gauge = component.Gauge;
-            // TsGauge handles its own store subscription for live data.
-            // We only pass live values via props for sweep/demo mode.
-            // In normal mode, pass gauge.value (config default) — the prop is stable,
-            // so React.memo blocks re-renders and the internal store subscription
-            // drives the animation without causing the dashboard to cascade re-renders.
-            const value = sweepActive
-              ? (sweepValues[gauge.output_channel] ?? gauge.min)
-              : gaugeDemoActive 
-                ? (demoValues[gauge.output_channel] ?? gauge.value)
-                : gauge.value;
-            
-            // Build gauge style with shape_locked_to_aspect and shortest_size support
-            const gaugeStyle: React.CSSProperties = {
-              left: `${toPercent(gauge.relative_x)}%`,
-              top: `${toPercent(gauge.relative_y)}%`,
-              width: `${toPercent(gauge.relative_width)}%`,
-              height: `${toPercent(gauge.relative_height)}%`,
-              // Enforce minimum size from shortest_size property
-              minWidth: !legacyMode && gauge.shortest_size > 0 ? `${gauge.shortest_size}px` : undefined,
-              minHeight: !legacyMode && gauge.shortest_size > 0 ? `${gauge.shortest_size}px` : undefined,
-              // Force square aspect ratio when shape is locked
-              aspectRatio: gauge.shape_locked_to_aspect ? '1 / 1' : undefined,
-            };
-            
-            return (
-              <div
-                key={gauge.id || `gauge-${index}`}
-                className={`ts-component ts-gauge ${designerMode ? 'editable' : ''}`}
-                style={gaugeStyle}
-                onContextMenu={(e) => handleContextMenu(e, gauge.id)}
-              >
-                <TsGauge 
-                  config={gauge}
-                  value={value}
-                  embeddedImages={embeddedImages}
-                  legacyMode={legacyMode}
-                  overrideStore={sweepActive || gaugeDemoActive}
-                />
-              </div>
-            );
-          }
-
-          if (isIndicator(component)) {
-            const indicator = component.Indicator;
-            
-            return (
-              <div
-                key={indicator.id || `indicator-${index}`}
-                className={`ts-component ts-indicator ${designerMode ? 'editable' : ''}`}
-                style={{
-                  left: `${toPercent(indicator.relative_x)}%`,
-                  top: `${toPercent(indicator.relative_y)}%`,
-                  width: `${toPercent(indicator.relative_width)}%`,
-                  height: `${toPercent(indicator.relative_height)}%`,
-                }}
-                onContextMenu={(e) => handleContextMenu(e, indicator.id)}
-              >
-                <LiveTsIndicator
-                  config={indicator}
-                  embeddedImages={embeddedImages}
-                />
-              </div>
-            );
-          }
-
-          return null;
-        })}
-        </div>
-      </div>
+      <DashboardCanvas
+        dashFile={dashFile}
+        selectedPath={selectedPath}
+        setDashFile={setDashFile}
+        channelInfoMap={channelInfoMap}
+        embeddedImages={embeddedImages}
+        designerMode={designerMode}
+        legacyMode={legacyMode}
+        scale={scale}
+        aspectRatio={dashboardBounds.aspectRatio}
+        bgColor={bgColor}
+        backgroundImageLayers={backgroundImageLayers}
+        backgroundSizeLayers={backgroundSizeLayers}
+        backgroundRepeatLayers={backgroundRepeatLayers}
+        sweepActive={sweepActive}
+        sweepValues={sweepValues}
+        gaugeDemoActive={gaugeDemoActive}
+        demoValues={demoValues}
+        wrapperRef={dashboardWrapperRef}
+        onContextMenu={handleContextMenu}
+      />
 
       {/* Context Menu */}
       <GaugeContextMenu
