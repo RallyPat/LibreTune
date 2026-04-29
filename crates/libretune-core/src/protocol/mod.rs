@@ -7,10 +7,17 @@
 pub mod command_builder;
 pub mod commands;
 mod connection;
+pub mod discovery;
 mod error;
 mod packet;
+mod response_code;
 pub mod serial;
 pub mod stream;
+
+pub use discovery::{
+    discover_ecu, DiscoveredEcu, DiscoveryConfig, DiscoveryResult, OpenPort,
+    DEFAULT_SEARCH_BAUD_RATES, DEFAULT_SEARCH_QUERIES,
+};
 
 pub use command_builder::CommandBuilder;
 pub use commands::{Command, ConsoleCommand};
@@ -19,6 +26,7 @@ pub use connection::{
 };
 pub use error::ProtocolError;
 pub use packet::{Packet, PacketBuilder};
+pub use response_code::ResponseCode;
 pub use serial::{clear_buffers, configure_port, list_ports, open_port, PortInfo};
 pub use stream::CommunicationChannel;
 

@@ -100,9 +100,12 @@ fn strip_status_byte(payload: &[u8], expected_data_len: usize, label: &str) -> V
             return payload.to_vec();
         }
         if payload.len() == expected_data_len + 1 && payload[0] != 0 {
+            let code = super::ResponseCode::from_byte(payload[0]);
             eprintln!(
-                "[WARN] {} response: ECU status=0x{:02x} (non-zero), using data anyway",
-                label, payload[0]
+                "[WARN] {} response: ECU status=0x{:02x} ({}), using data anyway",
+                label,
+                payload[0],
+                code.message()
             );
             return payload[1..].to_vec();
         }
@@ -264,6 +267,15 @@ pub struct ConnectionConfig {
     pub timeout_ms: u64,
     /// Optional override for runtime packet selection
     pub runtime_packet_mode: RuntimePacketMode,
+    /// Accept non-spec CRC scopes/byte-orders during packet decode (msEnvelope_1.0 §15.1).
+    /// Default `false`. Enable per-project for ECUs that ship quirky firmware.
+    pub permissive_crc: bool,
+    /// Auto-burn the previous page before any write that targets a different page (spec §6.2).
+    /// Prevents partial-flash corruption on power loss. Default `true`.
+    pub auto_burn_on_page_change: bool,
+    /// Auto-burn when a settings dialog closes (spec §6.2).
+    /// Frontend signals dialog-close via `flush_pending_burn`. Default `true`.
+    pub auto_burn_on_close_dialog: bool,
 }
 
 impl Default for ConnectionConfig {
@@ -277,6 +289,9 @@ impl Default for ConnectionConfig {
             use_modern_protocol: true,
             timeout_ms: DEFAULT_TIMEOUT_MS,
             runtime_packet_mode: RuntimePacketMode::Auto,
+            permissive_crc: false,
+            auto_burn_on_page_change: true,
+            auto_burn_on_close_dialog: true,
         }
     }
 }
@@ -306,6 +321,9 @@ pub struct Connection {
     rx_bytes: u64,
     tx_packets: u64,
     rx_packets: u64,
+    /// Page targeted by the most recent successful write, used by the auto-burn-on-page-change
+    /// safety policy (msEnvelope_1.0 spec §6.2). `None` after construction or after a burn.
+    last_written_page: Option<u8>,
 }
 
 impl Connection {
@@ -327,6 +345,7 @@ impl Connection {
             rx_bytes: 0,
             tx_packets: 0,
             rx_packets: 0,
+            last_written_page: None,
         }
     }
 
@@ -357,6 +376,7 @@ impl Connection {
             rx_bytes: 0,
             tx_packets: 0,
             rx_packets: 0,
+            last_written_page: None,
         }
     }
 
@@ -1071,7 +1091,7 @@ impl Connection {
         // If CRC parsing fails, the full packet was already consumed from the TCP
         // stream (exact bytes read = 2 + length + 4), so the stream IS aligned.
         // No drain needed on CRC mismatch — just return the error.
-        Packet::from_bytes(&full_packet)
+        Packet::from_bytes_with_mode(&full_packet, self.config.permissive_crc)
     }
 
     /// Decide which runtime fetch command to use (Burst vs OCH)
@@ -1379,6 +1399,24 @@ impl Connection {
 
     /// Write memory to ECU using INI-defined command format
     pub fn write_memory(&mut self, params: WriteMemoryParams) -> Result<(), ProtocolError> {
+        // Auto-burn safety policy (spec §6.2): if the previous write targeted a different
+        // page, burn it to flash before writing to the new page. Prevents partial-flash
+        // corruption on power loss.
+        if self.config.auto_burn_on_page_change {
+            if let Some(prev_page) = self.last_written_page {
+                if prev_page != params.page {
+                    eprintln!(
+                        "[INFO] auto-burn: page change {} -> {}, burning previous page first",
+                        prev_page, params.page
+                    );
+                    self.burn(BurnParams {
+                        page: prev_page,
+                        can_id: params.can_id,
+                    })?;
+                }
+            }
+        }
+
         let page = params.page as usize;
 
         // Get page identifier (may differ from page index)
@@ -1406,7 +1444,7 @@ impl Connection {
             &params.data,
         )?;
 
-        if self.use_modern_protocol {
+        let result = if self.use_modern_protocol {
             // Modern protocol: wrap in CRC packet
             let packet = Packet::new(cmd);
             let _response = self.send_packet(packet)?;
@@ -1415,7 +1453,12 @@ impl Connection {
             // Legacy protocol: send raw command
             self.send_raw_command(&cmd)?;
             Ok(())
+        };
+
+        if result.is_ok() {
+            self.last_written_page = Some(params.page);
         }
+        result
     }
 
     /// Burn current page to flash using INI-defined command format
@@ -1479,6 +1522,24 @@ impl Connection {
         std::thread::sleep(Duration::from_millis(delay as u64));
 
         eprintln!("[DEBUG] burn: flash write complete for page {}", page);
+        // Successful burn clears the auto-burn-on-page-change tracker.
+        if self.last_written_page == Some(params.page) {
+            self.last_written_page = None;
+        }
+        Ok(())
+    }
+
+    /// Flush any pending auto-burn (called by the UI when a settings dialog closes,
+    /// per spec §6.2 `autoBurnOnCloseDialog`). Burns the most recently written page
+    /// if `auto_burn_on_close_dialog` is enabled and a write is pending.
+    pub fn flush_pending_burn(&mut self) -> Result<(), ProtocolError> {
+        if !self.config.auto_burn_on_close_dialog {
+            return Ok(());
+        }
+        if let Some(page) = self.last_written_page {
+            eprintln!("[INFO] auto-burn: dialog close, burning page {}", page);
+            self.burn(BurnParams { page, can_id: 0 })?;
+        }
         Ok(())
     }
 
@@ -1663,15 +1724,27 @@ impl Connection {
         // Verify the 'E' response - should be TS_RESPONSE_OK (status byte 0)
         if !response.payload.is_empty() && response.payload[0] != 0 {
             let status = response.payload[0];
+            let code = super::ResponseCode::from_byte(status);
             eprintln!(
-                "[WARN] send_console_command_modern: 'E' command returned status {}",
-                status
+                "[WARN] send_console_command_modern: 'E' command returned status 0x{:02x} ({})",
+                status,
+                code.message()
             );
-            // Status 0x83 = unrecognized command - ECU may not support console
-            if status == 0x83 {
+            if code == super::ResponseCode::UnrecognizedCommand {
                 return Err(ProtocolError::ProtocolError(
                     "ECU does not support console commands (unrecognized 'E' command)".to_string(),
                 ));
+            }
+            if code.is_error() {
+                let message = if code.carries_payload_message() && response.payload.len() > 1 {
+                    String::from_utf8_lossy(&response.payload[1..]).into_owned()
+                } else {
+                    code.message().to_string()
+                };
+                return Err(ProtocolError::EcuStatusError {
+                    code: status,
+                    message,
+                });
             }
         }
 
