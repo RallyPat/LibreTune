@@ -28,46 +28,61 @@ impl Packet {
         Self { payload, crc }
     }
 
-    /// Decode a packet from raw bytes
+    /// Decode a packet from raw bytes using the strict spec scope.
+    ///
+    /// Per msEnvelope_1.0 §15.1, the on-the-wire frame is:
+    ///   `size(2 BE) || rc(1) || payload(size-1) || CRC32(4 BE)`
+    /// where the CRC covers `rc || payload` (scope A) and is encoded big-endian.
     pub fn from_bytes(data: &[u8]) -> Result<Self, ProtocolError> {
+        Self::from_bytes_with_mode(data, false)
+    }
+
+    /// Decode a packet, optionally accepting non-spec CRC scopes/byte-orders.
+    ///
+    /// When `permissive` is true, the decoder will also accept seven additional
+    /// CRC scope/endianness combinations observed on quirky firmware variants:
+    /// scope B (data-only, no rc byte), scope C (length+payload), scope D
+    /// (length+data), each in both big- and little-endian. A one-time warning
+    /// is logged when permissive matching succeeds with a non-strict scope.
+    pub fn from_bytes_with_mode(data: &[u8], permissive: bool) -> Result<Self, ProtocolError> {
         if data.len() < 6 {
             return Err(ProtocolError::InvalidResponse);
         }
 
-        // Read length
         let length = BigEndian::read_u16(&data[0..2]) as usize;
-
-        // Validate length
         if length > MAX_PACKET_SIZE {
             return Err(ProtocolError::BufferOverflow);
         }
-
         if data.len() < 2 + length + 4 {
             return Err(ProtocolError::InvalidResponse);
         }
 
-        // Extract payload
         let payload = data[2..2 + length].to_vec();
-
-        // Read CRC bytes
         let crc_bytes = &data[2 + length..2 + length + 4];
+        let received_crc_be = BigEndian::read_u32(crc_bytes);
 
-        // Try every plausible CRC scope and byte-order combination:
-        //
-        // Scope A: CRC over full payload (status_byte + data)     — msEnvelope_1.0 strict
-        // Scope B: CRC over data only (payload[1..])              — some rusEFI builds
-        // Scope C: CRC over length_bytes + payload                — some msEnvelope variants
-        // Scope D: CRC over length_bytes + data (payload[1..])    — combined variant
-        //
-        // Each scope tried in both big-endian and little-endian received-CRC interpretation.
-
-        let length_bytes = &data[0..2];
-
+        // Strict spec: scope A (full payload) big-endian.
         let crc_a = {
             let mut h = Hasher::new();
             h.update(&payload);
             h.finalize()
         };
+        if received_crc_be == crc_a {
+            return Ok(Self {
+                payload,
+                crc: received_crc_be,
+            });
+        }
+
+        if !permissive {
+            return Err(ProtocolError::CrcMismatch {
+                expected: crc_a,
+                actual: received_crc_be,
+            });
+        }
+
+        // Permissive fallback: try seven additional scope/endianness combos.
+        let length_bytes = &data[0..2];
         let crc_b = if payload.len() > 1 {
             let mut h = Hasher::new();
             h.update(&payload[1..]);
@@ -89,11 +104,8 @@ impl Packet {
         } else {
             0
         };
-
-        let received_crc_be = BigEndian::read_u32(crc_bytes);
         let received_crc_le = LittleEndian::read_u32(crc_bytes);
 
-        let match_a_be = received_crc_be == crc_a;
         let match_a_le = received_crc_le == crc_a;
         let match_b_be = received_crc_be == crc_b;
         let match_b_le = received_crc_le == crc_b;
@@ -102,8 +114,7 @@ impl Packet {
         let match_d_be = received_crc_be == crc_d;
         let match_d_le = received_crc_le == crc_d;
 
-        let matched = match_a_be
-            || match_a_le
+        let matched = match_a_le
             || match_b_be
             || match_b_le
             || match_c_be
@@ -112,7 +123,6 @@ impl Packet {
             || match_d_le;
 
         if !matched {
-            // Print enough detail to uniquely identify the CRC algorithm the ECU uses
             let raw_preview: Vec<String> =
                 data.iter().take(12).map(|b| format!("{:02x}", b)).collect();
             eprintln!(
@@ -132,12 +142,12 @@ impl Packet {
             });
         }
 
-        // Determine which scope matched so we can log on first occurrence
-        static LOGGED_CRC_SCOPE: std::sync::atomic::AtomicBool =
+        // Log non-strict scope match exactly once.
+        static LOGGED_PERMISSIVE: std::sync::atomic::AtomicBool =
             std::sync::atomic::AtomicBool::new(false);
-        if !LOGGED_CRC_SCOPE.swap(true, std::sync::atomic::Ordering::Relaxed) {
-            let scope = if match_a_be || match_a_le {
-                "A: full payload"
+        if !LOGGED_PERMISSIVE.swap(true, std::sync::atomic::Ordering::Relaxed) {
+            let scope = if match_a_le {
+                "A: full payload (LE)"
             } else if match_b_be || match_b_le {
                 "B: data-only (no status byte)"
             } else if match_c_be || match_c_le {
@@ -145,16 +155,13 @@ impl Packet {
             } else {
                 "D: length+data"
             };
-            let endian = if match_a_be || match_b_be || match_c_be || match_d_be {
-                "BE"
-            } else {
-                "LE"
-            };
-            eprintln!("[CRC] scope={} endian={}", scope, endian);
+            eprintln!(
+                "[CRC] WARNING: non-spec CRC scope accepted (permissive mode). scope={}",
+                scope
+            );
         }
 
-        // Use whichever interpretation matched for the stored crc value
-        let received_crc = if match_a_be || match_b_be || match_c_be || match_d_be {
+        let received_crc = if match_b_be || match_c_be || match_d_be {
             received_crc_be
         } else {
             received_crc_le
@@ -306,5 +313,30 @@ mod tests {
 
         // Should fail CRC check
         assert!(Packet::from_bytes(&encoded).is_err());
+    }
+
+    #[test]
+    fn test_strict_mode_rejects_scope_c_frame() {
+        // Build a frame whose CRC covers length+payload (scope C) instead of payload-only (A).
+        let payload = vec![0x00, 0x42, 0x43];
+        let mut len_bytes = [0u8; 2];
+        BigEndian::write_u16(&mut len_bytes, payload.len() as u16);
+
+        let mut h = Hasher::new();
+        h.update(&len_bytes);
+        h.update(&payload);
+        let crc_c = h.finalize();
+
+        let mut frame = Vec::new();
+        frame.extend_from_slice(&len_bytes);
+        frame.extend_from_slice(&payload);
+        let mut crc_bytes = [0u8; 4];
+        BigEndian::write_u32(&mut crc_bytes, crc_c);
+        frame.extend_from_slice(&crc_bytes);
+
+        // Strict mode: must reject (spec scope is A).
+        assert!(Packet::from_bytes(&frame).is_err());
+        // Permissive mode: must accept.
+        assert!(Packet::from_bytes_with_mode(&frame, true).is_ok());
     }
 }

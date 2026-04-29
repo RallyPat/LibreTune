@@ -1,31 +1,13 @@
 //! Dashboard file IO commands: load/save/rename/duplicate/delete + validate + create.
 
 use crate::commands::dash_layout::generate_unique_filename;
-use crate::convert_dashfile_to_layout;
 use crate::paths::{get_dashboards_dir, get_projects_dir};
-use libretune_core::dash::layout::DashboardLayout;
 use libretune_core::dash::{
     self, create_basic_dashboard, create_racing_dashboard, create_tuning_dashboard, DashComponent,
     DashFile, VersionInfo,
 };
 use libretune_core::ini::EcuDefinition;
 use std::path::{Path, PathBuf};
-
-/// Load a TS .dash file directly from a path (for testing)
-#[tauri::command]
-pub async fn load_tunerstudio_dash(path: String) -> Result<DashboardLayout, String> {
-    println!("[load_ts_dash] Loading from: {}", path);
-
-    let content = std::fs::read_to_string(&path)
-        .map_err(|e| format!("Failed to read dashboard file: {}", e))?;
-
-    let dash_file = dash::parse_dash_file(&content)
-        .map_err(|e| format!("Failed to parse dashboard XML: {}", e))?;
-
-    let layout = convert_dashfile_to_layout(&dash_file, "TS Dashboard");
-    println!("[load_ts_dash] Loaded {} gauges", layout.gauges.len());
-    Ok(layout)
-}
 
 /// Load a TS .dash file and return the full DashFile structure
 #[tauri::command]

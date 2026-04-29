@@ -3,7 +3,7 @@
 //! These structures match the TS XML schema exactly for full compatibility.
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 /// TunerStudio color format (ARGB as signed 32-bit integer).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -294,16 +294,33 @@ pub enum IndicatorPainter {
     #[default]
     BasicRectangleIndicator,
     BulbIndicator,
+    Led,
 }
 
 impl IndicatorPainter {
     pub fn from_ts_string(s: &str) -> Self {
         let trimmed = s.trim();
         let lower = trimmed.to_lowercase();
-        if trimmed == "Bulb Indicator" || lower.contains("bulbindicatorpainter") {
+        // Spec §A.3: TunerStudio dashboards reference painters by short label or
+        // by fully-qualified Java class name. Recognize all three indicator
+        // painters and their common aliases (LedPainter, BulbIndicatorPainter,
+        // RectangleIndicatorPainter / BasicRectangleIndicatorPainter).
+        if trimmed.eq_ignore_ascii_case("LED")
+            || lower.contains("ledpainter")
+            || lower.contains("ledindicator")
+        {
+            return Self::Led;
+        }
+        if trimmed == "Bulb Indicator"
+            || lower.contains("bulbindicatorpainter")
+            || lower.contains("bulbindicator")
+        {
             return Self::BulbIndicator;
         }
-        if trimmed == "Basic Rectangle Indicator" || lower.contains("rectangleindicatorpainter") {
+        if trimmed == "Basic Rectangle Indicator"
+            || lower.contains("rectangleindicatorpainter")
+            || lower.contains("basicrectangleindicator")
+        {
             return Self::BasicRectangleIndicator;
         }
         Self::BasicRectangleIndicator
@@ -313,6 +330,7 @@ impl IndicatorPainter {
         match self {
             Self::BasicRectangleIndicator => "Basic Rectangle Indicator",
             Self::BulbIndicator => "Bulb Indicator",
+            Self::Led => "LED",
         }
     }
 }
@@ -416,6 +434,24 @@ pub struct GaugeConfig {
     // Display options
     pub display_value_at_180: bool,
 
+    // --- Plan v2 / D-1 lossless model additions ----------------------------
+    /// Optional INI expression that, when present and false, hides this
+    /// gauge at runtime (TS `enabledCondition` attribute).
+    #[serde(default)]
+    pub enabled_condition: Option<String>,
+    /// Render a persistent peak-hold marker tracking the maximum observed
+    /// value (TS `peakHold`).
+    #[serde(default)]
+    pub peak_hold: bool,
+    /// Hysteresis (in channel units) applied to warning/critical state
+    /// transitions to suppress flicker (TS `hysteresis`).
+    #[serde(default)]
+    pub hysteresis: Option<f64>,
+    /// Catch-all for `.dash` attributes LibreTune doesn't model yet so they
+    /// survive a parse → write round-trip (Plan Phase D-1).
+    #[serde(default)]
+    pub extra_attrs: BTreeMap<String, String>,
+
     // Runtime state (not persisted)
     #[serde(skip)]
     pub run_demo: bool,
@@ -502,6 +538,10 @@ impl Default for GaugeConfig {
             short_click_action: None,
             long_click_action: None,
             display_value_at_180: false,
+            enabled_condition: None,
+            peak_hold: false,
+            hysteresis: None,
+            extra_attrs: BTreeMap::new(),
             run_demo: false,
             must_paint: false,
             invalid_state: false,
@@ -557,6 +597,14 @@ pub struct IndicatorConfig {
     // ECU configuration reference
     pub ecu_configuration_name: Option<String>,
 
+    // --- Plan v2 / D-1 lossless model additions ----------------------------
+    /// Optional INI expression hiding this indicator at runtime when false.
+    #[serde(default)]
+    pub enabled_condition: Option<String>,
+    /// Catch-all for un-modeled `.dash` attributes (round-trip safety).
+    #[serde(default)]
+    pub extra_attrs: BTreeMap<String, String>,
+
     // Runtime state
     #[serde(skip)]
     pub run_demo: bool,
@@ -598,6 +646,8 @@ impl Default for IndicatorConfig {
             short_click_action: None,
             long_click_action: None,
             ecu_configuration_name: None,
+            enabled_condition: None,
+            extra_attrs: BTreeMap::new(),
             run_demo: false,
             must_paint: false,
             invalid_state: false,
@@ -636,6 +686,19 @@ pub struct GaugeCluster {
     pub embedded_images: Vec<EmbeddedImage>,
     /// Dashboard components (gauges and indicators)
     pub components: Vec<DashComponent>,
+
+    // --- Plan v2 / D-1 lossless model additions ----------------------------
+    /// TS layout-manager name (e.g. `GridLayout`, `AbsoluteLayout`). Stored
+    /// verbatim so we can round-trip dashboards authored in TS even when
+    /// LibreTune doesn't yet honor the layout algorithm.
+    #[serde(default)]
+    pub cluster_layout: Option<String>,
+    /// Optional INI expression hiding the entire cluster when false.
+    #[serde(default)]
+    pub enabled_condition: Option<String>,
+    /// Catch-all for un-modeled `gaugeCluster` attributes.
+    #[serde(default)]
+    pub extra_attrs: BTreeMap<String, String>,
 }
 
 impl Default for GaugeCluster {
@@ -651,6 +714,9 @@ impl Default for GaugeCluster {
             cluster_background_image_style: BackgroundStyle::Tile,
             embedded_images: Vec::new(),
             components: Vec::new(),
+            cluster_layout: None,
+            enabled_condition: None,
+            extra_attrs: BTreeMap::new(),
         }
     }
 }
@@ -662,8 +728,30 @@ pub struct DashFile {
     pub bibliography: Bibliography,
     /// Version information
     pub version_info: VersionInfo,
-    /// Gauge cluster (main content)
+    /// Primary gauge cluster (main content). Most TS dashes have exactly one.
     pub gauge_cluster: GaugeCluster,
+    /// Additional gauge clusters for multi-cluster dashboards (Plan D-1).
+    /// Empty by default; iterate via [`DashFile::clusters`] to walk all
+    /// clusters in render order.
+    #[serde(default)]
+    pub additional_clusters: Vec<GaugeCluster>,
+    /// Catch-all for un-modeled root-level `.dash` attributes.
+    #[serde(default)]
+    pub extra_attrs: BTreeMap<String, String>,
+}
+
+impl DashFile {
+    /// Iterate every gauge cluster (primary first, then additional) in
+    /// render order. Multi-cluster dashboards (Plan D-1) extend the
+    /// existing single-cluster code path without breaking it.
+    pub fn clusters(&self) -> impl Iterator<Item = &GaugeCluster> {
+        std::iter::once(&self.gauge_cluster).chain(self.additional_clusters.iter())
+    }
+
+    /// Mutable counterpart to [`DashFile::clusters`].
+    pub fn clusters_mut(&mut self) -> impl Iterator<Item = &mut GaugeCluster> {
+        std::iter::once(&mut self.gauge_cluster).chain(self.additional_clusters.iter_mut())
+    }
 }
 
 impl Default for DashFile {
@@ -679,6 +767,8 @@ impl Default for DashFile {
                 firmware_signature: None,
             },
             gauge_cluster: GaugeCluster::default(),
+            additional_clusters: Vec::new(),
+            extra_attrs: BTreeMap::new(),
         }
     }
 }
@@ -716,3 +806,114 @@ impl Default for GaugeFile {
 
 /// Lookup map for embedded images by ID.
 pub type EmbeddedImageMap = HashMap<String, EmbeddedImage>;
+
+#[cfg(test)]
+mod painter_registry_tests {
+    use super::*;
+
+    /// Lock-in: every painter class name observed in stock TunerStudio
+    /// `.dash` files under `reference/TunerStudioMS/Dash/` resolves to a
+    /// concrete `GaugePainter` variant (Plan D-3). If TS adds a new
+    /// painter LibreTune doesn't model, this test still passes (because
+    /// the fallback is `BasicReadout`), so it's a safety net rather than
+    /// a strict gate — but the assertions below catch silent regressions
+    /// where an existing alias stops resolving.
+    #[test]
+    fn known_ts_painter_names_resolve() {
+        let cases: &[(&str, GaugePainter)] = &[
+            ("Analog Gauge", GaugePainter::AnalogGauge),
+            (
+                "com.efiAnalytics.tunerStudio.renderers.AnalogGaugePainter",
+                GaugePainter::AnalogGauge,
+            ),
+            ("Basic Readout", GaugePainter::BasicReadout),
+            (
+                "com.efiAnalytics.tunerStudio.renderers.BasicReadoutGaugePainter",
+                GaugePainter::BasicReadout,
+            ),
+            ("Horizontal Bar Gauge", GaugePainter::HorizontalBarGauge),
+            (
+                "com.efiAnalytics.tunerStudio.renderers.HorizontalBarPainter",
+                GaugePainter::HorizontalBarGauge,
+            ),
+            ("Vertical Bar Gauge", GaugePainter::VerticalBarGauge),
+            (
+                "com.efiAnalytics.tunerStudio.renderers.VerticalBarPainter",
+                GaugePainter::VerticalBarGauge,
+            ),
+            (
+                "Vertical Dashed Bar Gauge",
+                GaugePainter::VerticalDashedBar,
+            ),
+            (
+                "com.efiAnalytics.tunerStudio.renderers.VerticalDashedBarPainter",
+                GaugePainter::VerticalDashedBar,
+            ),
+            ("Analog Bar Gauge", GaugePainter::AnalogBarGauge),
+            (
+                "com.efiAnalytics.tunerStudio.renderers.AnalogBarPainter",
+                GaugePainter::AnalogBarGauge,
+            ),
+            (
+                "Analog Moving Bar Gauge",
+                GaugePainter::AnalogMovingBarGauge,
+            ),
+            (
+                "com.efiAnalytics.tunerStudio.renderers.AnalogMovingBarGaugePainter",
+                GaugePainter::AnalogMovingBarGauge,
+            ),
+            ("Histogram", GaugePainter::Histogram),
+            (
+                "com.efiAnalytics.tunerStudio.renderers.HistogramPainter",
+                GaugePainter::Histogram,
+            ),
+            ("Round Analog Gauge", GaugePainter::RoundGauge),
+            (
+                "com.efiAnalytics.tunerStudio.renderers.RoundAnalogGaugePainter",
+                GaugePainter::RoundGauge,
+            ),
+            ("Line Graph", GaugePainter::LineGraph),
+            ("Circle Analog Gauge", GaugePainter::CircleAnalogGauge),
+            ("Horizontal Line Gauge", GaugePainter::HorizontalLineGauge),
+            ("Asymetric Sweep Gauge", GaugePainter::AsymmetricSweepGauge),
+        ];
+        for (input, expected) in cases {
+            assert_eq!(
+                GaugePainter::from_ts_string(input),
+                *expected,
+                "GaugePainter alias {input:?} did not resolve as expected"
+            );
+        }
+    }
+
+    #[test]
+    fn known_ts_indicator_aliases_resolve() {
+        for s in [
+            "LED",
+            "LedPainter",
+            "com.efiAnalytics.tunerStudio.renderers.LedPainter",
+        ] {
+            assert_eq!(IndicatorPainter::from_ts_string(s), IndicatorPainter::Led);
+        }
+        for s in [
+            "Bulb Indicator",
+            "BulbIndicatorPainter",
+            "com.efiAnalytics.tunerStudio.renderers.BulbIndicatorPainter",
+        ] {
+            assert_eq!(
+                IndicatorPainter::from_ts_string(s),
+                IndicatorPainter::BulbIndicator
+            );
+        }
+        for s in [
+            "Basic Rectangle Indicator",
+            "BasicRectangleIndicatorPainter",
+            "com.efiAnalytics.tunerStudio.renderers.RectangleIndicatorPainter",
+        ] {
+            assert_eq!(
+                IndicatorPainter::from_ts_string(s),
+                IndicatorPainter::BasicRectangleIndicator
+            );
+        }
+    }
+}

@@ -258,7 +258,59 @@ fn parse_ini_internal(content: &str, ctx: &mut IncludeContext) -> Result<EcuDefi
         // Check for section header
         let line_trimmed = line.trim();
         if line_trimmed.starts_with('[') && line_trimmed.ends_with(']') {
-            current_section = line_trimmed[1..line_trimmed.len() - 1].trim().to_string();
+            let inner = line_trimmed[1..line_trimmed.len() - 1].trim();
+
+            // Spec §A.2: conditional section header `[Name &cond1 [&cond2 ...]]`.
+            // Each `&token` is a `#define` symbol reference (optionally negated
+            // with `!`). The whole header is suppressed unless every condition
+            // evaluates true. When suppressed, `current_section` is cleared so
+            // subsequent `key = value` lines fall through to the catch-all arm.
+            let (name, conditions): (&str, Vec<&str>) = if let Some(amp) = inner.find('&') {
+                let (n, rest) = inner.split_at(amp);
+                let conds: Vec<&str> = rest
+                    .split('&')
+                    .map(|s| s.trim())
+                    .filter(|s| !s.is_empty())
+                    .collect();
+                (n.trim(), conds)
+            } else {
+                (inner, Vec::new())
+            };
+
+            let conditions_pass = conditions.iter().all(|c| {
+                let (negated, sym) = if let Some(s) = c.strip_prefix('!') {
+                    (true, s.trim())
+                } else {
+                    (false, *c)
+                };
+                let defined = ctx.defined_symbols.contains(sym);
+                if negated { !defined } else { defined }
+            });
+
+            if !conditions.is_empty() && !conditions_pass {
+                eprintln!(
+                    "[DEBUG] ini: section [{}] suppressed by unmet condition(s): {:?}",
+                    name, conditions
+                );
+                current_section = String::new();
+                i += 1;
+                continue;
+            }
+
+            // Spec §A.1: `[UiDialogs]` is a deprecated alias for `[UserDefined]`.
+            if name.eq_ignore_ascii_case("UiDialogs") {
+                static LOGGED_UIDIALOGS: std::sync::atomic::AtomicBool =
+                    std::sync::atomic::AtomicBool::new(false);
+                if !LOGGED_UIDIALOGS.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                    eprintln!(
+                        "[WARN] ini: [UiDialogs] is a deprecated alias for [UserDefined] — \
+                         please update your INI"
+                    );
+                }
+                current_section = "UserDefined".to_string();
+            } else {
+                current_section = name.to_string();
+            }
             i += 1;
             continue;
         }
@@ -326,6 +378,12 @@ fn parse_ini_internal(content: &str, ctx: &mut IncludeContext) -> Result<EcuDefi
                             value,
                             &mut state.current_curve,
                         );
+                    } else if !current_section.is_empty()
+                        && !is_known_passive_section(&section_lower)
+                    {
+                        // Spec §14: warn once per truly-unknown section name so users
+                        // notice INI grammar gaps without flooding the log.
+                        warn_unknown_section(&current_section);
                     }
                 }
             }
@@ -519,6 +577,50 @@ fn strip_comment(line: &str) -> String {
     result
 }
 
+/// Parse an INI boolean value. Accepts: `true`/`false`, `1`/`0`, `on`/`off`,
+/// `yes`/`no` (case-insensitive). Inline `;`-comments are stripped.
+fn parse_ini_bool(value: &str) -> bool {
+    let clean = value.split(';').next().unwrap_or("").trim().to_lowercase();
+    matches!(clean.as_str(), "true" | "1" | "on" | "yes")
+}
+
+/// Sections from the TunerStudio INI grammar that LibreTune deliberately accepts
+/// without parsing the body (spec §14). Returning `true` here suppresses the
+/// "unknown section" warning for these well-known names so users only see
+/// genuinely unrecognized headers.
+fn is_known_passive_section(section_lower: &str) -> bool {
+    matches!(
+        section_lower,
+        "file_header"
+            | "verbiageoverride"
+            | "turbobaud"
+            | "replay"
+            | "extendedreplay"
+            | "accelerationwizard"
+            | "encodeddata"
+            | "tuningviews"
+            | "eventtriggers"
+            | "tools"
+    )
+}
+
+/// Emit a one-time warning per unknown INI section name. Subsequent occurrences
+/// of the same section name (case-insensitive) are suppressed to avoid log
+/// flooding when an INI defines many keys under an unsupported header.
+fn warn_unknown_section(section: &str) {
+    use std::sync::{Mutex, OnceLock};
+    static SEEN: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+    let lock = SEEN.get_or_init(|| Mutex::new(HashSet::new()));
+    if let Ok(mut seen) = lock.lock() {
+        let key = section.to_lowercase();
+        if seen.insert(key) {
+            eprintln!(
+                "[WARN] ini: unknown section [{section}] — entries dropped (open an issue if this should be supported)"
+            );
+        }
+    }
+}
+
 /// Extract help text from constant name according to TunerStudio format
 /// Format: fieldname;+help text;"units"
 /// Returns (clean_name, Option<help_text>)
@@ -666,6 +768,9 @@ fn parse_megatune(def: &mut EcuDefinition, key: &str, value: &str) {
         "signature" => {
             def.signature = value.trim_matches('"').to_string();
         }
+        "signatureprefix" => {
+            def.signature_prefix = Some(value.trim_matches('"').to_string());
+        }
         "querycommand" => {
             eprintln!("[DEBUG] parse_megatune: queryCommand = {:?}", value);
             def.query_command = value.trim_matches('"').to_string();
@@ -717,8 +822,24 @@ fn parse_tunerstudio(def: &mut EcuDefinition, key: &str, value: &str) {
         "signature" => {
             def.signature = value.trim_matches('"').to_string();
         }
+        "signatureprefix" => {
+            def.signature_prefix = Some(value.trim_matches('"').to_string());
+        }
         "inispecversion" => {
-            def.ini_spec_version = value.trim_matches('"').to_string();
+            let raw = value.trim_matches('"').trim();
+            def.ini_spec_version = raw.to_string();
+            // Spec §14.2: LibreTune currently implements iniSpecVersion ≤ 14.
+            // Versions above the cap may use grammar features we don't yet honor.
+            if let Ok(v) = raw.split(';').next().unwrap_or(raw).trim().parse::<f32>() {
+                const INI_SPEC_VERSION_CAP: f32 = 14.0;
+                if v > INI_SPEC_VERSION_CAP {
+                    eprintln!(
+                        "[WARN] ini: iniSpecVersion={} exceeds supported cap {} — \
+                         unsupported features may be silently ignored",
+                        v, INI_SPEC_VERSION_CAP
+                    );
+                }
+            }
         }
         "pagesizes" | "pagesize" => {
             // Parse comma-separated page sizes
@@ -910,6 +1031,96 @@ fn parse_constants_entry(
         }
         "enable2ndbytecanid" => {
             def.protocol.enable_can_id = value.to_lowercase() != "false" && value != "0";
+            return;
+        }
+        // ---- Optional spec keys (msEnvelope_1.0 §B.1). Parsed for INI fidelity;
+        // most are not yet honored by the runtime but stored on ProtocolSettings
+        // so future code can opt in without a second migration.
+        "tablewritecommand" => {
+            def.protocol.table_write_command = Some(value.trim_matches('"').to_string());
+            return;
+        }
+        "tablecrccommand" => {
+            def.protocol.table_crc_command = Some(value.trim_matches('"').to_string());
+            return;
+        }
+        "tableblockingfactor" => {
+            let clean = value.split(';').next().unwrap_or("").trim();
+            def.protocol.table_blocking_factor = clean.parse().ok();
+            return;
+        }
+        "replayconfigtable" => {
+            def.protocol.replay_config_table = Some(value.trim_matches('"').to_string());
+            return;
+        }
+        "replayreadcommand" => {
+            def.protocol.replay_read_command = Some(value.trim_matches('"').to_string());
+            return;
+        }
+        "replayrecordcountparam" => {
+            def.protocol.replay_record_count_param = Some(value.trim_matches('"').to_string());
+            return;
+        }
+        "nocommreaddelay" => {
+            let clean = value.split(';').next().unwrap_or("").trim();
+            def.protocol.no_comm_read_delay = clean.parse().unwrap_or(0);
+            return;
+        }
+        "refreshlocalstoreonactivity" => {
+            def.protocol.refresh_local_store_on_activity = parse_ini_bool(value);
+            return;
+        }
+        "defaultruntimerecordpersec" => {
+            let clean = value.split(';').next().unwrap_or("").trim();
+            def.protocol.default_runtime_record_per_sec = clean.parse().ok();
+            return;
+        }
+        "restrictsquirtrelationship" => {
+            def.protocol.restrict_squirt_relationship = parse_ini_bool(value);
+            return;
+        }
+        "forcebigendianprotocol" => {
+            def.protocol.force_big_endian_protocol = parse_ini_bool(value);
+            return;
+        }
+        "uselegacyftempunits" => {
+            def.protocol.use_legacy_f_temp_units = parse_ini_bool(value);
+            return;
+        }
+        // Spec spells the key with the typo `surpressConfigErrorVerbiage`.
+        "surpressconfigerrorverbiage" | "suppressconfigerrorverbiage" => {
+            def.protocol.suppress_config_error_verbiage = parse_ini_bool(value);
+            return;
+        }
+        "validatearraybounds" => {
+            def.protocol.validate_array_bounds = parse_ini_bool(value);
+            return;
+        }
+        "ignoremissingbitoptions" => {
+            def.protocol.ignore_missing_bit_options = parse_ini_bool(value);
+            return;
+        }
+        "filterechobytes" => {
+            def.protocol.filter_echo_bytes = parse_ini_bool(value);
+            return;
+        }
+        "envelopedscancommands" => {
+            def.protocol.enveloped_scan_commands = parse_ini_bool(value);
+            return;
+        }
+        "pageactivate" => {
+            def.protocol.page_activate_commands = parse_command_list(value, &def.pc_variables);
+            return;
+        }
+        "defaultipaddress" => {
+            def.protocol.default_ip_address = Some(value.trim_matches('"').to_string());
+            return;
+        }
+        "defaultipport" => {
+            let clean = value.split(';').next().unwrap_or("").trim();
+            if let Ok(p) = clean.parse() {
+                def.protocol.default_ip_port = p;
+            }
             return;
         }
         _ => {}
@@ -3005,6 +3216,51 @@ signature = "TestECU"
             def.query_command, "disabled",
             "Should use else branch after #unset"
         );
+    }
+
+    #[test]
+    fn test_conditional_section_header_active() {
+        // Spec §A.2: `[Section &symbol]` is parsed when `symbol` is `#set`.
+        let content = r#"
+#set EXTRA_TUNERSTUDIO
+
+[MegaTune]
+signature = "BaseECU"
+
+[TunerStudio &EXTRA_TUNERSTUDIO]
+signature = "OverrideECU"
+"#;
+        let def = parse_ini(content).expect("Should parse successfully");
+        // Conditional section was active; its `signature` overrode the base.
+        assert_eq!(def.signature, "OverrideECU");
+    }
+
+    #[test]
+    fn test_conditional_section_header_suppressed() {
+        // When the gate symbol isn't defined, the section is suppressed entirely.
+        let content = r#"
+[MegaTune]
+signature = "BaseECU"
+
+[TunerStudio &EXTRA_TUNERSTUDIO]
+signature = "OverrideECU"
+"#;
+        let def = parse_ini(content).expect("Should parse successfully");
+        assert_eq!(def.signature, "BaseECU");
+    }
+
+    #[test]
+    fn test_conditional_section_header_negation() {
+        // `&!symbol` activates the section only when `symbol` is NOT defined.
+        let content = r#"
+[MegaTune]
+signature = "BaseECU"
+
+[TunerStudio &!CAN_COMMANDS]
+signature = "NoCanECU"
+"#;
+        let def = parse_ini(content).expect("Should parse successfully");
+        assert_eq!(def.signature, "NoCanECU");
     }
 
     #[test]

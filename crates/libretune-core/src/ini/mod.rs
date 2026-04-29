@@ -40,6 +40,11 @@ pub struct EcuDefinition {
     /// ECU signature string (e.g., "speeduino 202310")
     pub signature: String,
 
+    /// Optional `signaturePrefix` declared by the INI (msEnvelope_1.0 spec §3.4).
+    /// If present, an ECU signature whose leading bytes match this prefix is
+    /// considered compatible even when the trailing build/version differs.
+    pub signature_prefix: Option<String>,
+
     /// Query command to retrieve signature
     pub query_command: String,
 
@@ -340,6 +345,7 @@ impl Default for EcuDefinition {
         Self {
             ecu_type: EcuType::Unknown,
             signature: String::new(),
+            signature_prefix: None,
             query_command: "Q".to_string(),
             version_info: String::new(),
             ini_spec_version: "3.64".to_string(),

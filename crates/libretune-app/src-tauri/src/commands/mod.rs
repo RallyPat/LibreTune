@@ -21,7 +21,6 @@ pub mod constant_values;
 pub mod constants_read;
 pub mod csv_io;
 pub mod curve_ops;
-pub mod dash_convert;
 pub mod dash_files;
 pub mod dash_layout;
 pub mod data_logging;

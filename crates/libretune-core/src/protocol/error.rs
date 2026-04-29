@@ -32,6 +32,15 @@ pub enum ProtocolError {
     #[error("ECU returned error code: {0}")]
     EcuError(u8),
 
+    /// ECU returned a structured error response per msEnvelope_1.0 spec §15.2
+    #[error("ECU error 0x{code:02x}: {message}")]
+    EcuStatusError {
+        /// Raw response code byte
+        code: u8,
+        /// Human-readable message (default per spec, or payload-derived for 0x03/0x94/0x95)
+        message: String,
+    },
+
     #[error("Buffer overflow: packet too large")]
     BufferOverflow,
 

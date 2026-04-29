@@ -31,12 +31,10 @@ Public modules (post-Phase 7):
 - `autotune` — VE / AFR / dwell adaptation algorithms; recommendations and
   authority limits live in `autotune/anomaly.rs` and friends.
 - `basemap` — Built-in base-map generation logic.
-- `dash` — Dashboard data structures:
-  - `dash::layout` (LibreTune-native simple format: `DashboardLayout`,
-    `GaugeConfig`, `GaugeType`, file-path helpers).
-  - `dash::{parser, writer, types, validation, templates}` — TunerStudio
-    `.dash` XML format (full schema with `DashFile`, `GaugeCluster`,
-    `DashComponent`, `Bibliography`, etc.).
+- `dash` — TunerStudio-compatible `.dash` / `.gauge` XML format and the
+  single canonical dashboard runtime model (`DashFile`, `GaugeCluster`,
+  `DashComponent`, `GaugeConfig`, `IndicatorConfig`, `Bibliography`,
+  validation, built-in templates).
 - `datalog` — Streaming log writer.
 - `demo` — Synthetic ECU for offline / demo mode.
 - `ecu` — `EcuMemory`, `Value`, page model.
@@ -74,8 +72,8 @@ file owns a coherent slice of functionality, e.g.:
 
 - `connection.rs`, `metrics.rs`, `realtime_get.rs` — connection lifecycle
   and metrics tasks.
-- `dash_files.rs`, `dash_layout.rs`, `dash_convert.rs` — dashboard file
-  IO + layout and `DashboardLayout` ↔ `DashFile` conversion.
+- `dash_files.rs`, `dash_layout.rs` — dashboard file IO, discovery,
+  templates, and import.
 - `tune_io.rs`, `tune_info.rs`, `tune_misc.rs`, `tune_health.rs`,
   `tune_migration.rs` — tune persistence, diffing, migration.
 - `table_ops.rs`, `table_compare.rs`, `csv_io.rs` — table editing
@@ -171,10 +169,9 @@ src/
 - Default dashboards (Basic / Tuning / Racing) are seeded by Rust at first
   launch via `create_default_dashboard_files`; the frontend treats these
   like any other dashboard via `list_available_dashes` / `get_dash_file`.
-- The TunerStudio `.dash` XML format is parsed by `libretune_core::dash`
-  (parser/writer); LibreTune's simpler runtime layout
-  (`DashboardLayout`) is converted at the Tauri-command boundary by
-  `commands::dash_convert`.
+- The TunerStudio `.dash` / `.gauge` XML format is the canonical dashboard
+  representation in both Rust core (`libretune_core::dash`) and the
+  frontend; there is no separate "native" intermediate model.
 
 ## State management
 
@@ -204,3 +201,43 @@ npm run build        # Production bundle
 ```
 
 See `scripts/` for the release / packaging helpers.
+
+## TunerStudioMS spec compliance
+
+LibreTune tracks the reverse-engineered TunerStudioMS specification
+(`SPECIFICATION.md`, kept outside the repo). The protocol, INI grammar,
+`.dash`/`.gauge`/`.msq`/`.tuneView` file formats, and ECU discovery
+behavior are all targeted for parity. See the `Spec compliance` block in
+[CHANGELOG.md](../CHANGELOG.md) for per-phase status.
+
+### Deliberately out of scope
+
+LibreTune **does not** and **will not** implement these TunerStudio
+subsystems:
+
+- **EFI Analytics cloud SOAP services** (`EcuDefinitionServices`,
+  registration/license endpoints, telemetry uploads). LibreTune ships a
+  GitHub-based INI repository (`OnlineIniRepository`) that fills the
+  same role without a proprietary backend.
+- **Java plugin SPI** (TS plugin classpath, `*.tsplugin` jars). LibreTune
+  uses a WASM plugin host (`wasmtime`) by design — see
+  [DEPRECATION_NOTICE.md](../DEPRECATION_NOTICE.md). Java SPI is not a
+  goal and will not be re-introduced.
+- **Proprietary VE Analyze / WUE Analyze algorithms**. LibreTune ships
+  its own AutoTune implementation (see `crates/libretune-core/src/autotune.rs`).
+  We accept feature requests but will not lift TS's algorithm verbatim.
+- **License / activation gating**. LibreTune is GPL — there is nothing
+  to gate.
+
+### Compatibility posture
+
+- **Strict CRC by default** with permissive multi-scope CRC behind the
+  `ConnectionConfig.permissive_crc` opt-in for known-quirky firmwares.
+- **Auto-burn on by default** per spec §6.2 to prevent flash corruption
+  on page transitions and dialog close.
+- **`.dash` round-trip is lossless** for every attribute LibreTune
+  models; un-modeled attributes survive parse→write via element
+  `extra_attrs` catch-all maps (planned, see Sprint 1 D-1).
+- **Read both INI vendor flavors**: stock TS sections plus
+  Speeduino/rusEFI/FOME/epicEFI extensions; the parser logs (once)
+  any genuinely unknown section name.

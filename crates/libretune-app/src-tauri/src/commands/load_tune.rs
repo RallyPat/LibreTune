@@ -2,7 +2,7 @@
 
 use crate::commands::tune_info::TuneInfo;
 use crate::{
-    compare_signatures, find_matching_inis_internal, load_settings, AppState, SignatureMatchType,
+    find_matching_inis_internal, load_settings, AppState, SignatureMatchType,
     SignatureMismatchInfo,
 };
 use libretune_core::tune::{PageState, TuneCache, TuneFile};
@@ -46,10 +46,15 @@ pub async fn load_tune(
     // We'll still apply constants by name match regardless of signature match
     let def_guard = state.definition.lock().await;
     let current_ini_signature = def_guard.as_ref().map(|d| d.signature.clone());
+    let current_ini_prefix = def_guard.as_ref().and_then(|d| d.signature_prefix.clone());
     drop(def_guard);
 
     if let Some(ref ini_sig) = current_ini_signature {
-        let match_type = compare_signatures(&tune.signature, ini_sig);
+        let match_type = crate::commands::signature_helpers::compare_signatures_with_prefix(
+            &tune.signature,
+            ini_sig,
+            current_ini_prefix.as_deref(),
+        );
         if match_type != SignatureMatchType::Exact {
             eprintln!("[INFO] load_tune: MSQ signature '{}' {} current INI signature '{}' - will apply constants by name match", 
                 tune.signature,

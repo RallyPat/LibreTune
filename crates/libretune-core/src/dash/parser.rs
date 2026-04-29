@@ -322,7 +322,14 @@ fn handle_empty_element(
 fn get_attribute(e: &BytesStart, name: &str) -> Option<String> {
     for attr in e.attributes().flatten() {
         if attr.key.as_ref() == name.as_bytes() {
-            return Some(String::from_utf8_lossy(&attr.value).to_string());
+            // Unescape XML entities (&gt; &lt; &amp; etc.) so attribute
+            // values that contain expressions or user text round-trip
+            // correctly through write → parse cycles.
+            return Some(
+                attr.unescape_value()
+                    .map(|c| c.to_string())
+                    .unwrap_or_else(|_| String::from_utf8_lossy(&attr.value).to_string()),
+            );
         }
     }
     None
@@ -401,8 +408,57 @@ fn parse_gauge_cluster_attributes(e: &BytesStart) -> GaugeCluster {
             _ => BackgroundStyle::Tile,
         };
     }
+    // Plan D-1: lossless model. Capture the new attributes plus any
+    // un-modeled ones into `extra_attrs` so they survive parse → write.
+    if let Some(val) = get_attribute(e, "clusterLayout") {
+        if !val.is_empty() {
+            cluster.cluster_layout = Some(val);
+        }
+    }
+    if let Some(val) = get_attribute(e, "enabledCondition") {
+        if !val.is_empty() {
+            cluster.enabled_condition = Some(val);
+        }
+    }
+    capture_extra_attrs(e, &mut cluster.extra_attrs, CLUSTER_KNOWN_ATTRS);
 
     cluster
+}
+
+/// Attribute names already mapped onto fields of [`GaugeCluster`]; everything
+/// else is captured into `extra_attrs` for round-trip preservation.
+const CLUSTER_KNOWN_ATTRS: &[&str] = &[
+    "antiAliasing",
+    "forceAspect",
+    "forceAspectWidth",
+    "forceAspectHeight",
+    "clusterBackgroundColor",
+    "backgroundDitherColor",
+    "clusterBackgroundImageFileName",
+    "clusterBackgroundImageStyle",
+    "clusterLayout",
+    "enabledCondition",
+];
+
+/// Copy XML attributes whose names are NOT in `known` into `bag`. Used to
+/// preserve `.dash` attributes LibreTune does not yet model so a parse →
+/// write cycle is lossless (Plan D-1).
+fn capture_extra_attrs(
+    e: &BytesStart,
+    bag: &mut std::collections::BTreeMap<String, String>,
+    known: &[&str],
+) {
+    for attr in e.attributes().flatten() {
+        let name = String::from_utf8_lossy(attr.key.as_ref()).to_string();
+        if known.iter().any(|k| k.eq_ignore_ascii_case(&name)) {
+            continue;
+        }
+        let value = attr
+            .unescape_value()
+            .map(|c| c.to_string())
+            .unwrap_or_else(|_| String::from_utf8_lossy(&attr.value).to_string());
+        bag.insert(name, value);
+    }
 }
 
 fn is_color_property(name: &str) -> bool {

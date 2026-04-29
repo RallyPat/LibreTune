@@ -102,7 +102,12 @@ pub fn create_basic_dashboard() -> DashFile {
             cluster_background_image_style: BackgroundStyle::Stretch,
             embedded_images: Vec::new(),
             components: Vec::new(),
+            cluster_layout: None,
+            enabled_condition: None,
+            extra_attrs: std::collections::BTreeMap::new(),
         },
+        additional_clusters: Vec::new(),
+        extra_attrs: std::collections::BTreeMap::new(),
     };
 
     // CENTER LEFT: Large RPM tachometer
@@ -409,7 +414,12 @@ pub fn create_racing_dashboard() -> DashFile {
             cluster_background_image_style: BackgroundStyle::Stretch,
             embedded_images: Vec::new(),
             components: Vec::new(),
+            cluster_layout: None,
+            enabled_condition: None,
+            extra_attrs: std::collections::BTreeMap::new(),
         },
+        additional_clusters: Vec::new(),
+        extra_attrs: std::collections::BTreeMap::new(),
     };
 
     // MASSIVE CENTER: RPM Tachometer - the star of the show
@@ -642,7 +652,12 @@ pub fn create_tuning_dashboard() -> DashFile {
             cluster_background_image_style: BackgroundStyle::Stretch,
             embedded_images: Vec::new(),
             components: Vec::new(),
+            cluster_layout: None,
+            enabled_condition: None,
+            extra_attrs: std::collections::BTreeMap::new(),
         },
+        additional_clusters: Vec::new(),
+        extra_attrs: std::collections::BTreeMap::new(),
     };
 
     // TOP ROW: Primary tuning metrics

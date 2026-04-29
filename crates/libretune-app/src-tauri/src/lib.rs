@@ -21,10 +21,11 @@ use state::{AppState, AutoTuneLoadSource, RpmState, RpmStateTracker, StreamStats
 pub(crate) use commands::app_settings::{
     get_commit_message_format, load_settings, save_settings, Settings,
 };
-pub(crate) use commands::dash_convert::{convert_dashfile_to_layout, convert_layout_to_dashfile};
 pub(crate) use commands::signature_helpers::{
-    call_connection_factory_and_build_result, compare_signatures, find_matching_inis_internal,
+    call_connection_factory_and_build_result, find_matching_inis_internal,
 };
+#[cfg(test)]
+pub(crate) use commands::signature_helpers::compare_signatures;
 pub(crate) use commands::table_internals::{
     get_table_data_internal, update_constant_array_internal, update_table_z_values_internal,
     TableData,
@@ -68,12 +69,11 @@ use commands::csv_io::{export_tune_as_csv, import_tune_from_csv, reset_tune_to_d
 use commands::curve_ops::{get_curve_data, update_curve_data};
 use commands::dash_files::{
     create_new_dashboard, delete_dashboard, duplicate_dashboard, export_dashboard, get_dash_file,
-    load_tunerstudio_dash, rename_dashboard, save_dash_file, validate_dashboard,
+    rename_dashboard, save_dash_file, validate_dashboard,
 };
 use commands::dash_layout::{
-    check_dash_conflict, create_default_dashboard, get_dashboard_templates, import_dash_file,
-    list_available_dashes, list_dashboard_layouts, load_dashboard_layout,
-    reset_dashboards_to_defaults, save_dashboard_layout,
+    check_dash_conflict, get_dashboard_templates, import_dash_file, list_available_dashes,
+    reset_dashboards_to_defaults,
 };
 use commands::data_logging::{
     clear_log, get_log_entries, get_logging_status, read_text_file, save_log, start_logging,
@@ -285,12 +285,7 @@ pub fn run() {
             fill_region,
             scale_cells,
             set_cells_equal,
-            save_dashboard_layout,
-            load_dashboard_layout,
-            list_dashboard_layouts,
-            create_default_dashboard,
             get_dashboard_templates,
-            load_tunerstudio_dash,
             get_dash_file,
             validate_dashboard,
             save_dash_file,

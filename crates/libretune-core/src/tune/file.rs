@@ -60,6 +60,12 @@ pub struct TuneFile {
     /// Key format: "constant_name" for scalars, "table_name:row:col" for cells
     #[serde(default)]
     pub annotations: HashMap<String, TuneAnnotation>,
+
+    /// Human-readable firmware identifier (e.g. "Speeduino 202405"). Optional;
+    /// emitted as `firmwareInfo` on `<versionInfo>` for stock-TS interop
+    /// (spec §3 / Plan Phase 3.5). Falls back to `signature` when absent.
+    #[serde(default)]
+    pub firmware_info: Option<String>,
 }
 
 /// A user annotation attached to a constant, table, or cell
@@ -160,6 +166,7 @@ impl TuneFile {
             ini_metadata: None,
             constant_manifest: None,
             annotations: HashMap::new(),
+            firmware_info: None,
         }
     }
 
@@ -814,10 +821,15 @@ impl TuneFile {
         // Start msq tag with signature
         xml.push_str("<msq xmlns=\"http://www.msefi.com/:msq\">\n");
 
-        // Add versionInfo with signature
+        // Add versionInfo with signature, firmwareInfo, and nPages.
+        // Spec / Plan Phase 3.5: stock TunerStudio expects `firmwareInfo`
+        // and `nPages` here for max interop. Falls back to `signature`
+        // when no explicit firmware string is set.
+        let fw_info = self.firmware_info.as_deref().unwrap_or(&self.signature);
+        let n_pages = self.pages.len().max(self.constant_pages.values().copied().max().map(|p| p as usize + 1).unwrap_or(0));
         xml.push_str(&format!(
-            "  <versionInfo signature=\"{}\"/>\n",
-            self.signature
+            "  <versionInfo signature=\"{}\" firmwareInfo=\"{}\" nPages=\"{}\"/>\n",
+            self.signature, fw_info, n_pages
         ));
 
         // Add bibliography if we have metadata
@@ -1178,6 +1190,7 @@ impl Default for TuneFile {
             ini_metadata: None,
             constant_manifest: None,
             annotations: HashMap::new(),
+            firmware_info: None,
         }
     }
 }

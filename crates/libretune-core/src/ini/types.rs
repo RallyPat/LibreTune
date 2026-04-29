@@ -888,6 +888,46 @@ pub struct ProtocolSettings {
 
     /// Default IP port for TCP connections
     pub default_ip_port: u16,
+
+    // ---- Optional [Constants] keys defined by the spec but not yet driving runtime
+    // behavior. Parsed for INI fidelity / round-trip and so future code can honor them
+    // without a second migration. (msEnvelope_1.0 spec §B.1.)
+    /// `tableWriteCommand` — alternate command for writing whole tables atomically.
+    pub table_write_command: Option<String>,
+    /// `tableCrcCommand` — alternate per-table CRC verification command.
+    pub table_crc_command: Option<String>,
+    /// `tableBlockingFactor` — max bytes per chunk for table writes.
+    pub table_blocking_factor: Option<u32>,
+    /// `replayConfigTable` — PC-variable that selects the replay channel set.
+    pub replay_config_table: Option<String>,
+    /// `replayReadCommand` — command format for fetching replay/log frames.
+    pub replay_read_command: Option<String>,
+    /// `replayRecordCountParam` — PC-variable holding the in-ECU replay record count.
+    pub replay_record_count_param: Option<String>,
+    /// `noCommReadDelay` — ms to back off after a read returns no data.
+    pub no_comm_read_delay: u32,
+    /// `refreshLocalStoreOnActivity` — invalidate cached PC vars on user input.
+    pub refresh_local_store_on_activity: bool,
+    /// `defaultRuntimeRecordPerSec` — default runtime polling cadence (Hz).
+    pub default_runtime_record_per_sec: Option<u32>,
+    /// `restrictSquirtRelationship` — enforce strict squirt/event count consistency.
+    pub restrict_squirt_relationship: bool,
+    /// `forceBigEndianProtocol` — override INI endianness, always use BE on the wire.
+    pub force_big_endian_protocol: bool,
+    /// `useLegacyFTempUnits` — treat raw temp bytes as legacy °F-encoded values.
+    pub use_legacy_f_temp_units: bool,
+    /// `surpressConfigErrorVerbiage` (sic) — suppress noisy config-error popups.
+    pub suppress_config_error_verbiage: bool,
+    /// `validateArrayBounds` — enforce strict bounds on array constants.
+    pub validate_array_bounds: bool,
+    /// `ignoreMissingBitOptions` — silently fill missing $-references with empty options.
+    pub ignore_missing_bit_options: bool,
+    /// `filterEchoBytes` — strip echoed command bytes from the read stream.
+    pub filter_echo_bytes: bool,
+    /// `envelopedScanCommands` — wrap discovery commands in the modern envelope.
+    pub enveloped_scan_commands: bool,
+    /// `pageActivate` — explicit per-page activation command (selects active page).
+    pub page_activate_commands: Vec<String>,
 }
 
 impl Default for ProtocolSettings {
@@ -916,6 +956,24 @@ impl Default for ProtocolSettings {
             default_baud_rate: 115200,
             default_ip_address: None,
             default_ip_port: 29001,
+            table_write_command: None,
+            table_crc_command: None,
+            table_blocking_factor: None,
+            replay_config_table: None,
+            replay_read_command: None,
+            replay_record_count_param: None,
+            no_comm_read_delay: 0,
+            refresh_local_store_on_activity: false,
+            default_runtime_record_per_sec: None,
+            restrict_squirt_relationship: false,
+            force_big_endian_protocol: false,
+            use_legacy_f_temp_units: false,
+            suppress_config_error_verbiage: false,
+            validate_array_bounds: false,
+            ignore_missing_bit_options: false,
+            filter_echo_bytes: false,
+            enveloped_scan_commands: false,
+            page_activate_commands: Vec::new(),
         }
     }
 }

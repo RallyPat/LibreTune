@@ -939,6 +939,71 @@ fn evaluate_function(
 
             Ok(Value::Number(0.0))
         }
+        // int(x) / trunc(x) - truncate to integer (towards zero)
+        // Commonly used in TS calcField / value-provider expressions.
+        "int" | "trunc" => {
+            if args.len() != 1 {
+                return Err(format!(
+                    "Function {} requires 1 argument, got {}",
+                    name,
+                    args.len()
+                ));
+            }
+            let x = evaluate(&args[0], context, string_context)?.as_f64();
+            Ok(Value::Number(x.trunc()))
+        }
+        // not(x) - logical negation, alias for ! operator (TS spelling).
+        "not" => {
+            if args.len() != 1 {
+                return Err(format!(
+                    "Function not requires 1 argument, got {}",
+                    args.len()
+                ));
+            }
+            let x = evaluate(&args[0], context, string_context)?.as_bool();
+            Ok(Value::Bool(!x))
+        }
+        // boolean(x) - cast to boolean (non-zero / non-empty is true).
+        "boolean" | "bool" => {
+            if args.len() != 1 {
+                return Err(format!(
+                    "Function {} requires 1 argument, got {}",
+                    name,
+                    args.len()
+                ));
+            }
+            let x = evaluate(&args[0], context, string_context)?.as_bool();
+            Ok(Value::Bool(x))
+        }
+        // pastValue(channel, samplesAgo)
+        // TS: returns the value of `channel` from `samplesAgo` samples back.
+        // Without a history buffer plumbed through this evaluator, return the
+        // current value (n==0 => identity) so expressions involving history
+        // degrade gracefully instead of failing to parse.
+        // A future audit can plumb a ring buffer through `StringContext`.
+        "pastvalue" => {
+            if args.len() != 2 {
+                return Err(format!(
+                    "Function pastValue requires 2 arguments (channel, samplesAgo), got {}",
+                    args.len()
+                ));
+            }
+            let v = evaluate(&args[0], context, string_context)?.as_f64();
+            Ok(Value::Number(v))
+        }
+        // getAuxDigital(n) - read n-th aux digital input. Without an
+        // aux-digital pin map plumbed through, return 0 so expressions parse.
+        "getauxdigital" => {
+            if args.len() != 1 {
+                return Err(format!(
+                    "Function getAuxDigital requires 1 argument, got {}",
+                    args.len()
+                ));
+            }
+            // Touch arg for evaluation side-effects / arg validation.
+            let _ = evaluate(&args[0], context, string_context)?.as_f64();
+            Ok(Value::Number(0.0))
+        }
         _ => {
             // Check for path functions (start with $)
             if name.starts_with('$') {
@@ -1130,5 +1195,59 @@ mod tests {
             evaluate_simple(&expr, &context).unwrap(),
             Value::Bool(false)
         );
+    }
+
+    /// Plan S-7: audit that all TS math functions referenced in stock INI
+    /// expressions parse and evaluate without `Unknown function` errors.
+    #[test]
+    fn test_ts_function_coverage() {
+        let mut context = HashMap::new();
+        context.insert("rpm".to_string(), 2500.0);
+        context.insert("time".to_string(), 1.5);
+
+        let cases: &[(&str, Value)] = &[
+            ("abs(-3)", Value::Number(3.0)),
+            ("round(2.7)", Value::Number(3.0)),
+            ("floor(2.7)", Value::Number(2.0)),
+            ("ceil(2.1)", Value::Number(3.0)),
+            ("sqrt(16)", Value::Number(4.0)),
+            ("min(3, 5, 1)", Value::Number(1.0)),
+            ("max(3, 5, 1)", Value::Number(5.0)),
+            ("pow(2, 10)", Value::Number(1024.0)),
+            ("recip(4)", Value::Number(0.25)),
+            ("if(1, 10, 20)", Value::Number(10.0)),
+            ("int(3.9)", Value::Number(3.0)),
+            ("trunc(-2.8)", Value::Number(-2.0)),
+            ("not(0)", Value::Bool(true)),
+            ("boolean(1)", Value::Bool(true)),
+            ("bool(0)", Value::Bool(false)),
+            ("isNaN(sqrt(0-1))", Value::Bool(true)),
+            ("isAdvancedMathAvailable()", Value::Bool(true)),
+            // pastValue degrades to current value
+            ("pastValue(time, 1)", Value::Number(1.5)),
+            ("getAuxDigital(0)", Value::Number(0.0)),
+        ];
+
+        for (src, expected) in cases {
+            let mut p = Parser::new(src);
+            let expr = p
+                .parse()
+                .unwrap_or_else(|e| panic!("parse failed for {src}: {e}"));
+            let got = evaluate_simple(&expr, &context)
+                .unwrap_or_else(|e| panic!("eval failed for {src}: {e}"));
+            assert_eq!(&got, expected, "expression {src}");
+        }
+    }
+
+    #[test]
+    fn test_ts_calcfield_toothtime_pattern() {
+        // The most common stateful TS calcField in the wild:
+        //     calcField = toothTime, "ToothTime", "ms", { time - pastValue(time, 1) }
+        // Without history pastValue is identity, so this evaluates to 0.
+        let mut p = Parser::new("time - pastValue(time, 1)");
+        let expr = p.parse().expect("parse");
+        let mut context = HashMap::new();
+        context.insert("time".to_string(), 42.0);
+        assert_eq!(evaluate_simple(&expr, &context).unwrap(), Value::Number(0.0));
     }
 }

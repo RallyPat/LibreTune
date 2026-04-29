@@ -13,6 +13,120 @@ relevant.
 
 ## [Unreleased]
 
+### Sprint 3 — Spec wrap-up (S-5..S-7)
+
+#### Added
+- **Phase 3.1 / S-5 — `.tuneView` round-trip** — new
+  `crates/libretune-core/src/tune_view/` module
+  (`mod.rs` / `types.rs` / `parser.rs` / `writer.rs`). Generic property-bag
+  data model (`TuneView` → `TuneComp` → `TuneProp` with `BTreeMap` attrs
+  + free-form text) preserves any field across parse → write → re-parse,
+  including unknown `tuneComp` types and color-style multi-attr properties.
+  Lossless against the entire `reference/TunerStudioMS/TuneView/` corpus
+  (37 stock files round-trip via new `tests/stock_ts_tune_view_corpus.rs`
+  integration test). 4 inline parser tests cover the minimal element set
+  and namespace-prefix handling.
+- **Phase 4.1 / S-6 — `discover_ecu` probe matrix** — new
+  `crates/libretune-core/src/protocol/discovery.rs` implementing spec §15.4.
+  Sweeps `deviceSearchBaudRates × deviceSearchQueryCommands` per port with
+  the canonical 1500 ms post-open settle / 40 ms pre-write / 600 ms read
+  window. Classifies each response as `Signature` (MS-family ASCII reply),
+  `Bootloader` (`b0&0xE0==0xE0 && b1&0xF0==0 && b2==b'>'`), `BigStuff3`
+  (`b0==0x01`), `Echo`, `GpsReceiver` (`$GP…` reject), `Unknown`, `Silent`,
+  or `OpenFailed`. Probe takes a channel-opener closure (`OpenPort`) so it
+  is testable without serial hardware; 7 inline tests use a scripted
+  `MockChannel` to exercise every classification path. Re-exported from
+  `protocol::` as `discover_ecu`, `DiscoveryConfig`, `DiscoveryResult`,
+  `DiscoveredEcu`.
+- **Phase 4.2 / S-7 — Math parser audit** — added the few remaining TS
+  expression functions found in stock INI corpus to
+  `ini::expression::evaluate_function`: `int` / `trunc` (truncate towards
+  zero), `not` (logical negation, TS spelling), `boolean` / `bool`
+  (cast to bool), `pastValue(channel, n)` (degrades to current value
+  pending history-buffer plumbing), and `getAuxDigital(n)` (returns 0
+  pending aux-digital pin map). New regression test
+  `test_ts_function_coverage` exercises 19 representative expressions plus
+  the canonical `time - pastValue(time, 1)` calcField pattern from real
+  ECU INIs.
+
+#### Verification
+- `cargo test -p libretune-core`: **484 tests pass** across 24 binaries
+  (was 246 at start of Sprint 1).
+- `cargo clippy -p libretune-core --lib --tests -- -D warnings`: clean.
+- All 37 stock `.tuneView` files round-trip losslessly.
+
+## [Unreleased — earlier sprints]
+
+### Spec compliance — TunerStudioMS alignment (Apr 29, 2026)
+
+LibreTune now closes the highest-priority gaps against the reverse-engineered
+TunerStudioMS specification (`SPECIFICATION.md`). Work is grouped by phase;
+deliberately out-of-scope items are documented in
+[docs/architecture.md](docs/architecture.md).
+
+#### Added
+- **Phase 1.1** — `protocol::response_code::ResponseCode` enum covering all
+  spec §15.2 codes (`OK_BURN`, `BUSY`, `FLASH_LOCKED`, `CRC_MISMATCH`,
+  `CAN_TIMEOUT`, etc.); `ProtocolError::EcuStatusError` carries the user-facing
+  message verbatim.
+- **Phase 1.3** — auto-burn safety policy. `ConnectionConfig` gains
+  `auto_burn_on_page_change` and `auto_burn_on_close_dialog` (both default
+  `true`); `Connection::flush_pending_burn()` exposes explicit flush for
+  dialog-close events. Page transitions are tracked via `last_written_page`.
+- **Phase 2.1** — INI `signaturePrefix` parsed under `[MegaTune]` and
+  `[TunerStudio]`; `EcuDefinition.signature_prefix` honored by every
+  signature-compare path (`connect_to_ecu`, `load_tune`,
+  `signature_helpers`).
+- **Phase 2.3** — 19 missing `[Constants]` keys parsed into
+  `ProtocolSettings` (`tableWriteCommand`, `tableCrcCommand`,
+  `tableBlockingFactor`, `replayConfigTable`, `replayReadCommand`,
+  `replayRecordCountParam`, `noCommReadDelay`,
+  `refreshLocalStoreOnActivity`, `defaultRuntimeRecordPerSec`,
+  `restrictSquirtRelationship`, `forceBigEndianProtocol`,
+  `useLegacyFTempUnits`, `surpressConfigErrorVerbiage`,
+  `validateArrayBounds`, `ignoreMissingBitOptions`, `filterEchoBytes`,
+  `envelopedScanCommands`, `pageActivate`, `defaultIpAddress`/`Port`).
+  New `parse_ini_bool` helper.
+- **Phase 2.4** — conditional section headers (`[Section &cond1 &!cond2]`)
+  evaluated against `#set`/`#unset` symbols.
+- **Phase 2.5** — known-but-passive INI sections (`[FILE_HEADER]`,
+  `[VerbiageOverride]`, `[TurboBaud]`, `[Replay]`, `[ExtendedReplay]`,
+  `[AccelerationWizard]`, `[EncodedData]`, `[TuningViews]`,
+  `[EventTriggers]`, `[Tools]`) silently accepted; truly-unknown section
+  names emit a one-time WARN per section so users notice INI grammar gaps
+  without log flooding.
+- **Phase 3.2** — `IndicatorPainter::Led` variant; `from_ts_string`
+  recognizes `LedPainter`, `BulbIndicatorPainter`,
+  `RectangleIndicatorPainter`, `BasicRectangleIndicatorPainter` aliases.
+
+#### Changed
+- **Phase 1.2** — `Packet::from_bytes` now defaults to strict scope-A-BE
+  CRC per spec §15.1; permissive multi-scope brute-force is opt-in via
+  `Packet::from_bytes_with_mode(data, permissive=true)` and gated behind
+  `ConnectionConfig.permissive_crc`.
+- **Phase 2.2** — `iniSpecVersion > 14` emits a cap warning during INI
+  parsing.
+- **Phase 2.6** — `[UiDialogs]` accepted as deprecated alias for
+  `[UserDefined]` with a one-time INFO log.
+- **Phase 3.3** — `clusterBackgroundImageStyle` (Tile/Stretch/Center/Fit)
+  and `forceAspect{Width,Height}` confirmed lossless via dedicated
+  round-trip test (`test_cluster_image_attrs_roundtrip`).
+- **Phase 3.5** — MSQ writer now emits `firmwareInfo` and `nPages` on
+  `<versionInfo>` for max stock-TunerStudio interop. New
+  `TuneFile::firmware_info` field falls back to `signature` when unset.
+
+#### Verified
+- **Phase 3.4** — restore-point filename
+  `{ProjectName}_{YYYY-MM-DD_HH.MM.SS}.msq` already matches spec §3.1
+  (no change required).
+
+#### Deferred
+- **Phase 3.1** — `.tuneView` round-trip module (Sprint 3).
+- **Phase 4.1** — `discover_ecu` probe matrix per spec §15.4
+  (Sprint 3).
+- **Phase 4.2** — full math-parser audit against published TS function
+  list (Sprint 3).
+
 ### Phase 6 — App.tsx & DialogRenderer decomposition (Apr 26, 2026)
 
 #### Changed

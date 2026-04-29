@@ -1,11 +1,11 @@
 //! TS-compatible dashboard and gauge file format support.
 //!
-//! This module implements parsing and writing of TS .dash and .gauge
-//! XML file formats, enabling full compatibility with existing dashboard files.
-//! It also re-exports LibreTune's native `DashboardLayout` representation
-//! from the `layout` submodule.
+//! This module implements parsing and writing of TS `.dash` and `.gauge`
+//! XML file formats. The runtime types in `types.rs` (`DashFile`,
+//! `GaugeConfig`, `IndicatorConfig`, ...) are LibreTune's single canonical
+//! dashboard model — the same structures are used for in-memory state,
+//! Tauri command payloads, and TS XML round-trip.
 
-pub mod layout;
 mod parser;
 mod templates;
 mod types;

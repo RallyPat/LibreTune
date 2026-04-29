@@ -34,11 +34,30 @@ pub(crate) fn normalize_signature(s: &str) -> String {
 
 /// Compare two signatures and determine match type using normalized strings
 pub(crate) fn compare_signatures(ecu_sig: &str, ini_sig: &str) -> SignatureMatchType {
+    compare_signatures_with_prefix(ecu_sig, ini_sig, None)
+}
+
+/// Compare signatures honoring an optional `signaturePrefix` (msEnvelope_1.0 spec §3.4).
+/// When `ini_prefix` is provided and the ECU signature starts with that prefix
+/// (after normalization), the match is upgraded to `Exact` even if the trailing
+/// build/version differs.
+pub(crate) fn compare_signatures_with_prefix(
+    ecu_sig: &str,
+    ini_sig: &str,
+    ini_prefix: Option<&str>,
+) -> SignatureMatchType {
     let ecu_normalized = normalize_signature(ecu_sig);
     let ini_normalized = normalize_signature(ini_sig);
 
     if ecu_normalized == ini_normalized {
         return SignatureMatchType::Exact;
+    }
+
+    if let Some(prefix) = ini_prefix {
+        let prefix_normalized = normalize_signature(prefix);
+        if !prefix_normalized.is_empty() && ecu_normalized.starts_with(&prefix_normalized) {
+            return SignatureMatchType::Exact;
+        }
     }
 
     // Check for common suffixes (hashes)
@@ -136,13 +155,16 @@ pub(crate) async fn find_matching_inis_internal(
 #[cfg(test)]
 pub(crate) async fn connect_to_ecu_simulated(state: &AppState, signature: &str) -> ConnectResult {
     // If there's a loaded definition, compare signatures
-    let expected_signature = {
+    let (expected_signature, expected_prefix) = {
         let def_guard = state.definition.lock().await;
-        def_guard.as_ref().map(|d| d.signature.clone())
+        match def_guard.as_ref() {
+            Some(d) => (Some(d.signature.clone()), d.signature_prefix.clone()),
+            None => (None, None),
+        }
     };
 
     let mismatch_info = if let Some(ref expected) = expected_signature {
-        let match_type = compare_signatures(signature, expected);
+        let match_type = compare_signatures_with_prefix(signature, expected, expected_prefix.as_deref());
         if match_type != SignatureMatchType::Exact {
             let matching_inis = find_matching_inis_from_state(state, signature).await;
             let current_ini_path = None; // In tests we don't need an app handle to load settings
@@ -176,6 +198,7 @@ pub(crate) async fn call_connection_factory_and_build_result(
     let protocol_settings = def_guard.as_ref().map(|d| d.protocol.clone());
     let endianness = def_guard.as_ref().map(|d| d.endianness).unwrap_or_default();
     let expected_signature = def_guard.as_ref().map(|d| d.signature.clone());
+    let expected_prefix = def_guard.as_ref().and_then(|d| d.signature_prefix.clone());
     drop(def_guard);
 
     let factory_opt = state.connection_factory.lock().await.clone();
@@ -184,7 +207,11 @@ pub(crate) async fn call_connection_factory_and_build_result(
             Ok(signature) => {
                 // Build mismatch info if needed
                 let mismatch_info = if let Some(ref expected) = expected_signature {
-                    let match_type = compare_signatures(&signature, expected);
+                    let match_type = compare_signatures_with_prefix(
+                        &signature,
+                        expected,
+                        expected_prefix.as_deref(),
+                    );
                     if match_type != SignatureMatchType::Exact {
                         let matching_inis = find_matching_inis_from_state(state, &signature).await;
                         let current_ini_path = None; // caller may provide app if needed

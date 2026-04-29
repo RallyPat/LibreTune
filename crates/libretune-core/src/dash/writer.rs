@@ -161,6 +161,17 @@ fn write_gauge_cluster<W: Write>(
     };
     elem.push_attribute(("clusterBackgroundImageStyle", style));
 
+    // Plan D-1: emit lossless additions + any captured `extra_attrs`.
+    if let Some(ref layout) = cluster.cluster_layout {
+        elem.push_attribute(("clusterLayout", layout.as_str()));
+    }
+    if let Some(ref cond) = cluster.enabled_condition {
+        elem.push_attribute(("enabledCondition", cond.as_str()));
+    }
+    for (k, v) in &cluster.extra_attrs {
+        elem.push_attribute((k.as_str(), v.as_str()));
+    }
+
     writer.write_event(Event::Start(elem))?;
 
     // Write embedded images
@@ -591,5 +602,84 @@ mod tests {
         } else {
             panic!("Expected Gauge");
         }
+    }
+
+    #[test]
+    fn test_cluster_image_attrs_roundtrip() {
+        // Spec §16.3 / Plan Phase 3.3: clusterBackgroundImageStyle and
+        // forceAspect{Width,Height} must round-trip losslessly so user-edited
+        // dashes saved by LibreTune still display correctly when re-loaded
+        // (and remain readable by stock TunerStudio).
+        let mut dash = DashFile::default();
+        dash.gauge_cluster.force_aspect = true;
+        dash.gauge_cluster.force_aspect_width = 16.0;
+        dash.gauge_cluster.force_aspect_height = 9.0;
+        dash.gauge_cluster.cluster_background_image_file_name = Some("bg.png".to_string());
+        dash.gauge_cluster.cluster_background_image_style = BackgroundStyle::Center;
+
+        let xml = write_dash_file(&dash).unwrap();
+        assert!(xml.contains("forceAspect=\"true\""));
+        assert!(xml.contains("forceAspectWidth=\"16\""));
+        assert!(xml.contains("forceAspectHeight=\"9\""));
+        assert!(xml.contains("clusterBackgroundImageFileName=\"bg.png\""));
+        assert!(xml.contains("clusterBackgroundImageStyle=\"Center\""));
+
+        let parsed = super::super::parser::parse_dash_file(&xml).unwrap();
+        assert!(parsed.gauge_cluster.force_aspect);
+        assert_eq!(parsed.gauge_cluster.force_aspect_width, 16.0);
+        assert_eq!(parsed.gauge_cluster.force_aspect_height, 9.0);
+        assert_eq!(
+            parsed.gauge_cluster.cluster_background_image_file_name,
+            Some("bg.png".to_string())
+        );
+        assert_eq!(
+            parsed.gauge_cluster.cluster_background_image_style,
+            BackgroundStyle::Center
+        );
+
+        // Verify each style variant survives a write→parse cycle.
+        for style in [
+            BackgroundStyle::Tile,
+            BackgroundStyle::Stretch,
+            BackgroundStyle::Center,
+            BackgroundStyle::Fit,
+        ] {
+            let mut d = DashFile::default();
+            d.gauge_cluster.cluster_background_image_style = style.clone();
+            let xml = write_dash_file(&d).unwrap();
+            let p = super::super::parser::parse_dash_file(&xml).unwrap();
+            assert_eq!(p.gauge_cluster.cluster_background_image_style, style);
+        }
+    }
+
+    #[test]
+    fn test_cluster_lossless_extras_roundtrip() {
+        // Plan D-1: cluster_layout, enabled_condition, and unknown attrs
+        // must survive parse → write → parse without loss.
+        let mut dash = DashFile::default();
+        dash.gauge_cluster.cluster_layout = Some("GridLayout".to_string());
+        dash.gauge_cluster.enabled_condition = Some("rpm > 1000".to_string());
+        dash.gauge_cluster
+            .extra_attrs
+            .insert("customVendorAttr".to_string(), "vendor-value".to_string());
+
+        let xml = write_dash_file(&dash).unwrap();
+        assert!(xml.contains("clusterLayout=\"GridLayout\""));
+        assert!(xml.contains("enabledCondition=\"rpm &gt; 1000\""));
+        assert!(xml.contains("customVendorAttr=\"vendor-value\""));
+
+        let parsed = super::super::parser::parse_dash_file(&xml).unwrap();
+        assert_eq!(
+            parsed.gauge_cluster.cluster_layout.as_deref(),
+            Some("GridLayout")
+        );
+        assert_eq!(
+            parsed.gauge_cluster.enabled_condition.as_deref(),
+            Some("rpm > 1000")
+        );
+        assert_eq!(
+            parsed.gauge_cluster.extra_attrs.get("customVendorAttr"),
+            Some(&"vendor-value".to_string())
+        );
     }
 }

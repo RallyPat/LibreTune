@@ -105,11 +105,12 @@ export const SUPPORTED_GAUGE_PAINTERS = [
 ] as const satisfies readonly GaugePainter[];
 
 /** Indicator painter type */
-export type IndicatorPainter = 'BasicRectangleIndicator' | 'BulbIndicator';
+export type IndicatorPainter = 'BasicRectangleIndicator' | 'BulbIndicator' | 'Led';
 
 export const SUPPORTED_INDICATOR_PAINTERS = [
   'BasicRectangleIndicator',
   'BulbIndicator',
+  'Led',
 ] as const satisfies readonly IndicatorPainter[];
 
 /** Gauge configuration from TS .dash file */
@@ -207,6 +208,16 @@ export interface TsGaugeConfig {
 
   // Display options
   display_value_at_180: boolean;
+
+  // --- Plan v2 / D-1 lossless model additions (mirrors Rust GaugeConfig) ---
+  /** Optional INI expression that hides this gauge when false. */
+  enabled_condition?: string | null;
+  /** Render a persistent peak-hold marker tracking the maximum observed value. */
+  peak_hold?: boolean;
+  /** Hysteresis (in channel units) on warning/critical state transitions. */
+  hysteresis?: number | null;
+  /** Catch-all for un-modeled `.dash` attributes (round-trip safety). */
+  extra_attrs?: Record<string, string>;
 }
 
 /** Indicator configuration */
@@ -237,6 +248,10 @@ export interface TsIndicatorConfig {
   short_click_action: string | null;
   long_click_action: string | null;
   ecu_configuration_name: string | null;
+
+  // --- Plan v2 / D-1 lossless model additions (mirrors Rust IndicatorConfig) ---
+  enabled_condition?: string | null;
+  extra_attrs?: Record<string, string>;
 }
 
 /** Dashboard component - gauge or indicator */
@@ -266,6 +281,10 @@ export interface GaugeCluster {
   cluster_background_image_style: BackgroundStyle;
   embedded_images: EmbeddedImage[];
   components: DashComponent[];
+  // --- Plan v2 / D-1 lossless model additions (mirrors Rust GaugeCluster) ---
+  cluster_layout?: string | null;
+  enabled_condition?: string | null;
+  extra_attrs?: Record<string, string>;
 }
 
 /** Top-level dashboard file structure */
@@ -273,6 +292,9 @@ export interface DashFile {
   bibliography: Bibliography;
   version_info: VersionInfo;
   gauge_cluster: GaugeCluster;
+  /** Multi-cluster support (Plan D-1). Empty for single-cluster dashboards. */
+  additional_clusters?: GaugeCluster[];
+  extra_attrs?: Record<string, string>;
 }
 
 /** Dashboard file info for listing */

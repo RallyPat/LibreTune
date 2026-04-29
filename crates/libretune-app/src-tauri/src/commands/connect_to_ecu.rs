@@ -2,7 +2,7 @@
 
 use crate::commands::metrics::start_metrics_task;
 use crate::{
-    call_connection_factory_and_build_result, compare_signatures, find_matching_inis_internal,
+    call_connection_factory_and_build_result, find_matching_inis_internal,
     load_settings, parse_runtime_packet_mode, AppState, ConnectResult, SignatureMatchType,
     SignatureMismatchInfo,
 };
@@ -69,6 +69,7 @@ pub async fn connect_to_ecu(
     let protocol_settings = def_guard.as_ref().map(|d| d.protocol.clone());
     let endianness = def_guard.as_ref().map(|d| d.endianness).unwrap_or_default();
     let expected_signature = def_guard.as_ref().map(|d| d.signature.clone());
+    let expected_prefix = def_guard.as_ref().and_then(|d| d.signature_prefix.clone());
     drop(def_guard);
 
     // If a test connection factory is installed, use helper to obtain a signature without opening a port
@@ -149,7 +150,11 @@ pub async fn connect_to_ecu(
 
             // Check signature match and build mismatch info if needed
             let mismatch_info = if let Some(ref expected) = expected_signature {
-                let match_type = compare_signatures(&signature, expected);
+                let match_type = crate::commands::signature_helpers::compare_signatures_with_prefix(
+                    &signature,
+                    expected,
+                    expected_prefix.as_deref(),
+                );
 
                 if match_type != SignatureMatchType::Exact {
                     // Log the mismatch
