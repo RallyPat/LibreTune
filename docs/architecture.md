@@ -201,3 +201,43 @@ npm run build        # Production bundle
 ```
 
 See `scripts/` for the release / packaging helpers.
+
+## TunerStudioMS spec compliance
+
+LibreTune tracks the reverse-engineered TunerStudioMS specification
+(`SPECIFICATION.md`, kept outside the repo). The protocol, INI grammar,
+`.dash`/`.gauge`/`.msq`/`.tuneView` file formats, and ECU discovery
+behavior are all targeted for parity. See the `Spec compliance` block in
+[CHANGELOG.md](../CHANGELOG.md) for per-phase status.
+
+### Deliberately out of scope
+
+LibreTune **does not** and **will not** implement these TunerStudio
+subsystems:
+
+- **EFI Analytics cloud SOAP services** (`EcuDefinitionServices`,
+  registration/license endpoints, telemetry uploads). LibreTune ships a
+  GitHub-based INI repository (`OnlineIniRepository`) that fills the
+  same role without a proprietary backend.
+- **Java plugin SPI** (TS plugin classpath, `*.tsplugin` jars). LibreTune
+  uses a WASM plugin host (`wasmtime`) by design — see
+  [DEPRECATION_NOTICE.md](../DEPRECATION_NOTICE.md). Java SPI is not a
+  goal and will not be re-introduced.
+- **Proprietary VE Analyze / WUE Analyze algorithms**. LibreTune ships
+  its own AutoTune implementation (see `crates/libretune-core/src/autotune.rs`).
+  We accept feature requests but will not lift TS's algorithm verbatim.
+- **License / activation gating**. LibreTune is GPL — there is nothing
+  to gate.
+
+### Compatibility posture
+
+- **Strict CRC by default** with permissive multi-scope CRC behind the
+  `ConnectionConfig.permissive_crc` opt-in for known-quirky firmwares.
+- **Auto-burn on by default** per spec §6.2 to prevent flash corruption
+  on page transitions and dialog close.
+- **`.dash` round-trip is lossless** for every attribute LibreTune
+  models; un-modeled attributes survive parse→write via element
+  `extra_attrs` catch-all maps (planned, see Sprint 1 D-1).
+- **Read both INI vendor flavors**: stock TS sections plus
+  Speeduino/rusEFI/FOME/epicEFI extensions; the parser logs (once)
+  any genuinely unknown section name.
