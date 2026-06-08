@@ -17,11 +17,11 @@ export function StatusBar({
 }: StatusBarProps) {
   const getStatusLabel = () => {
     switch (ecuStatus) {
-      case 'connected': return 'Connected';
-      case 'connecting': return 'Connecting...';
-      case 'error': return 'Error';
-      case 'disconnected': return 'Disconnected';
-      default: return 'Unknown';
+      case 'connected': return '已连接';
+      case 'connecting': return '连接中...';
+      case 'error': return '错误';
+      case 'disconnected': return '已断开';
+      default: return '未知';
     }
   };
 

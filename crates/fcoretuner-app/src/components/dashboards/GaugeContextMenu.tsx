@@ -163,7 +163,7 @@ export default function GaugeContextMenu({
     >
       {/* Reload Default Gauges */}
       <div className="menu-item" onClick={() => { onReloadDefaultGauges(); onClose(); }}>
-        Reload Default Gauges
+        重新加载默认仪表
       </div>
 
       {/* FCoreTuner Gauges Submenu */}
@@ -171,7 +171,7 @@ export default function GaugeContextMenu({
         className="menu-item has-submenu"
         onMouseEnter={() => setExpandedSubmenu('gauges')}
       >
-        FCoreTuner Gauges
+        FCoreTuner 仪表
         <span className="submenu-arrow">▶</span>
         
         {expandedSubmenu === 'gauges' && (
@@ -212,7 +212,7 @@ export default function GaugeContextMenu({
       {/* Reset Value (only if a gauge is selected) */}
       {state.targetGaugeId && (
         <div className="menu-item" onClick={() => { onResetValue(); onClose(); }}>
-          Reset Value
+          重置数值
         </div>
       )}
 
@@ -223,14 +223,14 @@ export default function GaugeContextMenu({
         className="menu-item has-submenu"
         onMouseEnter={() => setExpandedSubmenu('background')}
       >
-        Background
+        背景
         <span className="submenu-arrow">▶</span>
         
         {expandedSubmenu === 'background' && (
           <div className="submenu">
             <div className="menu-item">
               <label>
-                Set Background Color
+                设置背景颜色
                 <input
                   type="color"
                   value={tsColorToHex(backgroundColor)}
@@ -247,7 +247,7 @@ export default function GaugeContextMenu({
             </div>
             <div className="menu-item">
               <label>
-                Set Background Dither Color
+                设置背景抖动颜色
                 <input
                   type="color"
                   value={tsColorToHex(backgroundDitherColor)}
@@ -263,20 +263,20 @@ export default function GaugeContextMenu({
               </label>
             </div>
             <div className="menu-item">
-              Set Background Image...
+              设置背景图片...
             </div>
             <div
               className="menu-item has-submenu"
               onMouseEnter={() => setExpandedCategory('imagePosition')}
             >
-              Image Position
+              图片位置
               <span className="submenu-arrow">▶</span>
               
               {expandedCategory === 'imagePosition' && (
                 <div className="submenu">
-                  <div className="menu-item">Stretch</div>
-                  <div className="menu-item">Tile</div>
-                  <div className="menu-item">Center</div>
+                  <div className="menu-item">拉伸</div>
+                  <div className="menu-item">平铺</div>
+                  <div className="menu-item">居中</div>
                 </div>
               )}
             </div>
@@ -294,7 +294,7 @@ export default function GaugeContextMenu({
         <span className={`checkbox-mark ${antialiasingEnabled ? 'checked' : ''}`}>
           {antialiasingEnabled ? '☑' : '☐'}
         </span>
-        Antialiasing Enabled
+        启用抗锯齿
       </div>
 
       {/* Designer Mode Toggle */}
@@ -305,7 +305,7 @@ export default function GaugeContextMenu({
         <span className={`checkbox-mark ${designerMode ? 'checked' : ''}`}>
           {designerMode ? '☑' : '☐'}
         </span>
-        Designer Mode
+        设计模式
       </div>
 
       {/* Gauge Demo */}
@@ -313,7 +313,7 @@ export default function GaugeContextMenu({
         className="menu-item"
         onClick={() => { onGaugeDemoToggle(); onClose(); }}
       >
-        {gaugeDemoActive ? 'Stop Gauge Demo' : 'Gauge Demo'}
+        {gaugeDemoActive ? '停止仪表演示' : '仪表演示'}
       </div>
     </div>
   );

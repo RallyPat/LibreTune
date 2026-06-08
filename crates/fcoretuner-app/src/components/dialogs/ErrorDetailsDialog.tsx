@@ -19,14 +19,14 @@ export default function ErrorDetailsDialog({
   const [copied, setCopied] = useState(false);
 
   const handleCopy = useCallback(async () => {
-    const fullError = `FCoreTuner Error Report
+    const fullError = `FCoreTuner 错误报告
 ========================
-Title: ${title}
-Message: ${message}
-${details ? `\nDetails:\n${details}` : ''}
+标题: ${title}
+消息: ${message}
+${details ? `\n详细信息:\n${details}` : ''}
 ========================
-Date: ${new Date().toISOString()}
-Platform: ${navigator.platform}
+日期: ${new Date().toISOString()}
+平台: ${navigator.platform}
 UserAgent: ${navigator.userAgent}
 `;
 
@@ -56,13 +56,13 @@ UserAgent: ${navigator.userAgent}
           {details && (
             <div className="error-details">
               <div className="error-details-header">
-                <span>Error Details</span>
+                <span>错误详情</span>
                 <button 
                   className="copy-btn" 
                   onClick={handleCopy}
-                  title="Copy error details for bug report"
+                  title="复制错误详情用于错误报告"
                 >
-                  {copied ? '✓ Copied!' : '📋 Copy for Bug Report'}
+                  {copied ? '✓ 已复制!' : '📋 复制用于错误报告'}
                 </button>
               </div>
               <pre className="error-details-content">{details}</pre>
@@ -72,7 +72,7 @@ UserAgent: ${navigator.userAgent}
         
         <div className="error-dialog-footer">
           <p className="error-help-text">
-            If this error persists, please file a bug report with the error details above.
+            如果此错误持续存在，请附上上面的错误详细信息提交错误报告。
           </p>
           <button className="error-ok-btn" onClick={onClose}>OK</button>
         </div>
@@ -85,7 +85,7 @@ UserAgent: ${navigator.userAgent}
 export function useErrorDialog() {
   const [isOpen, setIsOpen] = useState(false);
   const [errorInfo, setErrorInfo] = useState({
-    title: 'Error',
+    title: '错误',
     message: '',
     details: '',
   });

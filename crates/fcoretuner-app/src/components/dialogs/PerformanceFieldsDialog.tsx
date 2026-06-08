@@ -277,7 +277,7 @@ export default function PerformanceFieldsDialog({ isOpen, onClose, realtimeData 
     <div className="performance-dialog-overlay" onClick={onClose}>
       <div className="performance-dialog" onClick={(e) => e.stopPropagation()}>
         <div className="performance-dialog-header">
-          <h2><Calculator size={20} /> Performance Calculator</h2>
+          <h3><Calculator size={20} /> 性能计算器</h3>
           <button className="close-btn" onClick={onClose}>
             <X size={18} />
           </button>
@@ -286,10 +286,10 @@ export default function PerformanceFieldsDialog({ isOpen, onClose, realtimeData 
         <div className="performance-dialog-content">
           {/* Left Column - Vehicle Specs */}
           <div className="performance-section">
-            <h3><Car size={16} /> Vehicle Specifications</h3>
+            <h3><Car size={16} /> 车辆规格</h3>
             
             <div className="form-row">
-              <label>Vehicle Weight</label>
+              <label>车辆重量</label>
               <div className="input-with-unit">
                 <input
                   type="number"
@@ -305,7 +305,7 @@ export default function PerformanceFieldsDialog({ isOpen, onClose, realtimeData 
             </div>
             
             <div className="form-row">
-              <label>Frontal Area (sq ft)</label>
+              <label>前迎风面积 (平方英尺)</label>
               <input
                 type="number"
                 value={frontalAreaSqft}
@@ -315,7 +315,7 @@ export default function PerformanceFieldsDialog({ isOpen, onClose, realtimeData 
             </div>
             
             <div className="form-row">
-              <label>Drag Coefficient (Cd)</label>
+              <label>阻力系数 (Cd)</label>
               <input
                 type="number"
                 value={dragCoefficient}
@@ -327,7 +327,7 @@ export default function PerformanceFieldsDialog({ isOpen, onClose, realtimeData 
             </div>
             
             <div className="form-row">
-              <label>Tire Diameter (in)</label>
+              <label>轮胎直径 (英寸)</label>
               <input
                 type="number"
                 value={tireDiameterIn}
@@ -337,7 +337,7 @@ export default function PerformanceFieldsDialog({ isOpen, onClose, realtimeData 
             </div>
             
             <div className="form-row">
-              <label>Tire Pressure (PSI)</label>
+              <label>胎压 (PSI)</label>
               <input
                 type="number"
                 value={tirePressurePsi}
@@ -347,7 +347,7 @@ export default function PerformanceFieldsDialog({ isOpen, onClose, realtimeData 
             </div>
             
             <div className="form-row">
-              <label>Drivetrain Loss (%)</label>
+              <label>传动损失 (%)</label>
               <input
                 type="number"
                 value={drivetrainLoss}
@@ -360,7 +360,7 @@ export default function PerformanceFieldsDialog({ isOpen, onClose, realtimeData 
             </div>
             
             <div className="form-row">
-              <label>Final Drive Ratio</label>
+              <label>主减速比</label>
               <input
                 type="number"
                 value={finalDrive}
@@ -370,7 +370,7 @@ export default function PerformanceFieldsDialog({ isOpen, onClose, realtimeData 
             </div>
             
             <div className="form-row">
-              <label>Gear Ratios (comma-sep)</label>
+              <label>档位齿比 (逗号分隔)</label>
               <input
                 type="text"
                 value={gearRatios}
@@ -380,7 +380,7 @@ export default function PerformanceFieldsDialog({ isOpen, onClose, realtimeData 
             </div>
             
             <div className="form-row">
-              <label>Injector Size (cc)</label>
+              <label>喷油嘴尺寸 (cc)</label>
               <input
                 type="number"
                 value={injectorSizeCc}
@@ -391,26 +391,26 @@ export default function PerformanceFieldsDialog({ isOpen, onClose, realtimeData 
             
             <div className="button-row">
               <button className="secondary" onClick={handleReset}>
-                <RotateCcw size={14} /> Reset
+                <RotateCcw size={14} /> 重置
               </button>
               <button className="primary" onClick={handleSave}>
-                <Save size={14} /> Save Specs
+                <Save size={14} /> 保存规格
               </button>
             </div>
           </div>
           
           {/* Center Column - Input Values */}
           <div className="performance-section">
-            <h3><Gauge size={16} /> Input Values</h3>
+            <h3><Gauge size={16} /> 输入值</h3>
             
             <div className="form-row">
-              <label>
+                <label>
                 <input
                   type="checkbox"
                   checked={useRealtime}
                   onChange={(e) => setUseRealtime(e.target.checked)}
                 />
-                Use Realtime Data
+                使用实时数据
               </label>
             </div>
             
@@ -427,7 +427,7 @@ export default function PerformanceFieldsDialog({ isOpen, onClose, realtimeData 
                 </div>
                 
                 <div className="form-row">
-                  <label>Speed (mph)</label>
+                  <label>速度 (mph)</label>
                   <input
                     type="number"
                     value={manualSpeed}
@@ -437,7 +437,7 @@ export default function PerformanceFieldsDialog({ isOpen, onClose, realtimeData 
                 </div>
                 
                 <div className="form-row">
-                  <label>Acceleration (g)</label>
+                  <label>加速度 (g)</label>
                   <input
                     type="number"
                     value={manualAccel}
@@ -457,42 +457,42 @@ export default function PerformanceFieldsDialog({ isOpen, onClose, realtimeData 
                   <span className="value">{rpm.toFixed(0)}</span>
                 </div>
                 <div className="realtime-value">
-                  <span className="label">Speed</span>
+                  <span className="label">速度</span>
                   <span className="value">{speedMph.toFixed(1)} mph</span>
                 </div>
                 <div className="realtime-value">
-                  <span className="label">Accel</span>
+                  <span className="label">加速度</span>
                   <span className="value">{accelG.toFixed(2)} g</span>
                 </div>
               </div>
             )}
             
-            <h3 style={{ marginTop: '1.5rem' }}><Fuel size={16} /> Fuel Economy</h3>
+            <h3 style={{ marginTop: '1.5rem' }}><Fuel size={16} /> 燃油经济性</h3>
             
             <div className="fuel-info">
               <p className="info-note">
-                Fuel economy calculations require datalog data with fuel consumption tracking.
-                Connect to ECU and start logging to see live values.
+                燃油经济性计算需要带有燃油消耗追踪的数据记录。
+                连接 ECU 并开始记录以查看实时值。
               </p>
             </div>
           </div>
           
           {/* Right Column - Results */}
           <div className="performance-section results">
-            <h3><Timer size={16} /> Performance Results</h3>
+            <h3><Timer size={16} /> 性能结果</h3>
             
             <div className="result-card primary">
-              <span className="result-label">Wheel Horsepower</span>
+              <span className="result-label">轮上马力</span>
               <span className="result-value">{metrics.hp.toFixed(1)} <small>HP</small></span>
             </div>
             
             <div className="result-card">
-              <span className="result-label">Wheel Torque</span>
+              <span className="result-label">轮上扭矩</span>
               <span className="result-value">{metrics.torqueLbFt.toFixed(1)} <small>lb-ft</small></span>
               <span className="result-alt">{metrics.torqueNm.toFixed(1)} Nm</span>
             </div>
             
-            <div className="result-divider">Estimated Acceleration</div>
+            <div className="result-divider">估算加速</div>
             
             <div className="result-row">
               <span className="result-label">0-60 mph</span>
@@ -500,35 +500,35 @@ export default function PerformanceFieldsDialog({ isOpen, onClose, realtimeData 
             </div>
             
             <div className="result-row">
-              <span className="result-label">1/4 Mile ET</span>
+              <span className="result-label">1/4英里 ET</span>
               <span className="result-value">{metrics.quarterMileTime.toFixed(2)} <small>sec</small></span>
             </div>
             
             <div className="result-row">
-              <span className="result-label">1/4 Mile Trap</span>
+              <span className="result-label">1/4英里阱速</span>
               <span className="result-value">{metrics.quarterMileSpeed.toFixed(1)} <small>mph</small></span>
             </div>
             
-            <div className="result-divider">Resistance Forces</div>
+            <div className="result-divider">阻力</div>
             
             <div className="result-row">
-              <span className="result-label">Aero Drag</span>
+              <span className="result-label">气动阻力</span>
               <span className="result-value">{metrics.dragForceLbs.toFixed(1)} <small>lbs</small></span>
             </div>
             
             <div className="result-row">
-              <span className="result-label">Rolling Resistance</span>
+              <span className="result-label">滚动阻力</span>
               <span className="result-value">{metrics.rollingForceLbs.toFixed(1)} <small>lbs</small></span>
             </div>
             
             <div className="result-note">
-              * Calculations use physics-based model. Actual results may vary based on conditions.
+              * 计算使用基于物理的模型。实际结果可能因条件而异。
             </div>
           </div>
         </div>
         
         <div className="performance-dialog-footer">
-          <button onClick={onClose}>Close</button>
+          <button onClick={onClose}>关闭</button>
         </div>
       </div>
     </div>

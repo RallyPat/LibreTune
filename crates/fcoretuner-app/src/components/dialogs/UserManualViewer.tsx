@@ -39,48 +39,48 @@ const ONLINE_DOCS_URL = 'https://github.com/RallyPat/FCoreTuner/tree/main/docs';
 
 /** Table of contents for navigation */
 const TABLE_OF_CONTENTS: TocEntry[] = [
-  { title: 'Introduction', path: 'introduction' },
+  { title: '简介', path: 'introduction' },
   {
-    title: 'Getting Started',
+    title: '快速入门',
     path: 'getting-started',
     children: [
-      { title: 'Installation', path: 'getting-started/installation' },
-      { title: 'Creating Your First Project', path: 'getting-started/first-project' },
-      { title: 'Connecting to Your ECU', path: 'getting-started/connecting' },
+      { title: '安装', path: 'getting-started/installation' },
+      { title: '创建第一个项目', path: 'getting-started/first-project' },
+      { title: '连接您的 ECU', path: 'getting-started/connecting' },
     ],
   },
   {
-    title: 'Core Features',
+    title: '核心功能',
     path: 'features',
     children: [
-      { title: 'Table Editing', path: 'features/table-editing' },
-      { title: 'AutoTune Live', path: 'features/autotune' },
-      { title: 'Dashboards', path: 'features/dashboards' },
-      { title: 'Data Logging', path: 'features/datalog' },
+      { title: '表格编辑', path: 'features/table-editing' },
+      { title: '实时自动调校', path: 'features/autotune' },
+      { title: '仪表盘', path: 'features/dashboards' },
+      { title: '数据记录', path: 'features/datalog' },
     ],
   },
   {
-    title: 'Project Management',
+    title: '项目管理',
     path: 'projects',
     children: [
-      { title: 'Managing Tunes', path: 'projects/tunes' },
-      { title: 'Version Control', path: 'projects/version-control' },
-      { title: 'Restore Points', path: 'projects/restore-points' },
-      { title: 'Importing Projects', path: 'projects/importing' },
+      { title: '管理调教', path: 'projects/tunes' },
+      { title: '版本控制', path: 'projects/version-control' },
+      { title: '还原点', path: 'projects/restore-points' },
+      { title: '导入项目', path: 'projects/importing' },
     ],
   },
   {
-    title: 'Reference',
+    title: '参考',
     path: 'reference',
     children: [
-      { title: 'Supported ECUs', path: 'reference/supported-ecus' },
-      { title: 'INI File Format', path: 'reference/ini-format' },
-      { title: 'Keyboard Shortcuts', path: 'reference/shortcuts' },
-      { title: 'Troubleshooting', path: 'reference/troubleshooting' },
+      { title: '支持的 ECU', path: 'reference/supported-ecus' },
+      { title: 'INI 文件格式', path: 'reference/ini-format' },
+      { title: '键盘快捷键', path: 'reference/shortcuts' },
+      { title: '故障排除', path: 'reference/troubleshooting' },
     ],
   },
-  { title: 'FAQ', path: 'faq' },
-  { title: 'Contributing', path: 'contributing' },
+  { title: '常见问题', path: 'faq' },
+  { title: '贡献', path: 'contributing' },
 ];
 
 export default function UserManualViewer({ section = 'introduction', onClose }: UserManualViewerProps) {
@@ -100,7 +100,7 @@ export default function UserManualViewer({ section = 'introduction', onClose }: 
       }
       return null;
     };
-    return findTitle(TABLE_OF_CONTENTS, currentSection) || 'User Manual';
+    return findTitle(TABLE_OF_CONTENTS, currentSection) || '用户手册';
   };
 
   // Get flat list for prev/next navigation
@@ -157,11 +157,11 @@ export default function UserManualViewer({ section = 'introduction', onClose }: 
     return `
       <div class="manual-placeholder">
         <h1>${getCurrentTitle()}</h1>
-        <p>The full user manual is available in the <code>docs/</code> folder.</p>
-        <p>To build and view the manual:</p>
+        <p>完整的用户手册可在 <code>docs/</code> 文件夹中找到。</p>
+        <p>构建并查看手册:</p>
         <pre><code>cd docs
 mdbook serve --open</code></pre>
-        <p>Or click "Open Online" to view on GitHub.</p>
+        <p>或点击"打开在线"在 GitHub 上查看。</p>
       </div>
     `;
   };
@@ -173,13 +173,13 @@ mdbook serve --open</code></pre>
         <div className="manual-viewer-header">
           <div className="manual-header-left">
             <Book size={20} />
-            <span>FCoreTuner User Manual</span>
+            <span>FCoreTuner 用户手册</span>
           </div>
           <div className="manual-header-right">
-            <button className="manual-icon-btn" onClick={handleOpenOnline} title="Open Online">
+            <button className="manual-icon-btn" onClick={handleOpenOnline} title="打开在线">
               <ExternalLink size={18} />
             </button>
-            <button className="manual-icon-btn" onClick={onClose} title="Close">
+            <button className="manual-icon-btn" onClick={onClose} title="关闭">
               <X size={20} />
             </button>
           </div>
@@ -195,7 +195,7 @@ mdbook serve --open</code></pre>
                   onClick={() => setCurrentSection('introduction')}
                 >
                   <Home size={16} />
-                  Home
+                  首页
                 </button>
               </div>
               <div className="manual-toc">
@@ -209,14 +209,14 @@ mdbook serve --open</code></pre>
             <button
               className="sidebar-toggle"
               onClick={() => setSidebarOpen(!sidebarOpen)}
-              title={sidebarOpen ? 'Hide sidebar' : 'Show sidebar'}
+              title={sidebarOpen ? '隐藏侧栏' : '显示侧栏'}
             >
               {sidebarOpen ? <ChevronLeft size={20} /> : <ChevronRight size={20} />}
             </button>
 
             <div className="manual-content-inner">
               {loading ? (
-                <div className="manual-loading">Loading...</div>
+                <div className="manual-loading">加载中...</div>
               ) : (
                 <div
                   className="manual-text"

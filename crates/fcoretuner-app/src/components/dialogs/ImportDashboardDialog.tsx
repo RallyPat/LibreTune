@@ -269,7 +269,7 @@ export const ImportDashboardDialog: React.FC<ImportDashboardDialogProps> = ({
     <div className="import-dashboard-overlay" onClick={handleClose}>
       <div className="import-dashboard-dialog" onClick={(e) => e.stopPropagation()}>
         <div className="import-dashboard-header">
-          <h2>Import Dashboards</h2>
+          <h2>导入仪表盘</h2>
           <button className="close-btn" onClick={handleClose}>×</button>
         </div>
 
@@ -278,23 +278,23 @@ export const ImportDashboardDialog: React.FC<ImportDashboardDialogProps> = ({
           <div className="file-selection-area">
             <button className="select-files-btn" onClick={handleSelectFiles}>
               <span className="icon">📁</span>
-              Select Dashboard Files
+              选择仪表盘文件
             </button>
-            <span className="hint">.dash and .xml files supported</span>
+            <span className="hint">支持 .dash 和 .xml 文件</span>
           </div>
 
           {/* File list */}
           {files.length > 0 && (
             <div className="file-list">
               <div className="file-list-header">
-                <span>Files to Import ({files.length})</span>
+                <span>待导入文件 ({files.length})</span>
                 {conflictCount > 0 && (
                   <div className="bulk-actions">
                     <button className="bulk-btn" onClick={handleOverwriteAll}>
-                      Overwrite All Conflicts
+                      全部覆盖冲突
                     </button>
                     <button className="bulk-btn skip" onClick={handleSkipAll}>
-                      Skip All Conflicts
+                      跳过全部冲突
                     </button>
                   </div>
                 )}
@@ -320,7 +320,7 @@ export const ImportDashboardDialog: React.FC<ImportDashboardDialogProps> = ({
                         <button
                           className="remove-btn"
                           onClick={() => handleRemoveFile(file.sourcePath)}
-                          title="Remove from list"
+                          title="从列表中移除"
                         >
                           ×
                         </button>
@@ -331,20 +331,20 @@ export const ImportDashboardDialog: React.FC<ImportDashboardDialogProps> = ({
                     {file.status === 'conflict' && (
                       <div className="conflict-resolution">
                         <span className="conflict-msg">
-                          File already exists
+                          文件已存在
                         </span>
                         <div className="rename-row">
                           <input
                             type="text"
                             value={file.renameTo || ''}
                             onChange={(e) => handleRenameChange(file.sourcePath, e.target.value)}
-                            placeholder="New filename"
+                            placeholder="新文件名"
                           />
                           <button onClick={() => handleRecheck(file.sourcePath)}>
-                            Rename
+                            重命名
                           </button>
                           <button onClick={() => handleOverwrite(file.sourcePath)}>
-                            Overwrite
+                            覆盖
                           </button>
                         </div>
                       </div>
@@ -379,18 +379,18 @@ export const ImportDashboardDialog: React.FC<ImportDashboardDialogProps> = ({
         <div className="import-dashboard-footer">
           <div className="status-summary">
             {successCount > 0 && (
-              <span className="success-count">✅ {successCount} imported</span>
+              <span className="success-count">✅ {successCount} 个已导入</span>
             )}
             {readyCount > 0 && (
-              <span className="ready-count">✓ {readyCount} ready</span>
+              <span className="ready-count">✓ {readyCount} 个就绪</span>
             )}
             {conflictCount > 0 && (
-              <span className="conflict-count">⚠️ {conflictCount} conflicts</span>
+              <span className="conflict-count">⚠️ {conflictCount} 个冲突</span>
             )}
           </div>
           <div className="footer-buttons">
             <button className="cancel-btn" onClick={handleClose}>
-              {successCount > 0 ? 'Done' : 'Cancel'}
+              {successCount > 0 ? '完成' : '取消'}
             </button>
             {readyCount > 0 && (
               <button
@@ -398,7 +398,7 @@ export const ImportDashboardDialog: React.FC<ImportDashboardDialogProps> = ({
                 onClick={handleImport}
                 disabled={isImporting}
               >
-                {isImporting ? 'Importing...' : `Import ${readyCount} File${readyCount !== 1 ? 's' : ''}`}
+                {isImporting ? '导入中...' : `导入 ${readyCount} 个文件`}
               </button>
             )}
           </div>

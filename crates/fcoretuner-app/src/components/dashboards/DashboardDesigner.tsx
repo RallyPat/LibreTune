@@ -459,7 +459,7 @@ export default function DashboardDesigner({
             className="toolbar-btn"
             onClick={handleUndo}
             disabled={historyIndex <= 0}
-            title="Undo (Ctrl+Z)"
+            title="撤销 (Ctrl+Z)"
           >
             <Undo2 size={16} />
           </button>
@@ -467,7 +467,7 @@ export default function DashboardDesigner({
             className="toolbar-btn"
             onClick={handleRedo}
             disabled={historyIndex >= history.length - 1}
-            title="Redo (Ctrl+Y)"
+            title="重做 (Ctrl+Y)"
           >
             <Redo2 size={16} />
           </button>
@@ -480,7 +480,7 @@ export default function DashboardDesigner({
             className="toolbar-btn"
             onClick={handleCopy}
             disabled={!selectedGaugeId}
-            title="Copy (Ctrl+C)"
+            title="复制 (Ctrl+C)"
           >
             <Copy size={16} />
           </button>
@@ -488,7 +488,7 @@ export default function DashboardDesigner({
             className="toolbar-btn"
             onClick={handlePaste}
             disabled={!clipboard}
-            title="Paste (Ctrl+V)"
+            title="粘贴 (Ctrl+V)"
           >
             <Clipboard size={16} />
           </button>
@@ -496,7 +496,7 @@ export default function DashboardDesigner({
             className="toolbar-btn danger"
             onClick={handleDelete}
             disabled={!selectedGaugeId}
-            title="Delete (Del)"
+            title="删除 (Del)"
           >
             <Trash2 size={16} />
           </button>
@@ -505,20 +505,20 @@ export default function DashboardDesigner({
         <div className="toolbar-separator" />
         
         <div className="toolbar-group">
-          <button 
-            className={`toolbar-btn ${showGrid ? 'active' : ''}`}
-            onClick={() => onShowGridChange(!showGrid)}
-            title="Toggle Grid"
-          >
+            <button 
+              className={`toolbar-btn ${showGrid ? 'active' : ''}`}
+              onClick={() => onShowGridChange(!showGrid)}
+              title="切换网格"
+            >
             <Grid3X3 size={16} />
           </button>
           <select 
             className="toolbar-select"
             value={gridSnap}
             onChange={(e) => onGridSnapChange(parseInt(e.target.value))}
-            title="Grid Snap Size"
+            title="网格吸附大小"
           >
-            <option value={0}>No Snap</option>
+            <option value={0}>无吸附</option>
             <option value={1}>1%</option>
             <option value={2}>2%</option>
             <option value={5}>5%</option>
@@ -532,18 +532,18 @@ export default function DashboardDesigner({
           <button 
             className="toolbar-btn primary"
             onClick={onSave}
-            title="Save Dashboard (Ctrl+S)"
+            title="保存仪表盘 (Ctrl+S)"
           >
             <Save size={16} />
-            <span>Save</span>
+            <span>保存</span>
           </button>
           <button 
             className="toolbar-btn"
             onClick={onExit}
-            title="Exit Designer Mode"
+            title="退出设计模式"
           >
             <X size={16} />
-            <span>Exit</span>
+            <span>退出</span>
           </button>
         </div>
       </div>
@@ -612,7 +612,7 @@ export default function DashboardDesigner({
 
         {/* Property editor panel */}
         <div className="designer-properties">
-          <h3>Properties</h3>
+          <h3>属性</h3>
           {selectedComponent ? (
             <PropertyEditor
               component={selectedComponent}
@@ -636,7 +636,7 @@ export default function DashboardDesigner({
               }}
             />
           ) : (
-            <p className="no-selection">Select a gauge to edit its properties</p>
+            <p className="no-selection">选择一个仪表以编辑其属性</p>
           )}
         </div>
       </div>
@@ -661,7 +661,7 @@ function PropertyEditor({ component, onChange }: PropertyEditorProps) {
     return (
       <div className="property-editor">
         <div className="property-group">
-          <label>Title</label>
+          <label>标题</label>
           <input 
             type="text" 
             value={gauge.title || ''} 
@@ -670,7 +670,7 @@ function PropertyEditor({ component, onChange }: PropertyEditorProps) {
         </div>
         
         <div className="property-group">
-          <label>Output Channel</label>
+          <label>输出通道</label>
           <input 
             type="text" 
             value={gauge.output_channel} 
@@ -680,7 +680,7 @@ function PropertyEditor({ component, onChange }: PropertyEditorProps) {
         
         <div className="property-row">
           <div className="property-group half">
-            <label>Min</label>
+            <label>最小值</label>
             <input 
               type="number" 
               value={gauge.min} 
@@ -688,7 +688,7 @@ function PropertyEditor({ component, onChange }: PropertyEditorProps) {
             />
           </div>
           <div className="property-group half">
-            <label>Max</label>
+            <label>最大值</label>
             <input 
               type="number" 
               value={gauge.max} 
@@ -698,7 +698,7 @@ function PropertyEditor({ component, onChange }: PropertyEditorProps) {
         </div>
         
         <div className="property-group">
-          <label>Units</label>
+          <label>单位</label>
           <input 
             type="text" 
             value={gauge.units || ''} 
@@ -708,7 +708,7 @@ function PropertyEditor({ component, onChange }: PropertyEditorProps) {
         
         <div className="property-row">
           <div className="property-group half">
-            <label>Warning</label>
+            <label>警告</label>
             <input 
               type="number" 
               value={gauge.high_warning ?? ''} 
@@ -716,7 +716,7 @@ function PropertyEditor({ component, onChange }: PropertyEditorProps) {
             />
           </div>
           <div className="property-group half">
-            <label>Critical</label>
+            <label>临界</label>
             <input 
               type="number" 
               value={gauge.high_critical ?? ''} 
@@ -726,26 +726,26 @@ function PropertyEditor({ component, onChange }: PropertyEditorProps) {
         </div>
         
         <div className="property-group">
-          <label>Gauge Type</label>
+          <label>仪表类型</label>
           <select 
             value={gauge.gauge_painter || 'AnalogGauge'}
             onChange={(e) => updateGauge({ gauge_painter: e.target.value as TsGaugeConfig['gauge_painter'] })}
           >
-            <option value="AnalogGauge">Analog Gauge</option>
-            <option value="BasicReadout">Digital Readout</option>
-            <option value="HorizontalBarGauge">Horizontal Bar</option>
-            <option value="VerticalBarGauge">Vertical Bar</option>
-            <option value="AsymmetricSweepGauge">Sweep Gauge</option>
-            <option value="RoundGauge">Round Gauge</option>
-            <option value="Tachometer">Tachometer</option>
-            <option value="FuelMeter">Fuel Meter</option>
-            <option value="LineGraph">Line Graph</option>
-            <option value="Histogram">Histogram</option>
+            <option value="AnalogGauge">模拟仪表</option>
+            <option value="BasicReadout">数字读数</option>
+            <option value="HorizontalBarGauge">水平条</option>
+            <option value="VerticalBarGauge">垂直条</option>
+            <option value="AsymmetricSweepGauge">扫描仪表</option>
+            <option value="RoundGauge">圆形仪表</option>
+            <option value="Tachometer">转速表</option>
+            <option value="FuelMeter">油量表</option>
+            <option value="LineGraph">折线图</option>
+            <option value="Histogram">直方图</option>
           </select>
         </div>
         
         <div className="property-group">
-          <label>Digits</label>
+          <label>小数位数</label>
           <input 
             type="number" 
             min={0}
@@ -762,12 +762,12 @@ function PropertyEditor({ component, onChange }: PropertyEditorProps) {
               checked={gauge.shape_locked_to_aspect ?? false} 
               onChange={(e) => updateGauge({ shape_locked_to_aspect: e.target.checked })}
             />
-            Lock Aspect Ratio
+            锁定宽高比
           </label>
         </div>
         
         <div className="property-section">
-          <h4>Position & Size</h4>
+          <h4>位置与大小</h4>
           <div className="property-row">
             <div className="property-group half">
               <label>X (%)</label>
@@ -790,7 +790,7 @@ function PropertyEditor({ component, onChange }: PropertyEditorProps) {
           </div>
           <div className="property-row">
             <div className="property-group half">
-              <label>Width (%)</label>
+              <label>宽度 (%)</label>
               <input 
                 type="number" 
                 step={0.01}
@@ -799,7 +799,7 @@ function PropertyEditor({ component, onChange }: PropertyEditorProps) {
               />
             </div>
             <div className="property-group half">
-              <label>Height (%)</label>
+              <label>高度 (%)</label>
               <input 
                 type="number" 
                 step={0.01}
@@ -823,7 +823,7 @@ function PropertyEditor({ component, onChange }: PropertyEditorProps) {
     return (
       <div className="property-editor">
         <div className="property-group">
-          <label>Output Channel</label>
+          <label>输出通道</label>
           <input 
             type="text" 
             value={indicator.output_channel} 
@@ -832,7 +832,7 @@ function PropertyEditor({ component, onChange }: PropertyEditorProps) {
         </div>
         
         <div className="property-group">
-          <label>On Label</label>
+          <label>开启标签</label>
           <input 
             type="text" 
             value={indicator.on_text || ''} 
@@ -841,7 +841,7 @@ function PropertyEditor({ component, onChange }: PropertyEditorProps) {
         </div>
         
         <div className="property-group">
-          <label>Off Label</label>
+          <label>关闭标签</label>
           <input 
             type="text" 
             value={indicator.off_text || ''} 
@@ -850,7 +850,7 @@ function PropertyEditor({ component, onChange }: PropertyEditorProps) {
         </div>
         
         <div className="property-section">
-          <h4>Position & Size</h4>
+          <h4>位置与大小</h4>
           <div className="property-row">
             <div className="property-group half">
               <label>X (%)</label>
@@ -873,7 +873,7 @@ function PropertyEditor({ component, onChange }: PropertyEditorProps) {
           </div>
           <div className="property-row">
             <div className="property-group half">
-              <label>Width (%)</label>
+              <label>宽度 (%)</label>
               <input 
                 type="number" 
                 step={0.01}
@@ -882,7 +882,7 @@ function PropertyEditor({ component, onChange }: PropertyEditorProps) {
               />
             </div>
             <div className="property-group half">
-              <label>Height (%)</label>
+              <label>高度 (%)</label>
               <input 
                 type="number" 
                 step={0.01}
@@ -896,5 +896,5 @@ function PropertyEditor({ component, onChange }: PropertyEditorProps) {
     );
   }
   
-  return <p>Unknown component type</p>;
+  return <p>未知组件类型</p>;
 }

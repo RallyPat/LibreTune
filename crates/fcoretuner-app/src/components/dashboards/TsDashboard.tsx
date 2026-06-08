@@ -474,7 +474,7 @@ export default function TsDashboard({ realtimeData = {}, initialDashPath, isConn
   if (loading) {
     return (
       <div className="ts-dashboard ts-dashboard-loading">
-        <div className="loading-spinner">Loading dashboard...</div>
+        <div className="loading-spinner">正在加载仪表盘...</div>
       </div>
     );
   }
@@ -483,9 +483,9 @@ export default function TsDashboard({ realtimeData = {}, initialDashPath, isConn
     return (
       <div className="ts-dashboard ts-dashboard-error">
         <div className="error-message">
-          <h3>Failed to load dashboard</h3>
+          <h3>加载仪表盘失败</h3>
           <p>{error}</p>
-          <button onClick={() => setShowSelector(true)}>Select Dashboard</button>
+          <button onClick={() => setShowSelector(true)}>选择仪表盘</button>
         </div>
       </div>
     );
@@ -495,8 +495,8 @@ export default function TsDashboard({ realtimeData = {}, initialDashPath, isConn
     return (
       <div className="ts-dashboard ts-dashboard-empty">
         <div className="empty-message">
-          <h3>No Dashboard Selected</h3>
-          <button onClick={() => setShowSelector(true)}>Select Dashboard</button>
+          <h3>未选择仪表盘</h3>
+          <button onClick={() => setShowSelector(true)}>选择仪表盘</button>
         </div>
       </div>
     );
@@ -520,23 +520,23 @@ export default function TsDashboard({ realtimeData = {}, initialDashPath, isConn
             className="ts-dashboard-selector-btn"
             onClick={() => setShowSelector(!showSelector)}
           >
-            Change ▼
+            更改 ▼
           </button>
         </div>
         <div className="ts-dashboard-header-right">
           <button 
             className="ts-dashboard-action-btn"
             onClick={() => { setNewDashName(''); setShowNewDialog(true); }}
-            title="New Dashboard"
+            title="新建仪表盘"
           >
-            ➕ New
+            ➕ 新建
           </button>
           <button 
             className="ts-dashboard-action-btn"
             onClick={handleDuplicateDashboard}
-            title="Duplicate Dashboard"
+            title="复制仪表盘"
           >
-            📋 Duplicate
+            📋 复制
           </button>
           <button 
             className="ts-dashboard-action-btn"
@@ -545,23 +545,23 @@ export default function TsDashboard({ realtimeData = {}, initialDashPath, isConn
               setRenameName(currentName);
               setShowRenameDialog(true); 
             }}
-            title="Rename Dashboard"
+            title="重命名仪表盘"
           >
-            ✏️ Rename
+            ✏️ 重命名
           </button>
           <button 
             className="ts-dashboard-action-btn danger"
             onClick={() => setShowDeleteConfirm(true)}
-            title="Delete Dashboard"
+            title="删除仪表盘"
           >
-            🗑️ Delete
+            🗑️ 删除
           </button>
           <button 
             className="ts-dashboard-action-btn"
             onClick={handleExportDashboard}
-            title="Export Dashboard"
+            title="导出仪表盘"
           >
-            💾 Export
+            💾 导出
           </button>
         </div>
       </div>
@@ -570,7 +570,7 @@ export default function TsDashboard({ realtimeData = {}, initialDashPath, isConn
       {showSelector && (
         <div className="ts-dashboard-selector-overlay" onClick={() => setShowSelector(false)}>
           <div className="ts-dashboard-selector" onClick={e => e.stopPropagation()}>
-            <h3>Select Dashboard</h3>
+            <h3>选择仪表盘</h3>
             <div className="ts-dashboard-list">
               {/* Group dashboards by category */}
               {(() => {
@@ -626,7 +626,7 @@ export default function TsDashboard({ realtimeData = {}, initialDashPath, isConn
                   setShowImportDialog(true);
                 }}
               >
-                📁 Import Dashboard Files...
+                📁 导入仪表盘文件...
               </button>
             </div>
           </div>
@@ -644,26 +644,26 @@ export default function TsDashboard({ realtimeData = {}, initialDashPath, isConn
       {showNewDialog && (
         <div className="ts-dashboard-dialog-overlay" onClick={() => setShowNewDialog(false)}>
           <div className="ts-dashboard-dialog" onClick={e => e.stopPropagation()}>
-            <h3>New Dashboard</h3>
+            <h3>新建仪表盘</h3>
             <div className="ts-dashboard-dialog-content">
-              <label>Dashboard Name:</label>
+              <label>仪表盘名称:</label>
               <input
                 type="text"
                 value={newDashName}
                 onChange={(e) => setNewDashName(e.target.value)}
-                placeholder="My Dashboard"
+                placeholder="我的仪表盘"
                 autoFocus
                 onKeyDown={(e) => e.key === 'Enter' && handleNewDashboard()}
               />
             </div>
             <div className="ts-dashboard-dialog-buttons">
-              <button onClick={() => setShowNewDialog(false)}>Cancel</button>
+              <button onClick={() => setShowNewDialog(false)}>取消</button>
               <button 
                 className="primary" 
                 onClick={handleNewDashboard}
                 disabled={!newDashName.trim()}
               >
-                Create
+                创建
               </button>
             </div>
           </div>
@@ -674,26 +674,26 @@ export default function TsDashboard({ realtimeData = {}, initialDashPath, isConn
       {showRenameDialog && (
         <div className="ts-dashboard-dialog-overlay" onClick={() => setShowRenameDialog(false)}>
           <div className="ts-dashboard-dialog" onClick={e => e.stopPropagation()}>
-            <h3>Rename Dashboard</h3>
+            <h3>重命名仪表盘</h3>
             <div className="ts-dashboard-dialog-content">
-              <label>New Name:</label>
+              <label>新名称:</label>
               <input
                 type="text"
                 value={renameName}
                 onChange={(e) => setRenameName(e.target.value)}
-                placeholder="Dashboard Name"
+                placeholder="仪表盘名称"
                 autoFocus
                 onKeyDown={(e) => e.key === 'Enter' && handleRenameDashboard()}
               />
             </div>
             <div className="ts-dashboard-dialog-buttons">
-              <button onClick={() => setShowRenameDialog(false)}>Cancel</button>
+              <button onClick={() => setShowRenameDialog(false)}>取消</button>
               <button 
                 className="primary" 
                 onClick={handleRenameDashboard}
                 disabled={!renameName.trim()}
               >
-                Rename
+                重命名
               </button>
             </div>
           </div>
@@ -704,14 +704,14 @@ export default function TsDashboard({ realtimeData = {}, initialDashPath, isConn
       {showDeleteConfirm && (
         <div className="ts-dashboard-dialog-overlay" onClick={() => setShowDeleteConfirm(false)}>
           <div className="ts-dashboard-dialog" onClick={e => e.stopPropagation()}>
-            <h3>Delete Dashboard?</h3>
+            <h3>删除仪表盘？</h3>
             <div className="ts-dashboard-dialog-content">
-              <p>Are you sure you want to delete "{selectedPath.split('/').pop()?.replace(/\.(ltdash\.xml|dash)$/i, '')}"?</p>
-              <p className="warning">This action cannot be undone.</p>
+              <p>确定要删除 "{selectedPath.split('/').pop()?.replace(/\.(ltdash\.xml|dash)$/i, '')}" 吗？</p>
+              <p className="warning">此操作无法撤销。</p>
             </div>
             <div className="ts-dashboard-dialog-buttons">
-              <button onClick={() => setShowDeleteConfirm(false)}>Cancel</button>
-              <button className="danger" onClick={handleDeleteDashboard}>Delete</button>
+              <button onClick={() => setShowDeleteConfirm(false)}>取消</button>
+              <button className="danger" onClick={handleDeleteDashboard}>删除</button>
             </div>
           </div>
         </div>

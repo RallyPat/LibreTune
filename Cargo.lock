@@ -948,6 +948,53 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "37909eebbb50d72f9059c3b6d82c0463f2ff062c9e95845c43a6c9c0355411be"
 
 [[package]]
+name = "fcoretuner-app"
+version = "0.1.0"
+dependencies = [
+ "byteorder",
+ "chrono",
+ "dirs 5.0.1",
+ "fcoretuner-core",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-dialog",
+ "tauri-plugin-opener",
+ "tauri-plugin-window-state",
+ "tokio",
+]
+
+[[package]]
+name = "fcoretuner-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "base64 0.22.1",
+ "byteorder",
+ "chrono",
+ "crc32fast",
+ "dirs 5.0.1",
+ "git2",
+ "libc",
+ "pretty_assertions",
+ "quick-xml 0.37.5",
+ "rand 0.8.5",
+ "regex",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "serialport",
+ "tempfile",
+ "thiserror 2.0.17",
+ "tokio",
+ "tokio-serial",
+ "tokio-util",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "fdeflate"
 version = "0.3.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2003,53 +2050,6 @@ checksum = "df15f6eac291ed1cf25865b1ee60399f57e7c227e7f51bdbd4c5270396a9ed50"
 dependencies = [
  "bitflags 2.10.0",
  "libc",
-]
-
-[[package]]
-name = "fcoretuner-app"
-version = "0.1.0"
-dependencies = [
- "byteorder",
- "chrono",
- "dirs 5.0.1",
- "fcoretuner-core",
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
- "tauri-plugin-dialog",
- "tauri-plugin-opener",
- "tauri-plugin-window-state",
- "tokio",
-]
-
-[[package]]
-name = "fcoretuner-core"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "base64 0.22.1",
- "byteorder",
- "chrono",
- "crc32fast",
- "dirs 5.0.1",
- "git2",
- "libc",
- "pretty_assertions",
- "quick-xml 0.37.5",
- "rand 0.8.5",
- "regex",
- "reqwest",
- "serde",
- "serde_json",
- "serialport",
- "tempfile",
- "thiserror 2.0.17",
- "tokio",
- "tokio-serial",
- "tokio-util",
- "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]

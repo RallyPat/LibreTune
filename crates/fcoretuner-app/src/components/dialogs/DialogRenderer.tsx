@@ -807,7 +807,7 @@ function RecursivePanel({
       <div className="embedded-port-editor">
         <div className="port-editor-title">{portEditor.label || name}</div>
         <div className="port-editor-placeholder">
-          Programmable Output Configuration: {portEditor.name}
+          可编程输出配置: {portEditor.name}
         </div>
       </div>
     );
@@ -1078,7 +1078,7 @@ export default function DialogRenderer({ definition, onBack, openTable, context,
   return (
     <div className="dialog-view view-transition">
       <div className="editor-header">
-        <button onClick={onBack} className="icon-btn" title="Back">
+        <button onClick={onBack} className="icon-btn" title="返回">
           <ArrowLeft size={20} />
         </button>
         <h2 className="content-title" style={{ margin: 0 }}>
@@ -1096,10 +1096,10 @@ export default function DialogRenderer({ definition, onBack, openTable, context,
         {selectedField ? (
           <>
             <strong>{selectedField.label}</strong>
-            <p>{selectedField.help || 'No description available for this setting.'}</p>
+            <p>{selectedField.help || '此设置没有可用描述。'}</p>
           </>
         ) : (
-          <p className="description-placeholder">Click the ℹ️ icon next to any setting to see its description</p>
+          <p className="description-placeholder">点击任意设置旁的 ℹ️ 图标查看其描述</p>
         )}
       </div>
     </div>
@@ -1107,4 +1107,4 @@ export default function DialogRenderer({ definition, onBack, openTable, context,
 }
 
 // Export types for use in App.tsx
-export type { DialogDefinition, DialogComponent }
+export type { DialogDefinition, DialogComponent };

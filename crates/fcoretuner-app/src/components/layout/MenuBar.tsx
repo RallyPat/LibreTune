@@ -26,64 +26,64 @@ interface MenuBarProps {
 // Standard menu items (File, Edit, View, etc.)
 const standardMenus: MenuItem[] = [
   {
-    name: 'File',
+    name: '文件',
     children: [
-      { name: 'New Project...', target: 'newProject', hotkey: 'Ctrl+N' },
-      { name: 'Open Project...', target: 'browseProjects', hotkey: 'Ctrl+O' },
+      { name: '新建项目...', target: 'newProject', hotkey: 'Ctrl+N' },
+      { name: '打开项目...', target: 'browseProjects', hotkey: 'Ctrl+O' },
       { separator: true, name: 'sep1' },
-      { name: 'Save Tune', target: 'save', hotkey: 'Ctrl+S' },
-      { name: 'Load Tune...', target: 'load' },
-      { name: 'Burn to ECU', target: 'burn', hotkey: 'Ctrl+B' },
+      { name: '保存调教', target: 'save', hotkey: 'Ctrl+S' },
+      { name: '加载调教...', target: 'load' },
+      { name: '烧录到 ECU', target: 'burn', hotkey: 'Ctrl+B' },
       { separator: true, name: 'sep2' },
-      { name: 'Settings', target: 'settings' },
+      { name: '设置', target: 'settings' },
     ]
   },
   {
-    name: 'Edit',
+    name: '编辑',
     children: [
-      { name: 'Undo', target: 'undo', hotkey: 'Ctrl+Z' },
-      { name: 'Redo', target: 'redo', hotkey: 'Ctrl+Y' },
+      { name: '撤销', target: 'undo', hotkey: 'Ctrl+Z' },
+      { name: '重做', target: 'redo', hotkey: 'Ctrl+Y' },
       { separator: true, name: 'sep1' },
-      { name: 'Cut', target: 'cut', hotkey: 'Ctrl+X' },
-      { name: 'Copy', target: 'copy', hotkey: 'Ctrl+C' },
-      { name: 'Paste', target: 'paste', hotkey: 'Ctrl+V' },
+      { name: '剪切', target: 'cut', hotkey: 'Ctrl+X' },
+      { name: '复制', target: 'copy', hotkey: 'Ctrl+C' },
+      { name: '粘贴', target: 'paste', hotkey: 'Ctrl+V' },
     ]
   },
   {
-    name: 'View',
+    name: '视图',
     children: [
-      { name: 'Dashboard', target: 'std_realtime' },
-      { name: 'Data Logger', target: 'dataLogger' },
+      { name: '仪表盘', target: 'std_realtime' },
+      { name: '数据记录器', target: 'dataLogger' },
       { separator: true, name: 'sep1' },
-      { name: 'Full Screen', target: 'fullScreen', hotkey: 'F11' },
+      { name: '全屏', target: 'fullScreen', hotkey: 'F11' },
     ]
   },
   {
-    name: 'Tuning',
+    name: '调校',
     children: [
-      { name: 'AutoTune Live', target: 'autoTune', hotkey: 'Ctrl+A' },
-      { name: 'Performance Calculator', target: 'performance' },
+      { name: '实时自动调校', target: 'autoTune', hotkey: 'Ctrl+A' },
+      { name: '性能计算器', target: 'performance' },
       { separator: true, name: 'sep1' },
-      { name: 'Tooth Logger', target: 'toothLogger' },
-      { name: 'Composite Logger', target: 'compositeLogger' },
+      { name: '齿记录器', target: 'toothLogger' },
+      { name: '复合记录器', target: 'compositeLogger' },
     ]
   },
   {
-    name: 'Tools',
+    name: '工具',
     children: [
-      { name: 'Action Manager', target: 'actions' },
-      { name: 'Table Comparison', target: 'tableCompare' },
+      { name: '动作管理器', target: 'actions' },
+      { name: '表格比较', target: 'tableCompare' },
       { separator: true, name: 'sep1' },
-      { name: 'Reset to Defaults', target: 'resetDefaults' },
+      { name: '重置为默认值', target: 'resetDefaults' },
     ]
   },
   {
-    name: 'Help',
+    name: '帮助',
     children: [
-      { name: 'Documentation', target: 'docs' },
-      { name: 'Keyboard Shortcuts', target: 'shortcuts' },
+      { name: '文档', target: 'docs' },
+      { name: '键盘快捷键', target: 'shortcuts' },
       { separator: true, name: 'sep1' },
-      { name: 'About FCoreTuner', target: 'about' },
+      { name: '关于 FCoreTuner', target: 'about' },
     ]
   },
 ];
@@ -158,7 +158,7 @@ export function MenuBar({
   
   // Add INI menus under "Tuning" submenu
   if (menuTree.length > 0) {
-    const tuningMenu = allMenus.find(m => m.name === 'Tuning');
+    const tuningMenu = allMenus.find(m => m.name === '调校');
     if (tuningMenu && tuningMenu.children) {
       tuningMenu.children.push({ separator: true, name: 'sep-ini' });
       menuTree.forEach(iniMenu => {
