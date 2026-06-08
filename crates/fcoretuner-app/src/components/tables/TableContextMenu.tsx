@@ -68,8 +68,8 @@ export default function TableContextMenu({
       }}
     >
       <div className="context-menu-header">
-        <span>Cell [{x}, {y}]</span>
-        <span>Value: {cellValue.toFixed(1)}</span>
+        <span>单元格 [{x}, {y}]</span>
+        <span>值: {cellValue.toFixed(1)}</span>
       </div>
 
       <div className="context-menu-item" onClick={handleSetEqual}>
@@ -80,19 +80,19 @@ export default function TableContextMenu({
       <div className="context-menu-separator" />
 
       <div className="context-menu-item" onClick={onInterpolate}>
-        <span>Interpolate Cells</span>
+        <span>插值单元格</span>
         <span className="context-shortcut">I</span>
       </div>
 
       <div className="context-menu-item" onClick={onSmooth}>
-        <span>Smooth Cells</span>
+        <span>平滑单元格</span>
         <span className="context-shortcut">S</span>
       </div>
 
       <div className="context-menu-separator" />
 
       <div className="context-menu-item" onClick={handleScale}>
-        <span>Scale Cells...</span>
+        <span>缩放单元格...</span>
         <span className="context-shortcut">*</span>
         <div className="scale-input-container">
           <input
@@ -121,12 +121,12 @@ export default function TableContextMenu({
       >
         {isLocked ? (
           <>
-            <span>Unlock Cell</span>
+            <span>解锁单元格</span>
             <span className="context-shortcut">U</span>
           </>
         ) : (
           <>
-            <span>Lock Cell</span>
+            <span>锁定单元格</span>
             <span className="context-shortcut">L</span>
           </>
         )}

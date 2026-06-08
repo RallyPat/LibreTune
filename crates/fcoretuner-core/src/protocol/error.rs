@@ -1,43 +1,43 @@
-//! Protocol errors
+//! 协议错误
 
 use thiserror::Error;
 
-/// Errors that can occur during protocol communication
+/// 协议通信中可能发生的错误
 #[derive(Error, Debug)]
 pub enum ProtocolError {
-    #[error("Serial port error: {0}")]
+    #[error("串口错误: {0}")]
     SerialError(String),
 
-    #[error("Connection timeout")]
+    #[error("连接超时")]
     Timeout,
 
-    #[error("Not connected to ECU")]
+    #[error("未连接到 ECU")]
     NotConnected,
 
-    #[error("Already connected")]
+    #[error("已连接")]
     AlreadyConnected,
 
-    #[error("Invalid response from ECU")]
+    #[error("ECU 响应无效")]
     InvalidResponse,
 
-    #[error("CRC mismatch: expected {expected:#010x}, got {actual:#010x}")]
+    #[error("CRC 不匹配: 期望 {expected:#010x}，实际 {actual:#010x}")]
     CrcMismatch { expected: u32, actual: u32 },
 
-    #[error("Signature mismatch: expected '{expected}', got '{actual}'")]
+    #[error("签名不匹配: 期望 '{expected}'，实际 '{actual}'")]
     SignatureMismatch { expected: String, actual: String },
 
-    #[error("ECU returned error code: {0}")]
+    #[error("ECU 返回错误代码: {0}")]
     EcuError(u8),
 
-    #[error("Buffer overflow: packet too large")]
+    #[error("缓冲区溢出: 数据包过大")]
     BufferOverflow,
 
-    #[error("Protocol error: {0}")]
+    #[error("协议错误: {0}")]
     ProtocolError(String),
 
-    #[error("Port not found: {0}")]
+    #[error("未找到端口: {0}")]
     PortNotFound(String),
 
-    #[error("I/O error: {0}")]
+    #[error("I/O 错误: {0}")]
     IoError(#[from] std::io::Error),
 }

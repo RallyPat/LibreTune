@@ -306,7 +306,7 @@ export const CompositeLoggerView: React.FC<CompositeLoggerViewProps> = ({ onClos
   return (
     <div className="composite-logger-view">
       <div className="composite-logger-header">
-        <h2>Composite Logger</h2>
+        <h2>复合记录器</h2>
         <div className="composite-logger-controls">
           <button
             className={`capture-btn ${isCapturing ? "capturing" : ""}`}
@@ -315,7 +315,7 @@ export const CompositeLoggerView: React.FC<CompositeLoggerViewProps> = ({ onClos
             {isCapturing ? "⏹ Stop" : "▶ Capture"}
           </button>
           <div className="zoom-controls">
-            <label>Zoom:</label>
+            <label>缩放:</label>
             <input
               type="range"
               min="1"
@@ -407,19 +407,19 @@ export const CompositeLoggerView: React.FC<CompositeLoggerViewProps> = ({ onClos
       <div className="composite-logger-legend">
         <div className="legend-item">
           <span className="legend-color" style={{ background: "#22c55e" }} />
-          <span>Primary (Crank)</span>
+          <span>主信号 (曲轴)</span>
         </div>
         <div className="legend-item">
           <span className="legend-color" style={{ background: "#3b82f6" }} />
-          <span>Secondary (Cam)</span>
+          <span>副信号 (凸轮轴)</span>
         </div>
         <div className="legend-item">
           <span className="legend-color" style={{ background: "#a855f7" }} />
-          <span>Sync Status</span>
+          <span>同步状态</span>
         </div>
         <div className="legend-item">
           <span className="legend-color" style={{ background: "#f59e0b" }} />
-          <span>Voltage</span>
+          <span>电压</span>
         </div>
       </div>
     </div>

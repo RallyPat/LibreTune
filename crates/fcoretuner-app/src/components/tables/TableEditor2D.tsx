@@ -601,7 +601,7 @@ export default function TableEditor2D({
         <div className="editor-header">
           <button className="back-btn" onClick={onBack}>
             <ArrowLeft size={18} />
-            <span>Back</span>
+            <span>返回</span>
           </button>
           <h1>{title}</h1>
           <div className="editor-actions">

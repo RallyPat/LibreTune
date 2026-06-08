@@ -246,7 +246,7 @@ export const ToothLoggerView: React.FC<ToothLoggerViewProps> = ({ onClose }) => 
   return (
     <div className="tooth-logger-view">
       <div className="tooth-logger-header">
-        <h2>Tooth Logger</h2>
+        <h2>齿形记录器</h2>
         <div className="tooth-logger-controls">
           <button
             className={`capture-btn ${isCapturing ? "capturing" : ""}`}

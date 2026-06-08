@@ -5,33 +5,33 @@ use thiserror::Error;
 /// Errors that can occur during INI parsing
 #[derive(Error, Debug)]
 pub enum IniError {
-    #[error("I/O error: {0}")]
+    #[error("I/O 错误: {0}")]
     IoError(String),
 
-    #[error("Parse error at line {line}: {message}")]
+    #[error("解析错误，第 {line} 行: {message}")]
     ParseError { line: usize, message: String },
 
-    #[error("Missing required section: [{0}]")]
+    #[error("缺少必要的节: [{0}]")]
     MissingSectionError(String),
 
-    #[error("Missing required field '{field}' in section [{section}]")]
+    #[error("节 [{section}] 中缺少必要字段 '{field}'")]
     MissingFieldError { section: String, field: String },
 
-    #[error("Invalid value for '{field}': {message}")]
+    #[error("'{field}' 的值无效: {message}")]
     InvalidValueError { field: String, message: String },
 
-    #[error("Unknown data type: {0}")]
+    #[error("未知数据类型: {0}")]
     UnknownDataType(String),
 
-    #[error("Expression parse error: {0}")]
+    #[error("表达式解析错误: {0}")]
     ExpressionError(String),
 
-    #[error("Include error: circular reference detected for '{0}'")]
+    #[error("包含错误: 检测到 '{0}'")]
     CircularInclude(String),
 
-    #[error("Include error: file not found '{0}'")]
+    #[error("包含错误: 未找到文件 '{0}'")]
     IncludeNotFound(String),
 
-    #[error("Include error: maximum depth ({0}) exceeded")]
+    #[error("包含错误: 超出最大深度 ({0})")]
     IncludeDepthExceeded(usize),
 }

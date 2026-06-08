@@ -455,12 +455,12 @@ export default function PortEditor({
 
         {/* Right panel: Pin diagram */}
         <div className="pinout-panel">
-          <h3>Hardware Pinout</h3>
+          <h3>硬件引脚</h3>
           
           <div className="pinout-diagram">
             {/* Organize pins by category */}
             <div className="pin-section">
-              <h4>High-Side Outputs (12V)</h4>
+              <h4>高端输出 (12V)</h4>
               <div className="pin-grid">
                 {hardwarePins.filter(p => p.id.startsWith('HSO')).map(pin => {
                   const assignedFunc = Array.from(assignments.entries()).find(([_, v]) => v === pin.id);
@@ -517,7 +517,7 @@ export default function PortEditor({
             </div>
 
             <div className="pin-section">
-              <h4>Analog Inputs</h4>
+              <h4>模拟输入</h4>
               <div className="pin-grid">
                 {hardwarePins.filter(p => p.id.startsWith('ADC')).map(pin => {
                   const assignedFunc = Array.from(assignments.entries()).find(([_, v]) => v === pin.id);
@@ -545,7 +545,7 @@ export default function PortEditor({
             </div>
 
             <div className="pin-section">
-              <h4>Digital & VR Inputs</h4>
+              <h4>数字 & VR 输入</h4>
               <div className="pin-grid">
                 {hardwarePins.filter(p => p.id.startsWith('DIN') || p.id.startsWith('VR')).map(pin => {
                   const assignedFunc = Array.from(assignments.entries()).find(([_, v]) => v === pin.id);
@@ -575,15 +575,15 @@ export default function PortEditor({
 
           {/* Legend */}
           <div className="pinout-legend">
-            <h4>Legend</h4>
+            <h4>图例</h4>
             <div className="legend-items">
               <div className="legend-item">
                 <span className="legend-color" style={{ backgroundColor: getFunctionColor('injector') }} />
-                <span>Injector</span>
+                <span>喷油器</span>
               </div>
               <div className="legend-item">
                 <span className="legend-color" style={{ backgroundColor: getFunctionColor('ignition') }} />
-                <span>Ignition</span>
+                <span>点火</span>
               </div>
               <div className="legend-item">
                 <span className="legend-color" style={{ backgroundColor: getFunctionColor('aux_output') }} />
@@ -591,7 +591,7 @@ export default function PortEditor({
               </div>
               <div className="legend-item">
                 <span className="legend-color" style={{ backgroundColor: getFunctionColor('analog_input') }} />
-                <span>Analog Input</span>
+                <span>模拟输入</span>
               </div>
               <div className="legend-item">
                 <span className="legend-color" style={{ backgroundColor: getFunctionColor('vr_input') }} />

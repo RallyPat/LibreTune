@@ -211,14 +211,14 @@ export default function TableEditor3D({ title, x_bins, y_bins, z_values, onBack,
       <div className="editor-header">
         <button className="back-btn" onClick={onBack}>
           <ArrowLeft size={18} />
-          <span>Back</span>
+          <span>返回</span>
         </button>
         <h1>{title} - 3D View</h1>
       </div>
 
       <div className="controls-panel">
         <div className="control-section">
-          <h3>Rotation</h3>
+          <h3>旋转</h3>
           <div className="control-row">
             <label>Yaw (M/K)</label>
             <input
@@ -231,7 +231,7 @@ export default function TableEditor3D({ title, x_bins, y_bins, z_values, onBack,
             <span>{yawAngle}°</span>
           </div>
           <div className="control-row">
-            <label>Roll (N/J)</label>
+            <label>横滚 (N/J)</label>
             <input
               type="range"
               min="-90"
@@ -242,7 +242,7 @@ export default function TableEditor3D({ title, x_bins, y_bins, z_values, onBack,
             <span>{rollAngle}°</span>
           </div>
           <div className="control-row">
-            <label>Pitch (↑/↓)</label>
+            <label>俯仰 (↑/↓)</label>
             <input
               type="range"
               min="10"
@@ -255,7 +255,7 @@ export default function TableEditor3D({ title, x_bins, y_bins, z_values, onBack,
         </div>
 
         <div className="control-section">
-          <h3>Scale</h3>
+          <h3>缩放</h3>
           <div className="control-row">
             <label>Z Scale</label>
             <input
@@ -271,7 +271,7 @@ export default function TableEditor3D({ title, x_bins, y_bins, z_values, onBack,
         </div>
 
         <div className="control-section">
-          <h3>View</h3>
+          <h3>视图</h3>
           <label className="checkbox-label">
             <input
               type="checkbox"
@@ -303,7 +303,7 @@ export default function TableEditor3D({ title, x_bins, y_bins, z_values, onBack,
         <div className="canvas-wrapper">
           <canvas ref={canvasRef} className="table-canvas" />
           <div className="active-position-display">
-            <div>Active Position</div>
+            <div>当前位置</div>
             <div>RPM: {x_bins[0]?.toFixed(0)}-{x_bins[x_size - 1]?.toFixed(0)}</div>
             <div>MAP: {y_bins[0]?.toFixed(0)}-{y_bins[y_size - 1]?.toFixed(0)}</div>
           </div>
