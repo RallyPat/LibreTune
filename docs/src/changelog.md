@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to LibreTune will be documented in this file.
+All notable changes to FCoreTuner will be documented in this file.
 
 ## [Unreleased]
 

@@ -1,5 +1,5 @@
 #!/bin/bash
-# LibreTune Development Launcher
+# FCoreTuner Development Launcher
 # Launches the Tauri app with sanitized environment to prevent WebKit crashes
 
 set -e
@@ -34,7 +34,7 @@ CLEAN=false
 # Show help message
 show_help() {
   cat << EOF
-LibreTune Development Launcher
+FCoreTuner Development Launcher
 
 Usage: $0 [OPTIONS]
 
@@ -48,7 +48,7 @@ Options:
 Examples:
   $0                              # Basic launch
   $0 --verbose                    # Launch with detailed output
-  $0 --verbose --log-file /tmp/libretune-dev.log    # Launch with logging
+  $0 --verbose --log-file /tmp/fcoretuner-dev.log    # Launch with logging
   $0 --clean                      # Clean build artifacts then launch
   $0 --no-sanitize                # Disable environment sanitization
 
@@ -183,12 +183,12 @@ check_npm() {
 # Get script directory and project root
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
-APP_DIR="$PROJECT_ROOT/crates/libretune-app"
+APP_DIR="$PROJECT_ROOT/crates/fcoretuner-app"
 
 # Verify directory structure
 if [[ ! -d "$APP_DIR" ]]; then
   log_error "Application directory not found: $APP_DIR"
-  log_info "Please run this script from the LibreTune project root"
+  log_info "Please run this script from the FCoreTuner project root"
   exit 1
 fi
 
@@ -649,7 +649,7 @@ else
 fi
 
 # Display startup banner
-log_section "LibreTune Development Launcher"
+log_section "FCoreTuner Development Launcher"
 log_info "Project directory: $PROJECT_ROOT"
 log_info "App directory: $APP_DIR"
 log_info "Environment mode: $ENV_MODE"
@@ -688,7 +688,7 @@ launch_result=$?
 
 # Handle result
 if [[ $launch_result -eq 0 ]]; then
-  log_success "LibreTune development server started successfully"
+  log_success "FCoreTuner development server started successfully"
 else
   log_error "Failed to start development server (exit code: $launch_result)"
 

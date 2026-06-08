@@ -1,11 +1,11 @@
-# LibreTune - Implementation Guide for AI Agents
+# FCoreTuner - Implementation Guide for AI Agents
 
 ## Project Overview
-LibreTune is a modern, open-source ECU tuning software for Speeduino, EpicEFI, and compatible aftermarket ECUs.
+FCoreTuner is a modern, open-source ECU tuning software for Speeduino, EpicEFI, and compatible aftermarket ECUs.
 It's built with Rust core + Tauri desktop app + React frontend.
 
 ## Supported ECU Platforms
-LibreTune supports multiple ECU platforms, each treated as a distinct project:
+FCoreTuner supports multiple ECU platforms, each treated as a distinct project:
 
 | Platform | Description | INI Pattern | Test Coverage |
 |----------|-------------|-------------|---------------|
@@ -20,8 +20,8 @@ LibreTune supports multiple ECU platforms, each treated as a distinct project:
 ## Architecture
 ```
 crates/
-├── libretune-core/      # Rust library (ECU communication, INI parsing, AutoTune)
-└── libretune-app/       # Tauri desktop app
+├── fcoretuner-core/      # Rust library (ECU communication, INI parsing, AutoTune)
+└── fcoretuner-app/       # Tauri desktop app
     ├── src/              # React frontend
     ├── src-tauri/        # Tauri backend glue
 ```
@@ -35,30 +35,30 @@ The project aims to provide professional ECU tuning workflow and functionality w
 ## Key Features Implemented
 
 ### 1. Table Editing (2D/3D)
-- Location: `crates/libretune-app/src/components/tables/`
+- Location: `crates/fcoretuner-app/src/components/tables/`
 - Files:
   - `TableEditor2D.tsx` - Main 2D table editor with toolbar
   - `TableEditor3D.tsx` - 3D visualization (canvas-based)
-- Backend: `crates/libretune-core/src/table_ops.rs`
+- Backend: `crates/fcoretuner-core/src/table_ops.rs`
 - Features: Set Equal, Increase/Decrease, Scale, Interpolate, Smooth, Re-bin, Copy/Paste, History Trail, Follow Mode
 
 ### 2. AutoTune Live
-- Location: `crates/libretune-app/src/components/realtime/AutoTuneLive.tsx`
-- Backend: `crates/libretune-core/src/autotune.rs`
+- Location: `crates/fcoretuner-app/src/components/realtime/AutoTuneLive.tsx`
+- Backend: `crates/fcoretuner-core/src/autotune.rs`
 - Features: Auto-tuning with recommendations, heat maps, cell locking, filters, authority limits
 
 ### 3. Dashboard System (TunerStudio-Compatible)
-- **NEW**: `crates/libretune-app/src/components/dashboards/TsDashboard.tsx` - Main dashboard component
-- **NEW**: `crates/libretune-app/src/components/dashboards/dashTypes.ts` - TypeScript types for TunerStudio format
-- **NEW**: `crates/libretune-app/src/components/dashboards/GaugeContextMenu.tsx` - Right-click context menu
-- **NEW**: `crates/libretune-app/src/components/gauges/TsGauge.tsx` - Canvas-based gauge renderer
-- **NEW**: `crates/libretune-app/src/components/gauges/TsIndicator.tsx` - Boolean indicator renderer
-- Backend: `crates/libretune-core/src/dash/{mod.rs,types.rs,parser.rs,writer.rs}`
+- **NEW**: `crates/fcoretuner-app/src/components/dashboards/TsDashboard.tsx` - Main dashboard component
+- **NEW**: `crates/fcoretuner-app/src/components/dashboards/dashTypes.ts` - TypeScript types for TunerStudio format
+- **NEW**: `crates/fcoretuner-app/src/components/dashboards/GaugeContextMenu.tsx` - Right-click context menu
+- **NEW**: `crates/fcoretuner-app/src/components/gauges/TsGauge.tsx` - Canvas-based gauge renderer
+- **NEW**: `crates/fcoretuner-app/src/components/gauges/TsIndicator.tsx` - Boolean indicator renderer
+- Backend: `crates/fcoretuner-core/src/dash/{mod.rs,types.rs,parser.rs,writer.rs}`
 - Features: Native .ltdash.xml format, TunerStudio .dash import, right-click context menu, designer mode, gauge demo, dashboard selector
 - Dashboard Storage: `<app_data>/dashboards/` with auto-generated defaults (Basic, Tuning, Racing)
 
 ### 4. Gauge Rendering (TunerStudio-Compatible)
-- Location: `crates/libretune-app/src/components/gauges/TsGauge.tsx`
+- Location: `crates/fcoretuner-app/src/components/gauges/TsGauge.tsx`
 - **Enhanced in Jan 2026**: All gauge types now feature metallic bezels, shadows, gradients, and 3D effects
 - Gauge Types Implemented (13 of 13 - ALL COMPLETE):
   - BasicReadout - LCD-style digital numeric display with metallic frame and inset shadows
@@ -76,7 +76,7 @@ The project aims to provide professional ECU tuning workflow and functionality w
   - Tachometer - RPM-specific gauge with redline zone
 
 ### 5. Professional Default Dashboards
-- Location: `crates/libretune-app/src-tauri/src/lib.rs` (create_*_dashboard functions)
+- Location: `crates/fcoretuner-app/src-tauri/src/lib.rs` (create_*_dashboard functions)
 - Three professionally designed dashboards:
   - **Basic**: Large analog RPM + digital AFR + vertical CLT/IAT bars + horizontal MAP bar + battery/advance/VE/PW readouts
   - **Racing**: Giant center RPM analog + oil pressure/water temp vertical bars + speed/AFR/boost/fuel digital readouts
@@ -84,7 +84,7 @@ The project aims to provide professional ECU tuning workflow and functionality w
 - All dashboards use consistent dark color scheme with accent colors matching gauge purposes
 
 ### 6. Dialog System
-- Location: `crates/libretune-app/src/components/dialogs/`
+- Location: `crates/fcoretuner-app/src/components/dialogs/`
 - Files:
   - `SaveLoadBurnDialogs.tsx` - Save/Load/Burn tunes
   - `PerformanceFieldsDialog.tsx` - Vehicle specs for HP/Torque calculations
@@ -94,18 +94,18 @@ The project aims to provide professional ECU tuning workflow and functionality w
   - `CellEditDialog.tsx` - Cell value editing dialog
 
 ### 7. Menu & Navigation
-- Location: `crates/libretune-app/src/components/MenuManager.ts`
+- Location: `crates/fcoretuner-app/src/components/MenuManager.ts`
 - Parses INI [Menu] sections, builds hierarchical menu tree
-- Location: `crates/libretune-app/src/components/HotkeyManager.ts`
+- Location: `crates/fcoretuner-app/src/components/HotkeyManager.ts`
 - Global keyboard shortcuts (see HotkeyManager for complete list)
 
 ### 8. Action Management
-- Location: `crates/libretune-app/src/components/ActionManagement.tsx`
+- Location: `crates/fcoretuner-app/src/components/ActionManagement.tsx`
 - Features: Action list, queue system, recording/playback
 
 ### 9. Pop-out Windows (Multi-Monitor)
-- Location: `crates/libretune-app/src/PopOutWindow.tsx` - Standalone pop-out window renderer
-- Location: `crates/libretune-app/src/PopOutWindow.css` - Pop-out window styles
+- Location: `crates/fcoretuner-app/src/PopOutWindow.tsx` - Standalone pop-out window renderer
+- Location: `crates/fcoretuner-app/src/PopOutWindow.css` - Pop-out window styles
 - Features:
   - Pop any tab to its own window (External Link button in tab bar)
   - Dock-back button to return tab to main window
@@ -118,7 +118,7 @@ The project aims to provide professional ECU tuning workflow and functionality w
   - WebviewWindow API for creating new windows
 
 ### 10. Git-Based Tune Versioning
-- Location: `crates/libretune-core/src/project/version_control.rs`
+- Location: `crates/fcoretuner-core/src/project/version_control.rs`
 - Features:
   - Initialize Git repo for project (`git_init_project`)
   - Manual and auto-commit on save (user preference: "always"/"never"/"ask")
@@ -131,7 +131,7 @@ The project aims to provide professional ECU tuning workflow and functionality w
 - Settings: Version Control section in SettingsDialog
 
 ### 11. Project Templates
-- Location: `crates/libretune-core/src/project/templates.rs`
+- Location: `crates/fcoretuner-core/src/project/templates.rs`
 - Built-in templates:
   - **Speeduino 4-cyl NA**: Basic naturally aspirated 4-cylinder gasoline engine
   - **rusEFI Proteus F4**: Advanced tuning for Proteus F4 board
@@ -143,15 +143,15 @@ The project aims to provide professional ECU tuning workflow and functionality w
 
 ### Backend (Rust)
 ```bash
-cd /home/pat/.gemini/antigravity/scratch/libretune
-cargo build -p libretune-core
-cargo test -p libretune-core
-cargo clippy -p libretune-core
+cd /home/pat/.gemini/antigravity/scratch/fcoretuner
+cargo build -p fcoretuner-core
+cargo test -p fcoretuner-core
+cargo clippy -p fcoretuner-core
 ```
 
 ### Frontend (React/Tauri)
 ```bash
-cd crates/libretune-app
+cd crates/fcoretuner-app
 npm install
 npm run dev        # Development mode
 npm run tauri dev  # Full Tauri app
@@ -161,7 +161,7 @@ npm run typecheck  # TypeScript checking
 ```
 
 ## INI File Format
-LibreTune uses standard ECU INI definition files. Structure:
+FCoreTuner uses standard ECU INI definition files. Structure:
 - `[MegaTune]` - Version info, signature, query command
 - `[Menu]` - Menu structure with sub-menus
 - `[TableEditor]` - Table definitions
@@ -371,7 +371,7 @@ Based on analysis of common ECU tuning software patterns:
 ### Table Operations Integration - Completed Jan 11, 2026
 - **Fixed table editing toolbar operations** (`lib.rs`):
   - All 5 Tauri commands were stubs returning "requires ECU connection" error
-  - Now properly wired to `libretune_core::table_ops` functions
+  - Now properly wired to `fcoretuner_core::table_ops` functions
   - Added `get_table_data_internal()` helper for code reuse
   - Added `update_table_z_values_internal()` helper for saving changes
   - Operations work in offline mode (edit tune file) and write to ECU if connected
@@ -592,10 +592,10 @@ Based on analysis of common ECU tuning software patterns:
   - Shows SignatureMismatchDialog when mismatch detected
 
 - **Files created/modified**:
-  - `crates/libretune-core/src/project/online_repository.rs` - New online repo module
-  - `crates/libretune-app/src/components/dialogs/SignatureMismatchDialog.tsx` - New dialog
-  - `crates/libretune-app/src/components/dialogs/SignatureMismatchDialog.css` - Styling
-  - `crates/libretune-app/src-tauri/src/lib.rs` - New commands and AppState field
+  - `crates/fcoretuner-core/src/project/online_repository.rs` - New online repo module
+  - `crates/fcoretuner-app/src/components/dialogs/SignatureMismatchDialog.tsx` - New dialog
+  - `crates/fcoretuner-app/src/components/dialogs/SignatureMismatchDialog.css` - Styling
+  - `crates/fcoretuner-app/src-tauri/src/lib.rs` - New commands and AppState field
 
 ### Dashboard Visual Fixes & Context Menu - Completed Jan 4, 2026
 - **Fixed visual glitches**:
@@ -616,7 +616,7 @@ Based on analysis of common ECU tuning software patterns:
 
 - **Right-click context menu** (`GaugeContextMenu.tsx`):
   - Reload Default Gauges
-  - LibreTune Gauges → (categories from INI)
+  - FCoreTuner Gauges → (categories from INI)
   - Reset Value
   - Background → (color, dither, image, position)
   - Antialiasing Enabled (toggle)
@@ -633,11 +633,11 @@ Based on analysis of common ECU tuning software patterns:
 - **Complete rewrite of dashboard system to use TunerStudio format natively**:
   - Replaced TabbedDashboard with new TsDashboard component
   - New files created:
-    - `crates/libretune-app/src/components/dashboards/TsDashboard.tsx` - Main dashboard with selector
-    - `crates/libretune-app/src/components/dashboards/TsDashboard.css` - Styling
-    - `crates/libretune-app/src/components/dashboards/dashTypes.ts` - TypeScript types matching Rust
-    - `crates/libretune-app/src/components/gauges/TsGauge.tsx` - Canvas gauge renderer (7 types)
-    - `crates/libretune-app/src/components/gauges/TsIndicator.tsx` - Boolean indicator renderer
+    - `crates/fcoretuner-app/src/components/dashboards/TsDashboard.tsx` - Main dashboard with selector
+    - `crates/fcoretuner-app/src/components/dashboards/TsDashboard.css` - Styling
+    - `crates/fcoretuner-app/src/components/dashboards/dashTypes.ts` - TypeScript types matching Rust
+    - `crates/fcoretuner-app/src/components/gauges/TsGauge.tsx` - Canvas gauge renderer (7 types)
+    - `crates/fcoretuner-app/src/components/gauges/TsIndicator.tsx` - Boolean indicator renderer
   
 - **Backend commands added** (`lib.rs`):
   - `get_dash_file(path: String) -> DashFile` - Load full DashFile structure
@@ -659,8 +659,8 @@ Based on analysis of common ECU tuning software patterns:
 
 ### TunerStudio Dashboard Format Implementation - Completed Jan 4, 2026
 - **Implemented full TunerStudio dashboard XML format support**:
-  - Created new `dash` module in libretune-core with parser and writer
-  - Files: `crates/libretune-core/src/dash/{mod.rs,types.rs,parser.rs,writer.rs}`
+  - Created new `dash` module in fcoretuner-core with parser and writer
+  - Files: `crates/fcoretuner-core/src/dash/{mod.rs,types.rs,parser.rs,writer.rs}`
   - XML namespace: `http://www.EFIAnalytics.com/:dsh` and `:gauge`
   - Supports file format version 3.0
 
@@ -768,12 +768,12 @@ Based on analysis of common ECU tuning software patterns:
   - `Sidebar.tsx` - Navigation sidebar with menu tree
   - `Overlays.tsx` - All modal overlay dialogs consolidated
   - `DialogRenderer.tsx` - Dialog rendering utilities
-  - Files: `crates/libretune-app/src/components/layout/`
+  - Files: `crates/fcoretuner-app/src/components/layout/`
 
 - **Created standalone dialog components**:
   - `RebinDialog.tsx` - Table re-binning with add/remove bins, linear spacing, interpolation
   - `CellEditDialog.tsx` - Cell value editor with +/- buttons, validation, min/max limits
-  - Files: `crates/libretune-app/src/components/dialogs/`
+  - Files: `crates/fcoretuner-app/src/components/dialogs/`
 
 - **Reduced App.tsx complexity**:
   - Reduced from 1,157 lines to 626 lines (46% reduction)
@@ -793,12 +793,12 @@ Based on analysis of common ECU tuning software patterns:
   - Runs on push to main and pull requests
 
 - **Added table_ops unit tests**:
-  - File: `crates/libretune-core/tests/table_ops.rs`
+  - File: `crates/fcoretuner-core/tests/table_ops.rs`
   - Tests for: rebin_table, scale_cells, set_cells_equal, interpolate_cells
   - 5 passing tests, 1 ignored (smooth_table bug discovered)
 
 - **Added platform-specific corpus tests** (Jan 2026):
-  - File: `crates/libretune-core/tests/corpus.rs`
+  - File: `crates/fcoretuner-core/tests/corpus.rs`
   - `test_parse_all_corpus_inis()` - All 687 INI files in reference/ecuDef must parse (100% pass)
   - `test_speeduino_ini_fields()` - Speeduino-specific validation
   - `test_rusefi_ini_fields()` - rusEFI validation (excludes FOME/epicEFI)
@@ -827,20 +827,20 @@ Based on analysis of common ECU tuning software patterns:
   - When offset field equals "lastOffset" (case-insensitive), uses the running counter value
   
 - **Files modified**:
-  - [parser.rs](crates/libretune-core/src/ini/parser.rs) - ParserState, parse_constants_entry
-  - [constants.rs](crates/libretune-core/src/ini/constants.rs) - parse_constant_line signature and logic
+  - [parser.rs](crates/fcoretuner-core/src/ini/parser.rs) - ParserState, parse_constants_entry
+  - [constants.rs](crates/fcoretuner-core/src/ini/constants.rs) - parse_constant_line signature and logic
   
 - **Test added**: `test_parse_constant_line_lastoffset` verifies keyword handling
 
 ### MenuBar Duplicate Key Fix - Completed Dec 31, 2025
 - **Issue**: React warning about duplicate keys for menu separators
 - **Fix**: Updated `renderMenuItem()` to use index-based unique keys
-- **File**: [MenuBar.tsx](crates/libretune-app/src/components/layout/MenuBar.tsx)
+- **File**: [MenuBar.tsx](crates/fcoretuner-app/src/components/layout/MenuBar.tsx)
 
 ### PcVariables & std_separator Fix - Completed Dec 31, 2025
 - **Issue 1 - std_separator showing as menu item**:
   - Root Cause: `std_separator` targets created `MenuItem::Std` instead of `MenuItem::Separator`
-  - Fix: Added check for `target == "std_separator"` before the `target.starts_with("std_")` check in [parser.rs](crates/libretune-core/src/ini/parser.rs#L1242)
+  - Fix: Added check for `target == "std_separator"` before the `target.starts_with("std_")` check in [parser.rs](crates/fcoretuner-core/src/ini/parser.rs#L1242)
 
 - **Issue 2 - PcVariables not available to dialogs** ("Loading..." shown):
   - Root Cause: `[PcVariables]` like `rpmwarn`, `rpmdang` were only stored as byte values, not full `Constant` structs
@@ -848,7 +848,7 @@ Based on analysis of common ECU tuning software patterns:
   
 - **Implementation**:
   - Added `is_pc_variable: bool` field to `Constant` struct (default `false`)
-  - Added `parse_pc_variable_line()` in [constants.rs](crates/libretune-core/src/ini/constants.rs) - parses PcVariable format (no offset field)
+  - Added `parse_pc_variable_line()` in [constants.rs](crates/fcoretuner-core/src/ini/constants.rs) - parses PcVariable format (no offset field)
   - Updated `parse_pc_variable_entry()` to use new function and store in `def.constants`
   - Added `default_values: HashMap<String, f64>` to `EcuDefinition` for INI defaults
   - Added `[Defaults]` section parsing (`defaultValue = name, value` entries)
@@ -885,7 +885,7 @@ Based on analysis of common ECU tuning software patterns:
   - `get_available_inis()` - Now accepts `app: tauri::AppHandle`
   - `load_ini()` - Now uses `Path::new(&path).is_absolute()` instead of Unix-specific check
   - `auto_load_last_ini()` - Now accepts app handle
-  - `save_tune()` - Uses `Project::projects_dir()` from libretune-core
+  - `save_tune()` - Uses `Project::projects_dir()` from fcoretuner-core
   - `list_tune_files()` - Uses cross-platform path resolution
   - `list_dashboard_layouts()` - Uses cross-platform path resolution
 
@@ -895,7 +895,7 @@ Based on analysis of common ECU tuning software patterns:
 - **Added Linux-only guard** in serial.rs:
   - `/dev` directory fallback scan wrapped in `#[cfg(target_os = "linux")]`
 
-- **Added dirs crate** to libretune-app/Cargo.toml for fallback path resolution
+- **Added dirs crate** to fcoretuner-app/Cargo.toml for fallback path resolution
 
 ### WebKit / Tauri Launch Fix
 **Issue**: Tauri app crashed on startup with WebKit internal error due to Snap environment variable leakage causing libpthread symbol lookup failures.
@@ -909,7 +909,7 @@ Or manually:
 ```bash
 env -i PATH="$PATH" HOME="$HOME" DISPLAY="$DISPLAY" XAUTHORITY="$XAUTHORITY" \
   XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" TERM="$TERM" \
-  bash -lc 'cd crates/libretune-app && npm run tauri dev'
+  bash -lc 'cd crates/fcoretuner-app && npm run tauri dev'
 ```
 
 This preserves only essential environment variables (PATH, HOME, DISPLAY) and removes Snap-related vars that cause WebKit to load incompatible libraries.
@@ -923,11 +923,11 @@ This preserves only essential environment variables (PATH, HOME, DISPLAY) and re
   - Lookup was failing because it only checked by tableName
 
 - **Changes made**:
-  - Added `map_name: Option<String>` field to `TableDefinition` in [tables.rs](crates/libretune-core/src/ini/tables.rs)
-  - Added `table_map_to_name: HashMap<String, String>` to `EcuDefinition` in [mod.rs](crates/libretune-core/src/ini/mod.rs)
-  - Updated parser to store map_name and build reverse lookup in [parser.rs](crates/libretune-core/src/ini/parser.rs)
+  - Added `map_name: Option<String>` field to `TableDefinition` in [tables.rs](crates/fcoretuner-core/src/ini/tables.rs)
+  - Added `table_map_to_name: HashMap<String, String>` to `EcuDefinition` in [mod.rs](crates/fcoretuner-core/src/ini/mod.rs)
+  - Updated parser to store map_name and build reverse lookup in [parser.rs](crates/fcoretuner-core/src/ini/parser.rs)
   - Added `get_table_by_name_or_map()` method for fallback lookup
-  - Updated all `def.tables.get()` calls in [lib.rs](crates/libretune-app/src-tauri/src/lib.rs) to use new resolver
+  - Updated all `def.tables.get()` calls in [lib.rs](crates/fcoretuner-app/src-tauri/src/lib.rs) to use new resolver
 
 **Channel Discovery API** (enables dynamic status bar & dashboard):
 - Added Tauri commands:
@@ -957,8 +957,8 @@ This preserves only essential environment variables (PATH, HOME, DISPLAY) and re
 ## Notes
 - The project is NOT a git repository currently
 - **Cross-platform directories** (resolved at runtime):
-  - Projects: `~/Documents/LibreTuneProjects/` (or platform equivalent)
-  - App Data: `~/.local/share/LibreTune/` (Linux), `~/Library/Application Support/LibreTune/` (macOS), `%APPDATA%\LibreTune\` (Windows)
+  - Projects: `~/Documents/FCoreTunerProjects/` (or platform equivalent)
+  - App Data: `~/.local/share/FCoreTuner/` (Linux), `~/Library/Application Support/FCoreTuner/` (macOS), `%APPDATA%\FCoreTuner\` (Windows)
   - Definitions: `<app_data_dir>/definitions/`
 - Reference ECU software files are in `TunerStudioMS/` (for understanding INI format patterns only)
 - **IMPORTANT**: Always use "AutoTune" not "VE Analyze", and avoid TunerStudio trademark terminology

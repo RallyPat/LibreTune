@@ -1,238 +1,217 @@
-# LibreTune
+# FCoreTuner
 
 [![License: GPL v2](https://img.shields.io/badge/License-GPL_v2-blue.svg)](https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html)
-[![CI](https://github.com/RallyPat/LibreTune/actions/workflows/ci.yml/badge.svg)](https://github.com/RallyPat/LibreTune/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/RallyPat/LibreTune?label=stable)](https://github.com/RallyPat/LibreTune/releases/latest)
-[![Nightly](https://img.shields.io/github/v/release/RallyPat/LibreTune?include_prereleases&label=nightly)](https://github.com/RallyPat/LibreTune/releases/tag/nightly)
+[![CI](https://github.com/FFGG10-29/FCoreTuner/actions/workflows/ci.yml/badge.svg)](https://github.com/FFGG10-29/FCoreTuner/actions/workflows/ci.yml)
 
-Modern, open-source ECU tuning software for EpicEFI, Speeduino, rusEFI, and other TS format INI compatible aftermarket engine control units.
+FCoreTuner 是一款现代、开源的 ECU 调校软件，支持 EpicEFI、Speeduino、rusEFI 及其他兼容 TS 格式 INI 的后市场发动机控制单元。
 
-## Downloads
+## 下载
 
-| Platform | Stable Release | Nightly Build | Notes |
-|----------|----------------|---------------|-------|
-| **Linux** | [AppImage / DEB / RPM](https://github.com/RallyPat/LibreTune/releases/latest) | [Nightly](https://github.com/RallyPat/LibreTune/releases/tag/nightly) | AppImage is portable, no install needed |
-| **Windows** | [Installer (MSI/EXE)](https://github.com/RallyPat/LibreTune/releases/latest) | [Portable EXE](https://github.com/RallyPat/LibreTune/releases/tag/nightly) | Nightly is portable, no install needed |
-| **macOS** | [DMG (ARM64 & Intel)](https://github.com/RallyPat/LibreTune/releases/latest) | [Nightly](https://github.com/RallyPat/LibreTune/releases/tag/nightly) | Separate builds for Apple Silicon and Intel |
+| 平台 | 版本说明 |
+|------|----------|
+| **Linux** | AppImage / DEB / RPM |
+| **Windows** | 安装包 (MSI/EXE) |
+| **macOS** | DMG (ARM64 & Intel) |
 
-> ⚠️ **Nightly builds** are automatically generated from the latest code and may be unstable. For production use, download stable releases.
+![FCoreTuner 表格编辑器](docs/screenshots/table-editor.png)
 
-![LibreTune Table Editor](docs/screenshots/table-editor.png)
+## 说明
 
-## Please note that this project is still very early days - these notes are largely agentically written, and may not be 100% accurate at this time.  We welcome public contribution, and want this to be a thriving publically developed effort. 
+本项目目前仍处于早期开发阶段，欢迎社区贡献。我们希望这个项目成为一个开放、协作开发的调校工具。
 
-## Features
+## 功能特性
 
-### Core Functionality
-- **Cross-platform**: Runs on Windows, macOS, and Linux
-- **Modern Architecture**: Rust core with native desktop UI via Tauri
-- **INI Definition Compatible**: Works with standard ECU INI definition files
-- **Real-time Data**: Live sensor display with configurable dashboard gauges
-- **Multi-Monitor Support**: Pop-out any tab to its own window with bidirectional sync
+### 核心功能
+- **跨平台**：支持 Windows、macOS 和 Linux
+- **现代架构**：Rust 核心 + Tauri 桌面 UI
+- **INI 定义兼容**：兼容标准 ECU INI 定义文件
+- **实时数据**：实时传感器显示，支持可配置仪表盘
+- **多显示器支持**：可将任意标签页弹出到独立窗口，支持双向同步
 
-### Table Editing
-- **2D/3D Table Editors**: Full-featured grid editor with keyboard navigation
-- **3D Visualization**: React Three Fiber surface mesh with orbit controls
-- **Live Cursor**: Follow mode with inverted triangle indicator and history trail
-- **Editing Tools**: Set Equal, Increase/Decrease, Scale, Interpolate, Smooth
-- **Re-binning**: Change axis bins with automatic Z-value interpolation
-- **Copy/Paste**: Standard clipboard operations for table data
-- **Table Comparison**: Side-by-side diff view between tune versions
-- **Burn to ECU**: Write changes directly to ECU memory
+### 表格编辑
+- **2D/3D 表格编辑器**：功能齐全的网格编辑器，支持键盘导航
+- **3D 可视化**：基于 React Three Fiber 的曲面网格，支持轨道控制
+- **实时光标**：跟随模式，带倒三角指示器和历史轨迹
+- **编辑工具**：等值设置、增减、缩放、插值、平滑
+- **重分箱**：更改轴区间，自动进行 Z 值插值
+- **复制/粘贴**：表格数据的标准剪贴板操作
+- **表格对比**：调校版本之间的并排差异视图
+- **烧录到 ECU**：直接将修改写入 ECU 内存
 
-### Dashboard & Gauges
-- **TS-Compatible Dashboards**: Import existing .dash files
-- **9 Gauge Types**: Analog dials, bar gauges (horizontal/vertical), digital readouts, sweep gauges, line graphs, histograms, dashed bars
-- **Customizable Layout**: Drag-and-drop gauge positioning
-- **Designer Mode**: Edit dashboard layouts visually
-- **Dashboard Management**: Create, duplicate, rename, delete, export dashboards
-- **3 Default Dashboards**: Basic, Racing, and Tuning layouts included
+### 仪表盘与仪表
+- **TS 兼容仪表盘**：可导入现有 .dash 文件
+- **9 种仪表类型**：模拟表盘、条形图（水平/垂直）、数字读数、扫描仪表、折线图、直方图、虚线柱
+- **自定义布局**：拖拽式仪表定位
+- **设计器模式**：可视化编辑仪表盘布局
+- **仪表盘管理**：创建、复制、重命名、删除、导出仪表盘
+- **3 个默认仪表盘**：基础、竞速和调校布局
 
-### AutoTune
-- **Live Auto-tuning**: Real-time fuel table recommendations based on AFR targets
-- **Table Selector**: Choose which table to auto-tune
-- **Heat Maps**: Visualize cell weighting and change magnitude
-- **Cell Locking**: Lock cells to prevent AutoTune modifications
-- **Authority Limits**: Configure maximum adjustment percentages
-- **Reference Tables**: Load/save reference CSV files
+### 自动调校（AutoTune）
+- **实时自动调校**：基于 AFR 目标的实时燃油表推荐
+- **表格选择器**：选择要自动调校的表格
+- **热力图**：可视化单元格权重和变化幅度
+- **单元格锁定**：锁定单元格以防止 AutoTune 修改
+- **权限限制**：配置最大调整百分比
+- **参考表格**：加载/保存参考 CSV 文件
 
-### Data Logging
-- **Configurable Sample Rates**: 1Hz to 100Hz logging
-- **Log Playback**: Play/pause, seek slider, variable speed (0.25x-4x)
-- **CSV Support**: Load logs from LibreTune or TunerStudio format
-- **Channel Selection**: Choose which channels to display
+### 数据记录
+- **可配置采样率**：1Hz 到 100Hz 记录
+- **日志回放**：播放/暂停、进度滑块、可变速度（0.25x-4x）
+- **CSV 支持**：加载 FCoreTuner 或 TunerStudio 格式的日志
+- **通道选择**：选择要显示的通道
 
-### Diagnostic Tools
-- **Tooth Logger**: Crank/cam trigger pattern analysis with RPM detection
-- **Composite Logger**: Multi-channel waveform display with sync status
-- **CSV Export**: Export diagnostic captures for analysis
+### 诊断工具
+- **齿形记录器**：曲轴/凸轮轴触发模式分析，带 RPM 检测
+- **复合记录器**：多通道波形显示，带同步状态
+- **CSV 导出**：导出诊断捕获数据以供分析
 
-### Data Management
-- **CSV Export/Import**: Export and import tune data as CSV
-- **Reset to Defaults**: Restore all values to INI defaults
-- **Restore Points**: Create, load, and manage tune backups
-- **TunerStudio Import**: Import existing TunerStudio projects
+### 数据管理
+- **CSV 导出/导入**：以 CSV 格式导出和导入调校数据
+- **恢复默认值**：将所有值恢复为 INI 默认值
+- **还原点**：创建、加载和管理调校备份
+- **TunerStudio 导入**：导入现有 TunerStudio 项目
 
-### Unit Preferences
-- **Temperature**: °C, °F, or Kelvin
-- **Pressure**: kPa, PSI, bar, or inHg
-- **AFR Display**: AFR or Lambda (with fuel type selection)
-- **Speed**: km/h or mph
+### 单位偏好
+- **温度**：°C、°F 或 Kelvin
+- **压力**：kPa、PSI、bar 或 inHg
+- **AFR 显示**：AFR 或 Lambda（支持燃料类型选择）
+- **速度**：km/h 或 mph
 
-### Performance Calculator
-- **Physics-based HP**: Calculate wheel horsepower from acceleration data
-- **Torque Curves**: View estimated torque at different RPMs
-- **Acceleration Times**: Estimated 0-60 and quarter mile times
-- **Vehicle Specs**: Configure weight, drag coefficient, tire diameter, gear ratios
+### 性能计算器
+- **基于物理的功率计算**：根据加速数据计算轮上马力
+- **扭矩曲线**：查看不同 RPM 下的估算扭矩
+- **加速时间**：估算 0-100km/h 和四分之一英里时间
+- **车辆参数**：配置车重、风阻系数、轮胎直径、齿比
 
-### Project Management
-- **Project-based Workflow**: Organize tunes by vehicle/ECU
-- **INI Repository**: Manage ECU definition files with signature matching
-- **Online INI Search**: Download INI files from Speeduino and rusEFI GitHub repos
-- **Signature Mismatch Detection**: Automatic detection when ECU doesn't match INI
+### 项目管理
+- **基于项目的工作流**：按车辆/ECU 组织调校
+- **INI 仓库**：管理 ECU 定义文件，支持签名匹配
+- **在线 INI 搜索**：从 Speeduino 和 rusEFI GitHub 仓库下载 INI 文件
+- **签名不匹配检测**：ECU 与 INI 不匹配时自动检测
 
-## Screenshots
+## 支持的 ECU
 
-| Welcome Screen | Settings Dialog | Table Editor |
-|:--------------:|:---------------:|:------------:|
-| ![Welcome](docs/screenshots/welcome.png) | ![Settings](docs/screenshots/settings-dialog.png) | ![Table Editor](docs/screenshots/table-editor.png) |
+### 当前支持
+- **Speeduino** - 完整支持 INI 定义文件和串行协议
+- **rusEFI** - 完整支持 INI 定义文件和串行协议
+- **EpicEFI** - 通过标准 INI 格式完整支持
 
-## Supported ECUs
+### 兼容
+- 任何使用标准 INI 定义格式的 ECU（MegaTune/TunerStudio 兼容）
+- Megasquirt MS2/MS3（部分支持 - 串行协议开发中）
 
-### Currently Supported
-- **Speeduino** - Full support for INI definition files and serial protocol
-- **rusEFI** - Full support for INI definition files and serial protocol
-- **EpicEFI** - Full support via standard INI format
+## 快速开始
 
-### Compatible
-- Any ECU using the standard INI definition format (MegaTune/TunerStudio compatible)
-- Megasquirt MS2/MS3 (partial support - serial protocol in progress)
+### 环境要求
 
-**Note**: Trigger pattern support (e.g., "60-2", "36-1", "Nissan QG18") depends on ECU firmware, not LibreTune. See [docs/NISSAN_QG18_TRIGGER_SETUP.md](docs/NISSAN_QG18_TRIGGER_SETUP.md) for details on how trigger patterns work and how to request support for new patterns.
+- **Rust 1.75+** - 通过 [rustup](https://rustup.rs) 安装
+- **Node.js 20+** - 用于 Tauri 前端
 
-## Quick Start
-
-### Prerequisites
-
-- **Rust 1.75+** - Install via [rustup](https://rustup.rs)
-- **Node.js 20+** - For the Tauri frontend
-
-### Build & Run
+### 构建与运行
 
 ```bash
-# Clone the repository
-git clone https://github.com/RallyPat/LibreTune.git
-cd LibreTune
+# 克隆仓库
+git clone https://github.com/FFGG10-29/FCoreTuner.git
+cd FCoreTuner
 
-# Install frontend dependencies
-cd crates/libretune-app
+# 安装前端依赖
+cd crates/fcoretuner-app
 npm install
 
-# Run in development mode
+# 开发模式运行
 npm run tauri dev
 ```
 
-### Notes for Windows Users
+### Windows 用户注意事项
 
 ```bash
-# If you are getting a message about link.exe not being found
-# you may need to download the Visual Stuido Build Tools 
-# until the binaries are ready to be distributed.
+# 如果提示找不到 link.exe，需要安装 Visual Studio Build Tools
 
-# 1. Install Visual Studio Build Tools
-# Download from:
+# 1. 安装 Visual Studio Build Tools
+# 下载地址：
 # https://visualstudio.microsoft.com/downloads/
 #
-# Scroll to "Tools for Visual Studio" → "Build Tools for Visual Studio".
-# During installation, enable ONLY this workload:
+# 滚动到 "Tools for Visual Studio" → "Build Tools for Visual Studio"
+# 安装时只勾选此工作负载：
 #
 #   ✔ Desktop development with C++
 #
-# This installs:
-# - MSVC compiler
-# - link.exe
-# - Windows 10/11 SDK
-# - CMake and Ninja
 
-# 2. Ensure Rust is using the MSVC toolchain
+# 2. 确保 Rust 使用 MSVC 工具链
 rustup default stable-x86_64-pc-windows-msvc
 
-# 3. Restart your terminal so PATH updates
+# 3. 重启终端使 PATH 生效
 
-# 4. Build LibreTune (development mode)
-cd crates/libretune-app
+# 4. 构建 FCoreTuner（开发模式）
+cd crates/fcoretuner-app
 npm install
 npm run tauri dev
 ```
 
-
-
-### Build for Production
+### 生产构建
 
 ```bash
-cd crates/libretune-app
+cd crates/fcoretuner-app
 npm run tauri build
 ```
 
-## Project Structure
+## 项目结构
 
 ```
-libretune/
+fcoretuner/
 ├── crates/
-│   ├── libretune-core/    # Core Rust library
+│   ├── fcoretuner-core/    # 核心 Rust 库
 │   │   ├── src/
-│   │   │   ├── ini/       # INI file parsing
-│   │   │   ├── protocol/  # Serial communication
-│   │   │   ├── ecu/       # ECU memory model
-│   │   │   ├── datalog/   # Data logging
-│   │   │   ├── autotune/  # AutoTune algorithms
-│   │   │   ├── tune/      # Tune file management
-│   │   │   ├── dash/      # Dashboard format parsing
-│   │   │   └── project/   # Project & restore points
+│   │   │   ├── ini/        # INI 文件解析
+│   │   │   ├── protocol/   # 串行通信
+│   │   │   ├── ecu/        # ECU 内存模型
+│   │   │   ├── datalog/    # 数据记录
+│   │   │   ├── autotune/   # AutoTune 算法
+│   │   │   ├── tune/       # 调校文件管理
+│   │   │   ├── dash/       # 仪表盘格式解析
+│   │   │   └── project/    # 项目与还原点
 │   │   └── Cargo.toml
-│   └── libretune-app/     # Tauri desktop application
-│       ├── src/           # React frontend (TypeScript)
+│   └── fcoretuner-app/     # Tauri 桌面应用
+│       ├── src/            # React 前端 (TypeScript)
 │       │   ├── components/
-│       │   │   ├── dashboards/   # Dashboard & gauge rendering
-│       │   │   ├── tables/       # 2D/3D table editors
-│       │   │   ├── dialogs/      # Modal dialogs
-│       │   │   ├── diagnostics/  # Tooth/composite loggers
-│       │   │   └── tuner-ui/     # Main UI components
-│       │   └── utils/     # Unit conversion, preferences
-│       └── src-tauri/     # Tauri backend (Rust)
-├── docs/                  # Documentation and screenshots
-├── scripts/               # Build and development scripts
-└── Cargo.toml             # Workspace root
+│       │   │   ├── dashboards/   # 仪表盘与仪表渲染
+│       │   │   ├── tables/       # 2D/3D 表格编辑器
+│       │   │   ├── dialogs/      # 模态对话框
+│       │   │   ├── diagnostics/  # 齿形/复合记录器
+│       │   │   └── tuner-ui/     # 主 UI 组件
+│       │   └── utils/     # 单位转换、偏好设置
+│       └── src-tauri/     # Tauri 后端 (Rust)
+├── docs/                  # 文档和截图
+├── scripts/               # 构建和开发脚本
+└── Cargo.toml             # 工作空间根配置
 ```
 
-## Development
+## 开发
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and guidelines.
+开发设置和指南请参阅 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
-### Run Tests
+### 运行测试
 
 ```bash
 cargo test --workspace
 ```
 
-### Run Lints
+### 运行代码检查
 
 ```bash
 cargo clippy --workspace
 ```
 
-## License
+## 许可证
 
-This program is free software; you can redistribute it and/or modify it under
-the terms of the GNU General Public License version 2 as published by the Free
-Software Foundation.
+本程序为自由软件；您可以根据自由软件基金会发布的 GNU 通用公共许可证第 2 版的条款重新分发和/或修改它。
 
-See [LICENSE](LICENSE) for the full license text.
+详见 [LICENSE](LICENSE)。
 
-## Contributing
+## 贡献
 
-Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) before submitting PRs.
+欢迎贡献！提交 PR 前请阅读 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
-## Acknowledgments
+## 致谢
 
-LibreTune is an independent open-source project and is not affiliated with EFI Analytics.
+FCoreTuner 是一个独立的开源项目，与 EFI Analytics 无关联。

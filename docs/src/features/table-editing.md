@@ -1,6 +1,6 @@
 # Table Editing
 
-LibreTune provides powerful tools for editing calibration tables.
+FCoreTuner provides powerful tools for editing calibration tables.
 
 ## Overview
 

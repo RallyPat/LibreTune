@@ -4,11 +4,11 @@ Dashboards display real-time engine data with customizable gauges and indicators
 
 ## Overview
 
-LibreTune dashboards are fully customizable layouts of gauges, indicators, and graphs that show live data from your ECU.
+FCoreTuner dashboards are fully customizable layouts of gauges, indicators, and graphs that show live data from your ECU.
 
 ## Default Dashboards
 
-LibreTune includes three professionally designed dashboards:
+FCoreTuner includes three professionally designed dashboards:
 
 ### Basic Dashboard
 Essential monitoring gauges:
@@ -52,7 +52,7 @@ When connected to an ECU:
 
 ## Gauge Types
 
-LibreTune supports all standard gauge styles:
+FCoreTuner supports all standard gauge styles:
 
 | Type | Description |
 |------|-------------|
@@ -88,7 +88,7 @@ Right-click any gauge or the background for options:
 | Option | Description |
 |--------|-------------|
 | **Reload Default Gauges** | Reset to default configuration |
-| **LibreTune Gauges** | Add gauges from INI definition |
+| **FCoreTuner Gauges** | Add gauges from INI definition |
 | **Reset Value** | Clear displayed value |
 | **Background** | Change background color/image |
 | **Antialiasing** | Toggle smooth rendering |
@@ -97,7 +97,7 @@ Right-click any gauge or the background for options:
 
 ## Importing Dashboards
 
-LibreTune can import TunerStudio dashboard layouts:
+FCoreTuner can import TunerStudio dashboard layouts:
 1. Go to **File → Import Dashboard**
 2. Select a `.dash` file
 3. The layout is converted and displayed

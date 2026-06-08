@@ -1,12 +1,12 @@
 # Introduction
 
-Welcome to **LibreTune**, a modern, open-source ECU tuning application for Speeduino, EpicEFI, rusEFI, and other compatible aftermarket engine control units.
+Welcome to **FCoreTuner**, a modern, open-source ECU tuning application for Speeduino, EpicEFI, rusEFI, and other compatible aftermarket engine control units.
 
-![LibreTune Welcome Screen](../screenshots/welcome.png)
+![FCoreTuner Welcome Screen](../screenshots/welcome.png)
 
-## What is LibreTune?
+## What is FCoreTuner?
 
-LibreTune is a desktop application that allows you to:
+FCoreTuner is a desktop application that allows you to:
 
 - **Connect** to your ECU via USB serial connection
 - **Monitor** real-time engine data with customizable dashboards
@@ -18,7 +18,7 @@ LibreTune is a desktop application that allows you to:
 ## Key Features
 
 ### Modern Interface
-LibreTune provides a clean, intuitive interface with dark theme support, keyboard navigation, and multi-monitor support.
+FCoreTuner provides a clean, intuitive interface with dark theme support, keyboard navigation, and multi-monitor support.
 
 ### Professional Table Editing
 Edit 2D and 3D tables with professional tools:
@@ -40,7 +40,7 @@ Automatically adjust VE and other tables based on wideband O2 sensor feedback:
 
 ## Supported ECUs
 
-LibreTune works with any ECU that uses the standard INI definition format:
+FCoreTuner works with any ECU that uses the standard INI definition format:
 
 - **Speeduino** - All versions
 - **rusEFI** - All board variants
@@ -49,14 +49,14 @@ LibreTune works with any ECU that uses the standard INI definition format:
 
 ## Getting Started
 
-Ready to start tuning? Head to the [Installation](./getting-started/installation.md) guide to get LibreTune set up on your system.
+Ready to start tuning? Head to the [Installation](./getting-started/installation.md) guide to get FCoreTuner set up on your system.
 
 ## Getting Help
 
 - **In-app Help**: Press `F1` or click the `?` button on any dialog
-- **GitHub Issues**: [Report bugs or request features](https://github.com/RallyPat/LibreTune/issues)
+- **GitHub Issues**: [Report bugs or request features](https://github.com/RallyPat/FCoreTuner/issues)
 - **Community**: Join discussions in the GitHub repository
 
 ## License
 
-LibreTune is open-source software licensed under the [GPL-2.0 License](https://github.com/RallyPat/LibreTune/blob/main/LICENSE).
+FCoreTuner is open-source software licensed under the [GPL-2.0 License](https://github.com/RallyPat/FCoreTuner/blob/main/LICENSE).

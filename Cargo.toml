@@ -1,17 +1,17 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/libretune-core",
-    "crates/libretune-app/src-tauri",
+    "crates/fcoretuner-core",
+    "crates/fcoretuner-app/src-tauri",
 ]
 
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
 license = "GPL-2.0-only"
-authors = ["LibreTune Contributors"]
-repository = "https://github.com/RallyPat/LibreTune"
-description = "Modern ECU tuning software for Speeduino, EpicEFI, and compatible ECUs"
+authors = ["FCoreTuner Contributors"]
+repository = "https://github.com/FFGG10-29/FCoreTuner"
+description = "现代ECU调校软件，支持Speeduino、EpicEFI及兼容ECU"
 
 [workspace.dependencies]
 # Async runtime

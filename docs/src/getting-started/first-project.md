@@ -1,6 +1,6 @@
 # Creating Your First Project
 
-LibreTune organizes your work into **projects**. Each project contains:
+FCoreTuner organizes your work into **projects**. Each project contains:
 
 - Your ECU definition (INI file)
 - Your current tune
@@ -9,13 +9,13 @@ LibreTune organizes your work into **projects**. Each project contains:
 
 ## Starting a New Project
 
-1. Launch LibreTune
+1. Launch FCoreTuner
 2. Click **New Project** on the welcome screen, or go to **File → New Project**
 3. Choose a project template or start from scratch
 
 ### Using a Template
 
-LibreTune includes built-in templates for common ECU configurations:
+FCoreTuner includes built-in templates for common ECU configurations:
 
 | Template | Description |
 |----------|-------------|
@@ -55,7 +55,7 @@ Have an existing TunerStudio project? You can import it:
 
 1. Go to **File → Import TS Project**
 2. Select your TunerStudio project folder
-3. LibreTune will import:
+3. FCoreTuner will import:
    - Your INI definition
    - Current tune (CurrentTune.msq)
    - Restore points

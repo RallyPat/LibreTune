@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# LibreTune Sanitized Environment Inspector
+# FCoreTuner Sanitized Environment Inspector
 # Use this script to diagnose issues with the tauri-dev.sh sanitized shell
 # It prints PATH, NVM_DIR, and node/npm availability inside the sanitized environment
 
@@ -64,7 +64,7 @@ build_sanitized_env() {
 }
 
 echo "========================================"
-echo "LibreTune Sanitized Environment Inspector"
+echo "FCoreTuner Sanitized Environment Inspector"
 echo "========================================"
 echo ""
 

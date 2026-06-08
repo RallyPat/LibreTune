@@ -1,6 +1,6 @@
-# Contributing to LibreTune
+# Contributing to FCoreTuner
 
-Thank you for your interest in contributing to LibreTune! This document provides guidelines and instructions for contributing.
+Thank you for your interest in contributing to FCoreTuner! This document provides guidelines and instructions for contributing.
 
 ## Getting Started
 
@@ -14,34 +14,34 @@ Thank you for your interest in contributing to LibreTune! This document provides
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/RallyPat/LibreTune.git
-   cd LibreTune
+   git clone https://github.com/RallyPat/FCoreTuner.git
+   cd FCoreTuner
    ```
 
 2. Install frontend dependencies:
    ```bash
-   cd crates/libretune-app
+   cd crates/fcoretuner-app
    npm install
    ```
 
 3. Build the core library:
    ```bash
-   cargo build -p libretune-core
+   cargo build -p fcoretuner-core
    ```
 
 4. Run in development mode:
    ```bash
-   cd crates/libretune-app
+   cd crates/fcoretuner-app
    npm run tauri dev
    ```
 
 ## Project Structure
 
 ```
-libretune/
+fcoretuner/
 ├── crates/
-│   ├── libretune-core/      # Rust library (ECU communication, INI parsing)
-│   └── libretune-app/       # Tauri desktop app
+│   ├── fcoretuner-core/      # Rust library (ECU communication, INI parsing)
+│   └── fcoretuner-app/       # Tauri desktop app
 │       ├── src/             # React frontend (TypeScript)
 │       └── src-tauri/       # Tauri backend (Rust)
 ├── docs/                    # Documentation and screenshots
@@ -54,13 +54,13 @@ libretune/
 
 ```bash
 # Build core library
-cargo build -p libretune-core
+cargo build -p fcoretuner-core
 
 # Run tests
-cargo test -p libretune-core
+cargo test -p fcoretuner-core
 
 # Run clippy lints
-cargo clippy -p libretune-core
+cargo clippy -p fcoretuner-core
 
 # Format code
 cargo fmt
@@ -69,7 +69,7 @@ cargo fmt
 ### Frontend (React/TypeScript)
 
 ```bash
-cd crates/libretune-app
+cd crates/fcoretuner-app
 
 # Development mode
 npm run dev
@@ -148,4 +148,4 @@ Feel free to open a GitHub issue for questions or discussion.
 
 ## License
 
-By contributing to LibreTune, you agree that your contributions will be licensed under the GPL-2.0 license.
+By contributing to FCoreTuner, you agree that your contributions will be licensed under the GPL-2.0 license.

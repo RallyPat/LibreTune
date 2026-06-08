@@ -1,23 +1,23 @@
 # Installation
 
-LibreTune is available for Windows, macOS, and Linux.
+FCoreTuner is available for Windows, macOS, and Linux.
 
 ## Download
 
-Download the latest release for your operating system from the [GitHub Releases](https://github.com/RallyPat/LibreTune/releases) page.
+Download the latest release for your operating system from the [GitHub Releases](https://github.com/RallyPat/FCoreTuner/releases) page.
 
 | Platform | File |
 |----------|------|
-| Windows | `LibreTune_x.x.x_x64-setup.exe` |
-| macOS | `LibreTune_x.x.x_universal.dmg` |
-| Linux (Debian/Ubuntu) | `libretune_x.x.x_amd64.deb` |
-| Linux (AppImage) | `LibreTune_x.x.x_amd64.AppImage` |
+| Windows | `FCoreTuner_x.x.x_x64-setup.exe` |
+| macOS | `FCoreTuner_x.x.x_universal.dmg` |
+| Linux (Debian/Ubuntu) | `fcoretuner_x.x.x_amd64.deb` |
+| Linux (AppImage) | `FCoreTuner_x.x.x_amd64.AppImage` |
 
 ## Windows Installation
 
 1. Download the `.exe` installer
 2. Run the installer and follow the prompts
-3. LibreTune will be added to your Start Menu
+3. FCoreTuner will be added to your Start Menu
 
 ### USB Driver Setup (Windows)
 
@@ -30,7 +30,7 @@ For Speeduino and most Arduino-based ECUs, you may need to install USB drivers:
 ## macOS Installation
 
 1. Download the `.dmg` file
-2. Open the DMG and drag LibreTune to your Applications folder
+2. Open the DMG and drag FCoreTuner to your Applications folder
 3. On first launch, you may need to allow the app in **System Preferences → Security & Privacy**
 
 ### USB Permissions (macOS)
@@ -38,22 +38,22 @@ For Speeduino and most Arduino-based ECUs, you may need to install USB drivers:
 macOS should automatically recognize most USB serial adapters. If you have issues:
 
 1. Check **System Preferences → Security & Privacy → Privacy → Files and Folders**
-2. Ensure LibreTune has access to removable volumes
+2. Ensure FCoreTuner has access to removable volumes
 
 ## Linux Installation
 
 ### Debian/Ubuntu (.deb)
 
 ```bash
-sudo dpkg -i libretune_x.x.x_amd64.deb
+sudo dpkg -i fcoretuner_x.x.x_amd64.deb
 sudo apt-get install -f  # Install dependencies if needed
 ```
 
 ### AppImage
 
 ```bash
-chmod +x LibreTune_x.x.x_amd64.AppImage
-./LibreTune_x.x.x_amd64.AppImage
+chmod +x FCoreTuner_x.x.x_amd64.AppImage
+./FCoreTuner_x.x.x_amd64.AppImage
 ```
 
 ### USB Permissions (Linux)
@@ -68,7 +68,7 @@ Log out and back in for the change to take effect.
 
 ## Building from Source
 
-For developers who want to build LibreTune from source, see the [Contributing Guide](../contributing.md).
+For developers who want to build FCoreTuner from source, see the [Contributing Guide](../contributing.md).
 
 ## Next Steps
 

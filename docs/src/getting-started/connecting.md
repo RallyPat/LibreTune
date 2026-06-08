@@ -1,6 +1,6 @@
 # Connecting to Your ECU
 
-LibreTune communicates with your ECU over a USB serial connection.
+FCoreTuner communicates with your ECU over a USB serial connection.
 
 ## Prerequisites
 
@@ -54,7 +54,7 @@ If you don't see your ECU's port:
 2. Verify baud rate matches your ECU
 3. Click **Connect**
 
-LibreTune will:
+FCoreTuner will:
 1. Open the serial connection
 2. Query the ECU signature
 3. Verify it matches your INI definition

@@ -1,8 +1,8 @@
 [book]
-title = "LibreTune User Manual"
-authors = ["LibreTune Contributors"]
-description = "User guide for LibreTune ECU tuning software"
-language = "en"
+title = "FCoreTuner 用户手册"
+authors = ["FCoreTuner 贡献者"]
+description = "FCoreTuner ECU 调校软件用户指南"
+language = "zh-CN"
 multilingual = false
 src = "src"
 
@@ -13,9 +13,9 @@ create-missing = true
 [output.html]
 default-theme = "navy"
 preferred-dark-theme = "navy"
-git-repository-url = "https://github.com/RallyPat/LibreTune"
-edit-url-template = "https://github.com/RallyPat/LibreTune/edit/main/docs/{path}"
-site-url = "/LibreTune/"
+git-repository-url = "https://github.com/FFGG10-29/FCoreTuner"
+edit-url-template = "https://github.com/FFGG10-29/FCoreTuner/edit/main/docs/{path}"
+site-url = "/FCoreTuner/"
 cname = ""
 input-404 = "404.md"
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# LibreTune Release Build Script
+# FCoreTuner Release Build Script
 #
 # Builds native release binaries for the current platform and outputs to releases/
 # 
@@ -28,7 +28,7 @@ NC='\033[0m' # No Color
 # Get script and project directories
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-APP_DIR="$PROJECT_ROOT/crates/libretune-app"
+APP_DIR="$PROJECT_ROOT/crates/fcoretuner-app"
 TAURI_DIR="$APP_DIR/src-tauri"
 RELEASES_DIR="$PROJECT_ROOT/releases"
 
@@ -36,7 +36,7 @@ RELEASES_DIR="$PROJECT_ROOT/releases"
 VERSION=$(grep -o '"version": "[^"]*"' "$TAURI_DIR/tauri.conf.json" | head -1 | cut -d'"' -f4)
 
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo -e "${BLUE}  LibreTune Release Builder v${VERSION}${NC}"
+echo -e "${BLUE}  FCoreTuner Release Builder v${VERSION}${NC}"
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 
 # Show help
@@ -187,7 +187,7 @@ copy_artifacts() {
 generate_build_info() {
     local info_file="$RELEASES_DIR/BUILD_INFO.txt"
     
-    echo "LibreTune Build Information" > "$info_file"
+    echo "FCoreTuner Build Information" > "$info_file"
     echo "============================" >> "$info_file"
     echo "" >> "$info_file"
     echo "Version:     $VERSION" >> "$info_file"
@@ -230,16 +230,16 @@ case "$HOST_OS" in
         copy_artifacts "linux" ""
         
         # Also copy the raw binary as fallback
-        RAW_BINARY="$PROJECT_ROOT/target/release/libretune-app"
+        RAW_BINARY="$PROJECT_ROOT/target/release/fcoretuner-app"
         if [[ -f "$RAW_BINARY" ]]; then
             cp "$RAW_BINARY" "$RELEASES_DIR/linux/"
-            chmod +x "$RELEASES_DIR/linux/libretune-app"
-            echo -e "${GREEN}  ✓ Raw binary (libretune-app)${NC}"
+            chmod +x "$RELEASES_DIR/linux/fcoretuner-app"
+            echo -e "${GREEN}  ✓ Raw binary (fcoretuner-app)${NC}"
         fi
         
         # If AppImage failed but AppDir exists, try manual squashfs
-        APPDIR="$PROJECT_ROOT/target/release/bundle/appimage/libretune-app.AppDir"
-        APPIMAGE_OUT="$RELEASES_DIR/linux/libretune-app_${VERSION}_amd64.AppImage"
+        APPDIR="$PROJECT_ROOT/target/release/bundle/appimage/fcoretuner-app.AppDir"
+        APPIMAGE_OUT="$RELEASES_DIR/linux/fcoretuner-app_${VERSION}_amd64.AppImage"
         if [[ -d "$APPDIR" ]] && ! ls "$RELEASES_DIR/linux/"*.AppImage 1>/dev/null 2>&1; then
             echo -e "${YELLOW}▶ AppImage bundle failed, attempting manual creation...${NC}"
             if command -v appimagetool &>/dev/null; then
@@ -272,18 +272,18 @@ case "$HOST_OS" in
         # Create universal binary using lipo
         echo -e "${GREEN}▶ Creating universal binary with lipo...${NC}"
         
-        INTEL_APP="$PROJECT_ROOT/target/x86_64-apple-darwin/release/bundle/macos/libretune-app.app"
-        ARM_APP="$PROJECT_ROOT/target/aarch64-apple-darwin/release/bundle/macos/libretune-app.app"
-        UNIVERSAL_APP="$RELEASES_DIR/macos/libretune-app.app"
+        INTEL_APP="$PROJECT_ROOT/target/x86_64-apple-darwin/release/bundle/macos/fcoretuner-app.app"
+        ARM_APP="$PROJECT_ROOT/target/aarch64-apple-darwin/release/bundle/macos/fcoretuner-app.app"
+        UNIVERSAL_APP="$RELEASES_DIR/macos/fcoretuner-app.app"
         
         # Copy ARM app as base (or Intel, doesn't matter for structure)
         if [[ -d "$ARM_APP" ]]; then
             cp -R "$ARM_APP" "$UNIVERSAL_APP"
             
             # Find the main executable and merge with lipo
-            INTEL_BIN="$INTEL_APP/Contents/MacOS/libretune-app"
-            ARM_BIN="$ARM_APP/Contents/MacOS/libretune-app"
-            UNIVERSAL_BIN="$UNIVERSAL_APP/Contents/MacOS/libretune-app"
+            INTEL_BIN="$INTEL_APP/Contents/MacOS/fcoretuner-app"
+            ARM_BIN="$ARM_APP/Contents/MacOS/fcoretuner-app"
+            UNIVERSAL_BIN="$UNIVERSAL_APP/Contents/MacOS/fcoretuner-app"
             
             if [[ -f "$INTEL_BIN" && -f "$ARM_BIN" ]]; then
                 lipo -create "$INTEL_BIN" "$ARM_BIN" -output "$UNIVERSAL_BIN"

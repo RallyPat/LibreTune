@@ -1,5 +1,5 @@
 #!/bin/bash
-# LibreTune Build Artifact Cleanup
+# FCoreTuner Build Artifact Cleanup
 # Removes build artifacts and dependencies
 
 set -e
@@ -20,7 +20,7 @@ NC='\033[0m' # No Color
 # Show help message
 show_help() {
   cat << EOF
-LibreTune Build Artifact Cleanup
+FCoreTuner Build Artifact Cleanup
 
 Usage: $0 [OPTIONS]
 
@@ -114,7 +114,7 @@ done
 # Get script directory and project root
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
-APP_DIR="$PROJECT_ROOT/crates/libretune-app"
+APP_DIR="$PROJECT_ROOT/crates/fcoretuner-app"
 
 # Confirm action
 confirm_action() {
@@ -198,7 +198,7 @@ clean_dist() {
 
 # Main execution
 main() {
-  log_section "LibreTune Build Artifact Cleanup"
+  log_section "FCoreTuner Build Artifact Cleanup"
 
   # If no options specified, ask what to clean
   if [[ $CLEAN_CARGO == false ]] && [[ $CLEAN_NODE == false ]] && [[ $CLEAN_DIST == false ]]; then

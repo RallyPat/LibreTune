@@ -1,5 +1,5 @@
 #!/bin/bash
-# LibreTune Development Environment Setup
+# FCoreTuner Development Environment Setup
 # Automatically installs Rust, Node.js, and system dependencies
 
 set -e
@@ -55,7 +55,7 @@ log_section() {
 # Show help message
 show_help() {
   cat << EOF
-LibreTune Development Environment Setup
+FCoreTuner Development Environment Setup
 
 Usage: $0 [OPTIONS]
 
@@ -455,7 +455,7 @@ install_npm_deps() {
   # Navigate to app directory
   SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
   PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
-  APP_DIR="$PROJECT_ROOT/crates/libretune-app"
+  APP_DIR="$PROJECT_ROOT/crates/fcoretuner-app"
 
   if [[ ! -d "$APP_DIR" ]]; then
     log_error "Application directory not found: $APP_DIR"
@@ -543,7 +543,7 @@ main() {
     esac
   done
 
-  log_section "LibreTune Development Environment Setup"
+  log_section "FCoreTuner Development Environment Setup"
 
   log_info "This script will install:"
   echo "  • Rust (latest stable)"

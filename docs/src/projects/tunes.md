@@ -4,7 +4,7 @@ Save, load, and organize your tune files.
 
 ## Tune File Format
 
-LibreTune uses the standard MSQ format:
+FCoreTuner uses the standard MSQ format:
 - XML-based tune storage
 - Compatible with TunerStudio
 - Human-readable with any text editor
@@ -63,7 +63,7 @@ Write tune to ECU's permanent flash:
 
 ### Burn Safety
 
-LibreTune warns before burning:
+FCoreTuner warns before burning:
 - Shows changed values count
 - Asks for confirmation
 - Cannot be undone (use restore points!)

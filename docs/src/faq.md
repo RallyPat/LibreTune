@@ -2,25 +2,25 @@
 
 ## General
 
-### What ECUs does LibreTune support?
+### What ECUs does FCoreTuner support?
 
-LibreTune works with any ECU that uses the standard INI definition format:
+FCoreTuner works with any ECU that uses the standard INI definition format:
 - Speeduino (all versions)
 - rusEFI (all boards)
 - EpicEFI (all versions)
 - MegaSquirt MS2/MS3 (compatibility mode)
 
-### Is LibreTune free?
+### Is FCoreTuner free?
 
-Yes! LibreTune is open-source software licensed under GPL-2.0. You can use it for free, modify it, and distribute your modifications.
+Yes! FCoreTuner is open-source software licensed under GPL-2.0. You can use it for free, modify it, and distribute your modifications.
 
 ### Can I use my existing TunerStudio projects?
 
 Yes. Use **File → Import TS Project** to import your TunerStudio project folder including tunes, restore points, and settings.
 
-### Will LibreTune work with my existing INI files?
+### Will FCoreTuner work with my existing INI files?
 
-Yes. LibreTune uses the same INI format as TunerStudio. Your existing INI files should work without modification.
+Yes. FCoreTuner uses the same INI format as TunerStudio. Your existing INI files should work without modification.
 
 ## Connection Issues
 
@@ -43,7 +43,7 @@ Yes. LibreTune uses the same INI format as TunerStudio. Your existing INI files 
 
 Your INI file doesn't match your ECU firmware:
 1. Download the correct INI for your firmware version
-2. Or use LibreTune's online search to find a matching INI
+2. Or use FCoreTuner's online search to find a matching INI
 3. Update your ECU firmware to match your INI
 
 ### Permission denied on Linux
@@ -58,7 +58,7 @@ Then log out and back in.
 
 ### How do I undo a change?
 
-Press `Ctrl+Z` to undo. LibreTune maintains a full history of changes.
+Press `Ctrl+Z` to undo. FCoreTuner maintains a full history of changes.
 
 ### What does "Set Equal" do?
 
@@ -106,7 +106,7 @@ Logs are saved in your project folder under `logs/`.
 
 ### What format are log files?
 
-LibreTune uses CSV format compatible with MegaLogViewer and other analysis tools.
+FCoreTuner uses CSV format compatible with MegaLogViewer and other analysis tools.
 
 ### How do I play back a log?
 
@@ -119,7 +119,7 @@ LibreTune uses CSV format compatible with MegaLogViewer and other analysis tools
 
 ### Where are projects stored?
 
-By default: `~/Documents/LibreTuneProjects/`
+By default: `~/Documents/FCoreTunerProjects/`
 
 You can change this in Settings.
 
@@ -139,7 +139,7 @@ Always save before burning!
 
 ## Performance
 
-### LibreTune is slow on my computer
+### FCoreTuner is slow on my computer
 
 Try these settings:
 1. Disable 3D table visualization
@@ -157,26 +157,26 @@ Try these settings:
 
 ### My trigger pattern isn't in the list
 
-Trigger patterns (like "60-2", "36-1", "Nissan QG18") are defined in the **ECU firmware**, not in LibreTune. LibreTune only displays what's available in your INI file.
+Trigger patterns (like "60-2", "36-1", "Nissan QG18") are defined in the **ECU firmware**, not in FCoreTuner. FCoreTuner only displays what's available in your INI file.
 
 If your trigger pattern is missing:
 1. Check if your ECU firmware supports it
 2. Request support from your ECU manufacturer (Speeduino, rusEFI, etc.)
 3. Update to newer firmware if support was added recently
-4. Import the matching INI file to LibreTune
+4. Import the matching INI file to FCoreTuner
 
 See [NISSAN_QG18_TRIGGER_SETUP.md](../../NISSAN_QG18_TRIGGER_SETUP.md) for a detailed example.
 
-### Can LibreTune add support for my trigger pattern?
+### Can FCoreTuner add support for my trigger pattern?
 
-No. Trigger pattern decoding happens in the **ECU firmware** in real-time (microsecond precision). LibreTune is a tuning interface that runs on your computer - it cannot process trigger patterns.
+No. Trigger pattern decoding happens in the **ECU firmware** in real-time (microsecond precision). FCoreTuner is a tuning interface that runs on your computer - it cannot process trigger patterns.
 
 To add a new trigger pattern:
 1. Request it from your ECU firmware project (Speeduino, rusEFI)
 2. Wait for firmware implementation
 3. Update your ECU firmware
 4. Import the new INI file
-5. The pattern will automatically appear in LibreTune
+5. The pattern will automatically appear in FCoreTuner
 
 ### What if I need a trigger pattern now?
 

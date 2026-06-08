@@ -1,6 +1,6 @@
 # Supported ECUs
 
-ECUs compatible with LibreTune.
+ECUs compatible with FCoreTuner.
 
 ## Officially Supported
 
@@ -50,7 +50,7 @@ Any ECU using standard INI format should work for:
 
 ## ECU Detection
 
-LibreTune detects your ECU by:
+FCoreTuner detects your ECU by:
 1. Connecting to serial port
 2. Querying ECU signature
 3. Matching to loaded INI file
@@ -63,7 +63,7 @@ If signature doesn't match:
 ## Getting INI Files
 
 ### Built-in Repository
-LibreTune includes common INI files:
+FCoreTuner includes common INI files:
 - Speeduino (multiple versions)
 - rusEFI (multiple boards)
 - epicEFI
@@ -83,7 +83,7 @@ Search GitHub repositories:
 
 To add support for a new ECU:
 1. Obtain the INI definition file
-2. Import into LibreTune
+2. Import into FCoreTuner
 3. Test connection and features
 4. Report issues on GitHub
 
@@ -105,16 +105,16 @@ Most INI-compatible ECUs should work without modification.
 ### "Features not working"
 Some ECU-specific features may require:
 - Updated INI file
-- LibreTune updates
+- FCoreTuner updates
 - Feature requests on GitHub
 
 ## Trigger Patterns
 
 ### Understanding Trigger Pattern Support
 
-**Important**: Trigger patterns (like "60-2", "36-1", "Nissan QG18") are implemented in the **ECU firmware**, not in LibreTune.
+**Important**: Trigger patterns (like "60-2", "36-1", "Nissan QG18") are implemented in the **ECU firmware**, not in FCoreTuner.
 
-LibreTune reads available patterns from the INI file and presents them in a dropdown. The actual trigger decoding happens in real-time on the ECU's microcontroller.
+FCoreTuner reads available patterns from the INI file and presents them in a dropdown. The actual trigger decoding happens in real-time on the ECU's microcontroller.
 
 ### If Your Trigger Pattern Is Missing
 
@@ -126,7 +126,7 @@ If you need a trigger pattern that's not in the list:
    - Speeduino: https://speeduino.com/forum/
    - rusEFI: https://github.com/rusefi/rusefi
    - EpicEFI: Contact through their channels
-4. **Import New INI**: Once firmware is updated, import matching INI to LibreTune
+4. **Import New INI**: Once firmware is updated, import matching INI to FCoreTuner
 
 **Example**: For detailed information on requesting trigger pattern support, see [NISSAN_QG18_TRIGGER_SETUP.md](../../NISSAN_QG18_TRIGGER_SETUP.md).
 

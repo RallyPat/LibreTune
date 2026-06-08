@@ -1,6 +1,6 @@
 # Global Keyboard Shortcuts
 
-Complete reference for LibreTune keyboard shortcuts.
+Complete reference for FCoreTuner keyboard shortcuts.
 
 ## File Operations
 

@@ -55,7 +55,7 @@ Switch between dashboards:
 
 ### Categories
 Dashboards are grouped:
-- **Built-in**: LibreTune defaults
+- **Built-in**: FCoreTuner defaults
 - **User**: Your custom dashboards
 - **Imported**: From TunerStudio
 

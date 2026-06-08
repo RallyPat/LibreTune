@@ -1,6 +1,6 @@
 # Contributing
 
-Thank you for your interest in contributing to LibreTune!
+Thank you for your interest in contributing to FCoreTuner!
 
 ## Getting Started
 
@@ -13,15 +13,15 @@ Thank you for your interest in contributing to LibreTune!
 ### Clone the Repository
 
 ```bash
-git clone https://github.com/RallyPat/LibreTune.git
-cd LibreTune
+git clone https://github.com/RallyPat/FCoreTuner.git
+cd FCoreTuner
 ```
 
 ### Install Dependencies
 
 ```bash
 # Frontend dependencies
-cd crates/libretune-app
+cd crates/fcoretuner-app
 npm install
 
 # Return to root
@@ -31,7 +31,7 @@ cd ../..
 ### Development Mode
 
 ```bash
-cd crates/libretune-app
+cd crates/fcoretuner-app
 npm run tauri dev
 ```
 
@@ -40,16 +40,16 @@ This starts the app in development mode with hot-reloading.
 ## Project Structure
 
 ```
-LibreTune/
+FCoreTuner/
 ├── crates/
-│   ├── libretune-core/     # Rust core library
+│   ├── fcoretuner-core/     # Rust core library
 │   │   ├── src/
 │   │   │   ├── ini/        # INI parsing
 │   │   │   ├── protocol/   # ECU communication
 │   │   │   ├── project/    # Project management
 │   │   │   └── ...
 │   │   └── tests/
-│   └── libretune-app/      # Tauri desktop app
+│   └── fcoretuner-app/      # Tauri desktop app
 │       ├── src/            # React frontend
 │       └── src-tauri/      # Tauri backend
 ├── docs/                   # Documentation
@@ -74,10 +74,10 @@ LibreTune/
 
 ```bash
 # Rust tests
-cargo test -p libretune-core
+cargo test -p fcoretuner-core
 
 # TypeScript type checking
-cd crates/libretune-app
+cd crates/fcoretuner-app
 npx tsc --noEmit
 ```
 
@@ -110,7 +110,7 @@ feat: Add wideband O2 support for rusEFI
 
 ## Areas for Contribution
 
-Check [GitHub Issues](https://github.com/RallyPat/LibreTune/issues) for:
+Check [GitHub Issues](https://github.com/RallyPat/FCoreTuner/issues) for:
 - `good first issue` - Good for newcomers
 - `help wanted` - Needs community help
 - `enhancement` - New features

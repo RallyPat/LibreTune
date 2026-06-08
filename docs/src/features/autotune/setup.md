@@ -15,7 +15,7 @@ Before using AutoTune, ensure:
 ## Sensor Configuration
 
 ### Wideband Controllers
-LibreTune works with any wideband that outputs 0-5V analog:
+FCoreTuner works with any wideband that outputs 0-5V analog:
 - AEM UEGO
 - Innovate LC-2
 - PLX Wideband
@@ -101,7 +101,7 @@ Engine exhaust takes time to reach the O2 sensor. AutoTune compensates:
 
 - **At idle**: ~200ms delay (long runner path)
 - **At redline**: ~50ms delay (fast exhaust flow)
-- LibreTune interpolates between these values
+- FCoreTuner interpolates between these values
 
 ## Best Practices
 

@@ -78,14 +78,14 @@ jobs:
         with:
           node-version: '22'
           cache: 'npm'
-          cache-dependency-path: crates/libretune-app/package-lock.json
+          cache-dependency-path: crates/fcoretuner-app/package-lock.json
 
       - name: Install frontend dependencies
-        working-directory: crates/libretune-app
+        working-directory: crates/fcoretuner-app
         run: npm ci
 
       - name: Frontend type check
-        working-directory: crates/libretune-app
+        working-directory: crates/fcoretuner-app
         run: npx tsc --noEmit
 
   build-linux:
@@ -116,30 +116,30 @@ jobs:
         with:
           node-version: '22'
           cache: 'npm'
-          cache-dependency-path: crates/libretune-app/package-lock.json
+          cache-dependency-path: crates/fcoretuner-app/package-lock.json
 
       - name: Install frontend dependencies
-        working-directory: crates/libretune-app
+        working-directory: crates/fcoretuner-app
         run: npm ci
 
       - name: Stamp nightly version
-        working-directory: crates/libretune-app/src-tauri
+        working-directory: crates/fcoretuner-app/src-tauri
         run: |
           DATE_STAMP=${{ needs.check-changes.outputs.date_stamp }}
           sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"0.1.0-nightly.${DATE_STAMP}\"/" tauri.conf.json
           echo "Version stamped as 0.1.0-nightly.${DATE_STAMP}"
 
       - name: Build Tauri app (Linux)
-        working-directory: crates/libretune-app
+        working-directory: crates/fcoretuner-app
         run: npx tauri build --target x86_64-unknown-linux-gnu
 
       - name: Prepare artifacts directory
-        working-directory: crates/libretune-app
+        working-directory: crates/fcoretuner-app
         run: |
           mkdir -p artifacts/linux
 
       - name: Copy Linux artifacts
-        working-directory: crates/libretune-app
+        working-directory: crates/fcoretuner-app
         run: |
           # Copy AppImage if it exists (check both possible locations)
           if [ -d "../../target/x86_64-unknown-linux-gnu/release/bundle/appimage" ]; then
@@ -167,7 +167,7 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: linux-x86_64-${{ needs.check-changes.outputs.date_stamp }}
-          path: crates/libretune-app/artifacts/linux/*
+          path: crates/fcoretuner-app/artifacts/linux/*
           if-no-files-found: warn
           retention-days: 7
 
@@ -188,31 +188,31 @@ jobs:
         with:
           node-version: '22'
           cache: 'npm'
-          cache-dependency-path: crates/libretune-app/package-lock.json
+          cache-dependency-path: crates/fcoretuner-app/package-lock.json
 
       - name: Install frontend dependencies
-        working-directory: crates/libretune-app
+        working-directory: crates/fcoretuner-app
         run: npm ci
 
       - name: Build Tauri app (Windows - Portable)
-        working-directory: crates/libretune-app
+        working-directory: crates/fcoretuner-app
         run: npx tauri build --target x86_64-pc-windows-msvc --no-bundle
 
       - name: Prepare artifacts directory
-        working-directory: crates/libretune-app
+        working-directory: crates/fcoretuner-app
         run: |
           mkdir artifacts\windows
 
       - name: Copy Windows portable exe
-        working-directory: crates/libretune-app
+        working-directory: crates/fcoretuner-app
         shell: cmd
         run: |
           REM Copy portable exe (check workspace root first, then local)
-          if exist "..\..\target\x86_64-pc-windows-msvc\release\libretune-app.exe" (
-            copy "..\..\target\x86_64-pc-windows-msvc\release\libretune-app.exe" "artifacts\windows\LibreTune-nightly-portable.exe" >nul 2>&1
+          if exist "..\..\target\x86_64-pc-windows-msvc\release\fcoretuner-app.exe" (
+            copy "..\..\target\x86_64-pc-windows-msvc\release\fcoretuner-app.exe" "artifacts\windows\FCoreTuner-nightly-portable.exe" >nul 2>&1
           )
-          if exist "src-tauri\target\x86_64-pc-windows-msvc\release\libretune-app.exe" (
-            copy "src-tauri\target\x86_64-pc-windows-msvc\release\libretune-app.exe" "artifacts\windows\LibreTune-nightly-portable.exe" >nul 2>&1
+          if exist "src-tauri\target\x86_64-pc-windows-msvc\release\fcoretuner-app.exe" (
+            copy "src-tauri\target\x86_64-pc-windows-msvc\release\fcoretuner-app.exe" "artifacts\windows\FCoreTuner-nightly-portable.exe" >nul 2>&1
           )
           REM List what we found
           echo === Artifacts copied ===
@@ -222,7 +222,7 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: windows-x86_64-${{ needs.check-changes.outputs.date_stamp }}
-          path: crates/libretune-app/artifacts/windows/*
+          path: crates/fcoretuner-app/artifacts/windows/*
           if-no-files-found: warn
           retention-days: 7
 
@@ -243,14 +243,14 @@ jobs:
         with:
           node-version: '22'
           cache: 'npm'
-          cache-dependency-path: crates/libretune-app/package-lock.json
+          cache-dependency-path: crates/fcoretuner-app/package-lock.json
 
       - name: Install frontend dependencies
-        working-directory: crates/libretune-app
+        working-directory: crates/fcoretuner-app
         run: npm ci
 
       - name: Stamp nightly version
-        working-directory: crates/libretune-app/src-tauri
+        working-directory: crates/fcoretuner-app/src-tauri
         run: |
           DATE_STAMP=${{ needs.check-changes.outputs.date_stamp }}
           sed -i '' "s/\"version\": \"[^\"]*\"/\"version\": \"0.1.0-nightly.${DATE_STAMP}\"/" tauri.conf.json
@@ -262,20 +262,20 @@ jobs:
           rustup target add x86_64-apple-darwin
 
       - name: Build Tauri app (macOS ARM)
-        working-directory: crates/libretune-app
+        working-directory: crates/fcoretuner-app
         run: npx tauri build --target aarch64-apple-darwin
 
       - name: Build Tauri app (macOS Intel)
-        working-directory: crates/libretune-app
+        working-directory: crates/fcoretuner-app
         run: npx tauri build --target x86_64-apple-darwin
 
       - name: Prepare artifacts directory
-        working-directory: crates/libretune-app
+        working-directory: crates/fcoretuner-app
         run: |
           mkdir -p artifacts/macos
 
       - name: Copy and package macOS artifacts
-        working-directory: crates/libretune-app
+        working-directory: crates/fcoretuner-app
         run: |
           # Copy DMG files (check workspace root first, then local)
           for dmg in ../../target/*/release/bundle/dmg/*.dmg; do
@@ -321,7 +321,7 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: macos-universal-${{ needs.check-changes.outputs.date_stamp }}
-          path: crates/libretune-app/artifacts/macos/*
+          path: crates/fcoretuner-app/artifacts/macos/*
           if-no-files-found: warn
           retention-days: 7
 
@@ -344,18 +344,18 @@ jobs:
           
           # Rename Linux artifacts
           for f in artifacts/linux-x86_64-*/*.AppImage; do
-            [ -f "$f" ] && cp "$f" "release/LibreTune-nightly-${DATE_STAMP}-linux-x86_64.AppImage"
+            [ -f "$f" ] && cp "$f" "release/FCoreTuner-nightly-${DATE_STAMP}-linux-x86_64.AppImage"
           done
           for f in artifacts/linux-x86_64-*/*.deb; do
-            [ -f "$f" ] && cp "$f" "release/LibreTune-nightly-${DATE_STAMP}-linux-x86_64.deb"
+            [ -f "$f" ] && cp "$f" "release/FCoreTuner-nightly-${DATE_STAMP}-linux-x86_64.deb"
           done
           for f in artifacts/linux-x86_64-*/*.rpm; do
-            [ -f "$f" ] && cp "$f" "release/LibreTune-nightly-${DATE_STAMP}-linux-x86_64.rpm"
+            [ -f "$f" ] && cp "$f" "release/FCoreTuner-nightly-${DATE_STAMP}-linux-x86_64.rpm"
           done
           
           # Rename Windows artifacts
           for f in artifacts/windows-x86_64-*/*.exe; do
-            [ -f "$f" ] && cp "$f" "release/LibreTune-nightly-${DATE_STAMP}-windows-x86_64-portable.exe"
+            [ -f "$f" ] && cp "$f" "release/FCoreTuner-nightly-${DATE_STAMP}-windows-x86_64-portable.exe"
           done
           
           # Rename macOS artifacts
@@ -390,7 +390,7 @@ jobs:
             
             ### Notes
             - This release is automatically updated each night when there are new commits
-            - For stable releases, see the [Releases](https://github.com/RallyPat/LibreTune/releases) page
+            - For stable releases, see the [Releases](https://github.com/RallyPat/FCoreTuner/releases) page
           files: release/*
           fail_on_unmatched_files: false
         env:

@@ -1,5 +1,5 @@
 #!/bin/bash
-# LibreTune Test Runner
+# FCoreTuner Test Runner
 # Runs all tests and displays summary
 
 set -e
@@ -85,7 +85,7 @@ run_rust_tests() {
 run_type_check() {
   log_section "TypeScript Type Checking"
 
-  APP_DIR="$PROJECT_ROOT/crates/libretune-app"
+  APP_DIR="$PROJECT_ROOT/crates/fcoretuner-app"
 
   if [[ ! -d "$APP_DIR" ]]; then
     log_warning "App directory not found: $APP_DIR"
@@ -175,7 +175,7 @@ display_summary() {
 
 # Main execution
 main() {
-  log_section "LibreTune Test Runner"
+  log_section "FCoreTuner Test Runner"
 
   # Run tests
   run_rust_tests

@@ -1,5 +1,5 @@
 #!/bin/bash
-# LibreTune Documentation Build Script
+# FCoreTuner Documentation Build Script
 # Generates all documentation: Rust API, TypeScript API, and User Manual
 
 set -e
@@ -15,7 +15,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 echo -e "${BLUE}╔════════════════════════════════════════╗${NC}"
-echo -e "${BLUE}║  LibreTune Documentation Builder       ║${NC}"
+echo -e "${BLUE}║  FCoreTuner Documentation Builder       ║${NC}"
 echo -e "${BLUE}╚════════════════════════════════════════╝${NC}"
 echo ""
 
@@ -82,8 +82,8 @@ if [ "$BUILD_RUST" = true ]; then
     echo -e "${YELLOW}📦 Building Rust API documentation...${NC}"
     
     if command -v cargo &> /dev/null; then
-        cargo doc --no-deps --document-private-items -p libretune-core 2>&1 | tail -5
-        echo -e "${GREEN}✓ Rust docs: target/doc/libretune_core/index.html${NC}"
+        cargo doc --no-deps --document-private-items -p fcoretuner-core 2>&1 | tail -5
+        echo -e "${GREEN}✓ Rust docs: target/doc/fcoretuner_core/index.html${NC}"
     else
         echo -e "${RED}✗ Cargo not found. Install Rust to build Rust documentation.${NC}"
     fi
@@ -94,7 +94,7 @@ fi
 if [ "$BUILD_FRONTEND" = true ]; then
     echo -e "${YELLOW}📦 Building TypeScript API documentation...${NC}"
     
-    cd "$PROJECT_ROOT/crates/libretune-app"
+    cd "$PROJECT_ROOT/crates/fcoretuner-app"
     
     if command -v npx &> /dev/null; then
         # Check if typedoc is installed
@@ -135,7 +135,7 @@ echo -e "${GREEN}Documentation build complete!${NC}"
 echo ""
 echo "Output locations:"
 if [ "$BUILD_RUST" = true ]; then
-    echo -e "  Rust API:      ${BLUE}file://$PROJECT_ROOT/target/doc/libretune_core/index.html${NC}"
+    echo -e "  Rust API:      ${BLUE}file://$PROJECT_ROOT/target/doc/fcoretuner_core/index.html${NC}"
 fi
 if [ "$BUILD_FRONTEND" = true ]; then
     echo -e "  Frontend API:  ${BLUE}file://$PROJECT_ROOT/docs/api/index.html${NC}"
@@ -154,12 +154,12 @@ if [ "$OPEN" = true ]; then
         elif command -v open &> /dev/null; then
             open "$PROJECT_ROOT/docs/book/index.html"
         fi
-    elif [ "$BUILD_RUST" = true ] && [ -f "$PROJECT_ROOT/target/doc/libretune_core/index.html" ]; then
+    elif [ "$BUILD_RUST" = true ] && [ -f "$PROJECT_ROOT/target/doc/fcoretuner_core/index.html" ]; then
         echo -e "${YELLOW}Opening Rust docs in browser...${NC}"
         if command -v xdg-open &> /dev/null; then
-            xdg-open "$PROJECT_ROOT/target/doc/libretune_core/index.html"
+            xdg-open "$PROJECT_ROOT/target/doc/fcoretuner_core/index.html"
         elif command -v open &> /dev/null; then
-            open "$PROJECT_ROOT/target/doc/libretune_core/index.html"
+            open "$PROJECT_ROOT/target/doc/fcoretuner_core/index.html"
         fi
     fi
 fi

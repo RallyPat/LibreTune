@@ -2006,13 +2006,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "libretune-app"
+name = "fcoretuner-app"
 version = "0.1.0"
 dependencies = [
  "byteorder",
  "chrono",
  "dirs 5.0.1",
- "libretune-core",
+ "fcoretuner-core",
  "serde",
  "serde_json",
  "tauri",
@@ -2024,7 +2024,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "libretune-core"
+name = "fcoretuner-core"
 version = "0.1.0"
 dependencies = [
  "anyhow",

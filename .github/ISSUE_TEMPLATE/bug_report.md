@@ -1,6 +1,6 @@
 ---
 name: Bug Report
-about: Report a bug or issue with LibreTune
+about: Report a bug or issue with FCoreTuner
 title: '[BUG] '
 labels: bug
 assignees: ''
@@ -11,7 +11,7 @@ A clear and concise description of the bug.
 
 ## Environment
 - **OS**: [e.g., Windows 11, Ubuntu 24.04, macOS 14]
-- **LibreTune Version**: [e.g., 0.1.0]
+- **FCoreTuner Version**: [e.g., 0.1.0]
 - **ECU Type**: [e.g., Speeduino, rusEFI]
 - **INI File**: [e.g., speeduino 202501]
 

@@ -1,6 +1,6 @@
 # Data Logging
 
-LibreTune can record real-time engine data for later analysis.
+FCoreTuner can record real-time engine data for later analysis.
 
 ## Overview
 
@@ -27,7 +27,7 @@ Logs are automatically saved to your project's `logs/` folder.
 
 ## Log File Format
 
-LibreTune uses CSV format:
+FCoreTuner uses CSV format:
 ```csv
 Time,RPM,MAP,AFR,CLT,TPS,...
 0.000,850,35.2,14.7,185,1.2,...

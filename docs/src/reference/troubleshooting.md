@@ -33,7 +33,7 @@ Common problems and solutions.
 
 **Solutions**:
 1. Download correct INI for firmware version
-2. Use LibreTune's online INI search
+2. Use FCoreTuner's online INI search
 3. Update ECU firmware to match INI
 4. Continue anyway (advanced users)
 
@@ -161,10 +161,10 @@ Common problems and solutions.
 
 If these solutions don't work:
 
-1. Check [GitHub Issues](https://github.com/RallyPat/LibreTune/issues)
+1. Check [GitHub Issues](https://github.com/RallyPat/FCoreTuner/issues)
 2. Search existing issues first
 3. Create new issue with:
-   - LibreTune version
+   - FCoreTuner version
    - Operating system
    - ECU type and firmware
    - Steps to reproduce

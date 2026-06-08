@@ -17,7 +17,7 @@ Bring in projects from TunerStudio and other sources.
 2. Select your TunerStudio project folder
 3. Preview shows what will be imported
 4. Click **Import**
-5. Project created in LibreTune
+5. Project created in FCoreTuner
 
 ### Project Folder Location
 
@@ -29,7 +29,7 @@ TunerStudio projects are typically in:
 ## After Import
 
 ### Verify INI Match
-LibreTune checks if the INI matches:
+FCoreTuner checks if the INI matches:
 - ✅ **Match**: Ready to use
 - ⚠️ **Mismatch**: May need different INI
 
@@ -59,7 +59,7 @@ Add an INI to your local repository:
 Import TunerStudio dashboard layouts:
 1. **File → Import Dashboard...**
 2. Select `.dash` file
-3. Dashboard converted to LibreTune format
+3. Dashboard converted to FCoreTuner format
 4. Available in dashboard selector
 
 ## Troubleshooting Import
@@ -79,4 +79,4 @@ MSQ doesn't match INI structure:
 ### "Missing restore points"
 TunerStudio didn't create restore points:
 1. This is normal for new projects
-2. Create restore points in LibreTune going forward
+2. Create restore points in FCoreTuner going forward

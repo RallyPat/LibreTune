@@ -1,7 +1,7 @@
 # Nissan Micra K12 (QG18) Trigger Setup Support
 
 ## Issue Summary
-Request to add support for the Nissan Micra K12 trigger pattern in LibreTune for use with Speeduino ECU.
+Request to add support for the Nissan Micra K12 trigger pattern in FCoreTuner for use with Speeduino ECU.
 
 ## Background
 The Nissan Micra K12 uses the **QG18DE** engine, which has a specific crankshaft and camshaft trigger pattern that needs to be recognized by the ECU for proper ignition and fuel timing.
@@ -20,7 +20,7 @@ ECU Firmware (Speeduino/rusEFI)
     ↓ (implements trigger decoding)
 INI Definition File
     ↓ (defines available options)
-Tuning Software (LibreTune/TunerStudio)
+Tuning Software (FCoreTuner/TunerStudio)
     ↓ (presents UI for selection)
 User selects trigger pattern
     ↓ (sends configuration to ECU)
@@ -29,9 +29,9 @@ ECU uses pattern for timing
 
 ### Key Points
 1. **Trigger pattern decoding happens in the ECU firmware**, not in the tuning software
-2. **LibreTune reads the available patterns from the INI file**
+2. **FCoreTuner reads the available patterns from the INI file**
 3. **The INI file is generated from the ECU firmware source code**
-4. **LibreTune does NOT decode or process trigger patterns** - it only displays what's available
+4. **FCoreTuner does NOT decode or process trigger patterns** - it only displays what's available
 
 ## Current Status
 
@@ -48,7 +48,7 @@ The demo INI file (rusEFI/epicEFI) includes these Nissan trigger patterns:
 The **Nissan QG18** pattern is NOT currently in the list. This pattern needs to be:
 1. Implemented in the Speeduino firmware
 2. Added to the Speeduino INI file
-3. Then it will automatically appear in LibreTune
+3. Then it will automatically appear in FCoreTuner
 
 ## What Needs to Happen
 
@@ -90,19 +90,19 @@ Once Speeduino firmware supports QG18:
 1. Download the latest Speeduino INI file
 2. It will include the new trigger pattern
 
-### Step 3: Use in LibreTune (AUTOMATIC)
-No LibreTune changes needed! Once you have the updated INI:
-1. Import the new INI file into LibreTune
+### Step 3: Use in FCoreTuner (AUTOMATIC)
+No FCoreTuner changes needed! Once you have the updated INI:
+1. Import the new INI file into FCoreTuner
 2. The QG18 option will appear in the trigger setup dropdown
 3. Select it and configure your ECU
 
-## For LibreTune Users
+## For FCoreTuner Users
 
 ### If You Need QG18 Support Now
 1. **Check Speeduino firmware**: See if your firmware version already supports QG18
 2. **Update firmware if available**: Flash the latest Speeduino firmware
 3. **Get matching INI**: Download the INI that matches your firmware version
-4. **Import to LibreTune**: File → Import ECU Definition → Select new INI
+4. **Import to FCoreTuner**: File → Import ECU Definition → Select new INI
 
 ### If Speeduino Doesn't Support QG18 Yet
 1. **Request support from Speeduino project**:
@@ -155,18 +155,18 @@ trigger_type = bits, U32, 564, [0:6],
     ; ...
 ```
 
-#### In LibreTune
-LibreTune automatically parses the INI and displays all options. No code changes needed.
+#### In FCoreTuner
+FCoreTuner automatically parses the INI and displays all options. No code changes needed.
 
 ```rust
-// crates/libretune-core/src/ini/parser.rs
+// crates/fcoretuner-core/src/ini/parser.rs
 // Parses bits definitions and extracts all options
 // Already handles any trigger pattern in the INI
 ```
 
-### Why LibreTune Can't Add This Directly
+### Why FCoreTuner Can't Add This Directly
 
-LibreTune is a **tuning interface**, not an ECU firmware. It:
+FCoreTuner is a **tuning interface**, not an ECU firmware. It:
 - ✅ Displays configuration options from INI
 - ✅ Sends configuration values to ECU
 - ✅ Shows real-time data
@@ -183,15 +183,15 @@ The actual trigger pattern decoding must happen in the ECU firmware because:
 
 ## Conclusion
 
-**Summary**: Adding QG18 trigger support is a Speeduino firmware task, not a LibreTune task.
+**Summary**: Adding QG18 trigger support is a Speeduino firmware task, not a FCoreTuner task.
 
-**What LibreTune Will Do**: Once Speeduino adds QG18 support and updates their INI file, LibreTune will automatically show the new trigger option without any code changes.
+**What FCoreTuner Will Do**: Once Speeduino adds QG18 support and updates their INI file, FCoreTuner will automatically show the new trigger option without any code changes.
 
 **What You Should Do**: 
 1. Engage with the Speeduino community to request QG18 support
 2. Provide documentation and scope traces if possible
 3. Once available, update your Speeduino firmware
-4. Import the new INI into LibreTune
+4. Import the new INI into FCoreTuner
 5. Select "Nissan QG18" from the trigger dropdown
 
 **Status**: This issue will remain open as a documentation reference, but the actual implementation must happen in the Speeduino project first.
@@ -202,4 +202,4 @@ The actual trigger pattern decoding must happen in the ECU firmware because:
 - Speeduino Decoders Wiki: https://wiki.speeduino.com/en/decoders
 - Speeduino Forums: https://speeduino.com/forum/
 - Speeduino GitHub: https://github.com/noisymime/speeduino
-- LibreTune INI Format Docs: [docs/reference/ini-format.md](../docs/reference/ini-format.md)
+- FCoreTuner INI Format Docs: [docs/reference/ini-format.md](../docs/reference/ini-format.md)

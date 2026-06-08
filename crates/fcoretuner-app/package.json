@@ -1,0 +1,48 @@
+{
+  "name": "FCoreTuner",
+  "description": "现代ECU调校软件，支持Speeduino、EpicEFI及兼容ECU",
+  "version": "0.1.0",
+  "private": true,
+  "license": "GPL-2.0-only",
+  "author": "FCoreTuner Contributors",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/FFGG10-29/FCoreTuner.git"
+  },
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "tauri": "tauri",
+    "release": "bash ../../scripts/build-release.sh",
+    "release:clean": "bash ../../scripts/build-release.sh --clean",
+    "docs:frontend": "typedoc",
+    "docs:rust": "cd ../fcoretuner-core && cargo doc --no-deps --open",
+    "docs:user": "mdbook build ../../docs && mdbook serve ../../docs --open",
+    "docs:all": "bash ../../scripts/build-docs.sh"
+  },
+  "dependencies": {
+    "@react-three/drei": "^10.7.7",
+    "@react-three/fiber": "^9.5.0",
+    "@tauri-apps/api": "^2",
+    "@tauri-apps/plugin-dialog": "^2.4.2",
+    "@tauri-apps/plugin-opener": "^2",
+    "@types/three": "^0.182.0",
+    "framer-motion": "^12.23.26",
+    "lucide-react": "^0.562.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "three": "^0.182.0"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2",
+    "@types/react": "^19.1.8",
+    "@types/react-dom": "^19.1.6",
+    "@vitejs/plugin-react": "^4.6.0",
+    "typedoc": "^0.27.0",
+    "typedoc-plugin-missing-exports": "^3.0.0",
+    "typescript": "~5.8.3",
+    "vite": "^7.0.4"
+  }
+}

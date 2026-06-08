@@ -4,7 +4,7 @@ Track tune history with Git-based versioning.
 
 ## Overview
 
-LibreTune can use Git to track changes to your tune:
+FCoreTuner can use Git to track changes to your tune:
 - Full history of all changes
 - Restore any previous version
 - Branch for experiments
@@ -22,7 +22,7 @@ Check **Enable version control** when creating a project.
 
 ## How It Works
 
-When enabled, LibreTune:
+When enabled, FCoreTuner:
 1. Creates a Git repository in your project folder
 2. Commits changes when you save (based on settings)
 3. Tracks all tune file modifications

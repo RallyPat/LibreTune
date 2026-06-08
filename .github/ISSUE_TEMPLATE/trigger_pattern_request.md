@@ -9,14 +9,14 @@ assignees: ''
 
 ## ⚠️ Important Information
 
-**Trigger patterns are implemented in ECU firmware, not in LibreTune.**
+**Trigger patterns are implemented in ECU firmware, not in FCoreTuner.**
 
-LibreTune is a tuning interface that reads available trigger patterns from INI files. The actual trigger decoding happens in real-time on your ECU's microcontroller.
+FCoreTuner is a tuning interface that reads available trigger patterns from INI files. The actual trigger decoding happens in real-time on your ECU's microcontroller.
 
 ### What This Means
 
-- ❌ LibreTune **cannot** add trigger pattern support directly
-- ✅ LibreTune **will automatically** show any pattern added to your ECU firmware and INI file
+- ❌ FCoreTuner **cannot** add trigger pattern support directly
+- ✅ FCoreTuner **will automatically** show any pattern added to your ECU firmware and INI file
 - 👉 You should request this feature from your **ECU firmware project** (Speeduino, rusEFI, etc.)
 
 ### Where to Request Support
