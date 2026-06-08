@@ -956,7 +956,7 @@ impl Connection {
 
         if read_format.is_empty() {
             return Err(ProtocolError::ProtocolError(format!(
-                "No read command for page {}",
+                "页面 {} 无读取命令",
                 page
             )));
         }
@@ -1005,7 +1005,7 @@ impl Connection {
 
         if page_size == 0 {
             return Err(ProtocolError::ProtocolError(format!(
-                "Unknown page size for page {}",
+                "页面 {} 的页面大小未知",
                 page
             )));
         }
@@ -1054,7 +1054,7 @@ impl Connection {
 
         if write_format.is_empty() {
             return Err(ProtocolError::ProtocolError(format!(
-                "No write command for page {}",
+                "页面 {} 无写入命令",
                 page
             )));
         }

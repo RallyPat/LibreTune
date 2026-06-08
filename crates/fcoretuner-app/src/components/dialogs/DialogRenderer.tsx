@@ -170,7 +170,7 @@ function DialogField({
     }
   }, [fieldEnabledCondition, constant?.visibility_condition, context, name, selectedBit, numValue, constant?.value_type]);
 
-  if (!constant) return <div className="field-loading">Loading {label}...</div>;
+  if (!constant) return <div className="field-loading">正在加载 {label}...</div>;
 
   // Always show field (don't hide based on condition) - condition controls enable/disable instead
   // This matches the closed-source program's behavior: "all 12 channels should be visible but disabled"

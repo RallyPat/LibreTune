@@ -97,7 +97,7 @@ impl MigrationReport {
         }
 
         if parts.is_empty() {
-            "No changes detected".to_string()
+            "未检测到更改".to_string()
         } else {
             parts.join(", ")
         }

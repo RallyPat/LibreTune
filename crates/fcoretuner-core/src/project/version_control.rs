@@ -347,12 +347,12 @@ datalogs/
             .unwrap_or("")
             .to_string();
 
-        let author = commit.author().name().unwrap_or("Unknown").to_string();
+        let author = commit.author().name().unwrap_or("未知").to_string();
 
         let time = commit.time();
         let timestamp = chrono::DateTime::from_timestamp(time.seconds(), 0)
             .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
-            .unwrap_or_else(|| "Unknown".to_string());
+            .unwrap_or_else(|| "未知".to_string());
 
         CommitInfo {
             sha_short,

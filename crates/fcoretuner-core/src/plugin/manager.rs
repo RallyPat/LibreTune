@@ -69,7 +69,7 @@ impl PluginManager {
         // Java prints version to stderr
         let version = String::from_utf8_lossy(&output.stderr);
         if output.status.success() || version.contains("version") {
-            Ok(version.lines().next().unwrap_or("Unknown").to_string())
+            Ok(version.lines().next().unwrap_or("未知").to_string())
         } else {
             Err("Java not found. Please install JRE 11 or later.".to_string())
         }
@@ -101,10 +101,10 @@ impl PluginManager {
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
             .spawn()
-            .map_err(|e| format!("Failed to start plugin host: {}", e))?;
+            .map_err(|e| format!("启动插件主机失败: {}", e))?;
 
-        let stdin = child.stdin.take().ok_or("Failed to get stdin")?;
-        let stdout = child.stdout.take().ok_or("Failed to get stdout")?;
+        let stdin = child.stdin.take().ok_or("获取标准输入失败")?;
+        let stdout = child.stdout.take().ok_or("获取标准输出失败")?;
 
         *self.stdin.lock().map_err(|e| e.to_string())? = Some(stdin);
         *process_guard = Some(child);
@@ -159,7 +159,7 @@ impl PluginManager {
                 .result
                 .ok_or_else(|| response.error.map(|e| e.message).unwrap_or_default())?,
         )
-        .map_err(|e| format!("Failed to parse plugin info: {}", e))?;
+        .map_err(|e| format!("解析插件信息失败: {}", e))?;
 
         // Store plugin
         self.plugins.write().map_err(|e| e.to_string())?.insert(
@@ -272,10 +272,10 @@ impl PluginManager {
         let stdin = stdin_guard.as_mut().ok_or("Plugin host not running")?;
 
         writeln!(stdin, "{}", message)
-            .map_err(|e| format!("Failed to write to plugin host: {}", e))?;
+            .map_err(|e| format!("写入插件主机失败: {}", e))?;
         stdin
             .flush()
-            .map_err(|e| format!("Failed to flush stdin: {}", e))?;
+            .map_err(|e| format!("刷新标准输入失败: {}", e))?;
 
         Ok(())
     }

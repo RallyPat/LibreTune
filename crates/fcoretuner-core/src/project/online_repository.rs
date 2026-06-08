@@ -170,7 +170,7 @@ impl OnlineIniRepository {
     async fn fetch_source_inis(&self, source: IniSource) -> Result<Vec<OnlineIniEntry>, io::Error> {
         let api_url = source
             .github_api_url()
-            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "No API URL for source"))?;
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "来源无 API URL"))?;
 
         let response = self
             .client

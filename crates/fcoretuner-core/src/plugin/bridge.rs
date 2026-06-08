@@ -200,7 +200,7 @@ impl ControllerBridge {
         let mut tune_guard = self.tune.write().map_err(|e| e.to_string())?;
         let tune = tune_guard
             .as_mut()
-            .ok_or_else(|| "No tune loaded".to_string())?;
+            .ok_or_else(|| "未加载调校".to_string())?;
 
         tune.set_constant(name, TuneValue::Scalar(value));
         Ok(())
@@ -211,7 +211,7 @@ impl ControllerBridge {
         let mut tune_guard = self.tune.write().map_err(|e| e.to_string())?;
         let tune = tune_guard
             .as_mut()
-            .ok_or_else(|| "No tune loaded".to_string())?;
+            .ok_or_else(|| "未加载调校".to_string())?;
 
         // Flatten 2D to 1D for storage
         let flat: Vec<f64> = values.into_iter().flatten().collect();
@@ -224,7 +224,7 @@ impl ControllerBridge {
         let mut tune_guard = self.tune.write().map_err(|e| e.to_string())?;
         let tune = tune_guard
             .as_mut()
-            .ok_or_else(|| "No tune loaded".to_string())?;
+            .ok_or_else(|| "未加载调校".to_string())?;
 
         tune.set_constant(name, TuneValue::String(value.to_string()));
         Ok(())

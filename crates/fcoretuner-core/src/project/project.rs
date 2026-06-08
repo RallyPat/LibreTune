@@ -128,7 +128,7 @@ impl Project {
         let base = dirs::document_dir()
             .or_else(dirs::home_dir)
             .ok_or_else(|| {
-                io::Error::new(io::ErrorKind::NotFound, "Could not find home directory")
+                io::Error::new(io::ErrorKind::NotFound, "找不到用户主目录")
             })?;
         Ok(base.join("FCoreTunerProjects"))
     }
@@ -426,7 +426,7 @@ impl Project {
         let Some(ref tune) = self.current_tune else {
             return Err(io::Error::new(
                 io::ErrorKind::NotFound,
-                "No tune loaded to create restore point from",
+                "未加载调校，无法创建还原点",
             ));
         };
 

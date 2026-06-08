@@ -764,7 +764,7 @@ impl TuneFile {
             }
             Some(ext) => Err(io::Error::new(
                 io::ErrorKind::Unsupported,
-                format!("Unknown format: {}", ext),
+                format!("未知格式: {}", ext),
             )),
         }
     }

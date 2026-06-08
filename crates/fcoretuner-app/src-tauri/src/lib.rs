@@ -265,7 +265,7 @@ fn default_auto_commit() -> String {
 }
 
 fn default_commit_message_format() -> String {
-    "Tune saved on {date} at {time}".to_string()
+    "调校保存于 {date} {time}".to_string()
 }
 
 fn save_settings(app: &tauri::AppHandle, settings: &Settings) {
@@ -579,11 +579,11 @@ async fn get_available_inis(app: tauri::AppHandle) -> Result<Vec<String>, String
                     }
                 }
             }
-            println!("Found {} INI files", inis.len());
+            println!("找到 {} 个 INI 文件", inis.len());
         }
         Err(e) => {
-            println!("Failed to read definitions directory: {}", e);
-            return Err(format!("Failed to read definitions directory: {}", e));
+            println!("无法读取定义目录：{}", e);
+            return Err(format!("无法读取定义目录：{}", e));
         }
     }
     inis.sort();
@@ -613,11 +613,11 @@ async fn load_ini(
         get_definitions_dir(&app).join(&path)
     };
 
-    println!("Loading INI from: {:?}", full_path);
+    println!("正在加载 INI：{:?}", full_path);
     match EcuDefinition::from_file(full_path.to_string_lossy().as_ref()) {
         Ok(def) => {
             println!(
-                "Successfully loaded INI: {} ({} tables, {} pages)",
+                "成功加载 INI：{}（{} 个表格，{} 个页面）",
                 def.signature,
                 def.tables.len(),
                 def.n_pages
@@ -873,7 +873,7 @@ async fn load_ini(
             Ok(())
         }
         Err(e) => {
-            let err_msg = format!("Failed to parse INI {:?}: {}", full_path, e);
+            let err_msg = format!("无法解析 INI {:?}：{}", full_path, e);
             eprintln!("{}", err_msg);
             Err(err_msg)
         }
@@ -973,7 +973,7 @@ async fn connect_to_ecu(
                 } else {
                     "unknown panic".to_string()
                 };
-                send_err(format!("Connection thread panicked: {}", panic_msg));
+                send_err(format!("连接线程异常退出：{}", panic_msg));
             }
         }
     });
@@ -982,16 +982,16 @@ async fn connect_to_ecu(
     let result = match rx.recv_timeout(std::time::Duration::from_secs(15)) {
         Ok(r) => r,
         Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-            Err("Connection timed out after 15 seconds".to_string())
+            Err("连接超时（15 秒）".to_string())
         }
         Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
-            Err("Connection thread crashed or disconnected".to_string())
+            Err("连接线程已崩溃或断开".to_string())
         }
     };
 
     match result {
         Ok(conn) => {
-            let signature = conn.signature().unwrap_or("Unknown").to_string();
+            let signature = conn.signature().unwrap_or("未知").to_string();
 
             // Check signature match and build mismatch info if needed
             let mismatch_info = if let Some(ref expected) = expected_signature {
@@ -1000,12 +1000,12 @@ async fn connect_to_ecu(
                 if match_type != SignatureMatchType::Exact {
                     // Log the mismatch
                     eprintln!(
-                        "Warning: ECU signature '{}' {} INI signature '{}'",
+                        "警告：ECU 签名 '{}' {} INI 签名 '{}'",
                         signature,
                         if match_type == SignatureMatchType::Partial {
-                            "partially matches"
+                            "部分匹配"
                         } else {
-                            "does not match"
+                            "不匹配"
                         },
                         expected
                     );
@@ -1284,7 +1284,7 @@ async fn enable_adaptive_timing(
     max_timeout_ms: Option<u32>,
 ) -> Result<AdaptiveTimingStats, String> {
     let mut guard = state.connection.lock().await;
-    let conn = guard.as_mut().ok_or("Not connected to ECU")?;
+    let conn = guard.as_mut().ok_or("未连接到 ECU")?;
 
     let config = AdaptiveTimingConfig {
         enabled: true,
@@ -1308,7 +1308,7 @@ async fn enable_adaptive_timing(
 #[tauri::command]
 async fn disable_adaptive_timing(state: tauri::State<'_, AppState>) -> Result<(), String> {
     let mut guard = state.connection.lock().await;
-    let conn = guard.as_mut().ok_or("Not connected to ECU")?;
+    let conn = guard.as_mut().ok_or("未连接到 ECU")?;
 
     conn.disable_adaptive_timing();
     Ok(())
@@ -1320,7 +1320,7 @@ async fn get_adaptive_timing_stats(
     state: tauri::State<'_, AppState>,
 ) -> Result<AdaptiveTimingStats, String> {
     let guard = state.connection.lock().await;
-    let conn = guard.as_ref().ok_or("Not connected to ECU")?;
+    let conn = guard.as_ref().ok_or("未连接到 ECU")?;
 
     let enabled = conn.is_adaptive_timing_enabled();
     let stats = conn.adaptive_timing_stats();
@@ -1471,7 +1471,7 @@ async fn get_table_data(
 
     let table = def
         .get_table_by_name_or_map(&table_name)
-        .ok_or_else(|| format!("Table {} not found", table_name))?;
+        .ok_or_else(|| format!("未找到表格 {}", table_name))?;
 
     // Clone the table info we need
     let x_bins_name = table.x_bins.clone();
@@ -1495,7 +1495,7 @@ async fn get_table_data(
     let x_const = def
         .constants
         .get(&x_bins_name)
-        .ok_or_else(|| format!("Constant {} not found", x_bins_name))?
+        .ok_or_else(|| format!("未找到常量 {}", x_bins_name))?
         .clone();
     let y_const = y_bins_name
         .as_ref()
@@ -1503,7 +1503,7 @@ async fn get_table_data(
     let z_const = def
         .constants
         .get(&map_name)
-        .ok_or_else(|| format!("Constant {} not found", map_name))?
+        .ok_or_else(|| format!("未找到常量 {}", map_name))?
         .clone();
 
     drop(def_guard);
@@ -1670,7 +1670,7 @@ async fn get_table_info(
             title: table.title.clone(),
         })
     } else {
-        Err(format!("Table {} not found", table_name))
+        Err(format!("未找到表格 {}", table_name))
     }
 }
 
@@ -1822,7 +1822,7 @@ async fn load_all_pages(
                 };
                 conn.read_memory(params).map_err(|e| e.to_string())
             } else {
-                Err("Not connected".to_string())
+                Err("未连接".to_string())
             }
         };
 
@@ -1898,12 +1898,12 @@ async fn get_curve_data(
     let x_const = def
         .constants
         .get(&curve.x_bins)
-        .ok_or_else(|| format!("Constant {} not found", curve.x_bins))?
+        .ok_or_else(|| format!("未找到常量 {}", curve.x_bins))?
         .clone();
     let y_const = def
         .constants
         .get(&curve.y_bins)
-        .ok_or_else(|| format!("Constant {} not found", curve.y_bins))?
+        .ok_or_else(|| format!("未找到常量 {}", curve.y_bins))?
         .clone();
 
     // Clone curve metadata
@@ -2027,19 +2027,19 @@ async fn update_table_data(
 
     let table = def
         .get_table_by_name_or_map(&table_name)
-        .ok_or_else(|| format!("Table {} not found", table_name))?;
+        .ok_or_else(|| format!("未找到表格 {}", table_name))?;
 
     let constant = def
         .constants
         .get(&table.map)
-        .ok_or_else(|| format!("Constant {} not found for table {}", table.map, table_name))?;
+        .ok_or_else(|| format!("未找到表格 {} 的常量 {}", table.map, table_name))?;
 
     // Flatten z_values
     let flat_values: Vec<f64> = z_values.into_iter().flatten().collect();
 
     if flat_values.len() != constant.shape.element_count() {
         return Err(format!(
-            "Invalid data size: expected {}, got {}",
+            "数据大小无效：期望 {}，实际 {}",
             constant.shape.element_count(),
             flat_values.len()
         ));
@@ -2140,7 +2140,7 @@ async fn update_curve_data(
 
     if y_values.len() != constant.shape.element_count() {
         return Err(format!(
-            "Invalid data size: expected {}, got {}",
+            "数据大小无效：期望 {}，实际 {}",
             constant.shape.element_count(),
             y_values.len()
         ));
@@ -2225,7 +2225,7 @@ async fn get_realtime_data(
 
     let (conn, def) = match (&mut *conn_guard, &*def_guard) {
         (Some(c), Some(d)) => (c, d),
-        _ => return Err("Connection or definition missing".to_string()),
+        _ => return Err("连接或定义缺失".to_string()),
     };
 
     // Get raw data from ECU
@@ -2399,7 +2399,7 @@ async fn start_realtime_stream(
         let conn_guard = state.connection.lock().await;
         let def_guard = state.definition.lock().await;
         if conn_guard.is_none() || def_guard.is_none() {
-            return Err("Connection or definition missing".to_string());
+            return Err("连接或定义缺失".to_string());
         }
     } else {
         let def_guard = state.definition.lock().await;
@@ -3014,7 +3014,7 @@ async fn get_constant(
     let constant = def
         .constants
         .get(&name)
-        .ok_or_else(|| format!("Constant {} not found", name))?;
+        .ok_or_else(|| format!("未找到常量 {}", name))?;
 
     // Determine value_type from DataType
     let value_type = match constant.data_type {
@@ -3078,11 +3078,11 @@ async fn get_constant_string_value(
     let constant = def
         .constants
         .get(&name)
-        .ok_or_else(|| format!("Constant {} not found", name))?;
+        .ok_or_else(|| format!("未找到常量 {}", name))?;
 
     // For string type, read the raw bytes and convert to UTF-8 string
     if constant.data_type != DataType::String {
-        return Err(format!("Constant {} is not a string type", name));
+        return Err(format!("未找到常量 {} 的字符串类型", name));
     }
 
     // When offline, try reading directly from TuneFile first (simpler and more reliable)
@@ -3148,7 +3148,7 @@ async fn get_constant_value(
     let constant = def
         .constants
         .get(&name)
-        .ok_or_else(|| format!("Constant {} not found", name))?;
+        .ok_or_else(|| format!("未找到常量 {}", name))?;
 
     // PC variables are stored locally, not on ECU
     if constant.is_pc_variable {
@@ -3386,7 +3386,7 @@ async fn update_constant(
     let constant = def
         .constants
         .get(&name)
-        .ok_or_else(|| format!("Constant {} not found", name))?;
+        .ok_or_else(|| format!("未找到常量 {}", name))?;
 
     // PC variables are stored locally, not on ECU
     if constant.is_pc_variable {
@@ -4091,18 +4091,18 @@ async fn send_autotune_recommendations(
     let mut conn_guard = state.connection.lock().await;
     let def_guard = state.definition.lock().await;
     let def = def_guard.as_ref().ok_or("Definition not loaded")?;
-    let conn = conn_guard.as_mut().ok_or("Not connected to ECU")?;
+    let conn = conn_guard.as_mut().ok_or("未连接到 ECU")?;
 
     // Find target table
     let table = def
         .get_table_by_name_or_map(&table_name)
-        .ok_or_else(|| format!("Table {} not found", table_name))?;
+        .ok_or_else(|| format!("未找到表格 {}", table_name))?;
 
     // Read current table map values
     let constant = def
         .constants
         .get(&table.map)
-        .ok_or_else(|| format!("Constant {} not found for table {}", table.map, table_name))?;
+        .ok_or_else(|| format!("未找到表格 {} 的常量 {}", table.map, table_name))?;
 
     let element_count = constant.shape.element_count();
     let element_size = constant.data_type.size_bytes();
@@ -4193,17 +4193,17 @@ async fn burn_autotune_recommendations(
     let mut conn_guard = state.connection.lock().await;
     let def_guard = state.definition.lock().await;
     let def = def_guard.as_ref().ok_or("Definition not loaded")?;
-    let conn = conn_guard.as_mut().ok_or("Not connected to ECU")?;
+    let conn = conn_guard.as_mut().ok_or("未连接到 ECU")?;
 
     // Find target table constant page
     let table = def
         .get_table_by_name_or_map(&table_name)
-        .ok_or_else(|| format!("Table {} not found", table_name))?;
+        .ok_or_else(|| format!("未找到表格 {}", table_name))?;
 
     let constant = def
         .constants
         .get(&table.map)
-        .ok_or_else(|| format!("Constant {} not found for table {}", table.map, table_name))?;
+        .ok_or_else(|| format!("未找到表格 {} 的常量 {}", table.map, table_name))?;
 
     let params = fcoretuner_core::protocol::commands::BurnParams {
         can_id: 0,
@@ -4258,7 +4258,7 @@ async fn start_autotune_autosend(
         let conn_guard = state.connection.lock().await;
         let def_guard = state.definition.lock().await;
         if conn_guard.is_none() || def_guard.is_none() {
-            return Err("Connection or definition missing".to_string());
+            return Err("连接或定义缺失".to_string());
         }
     }
 
@@ -4415,7 +4415,7 @@ async fn get_table_data_internal(
 
     let table = def
         .get_table_by_name_or_map(table_name)
-        .ok_or_else(|| format!("Table {} not found", table_name))?;
+        .ok_or_else(|| format!("未找到表格 {}", table_name))?;
 
     let x_bins_name = table.x_bins.clone();
     let y_bins_name = table.y_bins.clone();
@@ -4437,7 +4437,7 @@ async fn get_table_data_internal(
     let x_const = def
         .constants
         .get(&x_bins_name)
-        .ok_or_else(|| format!("Constant {} not found", x_bins_name))?
+        .ok_or_else(|| format!("未找到常量 {}", x_bins_name))?
         .clone();
     let y_const = y_bins_name
         .as_ref()
@@ -4445,7 +4445,7 @@ async fn get_table_data_internal(
     let z_const = def
         .constants
         .get(&map_name)
-        .ok_or_else(|| format!("Constant {} not found", map_name))?
+        .ok_or_else(|| format!("未找到常量 {}", map_name))?
         .clone();
 
     drop(def_guard);
@@ -4518,19 +4518,19 @@ async fn update_table_z_values_internal(
 
     let table = def
         .get_table_by_name_or_map(table_name)
-        .ok_or_else(|| format!("Table {} not found", table_name))?;
+        .ok_or_else(|| format!("未找到表格 {}", table_name))?;
 
     let constant = def
         .constants
         .get(&table.map)
-        .ok_or_else(|| format!("Constant {} not found for table {}", table.map, table_name))?;
+        .ok_or_else(|| format!("未找到表格 {} 的常量 {}", table.map, table_name))?;
 
     // Flatten z_values
     let flat_values: Vec<f64> = z_values.into_iter().flatten().collect();
 
     if flat_values.len() != constant.shape.element_count() {
         return Err(format!(
-            "Invalid data size: expected {}, got {}",
+            "数据大小无效：期望 {}，实际 {}",
             constant.shape.element_count(),
             flat_values.len()
         ));
@@ -4782,7 +4782,7 @@ async fn save_dashboard_layout(
 
     // Write as TS XML format
     dash::save_dash_file(&dash_file, &path)
-        .map_err(|e| format!("Failed to write dashboard file: {}", e))?;
+        .map_err(|e| format!("无法写入仪表盘文件：{}", e))?;
 
     Ok(())
 }
@@ -4803,18 +4803,18 @@ async fn load_dashboard_layout(
     let path = get_dashboard_file_path(&project_name);
 
     let content = std::fs::read_to_string(&path)
-        .map_err(|e| format!("Failed to read dashboard file: {}", e))?;
+        .map_err(|e| format!("无法读取仪表盘文件：{}", e))?;
 
     // Try TS XML format first
     if content.trim().starts_with("<?xml") || content.trim().starts_with("<dsh") {
         let dash_file = dash::parse_dash_file(&content)
-            .map_err(|e| format!("Failed to parse dashboard XML: {}", e))?;
+            .map_err(|e| format!("无法解析仪表盘 XML：{}", e))?;
         return Ok(convert_dashfile_to_layout(&dash_file, &project_name));
     }
 
     // Fall back to legacy JSON format for backward compatibility
     let layout: DashboardLayout = serde_json::from_str(&content)
-        .map_err(|e| format!("Failed to parse dashboard file: {}", e))?;
+        .map_err(|e| format!("仪表盘文件解析失败: {}", e))?;
 
     Ok(layout)
 }
@@ -4828,7 +4828,7 @@ async fn list_dashboard_layouts(
     project_name: String,
 ) -> Result<Vec<String>, String> {
     let projects_dir = fcoretuner_core::project::Project::projects_dir()
-        .map_err(|e| format!("Failed to get projects directory: {}", e))?;
+        .map_err(|e| format!("无法获取项目目录：{}", e))?;
 
     let mut dashboards = Vec::new();
 
@@ -4839,7 +4839,7 @@ async fn list_dashboard_layouts(
     }
 
     let entries = std::fs::read_dir(&projects_dir)
-        .map_err(|e| format!("Failed to read projects directory: {}", e))?;
+        .map_err(|e| format!("读取项目目录失败: {}", e))?;
 
     for entry in entries.flatten() {
         if let Some(name) = entry.file_name().to_str() {
@@ -4884,7 +4884,7 @@ async fn create_default_dashboard(
     let path = get_dashboard_file_path(&project_name);
     println!("[create_default_dashboard] Saving to: {:?}", path);
     dash::save_dash_file(&dash_file, &path)
-        .map_err(|e| format!("Failed to write dashboard file: {}", e))?;
+        .map_err(|e| format!("无法写入仪表盘文件：{}", e))?;
 
     // Return as layout
     let layout = convert_dashfile_to_layout(&dash_file, &project_name);
@@ -4901,10 +4901,10 @@ async fn load_tunerstudio_dash(path: String) -> Result<DashboardLayout, String> 
     println!("[load_ts_dash] Loading from: {}", path);
 
     let content = std::fs::read_to_string(&path)
-        .map_err(|e| format!("Failed to read dashboard file: {}", e))?;
+        .map_err(|e| format!("无法读取仪表盘文件：{}", e))?;
 
     let dash_file = dash::parse_dash_file(&content)
-        .map_err(|e| format!("Failed to parse dashboard XML: {}", e))?;
+        .map_err(|e| format!("无法解析仪表盘 XML：{}", e))?;
 
     let layout = convert_dashfile_to_layout(&dash_file, "TS Dashboard");
     println!("[load_ts_dash] Loaded {} gauges", layout.gauges.len());
@@ -4917,10 +4917,10 @@ async fn get_dash_file(path: String) -> Result<DashFile, String> {
     println!("[get_dash_file] Loading from: {}", path);
 
     let content = std::fs::read_to_string(&path)
-        .map_err(|e| format!("Failed to read dashboard file: {}", e))?;
+        .map_err(|e| format!("无法读取仪表盘文件：{}", e))?;
 
     let dash_file = dash::parse_dash_file(&content)
-        .map_err(|e| format!("Failed to parse dashboard XML: {}", e))?;
+        .map_err(|e| format!("无法解析仪表盘 XML：{}", e))?;
 
     println!(
         "[get_dash_file] Loaded {} components, {} embedded images",
@@ -4981,7 +4981,7 @@ async fn list_available_dashes(app: tauri::AppHandle) -> Result<Vec<DashFileInfo
     // Create directory if it doesn't exist
     if !dash_dir.exists() {
         std::fs::create_dir_all(&dash_dir)
-            .map_err(|e| format!("Failed to create dashboards directory: {}", e))?;
+            .map_err(|e| format!("无法创建仪表盘目录：{}", e))?;
     }
 
     // Check if directory is empty and create defaults if so
@@ -5119,7 +5119,7 @@ async fn import_dash_file(
 
     // Ensure dashboards directory exists
     std::fs::create_dir_all(&dash_dir)
-        .map_err(|e| format!("Failed to create dashboards directory: {}", e))?;
+        .map_err(|e| format!("无法创建仪表盘目录：{}", e))?;
 
     let source = Path::new(&source_path);
 
@@ -5135,13 +5135,13 @@ async fn import_dash_file(
 
     // Validate it's a parseable dash file
     let content =
-        std::fs::read_to_string(source).map_err(|e| format!("Failed to read file: {}", e))?;
+        std::fs::read_to_string(source).map_err(|e| format!("读取文件失败: {}", e))?;
 
     if let Err(e) = dash::parse_dash_file(&content) {
         return Ok(DashImportResult {
             source_path: source_path.clone(),
             success: false,
-            error: Some(format!("Invalid dashboard file: {}", e)),
+            error: Some(format!("无效的仪表盘文件: {}", e)),
             file_info: None,
         });
     }
@@ -5152,7 +5152,7 @@ async fn import_dash_file(
     } else {
         source
             .file_name()
-            .ok_or_else(|| "Invalid file path".to_string())?
+            .ok_or_else(|| "无效的文件路径".to_string())?
             .to_string_lossy()
             .to_string()
     };
@@ -5170,7 +5170,7 @@ async fn import_dash_file(
     }
 
     // Copy file to dashboards directory
-    std::fs::copy(source, &dest_path).map_err(|e| format!("Failed to copy file: {}", e))?;
+    std::fs::copy(source, &dest_path).map_err(|e| format!("复制文件失败: {}", e))?;
 
     println!(
         "[import_dash_file] Imported {} -> {:?}",
@@ -5194,23 +5194,23 @@ fn create_default_dashboard_files(dir: &Path) -> Result<(), String> {
     // Basic Dashboard
     let basic = create_basic_dashboard();
     let basic_xml = dash::write_dash_file(&basic)
-        .map_err(|e| format!("Failed to serialize basic dashboard: {}", e))?;
+        .map_err(|e| format!("基础仪表盘序列化失败: {}", e))?;
     std::fs::write(dir.join("Basic.ltdash.xml"), basic_xml)
-        .map_err(|e| format!("Failed to write Basic.ltdash.xml: {}", e))?;
+        .map_err(|e| format!("写入 Basic.ltdash.xml 失败: {}", e))?;
 
     // Tuning Dashboard
     let tuning = create_tuning_dashboard();
     let tuning_xml = dash::write_dash_file(&tuning)
-        .map_err(|e| format!("Failed to serialize tuning dashboard: {}", e))?;
+        .map_err(|e| format!("调校仪表盘序列化失败: {}", e))?;
     std::fs::write(dir.join("Tuning.ltdash.xml"), tuning_xml)
-        .map_err(|e| format!("Failed to write Tuning.ltdash.xml: {}", e))?;
+        .map_err(|e| format!("写入 Tuning.ltdash.xml 失败: {}", e))?;
 
     // Racing Dashboard
     let racing = create_racing_dashboard();
     let racing_xml = dash::write_dash_file(&racing)
-        .map_err(|e| format!("Failed to serialize racing dashboard: {}", e))?;
+        .map_err(|e| format!("竞速仪表盘序列化失败: {}", e))?;
     std::fs::write(dir.join("Racing.ltdash.xml"), racing_xml)
-        .map_err(|e| format!("Failed to write Racing.ltdash.xml: {}", e))?;
+        .map_err(|e| format!("写入 Racing.ltdash.xml 失败: {}", e))?;
 
     println!("[create_default_dashboard_files] Created 3 default dashboards");
     Ok(())
@@ -6804,7 +6804,7 @@ async fn new_tune(state: tauri::State<'_, AppState>) -> Result<(), String> {
     let signature = def_guard
         .as_ref()
         .map(|d| d.signature.clone())
-        .unwrap_or_else(|| "Unknown".to_string());
+        .unwrap_or_else(|| "未知".to_string());
 
     let tune = TuneFile::new(&signature);
 
@@ -7016,18 +7016,18 @@ async fn save_tune(
         // Generate default path in projects directory
         let filename = format!("{}.msq", tune.signature.replace(' ', "_"));
         fcoretuner_core::project::Project::projects_dir()
-            .map_err(|e| format!("Failed to get projects directory: {}", e))?
+            .map_err(|e| format!("无法获取项目目录：{}", e))?
             .join(filename)
     };
 
     // Ensure projects directory exists
     if let Some(parent) = save_path.parent() {
         std::fs::create_dir_all(parent)
-            .map_err(|e| format!("Failed to create directory: {}", e))?;
+            .map_err(|e| format!("创建目录失败: {}", e))?;
     }
 
     tune.save(&save_path)
-        .map_err(|e| format!("Failed to save tune: {}", e))?;
+        .map_err(|e| format!("保存调校失败: {}", e))?;
 
     drop(tune_guard);
     drop(path_guard);
@@ -7072,7 +7072,7 @@ async fn load_tune(
     eprintln!("[INFO] LOADING TUNE FILE: {}", path);
     eprintln!("[INFO] ========================================");
 
-    let tune = TuneFile::load(&path).map_err(|e| format!("Failed to load tune: {}", e))?;
+    let tune = TuneFile::load(&path).map_err(|e| format!("无法加载调校文件：{}", e))?;
 
     eprintln!("[INFO] ✓ Tune file loaded successfully");
     eprintln!("[INFO]   Signature: '{}'", tune.signature);
@@ -7710,16 +7710,16 @@ async fn get_tune_constant_manifest(
 #[tauri::command]
 async fn list_tune_files() -> Result<Vec<String>, String> {
     let projects_dir = fcoretuner_core::project::Project::projects_dir()
-        .map_err(|e| format!("Failed to get projects directory: {}", e))?;
+        .map_err(|e| format!("无法获取项目目录：{}", e))?;
 
     // Ensure directory exists
     std::fs::create_dir_all(&projects_dir)
-        .map_err(|e| format!("Failed to create projects directory: {}", e))?;
+        .map_err(|e| format!("无法创建项目目录：{}", e))?;
 
     let mut tunes = Vec::new();
 
     let entries = std::fs::read_dir(&projects_dir)
-        .map_err(|e| format!("Failed to read projects directory: {}", e))?;
+        .map_err(|e| format!("读取项目目录失败: {}", e))?;
 
     for entry in entries.flatten() {
         if let Some(name) = entry.file_name().to_str() {
@@ -7748,7 +7748,7 @@ async fn burn_to_ecu(
     let _ = app.save_window_state(StateFlags::all());
 
     let mut conn_guard = state.connection.lock().await;
-    let conn = conn_guard.as_mut().ok_or("Not connected to ECU")?;
+    let conn = conn_guard.as_mut().ok_or("未连接到 ECU")?;
 
     // Send burn command to ECU
     // The 'b' command tells the ECU to write RAM to flash
@@ -7769,14 +7769,14 @@ async fn execute_controller_command(
     let def = def_guard.as_ref().ok_or("No INI definition loaded")?;
 
     let mut conn_guard = state.connection.lock().await;
-    let conn = conn_guard.as_mut().ok_or("Not connected to ECU")?;
+    let conn = conn_guard.as_mut().ok_or("未连接到 ECU")?;
 
     // Resolve the command and get raw bytes
     let bytes = resolve_command_bytes(def, &command_name, &mut std::collections::HashSet::new())?;
 
     // Send bytes to ECU
     conn.send_raw_bytes(&bytes)
-        .map_err(|e| format!("Failed to send command: {}", e))?;
+        .map_err(|e| format!("发送命令失败: {}", e))?;
 
     Ok(())
 }
@@ -7963,20 +7963,20 @@ async fn write_project_tune_to_ecu(
     let project_guard = state.current_project.lock().await;
     let def_guard = state.definition.lock().await;
 
-    let project = project_guard.as_ref().ok_or("No project open")?;
+    let project = project_guard.as_ref().ok_or("未打开项目")?;
     let def = def_guard.as_ref().ok_or("Definition not loaded")?;
 
     // Load project tune
     let tune_path = project.current_tune_path();
     let tune =
-        TuneFile::load(&tune_path).map_err(|e| format!("Failed to load project tune: {}", e))?;
+        TuneFile::load(&tune_path).map_err(|e| format!("无法加载项目调校文件：{}", e))?;
 
     drop(project_guard);
     drop(def_guard);
 
     // Write all pages to ECU
     let mut conn_guard = state.connection.lock().await;
-    let conn = conn_guard.as_mut().ok_or("Not connected to ECU")?;
+    let conn = conn_guard.as_mut().ok_or("未连接到 ECU")?;
 
     // Sort pages for consistent writing
     let mut pages: Vec<(u8, &Vec<u8>)> = tune.pages.iter().map(|(k, v)| (*k, v)).collect();
@@ -7990,7 +7990,7 @@ async fn write_project_tune_to_ecu(
             data: page_data.clone(),
         };
         conn.write_memory(params)
-            .map_err(|e| format!("Failed to write page {}: {}", page_num, e))?;
+            .map_err(|e| format!("写入页面 {} 失败: {}", page_num, e))?;
     }
 
     // Update cache and current_tune with project tune
@@ -8021,7 +8021,7 @@ async fn save_tune_to_project(state: tauri::State<'_, AppState>) -> Result<(), S
     let project_guard = state.current_project.lock().await;
     let tune_guard = state.current_tune.lock().await;
 
-    let project = project_guard.as_ref().ok_or("No project open")?;
+    let project = project_guard.as_ref().ok_or("未打开项目")?;
     let tune = tune_guard.as_ref().ok_or("No tune loaded")?.clone();
 
     let tune_path = project.current_tune_path();
@@ -8031,7 +8031,7 @@ async fn save_tune_to_project(state: tauri::State<'_, AppState>) -> Result<(), S
 
     // Save tune to project path
     tune.save(&tune_path)
-        .map_err(|e| format!("Failed to save tune to project: {}", e))?;
+        .map_err(|e| format!("保存调校到项目失败: {}", e))?;
 
     // Update path
     *state.current_tune_path.lock().await = Some(tune_path);
@@ -8164,14 +8164,14 @@ async fn save_log(state: tauri::State<'_, AppState>, path: String) -> Result<(),
         csv.push('\n');
     }
 
-    std::fs::write(&path, csv).map_err(|e| format!("Failed to save log: {}", e))?;
+    std::fs::write(&path, csv).map_err(|e| format!("保存日志失败: {}", e))?;
 
     Ok(())
 }
 
 #[tauri::command]
 async fn read_text_file(path: String) -> Result<String, String> {
-    std::fs::read_to_string(&path).map_err(|e| format!("Failed to read file: {}", e))
+    std::fs::read_to_string(&path).map_err(|e| format!("读取文件失败: {}", e))
 }
 
 // =====================================================
@@ -8243,7 +8243,7 @@ async fn start_tooth_logger(
     let mut conn_guard = state.connection.lock().await;
     let def_guard = state.definition.lock().await;
 
-    let conn = conn_guard.as_mut().ok_or("Not connected to ECU")?;
+    let conn = conn_guard.as_mut().ok_or("未连接到 ECU")?;
     let def = def_guard.as_ref().ok_or("Definition not loaded")?;
 
     // Detect ECU type from signature
@@ -8259,7 +8259,7 @@ async fn start_tooth_logger(
 
         // Send the tooth log request command
         conn.send_raw_bytes(b"H")
-            .map_err(|e| format!("Failed to send tooth log command: {}", e))?;
+            .map_err(|e| format!("发送齿形日志命令失败: {}", e))?;
 
         // Wait for ECU to capture data
         std::thread::sleep(std::time::Duration::from_millis(500));
@@ -8284,18 +8284,18 @@ async fn start_tooth_logger(
 
         // Start logger
         conn.send_raw_bytes(&[b'l', 0x01])
-            .map_err(|e| format!("Failed to start tooth logger: {}", e))?;
+            .map_err(|e| format!("启动齿形记录器失败: {}", e))?;
 
         // Wait for capture
         std::thread::sleep(std::time::Duration::from_millis(500));
 
         // Get data
         conn.send_raw_bytes(&[b'l', 0x02])
-            .map_err(|e| format!("Failed to get tooth data: {}", e))?;
+            .map_err(|e| format!("获取齿形数据失败: {}", e))?;
 
         // Stop logger
         conn.send_raw_bytes(&[b'l', 0x03])
-            .map_err(|e| format!("Failed to stop tooth logger: {}", e))?;
+            .map_err(|e| format!("无法停止齿讯记录器：{}", e))?;
 
         // For now, return simulated data
         teeth = (0..60)
@@ -8370,7 +8370,7 @@ async fn stop_tooth_logger(state: tauri::State<'_, AppState>) -> Result<(), Stri
         if signature.contains("rusefi") || signature.contains("fome") {
             // rusEFI: Send stop command
             conn.send_raw_bytes(&[b'l', 0x03])
-                .map_err(|e| format!("Failed to stop tooth logger: {}", e))?;
+                .map_err(|e| format!("无法停止齿讯记录器：{}", e))?;
         }
         // Speeduino and MS don't need explicit stop
     }
@@ -8387,7 +8387,7 @@ async fn start_composite_logger(
     let mut conn_guard = state.connection.lock().await;
     let def_guard = state.definition.lock().await;
 
-    let conn = conn_guard.as_mut().ok_or("Not connected to ECU")?;
+    let conn = conn_guard.as_mut().ok_or("未连接到 ECU")?;
     let def = def_guard.as_ref().ok_or("Definition not loaded")?;
 
     let signature = conn.signature().unwrap_or_default().to_lowercase();
@@ -8402,12 +8402,12 @@ async fn start_composite_logger(
         eprintln!("[Composite Logger] Starting Speeduino composite capture...");
 
         conn.send_raw_bytes(b"J")
-            .map_err(|e| format!("Failed to start composite logger: {}", e))?;
+            .map_err(|e| format!("无法启动组合记录器：{}", e))?;
 
         std::thread::sleep(std::time::Duration::from_millis(500));
 
         conn.send_raw_bytes(b"O")
-            .map_err(|e| format!("Failed to get composite data: {}", e))?;
+            .map_err(|e| format!("无法获取组合数据：{}", e))?;
 
         // Simulated data for now
         entries = (0..1000)
@@ -8424,15 +8424,15 @@ async fn start_composite_logger(
         eprintln!("[Composite Logger] Starting rusEFI composite capture...");
 
         conn.send_raw_bytes(&[b'l', 0x04])
-            .map_err(|e| format!("Failed to start composite logger: {}", e))?;
+            .map_err(|e| format!("无法启动组合记录器：{}", e))?;
 
         std::thread::sleep(std::time::Duration::from_millis(500));
 
         conn.send_raw_bytes(&[b'l', 0x05])
-            .map_err(|e| format!("Failed to get composite data: {}", e))?;
+            .map_err(|e| format!("无法获取组合数据：{}", e))?;
 
         conn.send_raw_bytes(&[b'l', 0x06])
-            .map_err(|e| format!("Failed to stop composite logger: {}", e))?;
+            .map_err(|e| format!("无法停止组合记录器：{}", e))?;
 
         entries = (0..2000)
             .map(|i| CompositeLogEntry {
@@ -8486,7 +8486,7 @@ async fn stop_composite_logger(state: tauri::State<'_, AppState>) -> Result<(), 
 
         if signature.contains("rusefi") || signature.contains("fome") {
             conn.send_raw_bytes(&[b'l', 0x06])
-                .map_err(|e| format!("Failed to stop composite logger: {}", e))?;
+                .map_err(|e| format!("无法停止组合记录器：{}", e))?;
         }
     }
 
@@ -8549,12 +8549,12 @@ async fn compare_tables(
     // Find table A definition
     let table_def_a = def
         .get_table_by_name_or_map(&table_a)
-        .ok_or_else(|| format!("Table '{}' not found", table_a))?;
+        .ok_or_else(|| format!("未找到表格 '{}'", table_a))?;
 
     // Find table B definition
     let table_def_b = def
         .get_table_by_name_or_map(&table_b)
-        .ok_or_else(|| format!("Table '{}' not found", table_b))?;
+        .ok_or_else(|| format!("未找到表格 '{}'", table_b))?;
 
     // Get dimensions from x_size and y_size
     let (rows_a, cols_a) = (table_def_a.y_size, table_def_a.x_size);
@@ -8894,7 +8894,7 @@ async fn export_tune_as_csv(
 
     // Write to file
     let csv_content = csv_lines.join("\n");
-    std::fs::write(&path, csv_content).map_err(|e| format!("Failed to write CSV file: {}", e))?;
+    std::fs::write(&path, csv_content).map_err(|e| format!("写入 CSV 文件失败: {}", e))?;
 
     Ok(export_count)
 }
@@ -8915,7 +8915,7 @@ async fn import_tune_from_csv(
 
     // Read CSV file
     let csv_content =
-        std::fs::read_to_string(&path).map_err(|e| format!("Failed to read CSV file: {}", e))?;
+        std::fs::read_to_string(&path).map_err(|e| format!("读取 CSV 文件失败: {}", e))?;
 
     let mut import_count = 0u32;
     let mut errors = Vec::new();
@@ -9111,11 +9111,11 @@ struct ConnectionSettingsResponse {
 #[tauri::command]
 async fn get_projects_path() -> Result<String, String> {
     let path =
-        Project::projects_dir().map_err(|e| format!("Failed to get projects directory: {}", e))?;
+        Project::projects_dir().map_err(|e| format!("无法获取项目目录：{}", e))?;
 
     // Create if doesn't exist
     std::fs::create_dir_all(&path)
-        .map_err(|e| format!("Failed to create projects directory: {}", e))?;
+        .map_err(|e| format!("无法创建项目目录：{}", e))?;
 
     Ok(path.to_string_lossy().to_string())
 }
@@ -9124,7 +9124,7 @@ async fn get_projects_path() -> Result<String, String> {
 #[tauri::command]
 async fn list_projects() -> Result<Vec<ProjectInfoResponse>, String> {
     let projects =
-        Project::list_projects().map_err(|e| format!("Failed to list projects: {}", e))?;
+        Project::list_projects().map_err(|e| format!("列出项目失败: {}", e))?;
 
     Ok(projects
         .into_iter()
@@ -9166,12 +9166,12 @@ async fn create_project(
 
     // Get signature from INI
     let def =
-        EcuDefinition::from_file(&ini_path).map_err(|e| format!("Failed to parse INI: {}", e))?;
+        EcuDefinition::from_file(&ini_path).map_err(|e| format!("INI 文件解析失败: {}", e))?;
     let signature = def.signature.clone();
 
     // Create the project with optional imported tune
     let mut project = Project::create(&name, &ini_path, &signature, None)
-        .map_err(|e| format!("Failed to create project: {}", e))?;
+        .map_err(|e| format!("创建项目失败: {}", e))?;
 
     // Store current project and load its definition first (needed for applying tune)
     let mut def_guard = state.definition.lock().await;
@@ -9191,7 +9191,7 @@ async fn create_project(
         if tune_path_ref.exists() {
             // TuneFile::load handles both XML and MSQ formats automatically
             let tune =
-                TuneFile::load(tune_path_ref).map_err(|e| format!("Failed to load tune: {}", e))?;
+                TuneFile::load(tune_path_ref).map_err(|e| format!("无法加载调校文件：{}", e))?;
 
             // Apply tune constants to cache (same logic as load_tune)
             {
@@ -9273,7 +9273,7 @@ async fn create_project(
             project.current_tune = Some(tune);
             project
                 .save_current_tune()
-                .map_err(|e| format!("Failed to save imported tune: {}", e))?;
+                .map_err(|e| format!("保存导入调校失败: {}", e))?;
         }
     }
 
@@ -9314,7 +9314,7 @@ async fn open_project(
     eprintln!("[INFO] OPENING PROJECT: {}", path);
     eprintln!("[INFO] ========================================");
 
-    let project = Project::open(&path).map_err(|e| format!("Failed to open project: {}", e))?;
+    let project = Project::open(&path).map_err(|e| format!("无法打开项目：{}", e))?;
 
     eprintln!("[INFO] Project opened: {}", project.config.name);
     eprintln!(
@@ -9336,7 +9336,7 @@ async fn open_project(
     let ini_path = project.ini_path();
     eprintln!("[INFO] Loading INI from: {:?}", ini_path);
     let def = EcuDefinition::from_file(&ini_path)
-        .map_err(|e| format!("Failed to parse project INI: {}", e))?;
+        .map_err(|e| format!("解析项目 INI 失败: {}", e))?;
 
     eprintln!("[INFO] INI signature: '{}'", def.signature);
     eprintln!("[INFO] INI has {} constants", def.constants.len());
@@ -9755,7 +9755,7 @@ async fn close_project(state: tauri::State<'_, AppState>) -> Result<(), String> 
     if let Some(project) = proj_guard.take() {
         project
             .close()
-            .map_err(|e| format!("Failed to close project: {}", e))?;
+            .map_err(|e| format!("关闭项目失败: {}", e))?;
     }
 
     // Clear definition
@@ -9813,13 +9813,13 @@ async fn update_project_connection(
     let mut proj_guard = state.current_project.lock().await;
     let project = proj_guard
         .as_mut()
-        .ok_or_else(|| "No project open".to_string())?;
+        .ok_or_else(|| "未打开项目".to_string())?;
 
     project.config.connection.port = port;
     project.config.connection.baud_rate = baud_rate;
     project
         .save_config()
-        .map_err(|e| format!("Failed to save project config: {}", e))?;
+        .map_err(|e| format!("保存项目配置失败: {}", e))?;
 
     Ok(())
 }
@@ -9843,7 +9843,7 @@ async fn update_project_ini(
 ) -> Result<(), String> {
     // Load the new INI definition
     let new_def = EcuDefinition::from_file(&ini_path)
-        .map_err(|e| format!("Failed to parse INI file: {}", e))?;
+        .map_err(|e| format!("INI 文件解析失败: {}", e))?;
 
     // Update the project config if we have a project open
     let mut proj_guard = state.current_project.lock().await;
@@ -9851,13 +9851,13 @@ async fn update_project_ini(
         // Copy the new INI to the project directory
         let project_ini_path = project.ini_path();
         std::fs::copy(&ini_path, &project_ini_path)
-            .map_err(|e| format!("Failed to copy INI to project: {}", e))?;
+            .map_err(|e| format!("复制 INI 到项目失败: {}", e))?;
 
         // Update project signature
         project.config.signature = new_def.signature.clone();
         project
             .save_config()
-            .map_err(|e| format!("Failed to save project config: {}", e))?;
+            .map_err(|e| format!("保存项目配置失败: {}", e))?;
     }
     drop(proj_guard);
 
@@ -10020,11 +10020,11 @@ async fn create_restore_point(
     let proj_guard = state.current_project.lock().await;
     let project = proj_guard
         .as_ref()
-        .ok_or_else(|| "No project open".to_string())?;
+        .ok_or_else(|| "未打开项目".to_string())?;
 
     let restore_path = project
         .create_restore_point()
-        .map_err(|e| format!("Failed to create restore point: {}", e))?;
+        .map_err(|e| format!("创建还原点失败: {}", e))?;
 
     // Auto-prune if max_restore_points is set
     let max_points = project.config.settings.max_restore_points;
@@ -10033,7 +10033,7 @@ async fn create_restore_point(
     }
 
     let metadata = std::fs::metadata(&restore_path)
-        .map_err(|e| format!("Failed to read restore point metadata: {}", e))?;
+        .map_err(|e| format!("读取还原点元数据失败: {}", e))?;
 
     Ok(RestorePointResponse {
         filename: restore_path
@@ -10054,11 +10054,11 @@ async fn list_restore_points(
     let proj_guard = state.current_project.lock().await;
     let project = proj_guard
         .as_ref()
-        .ok_or_else(|| "No project open".to_string())?;
+        .ok_or_else(|| "未打开项目".to_string())?;
 
     let points = project
         .list_restore_points()
-        .map_err(|e| format!("Failed to list restore points: {}", e))?;
+        .map_err(|e| format!("列出还原点失败: {}", e))?;
 
     Ok(points
         .into_iter()
@@ -10081,11 +10081,11 @@ async fn load_restore_point(
     let mut proj_guard = state.current_project.lock().await;
     let project = proj_guard
         .as_mut()
-        .ok_or_else(|| "No project open".to_string())?;
+        .ok_or_else(|| "未打开项目".to_string())?;
 
     project
         .load_restore_point(&filename)
-        .map_err(|e| format!("Failed to load restore point: {}", e))?;
+        .map_err(|e| format!("加载还原点失败: {}", e))?;
 
     // Reload the tune into cache
     if let Some(ref tune) = project.current_tune {
@@ -10177,11 +10177,11 @@ async fn delete_restore_point(
     let proj_guard = state.current_project.lock().await;
     let project = proj_guard
         .as_ref()
-        .ok_or_else(|| "No project open".to_string())?;
+        .ok_or_else(|| "未打开项目".to_string())?;
 
     project
         .delete_restore_point(&filename)
-        .map_err(|e| format!("Failed to delete restore point: {}", e))
+        .map_err(|e| format!("删除还原点失败: {}", e))
 }
 
 /// Preview data for a TS project import
@@ -10210,7 +10210,7 @@ async fn preview_tunerstudio_import(path: String) -> Result<TsImportPreview, Str
     }
 
     let project_props = Properties::load(&project_props_path)
-        .map_err(|e| format!("Failed to read project: {}", e))?;
+        .map_err(|e| format!("读取项目失败: {}", e))?;
 
     // Extract project name
     let project_name = project_props
@@ -10271,7 +10271,7 @@ async fn import_tunerstudio_project(
     source_path: String,
 ) -> Result<CurrentProjectInfo, String> {
     let project = Project::import_tunerstudio(&source_path, None)
-        .map_err(|e| format!("Failed to import TS project: {}", e))?;
+        .map_err(|e| format!("导入 TS 项目失败: {}", e))?;
 
     let response = CurrentProjectInfo {
         name: project.config.name.clone(),
@@ -10344,14 +10344,14 @@ async fn git_init_project(state: tauri::State<'_, AppState>) -> Result<bool, Str
     let proj_guard = state.current_project.lock().await;
     let project = proj_guard
         .as_ref()
-        .ok_or_else(|| "No project open".to_string())?;
+        .ok_or_else(|| "未打开项目".to_string())?;
 
     let vc = VersionControl::init(&project.path)
-        .map_err(|e| format!("Failed to initialize git: {}", e))?;
+        .map_err(|e| format!("无法初始化 Git：{}", e))?;
 
     // Create initial commit
     vc.commit("Initial project commit")
-        .map_err(|e| format!("Failed to create initial commit: {}", e))?;
+        .map_err(|e| format!("无法创建初始提交：{}", e))?;
 
     Ok(true)
 }
@@ -10362,7 +10362,7 @@ async fn git_has_repo(state: tauri::State<'_, AppState>) -> Result<bool, String>
     let proj_guard = state.current_project.lock().await;
     let project = proj_guard
         .as_ref()
-        .ok_or_else(|| "No project open".to_string())?;
+        .ok_or_else(|| "未打开项目".to_string())?;
 
     Ok(VersionControl::is_git_repo(&project.path))
 }
@@ -10377,10 +10377,10 @@ async fn git_commit(
     let proj_guard = state.current_project.lock().await;
     let project = proj_guard
         .as_ref()
-        .ok_or_else(|| "No project open".to_string())?;
+        .ok_or_else(|| "未打开项目".to_string())?;
 
     let vc = VersionControl::open(&project.path)
-        .map_err(|e| format!("Git repository not initialized: {}", e))?;
+        .map_err(|e| format!("Git 仓库未初始化：{}", e))?;
 
     // Generate message from settings if not provided
     let commit_message = message.unwrap_or_else(|| {
@@ -10394,7 +10394,7 @@ async fn git_commit(
 
     let sha = vc
         .commit(&commit_message)
-        .map_err(|e| format!("Failed to commit: {}", e))?;
+        .map_err(|e| format!("无法提交：{}", e))?;
 
     Ok(sha)
 }
@@ -10408,14 +10408,14 @@ async fn git_history(
     let proj_guard = state.current_project.lock().await;
     let project = proj_guard
         .as_ref()
-        .ok_or_else(|| "No project open".to_string())?;
+        .ok_or_else(|| "未打开项目".to_string())?;
 
     let vc = VersionControl::open(&project.path)
-        .map_err(|e| format!("Git repository not initialized: {}", e))?;
+        .map_err(|e| format!("Git 仓库未初始化：{}", e))?;
 
     let history = vc
         .get_history(max_count.unwrap_or(50))
-        .map_err(|e| format!("Failed to get history: {}", e))?;
+        .map_err(|e| format!("获取历史失败: {}", e))?;
 
     Ok(history.into_iter().map(CommitInfoResponse::from).collect())
 }
@@ -10430,13 +10430,13 @@ async fn git_diff(
     let proj_guard = state.current_project.lock().await;
     let project = proj_guard
         .as_ref()
-        .ok_or_else(|| "No project open".to_string())?;
+        .ok_or_else(|| "未打开项目".to_string())?;
 
     let vc = VersionControl::open(&project.path)
-        .map_err(|e| format!("Git repository not initialized: {}", e))?;
+        .map_err(|e| format!("Git 仓库未初始化：{}", e))?;
 
     vc.diff_commits(&from_sha, &to_sha)
-        .map_err(|e| format!("Failed to diff commits: {}", e))
+        .map_err(|e| format!("比较提交差异失败: {}", e))
 }
 
 /// Checkout a specific commit
@@ -10449,13 +10449,13 @@ async fn git_checkout(
     let proj_guard = state.current_project.lock().await;
     let project = proj_guard
         .as_ref()
-        .ok_or_else(|| "No project open".to_string())?;
+        .ok_or_else(|| "未打开项目".to_string())?;
 
     let vc = VersionControl::open(&project.path)
-        .map_err(|e| format!("Git repository not initialized: {}", e))?;
+        .map_err(|e| format!("Git 仓库未初始化：{}", e))?;
 
     vc.checkout_commit(&sha)
-        .map_err(|e| format!("Failed to checkout: {}", e))?;
+        .map_err(|e| format!("检出失败: {}", e))?;
 
     // Notify UI to reload tune
     let _ = app.emit("tune:loaded", "git_checkout");
@@ -10476,14 +10476,14 @@ async fn git_list_branches(
     let proj_guard = state.current_project.lock().await;
     let project = proj_guard
         .as_ref()
-        .ok_or_else(|| "No project open".to_string())?;
+        .ok_or_else(|| "未打开项目".to_string())?;
 
     let vc = VersionControl::open(&project.path)
-        .map_err(|e| format!("Git repository not initialized: {}", e))?;
+        .map_err(|e| format!("Git 仓库未初始化：{}", e))?;
 
     let branches = vc
         .list_branches()
-        .map_err(|e| format!("Failed to list branches: {}", e))?;
+        .map_err(|e| format!("列出分支失败: {}", e))?;
 
     Ok(branches.into_iter().map(BranchInfoResponse::from).collect())
 }
@@ -10502,13 +10502,13 @@ async fn git_create_branch(state: tauri::State<'_, AppState>, name: String) -> R
     let proj_guard = state.current_project.lock().await;
     let project = proj_guard
         .as_ref()
-        .ok_or_else(|| "No project open".to_string())?;
+        .ok_or_else(|| "未打开项目".to_string())?;
 
     let vc = VersionControl::open(&project.path)
-        .map_err(|e| format!("Git repository not initialized: {}", e))?;
+        .map_err(|e| format!("Git 仓库未初始化：{}", e))?;
 
     vc.create_branch(&name)
-        .map_err(|e| format!("Failed to create branch: {}", e))
+        .map_err(|e| format!("创建分支失败: {}", e))
 }
 
 /// Switch to a different git branch.
@@ -10529,13 +10529,13 @@ async fn git_switch_branch(
     let proj_guard = state.current_project.lock().await;
     let project = proj_guard
         .as_ref()
-        .ok_or_else(|| "No project open".to_string())?;
+        .ok_or_else(|| "未打开项目".to_string())?;
 
     let vc = VersionControl::open(&project.path)
-        .map_err(|e| format!("Git repository not initialized: {}", e))?;
+        .map_err(|e| format!("Git 仓库未初始化：{}", e))?;
 
     vc.switch_branch(&name)
-        .map_err(|e| format!("Failed to switch branch: {}", e))?;
+        .map_err(|e| format!("切换分支失败: {}", e))?;
 
     // Notify UI to reload tune
     let _ = app.emit("tune:loaded", "git_switch_branch");
@@ -10553,14 +10553,14 @@ async fn git_current_branch(state: tauri::State<'_, AppState>) -> Result<Option<
     let proj_guard = state.current_project.lock().await;
     let project = proj_guard
         .as_ref()
-        .ok_or_else(|| "No project open".to_string())?;
+        .ok_or_else(|| "未打开项目".to_string())?;
 
     if !VersionControl::is_git_repo(&project.path) {
         return Ok(None);
     }
 
     let vc = VersionControl::open(&project.path)
-        .map_err(|e| format!("Git repository not initialized: {}", e))?;
+        .map_err(|e| format!("Git 仓库未初始化：{}", e))?;
 
     Ok(vc.get_current_branch_name())
 }
@@ -10575,17 +10575,17 @@ async fn git_has_changes(state: tauri::State<'_, AppState>) -> Result<bool, Stri
     let proj_guard = state.current_project.lock().await;
     let project = proj_guard
         .as_ref()
-        .ok_or_else(|| "No project open".to_string())?;
+        .ok_or_else(|| "未打开项目".to_string())?;
 
     if !VersionControl::is_git_repo(&project.path) {
         return Ok(false);
     }
 
     let vc = VersionControl::open(&project.path)
-        .map_err(|e| format!("Git repository not initialized: {}", e))?;
+        .map_err(|e| format!("Git 仓库未初始化：{}", e))?;
 
     vc.has_changes()
-        .map_err(|e| format!("Failed to check changes: {}", e))
+        .map_err(|e| format!("检查更改失败: {}", e))
 }
 
 // =====================================================
@@ -10664,7 +10664,7 @@ async fn create_project_from_template(
             .cloned()
             .ok_or_else(|| {
                 format!(
-                    "No matching INI found for {}. Please import an INI file for {} first.",
+                    "未找到匹配 {} 的 INI。请先为 {} 导入 INI 文件。",
                     template.ini_signature, template.ecu_type
                 )
             })?
@@ -10679,7 +10679,7 @@ async fn create_project_from_template(
     }
 
     std::fs::create_dir_all(&project_path)
-        .map_err(|e| format!("Failed to create project directory: {}", e))?;
+        .map_err(|e| format!("创建项目目录失败: {}", e))?;
 
     // Create project config with template settings
     let config = ProjectConfig {
@@ -10701,9 +10701,9 @@ async fn create_project_from_template(
     // Save project config
     let config_path = project_path.join("project.json");
     let config_json = serde_json::to_string_pretty(&config)
-        .map_err(|e| format!("Failed to serialize config: {}", e))?;
+        .map_err(|e| format!("序列化配置失败: {}", e))?;
     std::fs::write(&config_path, config_json)
-        .map_err(|e| format!("Failed to write config: {}", e))?;
+        .map_err(|e| format!("写入配置失败: {}", e))?;
 
     // Create subdirectories
     std::fs::create_dir_all(project_path.join("datalogs")).ok();
@@ -10729,17 +10729,17 @@ async fn create_project_from_template(
 
     let tune_path = project_path.join("CurrentTune.msq");
     tune.save(&tune_path)
-        .map_err(|e| format!("Failed to save initial tune: {}", e))?;
+        .map_err(|e| format!("保存初始调校失败: {}", e))?;
 
     // Initialize git repository
     let vc = VersionControl::init(&project_path)
-        .map_err(|e| format!("Failed to initialize git: {}", e))?;
+        .map_err(|e| format!("无法初始化 Git：{}", e))?;
     vc.commit("Project created from template")
-        .map_err(|e| format!("Failed to create initial commit: {}", e))?;
+        .map_err(|e| format!("无法创建初始提交：{}", e))?;
 
     // Open the project
     let project =
-        Project::open(&project_path).map_err(|e| format!("Failed to open project: {}", e))?;
+        Project::open(&project_path).map_err(|e| format!("无法打开项目：{}", e))?;
 
     let response = CurrentProjectInfo {
         name: project.config.name.clone(),
@@ -10773,7 +10773,7 @@ async fn create_project_from_template(
 #[tauri::command]
 async fn init_ini_repository(state: tauri::State<'_, AppState>) -> Result<String, String> {
     let repo =
-        IniRepository::open(None).map_err(|e| format!("Failed to open INI repository: {}", e))?;
+        IniRepository::open(None).map_err(|e| format!("打开 INI 仓库失败: {}", e))?;
 
     let path = repo.path.to_string_lossy().to_string();
 
@@ -10825,11 +10825,11 @@ async fn import_ini(
 
     let id = repo
         .import(Path::new(&source_path))
-        .map_err(|e| format!("Failed to import INI: {}", e))?;
+        .map_err(|e| format!("导入 INI 失败: {}", e))?;
 
     let entry = repo
         .get(&id)
-        .ok_or_else(|| "Failed to get imported INI".to_string())?;
+        .ok_or_else(|| "获取导入的 INI 失败".to_string())?;
 
     Ok(IniEntryResponse {
         id: entry.id.clone(),
@@ -10858,7 +10858,7 @@ async fn scan_for_inis(
         .ok_or_else(|| "INI repository not initialized".to_string())?;
 
     repo.scan_directory(Path::new(&directory))
-        .map_err(|e| format!("Failed to scan directory: {}", e))
+        .map_err(|e| format!("扫描目录失败: {}", e))
 }
 
 /// Remove an INI file from the repository.
@@ -10877,7 +10877,7 @@ async fn remove_ini(state: tauri::State<'_, AppState>, id: String) -> Result<(),
         .ok_or_else(|| "INI repository not initialized".to_string())?;
 
     repo.remove(&id)
-        .map_err(|e| format!("Failed to remove INI: {}", e))
+        .map_err(|e| format!("移除 INI 失败: {}", e))
 }
 
 // =============================================================================
@@ -10927,7 +10927,7 @@ async fn search_online_inis(
     let results = repo
         .search(signature.as_deref())
         .await
-        .map_err(|e| format!("Failed to search online INIs: {}", e))?;
+        .map_err(|e| format!("搜索在线 INI 失败: {}", e))?;
 
     Ok(results.into_iter().map(|e| e.into()).collect())
 }
@@ -10965,7 +10965,7 @@ async fn download_ini(
     let downloaded_path = repo
         .download(&entry, &definitions_dir)
         .await
-        .map_err(|e| format!("Failed to download INI: {}", e))?;
+        .map_err(|e| format!("下载 INI 失败: {}", e))?;
 
     // Also import to local repository
     drop(repo);
@@ -11024,7 +11024,7 @@ async fn set_demo_mode(
         let resource_path = app
             .path()
             .resource_dir()
-            .map_err(|e| format!("Failed to get resource dir: {}", e))?
+            .map_err(|e| format!("无法获取资源目录：{}", e))?
             .join("resources")
             .join("demo.ini");
 
@@ -11048,7 +11048,7 @@ async fn set_demo_mode(
 
         // Load the INI definition
         let def = EcuDefinition::from_file(ini_path.to_string_lossy().as_ref())
-            .map_err(|e| format!("Failed to load demo INI: {}", e))?;
+            .map_err(|e| format!("加载演示 INI 失败: {}", e))?;
 
         // Initialize TuneCache from definition
         let cache = TuneCache::from_definition(&def);
@@ -11248,7 +11248,7 @@ async fn update_setting(app: tauri::AppHandle, key: String, value: String) -> Re
         "show_all_help_icons" => {
             settings.show_all_help_icons = value.parse().map_err(|_| "Invalid boolean value")?
         }
-        _ => return Err(format!("Unknown setting: {}", key)),
+        _ => return Err(format!("未知设置: {}", key)),
     }
 
     save_settings(&app, &settings);
@@ -11268,7 +11268,7 @@ async fn update_heatmap_custom_stops(
         "value" => settings.heatmap_value_custom = stops,
         "change" => settings.heatmap_change_custom = stops,
         "coverage" => settings.heatmap_coverage_custom = stops,
-        _ => return Err(format!("Unknown heatmap context: {}", context)),
+        _ => return Err(format!("未知热力图上下文: {}", context)),
     }
 
     save_settings(&app, &settings);
@@ -11289,11 +11289,11 @@ async fn update_constant_string(
     let constant = def
         .constants
         .get(&name)
-        .ok_or_else(|| format!("Constant {} not found", name))?;
+        .ok_or_else(|| format!("未找到常量 {}", name))?;
 
     // Validate it's a string type
     if constant.data_type != DataType::String {
-        return Err(format!("Constant {} is not a string type", name));
+        return Err(format!("未找到常量 {} 的字符串类型", name));
     }
 
     // For now, string constants are just stored locally without ECU write
@@ -11379,7 +11379,7 @@ fn get_plugin_host_jar_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let resource_path = app
         .path()
         .resource_dir()
-        .map_err(|e| format!("Failed to get resource dir: {}", e))?
+        .map_err(|e| format!("无法获取资源目录：{}", e))?
         .join("resources")
         .join("plugin-host.jar");
 
@@ -11426,7 +11426,7 @@ async fn ensure_plugin_manager_initialized(
 
     // Start the JVM host
     pm.start()
-        .map_err(|e| format!("Failed to start plugin host: {}", e))?;
+        .map_err(|e| format!("启动插件主机失败: {}", e))?;
 
     // Store in state
     *pm_guard = Some(pm.clone());
@@ -11448,12 +11448,12 @@ fn check_jre() -> Result<String, String> {
     let output = std::process::Command::new("java")
         .arg("-version")
         .output()
-        .map_err(|e| format!("Failed to run java: {}", e))?;
+        .map_err(|e| format!("运行 Java 失败: {}", e))?;
 
     // Java prints version to stderr
     let version = String::from_utf8_lossy(&output.stderr);
     if output.status.success() || version.contains("version") {
-        Ok(version.lines().next().unwrap_or("Unknown").to_string())
+        Ok(version.lines().next().unwrap_or("未知").to_string())
     } else {
         Err("Java not found. Please install JRE 11 or later.".to_string())
     }
@@ -11583,7 +11583,7 @@ async fn use_project_tune(
     let tune_path = project.current_tune_path();
     if tune_path.exists() {
         let tune = TuneFile::load(&tune_path)
-            .map_err(|e| format!("Failed to load project tune: {}", e))?;
+            .map_err(|e| format!("无法加载项目调校文件：{}", e))?;
 
         // Populate TuneCache from project tune
         {

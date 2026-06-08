@@ -46,7 +46,7 @@ impl IniRepository {
         let base = dirs::data_local_dir()
             .or_else(dirs::home_dir)
             .ok_or_else(|| {
-                io::Error::new(io::ErrorKind::NotFound, "Could not find app data directory")
+                io::Error::new(io::ErrorKind::NotFound, "找不到应用数据目录")
             })?;
         Ok(base.join("FCoreTuner").join("definitions"))
     }
@@ -204,7 +204,7 @@ impl IniRepository {
         if signature.is_empty() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
-                "Could not find signature in INI file",
+                "在 INI 文件中找不到签名",
             ));
         }
 

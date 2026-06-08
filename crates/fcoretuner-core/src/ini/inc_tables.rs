@@ -52,7 +52,7 @@ impl IncTable {
     /// Load an .inc file from disk
     pub fn load_from_file(path: &Path) -> Result<Self, String> {
         let content = fs::read_to_string(path)
-            .map_err(|e| format!("Failed to read .inc file '{}': {}", path.display(), e))?;
+            .map_err(|e| format!("读取 .inc 文件 '{}' 失败: {}", path.display(), e))?;
 
         let name = path
             .file_stem()
