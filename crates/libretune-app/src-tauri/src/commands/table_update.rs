@@ -12,7 +12,7 @@ pub async fn update_table_data(
     z_values: Vec<Vec<f64>>,
 ) -> Result<(), String> {
     let mut conn_guard = state.connection.lock().await;
-    let def_guard = state.definition.lock().await;
+    let def_guard = state.definition.read().await;
     let def = def_guard.as_ref().ok_or("Definition not loaded")?;
 
     ensure_tune_cache(&state, def).await;

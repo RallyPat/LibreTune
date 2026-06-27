@@ -69,7 +69,7 @@ pub async fn execute_controller_command(
 ) -> Result<(), String> {
     // Resolve command bytes while holding definition lock, then release definition before acquiring connection
     let bytes = {
-        let def_guard = state.definition.lock().await;
+        let def_guard = state.definition.read().await;
         let def = def_guard.as_ref().ok_or("No INI definition loaded")?;
         resolve_command_bytes(def, &command_name, &mut std::collections::HashSet::new())?
     };

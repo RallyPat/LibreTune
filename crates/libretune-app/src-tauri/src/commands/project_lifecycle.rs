@@ -35,7 +35,7 @@ pub async fn create_project(
         .map_err(|e| format!("Failed to create project: {}", e))?;
 
     // Store current project and load its definition first (needed for applying tune)
-    let mut def_guard = state.definition.lock().await;
+    let mut def_guard = state.definition.write().await;
     *def_guard = Some(def.clone());
     drop(def_guard);
 
@@ -248,7 +248,7 @@ pub async fn open_project(
     drop(conn_guard);
 
     // Store current project and definition
-    let mut def_guard = state.definition.lock().await;
+    let mut def_guard = state.definition.write().await;
     let def_clone = def.clone();
     *def_guard = Some(def);
     drop(def_guard);

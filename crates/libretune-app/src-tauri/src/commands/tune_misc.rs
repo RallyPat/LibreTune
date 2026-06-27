@@ -14,7 +14,7 @@ pub async fn update_constant_string(
     name: String,
     value: String,
 ) -> Result<(), String> {
-    let def_guard = state.definition.lock().await;
+    let def_guard = state.definition.read().await;
     let def = def_guard.as_ref().ok_or("Definition not loaded")?;
 
     let constant = def

@@ -12,7 +12,7 @@ pub async fn get_table_info(
     state: tauri::State<'_, AppState>,
     table_name: String,
 ) -> Result<TableInfo, String> {
-    let def_guard = state.definition.lock().await;
+    let def_guard = state.definition.read().await;
     let def = def_guard.as_ref().ok_or_else(|| {
         eprintln!(
             "[WARN] get_table_info: Definition not loaded when looking for '{}'",
@@ -60,7 +60,7 @@ pub async fn get_curve_info(
     state: tauri::State<'_, AppState>,
     curve_name: String,
 ) -> Result<CurveInfo, String> {
-    let def_guard = state.definition.lock().await;
+    let def_guard = state.definition.read().await;
     let def = def_guard.as_ref().ok_or_else(|| {
         eprintln!(
             "[WARN] get_curve_info: Definition not loaded when looking for '{}'",

@@ -156,7 +156,7 @@ pub(crate) async fn find_matching_inis_internal(
 pub(crate) async fn connect_to_ecu_simulated(state: &AppState, signature: &str) -> ConnectResult {
     // If there's a loaded definition, compare signatures
     let (expected_signature, expected_prefix) = {
-        let def_guard = state.definition.lock().await;
+        let def_guard = state.definition.read().await;
         match def_guard.as_ref() {
             Some(d) => (Some(d.signature.clone()), d.signature_prefix.clone()),
             None => (None, None),
@@ -194,7 +194,7 @@ pub(crate) async fn call_connection_factory_and_build_result(
     config: ConnectionConfig,
 ) -> Result<ConnectResult, String> {
     // Read protocol settings and expected signature from state
-    let def_guard = state.definition.lock().await;
+    let def_guard = state.definition.read().await;
     let protocol_settings = def_guard.as_ref().map(|d| d.protocol.clone());
     let endianness = def_guard.as_ref().map(|d| d.endianness).unwrap_or_default();
     let expected_signature = def_guard.as_ref().map(|d| d.signature.clone());

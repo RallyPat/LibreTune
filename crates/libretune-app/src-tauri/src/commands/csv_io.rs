@@ -9,7 +9,7 @@ use crate::state::AppState;
 /// Reset all tune values to their INI-defined defaults
 #[tauri::command]
 pub async fn reset_tune_to_defaults(state: tauri::State<'_, AppState>) -> Result<u32, String> {
-    let def_guard = state.definition.lock().await;
+    let def_guard = state.definition.read().await;
     let mut cache_guard = state.tune_cache.lock().await;
     let mut tune_guard = state.current_tune.lock().await;
 
@@ -66,7 +66,7 @@ pub async fn export_tune_as_csv(
     state: tauri::State<'_, AppState>,
     path: String,
 ) -> Result<u32, String> {
-    let def_guard = state.definition.lock().await;
+    let def_guard = state.definition.read().await;
     let cache_guard = state.tune_cache.lock().await;
     let tune_guard = state.current_tune.lock().await;
 
@@ -217,7 +217,7 @@ pub async fn import_tune_from_csv(
     state: tauri::State<'_, AppState>,
     path: String,
 ) -> Result<u32, String> {
-    let def_guard = state.definition.lock().await;
+    let def_guard = state.definition.read().await;
     let mut cache_guard = state.tune_cache.lock().await;
     let mut tune_guard = state.current_tune.lock().await;
 

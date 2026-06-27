@@ -30,7 +30,7 @@ pub async fn merge_from_tune(
 
     if merged > 0 {
         let mut cache_guard = state.tune_cache.lock().await;
-        let def_guard = state.definition.lock().await;
+        let def_guard = state.definition.read().await;
         if let (Some(cache), Some(def)) = (cache_guard.as_mut(), def_guard.as_ref()) {
             for name in &constant_names {
                 if let Some(value) = source.constants.get(name) {

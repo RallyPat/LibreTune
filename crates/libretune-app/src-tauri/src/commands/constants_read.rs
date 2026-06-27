@@ -189,7 +189,7 @@ pub async fn get_constant(
     state: tauri::State<'_, AppState>,
     name: String,
 ) -> Result<ConstantInfo, String> {
-    let def_guard = state.definition.lock().await;
+    let def_guard = state.definition.read().await;
     let def = def_guard.as_ref().ok_or("Definition not loaded")?;
     let constant = def
         .constants
@@ -205,7 +205,7 @@ pub async fn get_constants_batch(
     state: tauri::State<'_, AppState>,
     names: Vec<String>,
 ) -> Result<std::collections::HashMap<String, ConstantInfo>, String> {
-    let def_guard = state.definition.lock().await;
+    let def_guard = state.definition.read().await;
     let def = def_guard.as_ref().ok_or("Definition not loaded")?;
     let mut result = std::collections::HashMap::with_capacity(names.len());
     for name in names {
@@ -228,7 +228,7 @@ pub async fn get_constant_string_value(
     name: String,
 ) -> Result<String, String> {
     let constant = {
-        let def_guard = state.definition.lock().await;
+        let def_guard = state.definition.read().await;
         let def = def_guard.as_ref().ok_or("Definition not loaded")?;
         def.constants
             .get(&name)
@@ -299,7 +299,7 @@ pub async fn get_constant_value(
     name: String,
 ) -> Result<f64, String> {
     let (constant, endianness, default_value) = {
-        let def_guard = state.definition.lock().await;
+        let def_guard = state.definition.read().await;
         let def = def_guard.as_ref().ok_or("Definition not loaded")?;
         let constant = def
             .constants

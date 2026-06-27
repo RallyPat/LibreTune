@@ -149,7 +149,7 @@ pub async fn send_autotune_recommendations(
 
     // Ensure connection and definition exist
     let mut conn_guard = state.connection.lock().await;
-    let def_guard = state.definition.lock().await;
+    let def_guard = state.definition.read().await;
     let def = def_guard.as_ref().ok_or("Definition not loaded")?;
     let conn = conn_guard.as_mut().ok_or("Not connected to ECU")?;
 
@@ -251,7 +251,7 @@ pub async fn burn_autotune_recommendations(
 ) -> Result<(), String> {
     // Ensure connection and definition exist
     let mut conn_guard = state.connection.lock().await;
-    let def_guard = state.definition.lock().await;
+    let def_guard = state.definition.read().await;
     let def = def_guard.as_ref().ok_or("Definition not loaded")?;
     let conn = conn_guard.as_mut().ok_or("Not connected to ECU")?;
 
@@ -335,7 +335,7 @@ pub async fn start_autotune_autosend(
     // Ensure connection and definition exist
     {
         let conn_guard = state.connection.lock().await;
-        let def_guard = state.definition.lock().await;
+        let def_guard = state.definition.read().await;
         if conn_guard.is_none() || def_guard.is_none() {
             return Err("Connection or definition missing".to_string());
         }
@@ -382,7 +382,7 @@ pub async fn start_autotune_autosend(
             // Acquire definition snapshot first, then connection. Do not hold both locks
             // simultaneously to avoid deadlocks with other code paths.
             let def = {
-                let def_guard = app_state.definition.lock().await;
+                let def_guard = app_state.definition.read().await;
                 match def_guard.as_ref() {
                     Some(d) => d.clone(),
                     None => continue,

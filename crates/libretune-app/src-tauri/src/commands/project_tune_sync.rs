@@ -88,7 +88,7 @@ pub async fn write_project_tune_to_ecu(
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
     let project_guard = state.current_project.lock().await;
-    let def_guard = state.definition.lock().await;
+    let def_guard = state.definition.read().await;
 
     let project = project_guard.as_ref().ok_or("No project open")?;
     let _def = def_guard.as_ref().ok_or("Definition not loaded")?;

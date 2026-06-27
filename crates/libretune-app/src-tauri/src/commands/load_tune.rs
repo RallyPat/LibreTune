@@ -44,7 +44,7 @@ pub async fn load_tune(
 
     // Check if MSQ signature matches current INI definition (informational only)
     // We'll still apply constants by name match regardless of signature match
-    let def_guard = state.definition.lock().await;
+    let def_guard = state.definition.read().await;
     let current_ini_signature = def_guard.as_ref().map(|d| d.signature.clone());
     let current_ini_prefix = def_guard.as_ref().and_then(|d| d.signature_prefix.clone());
     drop(def_guard);
@@ -98,7 +98,7 @@ pub async fn load_tune(
     {
         use libretune_core::tune::migration::compare_manifests;
 
-        let def_guard = state.definition.lock().await;
+        let def_guard = state.definition.read().await;
         if let (Some(saved_manifest), Some(def)) = (&tune.constant_manifest, def_guard.as_ref()) {
             let migration_report = compare_manifests(saved_manifest, def);
 
@@ -156,7 +156,7 @@ pub async fn load_tune(
     // Populate TuneCache from loaded tune data
     // This allows table operations to use cached data instead of reading from ECU
     {
-        let def_guard = state.definition.lock().await;
+        let def_guard = state.definition.read().await;
         let def = def_guard.as_ref();
         let mut cache_guard = state.tune_cache.lock().await;
 
@@ -596,7 +596,7 @@ pub async fn load_tune(
     }
 
     {
-        let def_guard = state.definition.lock().await;
+        let def_guard = state.definition.read().await;
         if let Some(def) = def_guard.as_ref() {
             crate::commands::constant_values::refresh_tune_constants_from_pages(&mut tune, def);
         }

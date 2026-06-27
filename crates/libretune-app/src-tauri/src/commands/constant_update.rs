@@ -13,7 +13,7 @@ pub async fn update_constant(
     value: f64,
 ) -> Result<(), String> {
     let mut conn_guard = state.connection.lock().await;
-    let def_guard = state.definition.lock().await;
+    let def_guard = state.definition.read().await;
     let mut cache_guard = state.tune_cache.lock().await;
 
     let def = def_guard.as_ref().ok_or("Definition not loaded")?;

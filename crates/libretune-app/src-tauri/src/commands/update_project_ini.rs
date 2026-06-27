@@ -34,7 +34,7 @@ pub async fn update_project_ini(
     drop(proj_guard);
 
     // Update the loaded definition
-    let mut def_guard = state.definition.lock().await;
+    let mut def_guard = state.definition.write().await;
     let def_clone = new_def.clone();
     *def_guard = Some(new_def);
     drop(def_guard);

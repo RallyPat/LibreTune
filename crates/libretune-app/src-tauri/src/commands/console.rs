@@ -13,7 +13,7 @@ const MAX_HISTORY: usize = 1000;
 /// "epicEFI", "MegaSquirt 2", "MegaSquirt 3", or "Unknown".
 #[tauri::command]
 pub async fn get_ecu_type(state: tauri::State<'_, AppState>) -> Result<String, String> {
-    let def_guard = state.definition.lock().await;
+    let def_guard = state.definition.read().await;
     let def = def_guard.as_ref().ok_or("No INI definition loaded")?;
 
     Ok(def.ecu_type.display_name().to_string())
@@ -36,7 +36,7 @@ pub async fn send_console_command(
     let mut conn_guard = state.connection.lock().await;
     let conn = conn_guard.as_mut().ok_or("Not connected to ECU")?;
 
-    let def_guard = state.definition.lock().await;
+    let def_guard = state.definition.read().await;
     let def = def_guard.as_ref().ok_or("No INI definition loaded")?;
 
     if !def.ecu_type.supports_console() {

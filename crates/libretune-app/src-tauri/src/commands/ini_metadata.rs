@@ -21,7 +21,7 @@ pub struct ProtocolDefaults {
 pub async fn get_protocol_defaults(
     state: tauri::State<'_, AppState>,
 ) -> Result<ProtocolDefaults, String> {
-    let def_guard = state.definition.lock().await;
+    let def_guard = state.definition.read().await;
     let def = def_guard.as_ref().ok_or("Definition not loaded")?;
     let proto = def.protocol.clone();
     Ok(ProtocolDefaults {
@@ -44,7 +44,7 @@ pub struct ProtocolCapabilities {
 pub async fn get_protocol_capabilities(
     state: tauri::State<'_, AppState>,
 ) -> Result<ProtocolCapabilities, String> {
-    let def_guard = state.definition.lock().await;
+    let def_guard = state.definition.read().await;
     let def = def_guard.as_ref().ok_or("Definition not loaded")?;
     let proto = &def.protocol;
     Ok(ProtocolCapabilities {
@@ -57,7 +57,7 @@ pub async fn get_protocol_capabilities(
 pub async fn get_ve_analyze_config(
     state: tauri::State<'_, AppState>,
 ) -> Result<Option<VeAnalyzeConfig>, String> {
-    let def_guard = state.definition.lock().await;
+    let def_guard = state.definition.read().await;
     let def = def_guard.as_ref().ok_or("Definition not loaded")?;
     Ok(def.ve_analyze.clone())
 }
@@ -67,7 +67,7 @@ pub async fn get_ve_analyze_config(
 pub async fn get_ini_capabilities(
     state: tauri::State<'_, AppState>,
 ) -> Result<IniCapabilities, String> {
-    let def_guard = state.definition.lock().await;
+    let def_guard = state.definition.read().await;
     let def = def_guard.as_ref().ok_or("Definition not loaded")?;
     Ok(def.capabilities())
 }

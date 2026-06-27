@@ -41,7 +41,7 @@ pub async fn get_dialog_definition(
     state: tauri::State<'_, AppState>,
     name: String,
 ) -> Result<DialogDefinition, String> {
-    let def_guard = state.definition.lock().await;
+    let def_guard = state.definition.read().await;
     let def = def_guard.as_ref().ok_or("Definition not loaded")?;
     def.dialogs
         .get(&name)
@@ -60,7 +60,7 @@ pub async fn get_indicator_panel(
     state: tauri::State<'_, AppState>,
     name: String,
 ) -> Result<libretune_core::ini::IndicatorPanel, String> {
-    let def_guard = state.definition.lock().await;
+    let def_guard = state.definition.read().await;
     let def = def_guard.as_ref().ok_or("Definition not loaded")?;
     def.indicator_panels
         .get(&name)
@@ -79,7 +79,7 @@ pub async fn get_port_editor(
     state: tauri::State<'_, AppState>,
     name: String,
 ) -> Result<libretune_core::ini::PortEditorConfig, String> {
-    let def_guard = state.definition.lock().await;
+    let def_guard = state.definition.read().await;
     let def = def_guard.as_ref().ok_or("Definition not loaded")?;
 
     // First try to get from INI definition
@@ -142,7 +142,7 @@ pub async fn get_help_topic(
     state: tauri::State<'_, AppState>,
     name: String,
 ) -> Result<HelpTopic, String> {
-    let def_guard = state.definition.lock().await;
+    let def_guard = state.definition.read().await;
     let def = def_guard.as_ref().ok_or("Definition not loaded")?;
     def.help_topics
         .get(&name)

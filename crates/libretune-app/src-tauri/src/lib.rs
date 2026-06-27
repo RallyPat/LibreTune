@@ -8,7 +8,7 @@
 use libretune_core::autotune::AutoTuneState;
 use libretune_core::datalog::DataLogger;
 use libretune_core::project::OnlineIniRepository;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, RwLock};
 
 mod commands;
 mod paths;
@@ -172,7 +172,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .manage(AppState {
             connection: Mutex::new(None),
-            definition: Mutex::new(None),
+            definition: RwLock::new(None),
             autotune_state: Mutex::new(AutoTuneState::new()),
             autotune_secondary_state: Mutex::new(AutoTuneState::new()),
             autotune_config: Mutex::new(None),

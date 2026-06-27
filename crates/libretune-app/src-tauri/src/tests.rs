@@ -10,7 +10,7 @@ use libretune_core::autotune::AutoTuneState;
 use libretune_core::ini::{EcuDefinition, Endianness, ProtocolSettings};
 use libretune_core::project::IniRepository;
 use libretune_core::protocol::ConnectionConfig;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, RwLock};
 
 #[cfg(test)]
 mod runtime_mode_tests {
@@ -107,7 +107,7 @@ mod concurrency_tests {
 
         let state = Arc::new(AppState {
             connection: Mutex::new(Some(Connection::new(ConnectionConfig::default()))),
-            definition: Mutex::new(Some(def)),
+            definition: RwLock::new(Some(def)),
             autotune_state: Mutex::new(AutoTuneState::new()),
             autotune_secondary_state: Mutex::new(AutoTuneState::new()),
             autotune_config: Mutex::new(None),
@@ -140,7 +140,7 @@ mod concurrency_tests {
         let s1 = state.clone();
 
         let task1 = tokio::spawn(async move {
-            let _def = s1.definition.lock().await;
+            let _def = s1.definition.read().await;
             // hold definition lock for some time
             tokio::time::sleep(Duration::from_millis(50)).await;
             let _conn = s1.connection.lock().await;
@@ -151,7 +151,7 @@ mod concurrency_tests {
         let s2 = state.clone();
         let task2 = tokio::spawn(async move {
             let _snapshot = {
-                let def_guard = s2.definition.lock().await;
+                let def_guard = s2.definition.read().await;
                 def_guard.is_some()
             };
 
@@ -255,7 +255,7 @@ signature = "Speeduino 2023-04"
         // Build minimal AppState with this repo
         let state = AppState {
             connection: Mutex::new(None),
-            definition: Mutex::new(None),
+            definition: RwLock::new(None),
             autotune_state: Mutex::new(AutoTuneState::default()),
             autotune_secondary_state: Mutex::new(AutoTuneState::default()),
             autotune_config: Mutex::new(None),
@@ -323,7 +323,7 @@ signature = "Speeduino 2023-04"
 
         let state = AppState {
             connection: Mutex::new(None),
-            definition: Mutex::new(None),
+            definition: RwLock::new(None),
             autotune_state: Mutex::new(AutoTuneState::default()),
             autotune_secondary_state: Mutex::new(AutoTuneState::default()),
             autotune_config: Mutex::new(None),
@@ -394,7 +394,7 @@ signature = "Speeduino 2023-04"
 
         let state = AppState {
             connection: Mutex::new(None),
-            definition: Mutex::new(Some(def)),
+            definition: RwLock::new(Some(def)),
             autotune_state: Mutex::new(AutoTuneState::default()),
             autotune_secondary_state: Mutex::new(AutoTuneState::default()),
             autotune_config: Mutex::new(None),
@@ -470,7 +470,7 @@ signature = "Speeduino 2023-04"
         // Build a minimal AppState with repo and expected definition
         let state = AppState {
             connection: Mutex::new(None),
-            definition: Mutex::new(Some(
+            definition: RwLock::new(Some(
                 EcuDefinition::from_str(
                     r#"[MegaTune]
 signature = "Speeduino 2023-04"

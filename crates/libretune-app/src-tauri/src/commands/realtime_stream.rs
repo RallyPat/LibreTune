@@ -188,7 +188,7 @@ pub async fn start_realtime_stream(
     // opposite order.
     if !is_demo {
         {
-            let def_guard = state.definition.lock().await;
+            let def_guard = state.definition.read().await;
             if def_guard.is_none() {
                 return Err("Connection or definition missing".to_string());
             }
@@ -200,7 +200,7 @@ pub async fn start_realtime_stream(
             }
         }
     } else {
-        let def_guard = state.definition.lock().await;
+        let def_guard = state.definition.read().await;
         if def_guard.is_none() {
             return Err("Definition not loaded for demo mode".to_string());
         }
@@ -244,14 +244,14 @@ pub async fn start_realtime_stream(
 
             // Step B: get endianness from definition (separate lock)
             if let Some(ch) = cached_ch {
-                let def_guard = app_state.definition.lock().await;
+                let def_guard = app_state.definition.read().await;
                 let endianness = def_guard
                     .as_ref()
                     .map(|d| d.endianness)
                     .unwrap_or(libretune_core::ini::Endianness::Little);
                 Some((ch, endianness))
             } else {
-                let def_guard = app_state.definition.lock().await;
+                let def_guard = app_state.definition.read().await;
                 def_guard
                     .as_ref()
                     .map(|def| (Arc::new(def.output_channels.clone()), def.endianness))

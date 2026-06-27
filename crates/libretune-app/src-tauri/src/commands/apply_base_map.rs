@@ -14,7 +14,7 @@ pub async fn apply_base_map(
     };
     use libretune_core::basemap::EngineSpec;
 
-    let def_guard = state.definition.lock().await;
+    let def_guard = state.definition.read().await;
     let def = def_guard.as_ref().ok_or("No ECU definition loaded")?;
     let endianness = def.endianness;
 

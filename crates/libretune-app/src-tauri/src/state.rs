@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, RwLock};
 
 /// Optional test seam: factory to produce a signature without opening real serial ports.
 pub type ConnectionFactory = dyn Fn(ConnectionConfig, Option<ProtocolSettings>, Endianness) -> Result<String, String>
@@ -139,7 +139,7 @@ pub struct AutoTuneConfig {
 
 pub struct AppState {
     pub connection: Mutex<Option<Connection>>,
-    pub definition: Mutex<Option<EcuDefinition>>,
+    pub definition: RwLock<Option<EcuDefinition>>,
     pub autotune_state: Mutex<AutoTuneState>,
     pub autotune_secondary_state: Mutex<AutoTuneState>,
     pub connection_factory: Mutex<Option<Arc<ConnectionFactory>>>,

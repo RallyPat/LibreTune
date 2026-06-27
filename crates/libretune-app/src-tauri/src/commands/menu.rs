@@ -10,7 +10,7 @@ pub async fn get_menu_tree(
     filter_context: Option<HashMap<String, f64>>,
 ) -> Result<Vec<Menu>, String> {
     let menus = {
-        let def_guard = state.definition.lock().await;
+        let def_guard = state.definition.read().await;
         let def = def_guard.as_ref().ok_or("Definition not loaded")?;
         def.menus.clone()
     };
@@ -154,7 +154,7 @@ fn evaluate_visibility(condition: &Option<String>, context: &HashMap<String, f64
 pub async fn get_searchable_index(
     state: tauri::State<'_, AppState>,
 ) -> Result<HashMap<String, Vec<String>>, String> {
-    let def_guard = state.definition.lock().await;
+    let def_guard = state.definition.read().await;
     let def = def_guard.as_ref().ok_or("Definition not loaded")?;
 
     let mut index: HashMap<String, Vec<String>> = HashMap::new();

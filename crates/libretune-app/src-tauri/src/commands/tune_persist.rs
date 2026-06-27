@@ -139,7 +139,7 @@ pub(crate) async fn persist_tune_to_path(
 ) -> Result<(), String> {
     let mut tune_guard = state.current_tune.lock().await;
     let cache_guard = state.tune_cache.lock().await;
-    let def_guard = state.definition.lock().await;
+    let def_guard = state.definition.read().await;
 
     let tune = tune_guard.as_mut().ok_or("No tune loaded")?;
     let def = def_guard.as_ref().ok_or("Definition not loaded")?;

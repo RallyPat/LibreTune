@@ -17,7 +17,7 @@ pub async fn get_all_constant_values(
     state: tauri::State<'_, AppState>,
 ) -> Result<HashMap<String, f64>, String> {
     let (scalar_constants, endianness) = {
-        let def_guard = state.definition.lock().await;
+        let def_guard = state.definition.read().await;
         let def = def_guard.as_ref().ok_or("Definition not loaded")?;
         let scalars: Vec<(String, libretune_core::ini::Constant)> = def
             .constants

@@ -30,7 +30,9 @@ function manualChunks(id: string): string | undefined {
   if (id.includes("lucide-react")) {
     return "vendor-icons";
   }
-  if (id.includes("i18next") || id.includes("react-i18next")) {
+  // react-i18next calls React.createContext() at module init time — it must live in
+  // the same chunk as React so WKWebView (Safari) doesn't execute it before React is ready.
+  if (id.includes("i18next") && !id.includes("react-i18next")) {
     return "vendor-i18n";
   }
   if (id.includes("@tauri-apps")) {
@@ -39,7 +41,7 @@ function manualChunks(id: string): string | undefined {
   if (id.includes("zustand")) {
     return "vendor-state";
   }
-  if (id.includes("react-dom") || id.includes("/react/")) {
+  if (id.includes("react-dom") || id.includes("/react/") || id.includes("react-i18next")) {
     return "vendor-react";
   }
 
@@ -55,6 +57,10 @@ export default defineConfig(async () => ({
   build: {
     // three.js is ~1 MB minified; it loads only when the 3D table view is opened.
     chunkSizeWarningLimit: 1024,
+    // WKWebView (Safari engine) executes crossorigin modulepreload hints in document
+    // order rather than dependency order, causing vendor-i18n to run before React is
+    // ready. Disabling modulePreload forces load order to follow the import graph.
+    modulePreload: false,
     rollupOptions: {
       output: {
         manualChunks,

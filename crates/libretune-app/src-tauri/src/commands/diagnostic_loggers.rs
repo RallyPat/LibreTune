@@ -67,7 +67,7 @@ pub async fn start_tooth_logger(
     app: tauri::AppHandle,
 ) -> Result<ToothLogResult, String> {
     let mut conn_guard = state.connection.lock().await;
-    let def_guard = state.definition.lock().await;
+    let def_guard = state.definition.read().await;
 
     let conn = conn_guard.as_mut().ok_or("Not connected to ECU")?;
     let _def = def_guard.as_ref().ok_or("Definition not loaded")?;
@@ -275,7 +275,7 @@ pub async fn start_composite_logger(
     app: tauri::AppHandle,
 ) -> Result<CompositeLogResult, String> {
     let mut conn_guard = state.connection.lock().await;
-    let def_guard = state.definition.lock().await;
+    let def_guard = state.definition.read().await;
 
     let conn = conn_guard.as_mut().ok_or("Not connected to ECU")?;
     let _def = def_guard.as_ref().ok_or("Definition not loaded")?;

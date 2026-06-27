@@ -23,7 +23,7 @@ pub(crate) struct CurveInfo {
 /// Returns: Sorted vector of TableInfo with name and title
 #[tauri::command]
 pub async fn get_tables(state: tauri::State<'_, AppState>) -> Result<Vec<TableInfo>, String> {
-    let def_guard = state.definition.lock().await;
+    let def_guard = state.definition.read().await;
     let def = def_guard.as_ref().ok_or("Definition not loaded")?;
 
     let mut tables: Vec<TableInfo> = def
@@ -46,7 +46,7 @@ pub async fn get_tables(state: tauri::State<'_, AppState>) -> Result<Vec<TableIn
 /// Returns: Sorted vector of CurveInfo with name and title
 #[tauri::command]
 pub async fn get_curves(state: tauri::State<'_, AppState>) -> Result<Vec<CurveInfo>, String> {
-    let def_guard = state.definition.lock().await;
+    let def_guard = state.definition.read().await;
     let def = def_guard.as_ref().ok_or("Definition not loaded")?;
 
     let mut curves: Vec<CurveInfo> = def
@@ -108,7 +108,7 @@ pub(crate) struct FrontPageInfo {
 pub async fn get_frontpage(
     state: tauri::State<'_, AppState>,
 ) -> Result<Option<FrontPageInfo>, String> {
-    let def_guard = state.definition.lock().await;
+    let def_guard = state.definition.read().await;
     let def = def_guard.as_ref().ok_or("Definition not loaded")?;
 
     Ok(def.frontpage.as_ref().map(|fp| FrontPageInfo {
@@ -140,7 +140,7 @@ pub async fn get_frontpage(
 pub async fn get_gauge_configs(
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<GaugeInfo>, String> {
-    let def_guard = state.definition.lock().await;
+    let def_guard = state.definition.read().await;
     let def = def_guard.as_ref().ok_or("Definition not loaded")?;
 
     let gauges: Vec<GaugeInfo> = def
@@ -169,7 +169,7 @@ pub async fn get_gauge_config(
     state: tauri::State<'_, AppState>,
     gauge_name: String,
 ) -> Result<GaugeInfo, String> {
-    let def_guard = state.definition.lock().await;
+    let def_guard = state.definition.read().await;
     let def = def_guard.as_ref().ok_or("Definition not loaded")?;
 
     let gauge = def

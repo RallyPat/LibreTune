@@ -32,7 +32,7 @@ pub async fn get_curve_data(
     state: tauri::State<'_, AppState>,
     curve_name: String,
 ) -> Result<CurveData, String> {
-    let def_guard = state.definition.lock().await;
+    let def_guard = state.definition.read().await;
     let def = def_guard.as_ref().ok_or_else(|| {
         eprintln!(
             "[WARN] get_curve_data: Definition not loaded when looking for '{}'",
@@ -251,7 +251,7 @@ pub async fn update_curve_data(
     y_values: Vec<f64>,
 ) -> Result<(), String> {
     let mut conn_guard = state.connection.lock().await;
-    let def_guard = state.definition.lock().await;
+    let def_guard = state.definition.read().await;
     let mut cache_guard = state.tune_cache.lock().await;
 
     let def = def_guard.as_ref().ok_or("Definition not loaded")?;

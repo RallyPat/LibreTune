@@ -53,7 +53,7 @@ pub async fn get_connection_status(
     };
 
     let (has_definition, ini_name) = {
-        let def_guard = state.definition.lock().await;
+        let def_guard = state.definition.read().await;
         (
             def_guard.is_some(),
             def_guard.as_ref().map(|d| d.signature.clone()),

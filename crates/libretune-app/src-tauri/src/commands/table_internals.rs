@@ -28,7 +28,7 @@ pub(crate) async fn get_table_data_internal(
     state: &tauri::State<'_, AppState>,
     table_name: &str,
 ) -> Result<TableData, String> {
-    let def_guard = state.definition.lock().await;
+    let def_guard = state.definition.read().await;
     let def = def_guard.as_ref().ok_or("Definition not loaded")?;
     let endianness = def.endianness;
 
@@ -121,7 +121,7 @@ pub(crate) async fn get_table_data_internal(
     let z_flat = read_const_values(&z_const, tune_guard.as_ref(), endianness);
 
     let (x_axis_name, y_axis_name) = {
-        let def_guard = state.definition.lock().await;
+        let def_guard = state.definition.read().await;
         let def = def_guard.as_ref().ok_or("Definition not loaded")?;
         (
             resolve_table_axis_label(&x_label, def, tune_guard.as_ref(), None),
@@ -168,7 +168,7 @@ pub(crate) async fn update_table_z_values_internal(
     z_values: Vec<Vec<f64>>,
 ) -> Result<(), String> {
     let mut conn_guard = state.connection.lock().await;
-    let def_guard = state.definition.lock().await;
+    let def_guard = state.definition.read().await;
 
     let def = def_guard.as_ref().ok_or("Definition not loaded")?;
     crate::commands::tune_persist::ensure_tune_cache(state, def).await;
@@ -254,7 +254,7 @@ pub(crate) async fn update_constant_array_internal(
     values: Vec<f64>,
 ) -> Result<(), String> {
     let mut conn_guard = state.connection.lock().await;
-    let def_guard = state.definition.lock().await;
+    let def_guard = state.definition.read().await;
     let mut cache_guard = state.tune_cache.lock().await;
 
     let def = def_guard.as_ref().ok_or("Definition not loaded")?;

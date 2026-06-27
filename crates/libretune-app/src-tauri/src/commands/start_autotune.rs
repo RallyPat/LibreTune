@@ -17,7 +17,7 @@ pub async fn start_autotune(
     authority_limits: AutoTuneAuthorityLimits,
 ) -> Result<(), String> {
     // Get the table definition to extract bin values
-    let def_guard = state.definition.lock().await;
+    let def_guard = state.definition.read().await;
     let def = def_guard.as_ref().ok_or("No ECU definition loaded")?;
     let cache_guard = state.tune_cache.lock().await;
     let cache = cache_guard.as_ref();

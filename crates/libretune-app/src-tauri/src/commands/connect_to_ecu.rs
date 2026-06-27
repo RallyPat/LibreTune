@@ -65,7 +65,7 @@ pub async fn connect_to_ecu(
     );
 
     // Get protocol settings from loaded definition if available
-    let def_guard = state.definition.lock().await;
+    let def_guard = state.definition.read().await;
     let protocol_settings = def_guard.as_ref().map(|d| d.protocol.clone());
     let endianness = def_guard.as_ref().map(|d| d.endianness).unwrap_or_default();
     let expected_signature = def_guard.as_ref().map(|d| d.signature.clone());

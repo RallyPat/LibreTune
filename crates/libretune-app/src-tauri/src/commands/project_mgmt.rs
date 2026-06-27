@@ -20,7 +20,7 @@ pub async fn close_project(state: tauri::State<'_, AppState>) -> Result<(), Stri
     }
 
     // Clear definition
-    let mut def_guard = state.definition.lock().await;
+    let mut def_guard = state.definition.write().await;
     *def_guard = None;
 
     // Clear tune

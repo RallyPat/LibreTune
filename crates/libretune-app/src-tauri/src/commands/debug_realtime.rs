@@ -13,7 +13,7 @@ pub async fn debug_single_realtime_read(
 
     // 1) Check definition
     {
-        let def_guard = state.definition.lock().await;
+        let def_guard = state.definition.read().await;
         if let Some(def) = &*def_guard {
             report.push_str(&format!("INI loaded: sig={}\n", def.signature));
             report.push_str(&format!(

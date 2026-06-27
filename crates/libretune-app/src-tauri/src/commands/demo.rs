@@ -147,7 +147,7 @@ pub(crate) async fn apply_demo_enable(
     }
 
     {
-        let mut def_guard = state.definition.lock().await;
+        let mut def_guard = state.definition.write().await;
         *def_guard = Some(def);
     }
 
@@ -234,14 +234,14 @@ mod demo_mode_tests {
 
         // initial state
         assert!(!*state.demo_mode.lock().await);
-        assert!(state.definition.lock().await.is_none());
+        assert!(state.definition.read().await.is_none());
         assert!(state.tune_cache.lock().await.is_none());
 
         apply_demo_enable(&state, def.clone(), cache)
             .await
             .expect("apply enable");
         assert!(*state.demo_mode.lock().await);
-        assert!(state.definition.lock().await.is_some());
+        assert!(state.definition.read().await.is_some());
         assert!(state.tune_cache.lock().await.is_some());
 
         apply_demo_disable(&state).await.expect("apply disable");

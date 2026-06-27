@@ -29,15 +29,15 @@
 }
 
 .ini-select-row {
-  display: flex;
-  align-items: stretch;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
   gap: var(--space-2);
   min-width: 0;
   width: 100%;
 }
 
 .ini-select-wrap {
-  flex: 1 1 0;
   min-width: 0;
   overflow: hidden;
 }
@@ -46,7 +46,6 @@
 .name-input {
   width: 100%;
   box-sizing: border-box;
-  flex: 1 1 0;
   min-width: 0;
   max-width: 100%;
   padding: 6px 10px;
@@ -70,7 +69,6 @@
 }
 
 .no-ini-placeholder {
-  flex: 1 1 0;
   min-width: 0;
   padding: 6px 10px;
   background: var(--bg-elevated);
@@ -79,10 +77,12 @@
   color: var(--text-secondary);
   font-size: var(--font-size-sm);
   font-style: italic;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .browse-ini-btn {
-  flex-shrink: 0;
   white-space: nowrap;
   padding: 6px 14px;
   background: var(--bg-elevated);

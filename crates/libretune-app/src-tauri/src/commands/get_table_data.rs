@@ -10,7 +10,7 @@ pub async fn get_table_data(
     state: tauri::State<'_, AppState>,
     table_name: String,
 ) -> Result<TableData, String> {
-    let def_guard = state.definition.lock().await;
+    let def_guard = state.definition.read().await;
     let def = def_guard.as_ref().ok_or("Definition not loaded")?;
     let endianness = def.endianness;
 
@@ -233,7 +233,7 @@ pub async fn get_table_data(
     drop(conn_guard_result);
 
     let (x_axis_name, y_axis_name) = {
-        let def_guard = state.definition.lock().await;
+        let def_guard = state.definition.read().await;
         let def = def_guard.as_ref().ok_or("Definition not loaded")?;
         (
             resolve_table_axis_label(&x_label, def, tune_guard.as_ref(), cache_guard.as_ref()),

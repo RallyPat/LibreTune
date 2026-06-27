@@ -10,7 +10,7 @@ pub async fn sync_ecu_data(
     state: tauri::State<'_, AppState>,
 ) -> Result<SyncResult, String> {
     // Get definition to know page sizes
-    let def_guard = state.definition.lock().await;
+    let def_guard = state.definition.read().await;
     let def = def_guard.as_ref().ok_or("Definition not loaded")?;
 
     let signature = def.signature.clone();
@@ -107,7 +107,7 @@ pub async fn sync_ecu_data(
 
     // Store tune file in state (even if partial)
     {
-        let def_guard = state.definition.lock().await;
+        let def_guard = state.definition.read().await;
         if let Some(def) = def_guard.as_ref() {
             crate::commands::constant_values::refresh_tune_constants_from_pages(&mut tune, def);
         }

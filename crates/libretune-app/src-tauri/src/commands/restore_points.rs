@@ -90,7 +90,7 @@ pub async fn load_restore_point(
 
     // Reload the tune into cache
     if let Some(ref tune) = project.current_tune {
-        let def_guard = state.definition.lock().await;
+        let def_guard = state.definition.read().await;
         if let Some(ref def) = *def_guard {
             let cache = TuneCache::from_definition(def);
             let mut cache_guard = state.tune_cache.lock().await;

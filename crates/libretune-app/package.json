@@ -29,6 +29,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@fontsource/inter": "^5.2.8",
+    "@fontsource/jetbrains-mono": "^5.2.8",
     "@react-three/drei": "^9.30.0",
     "@react-three/fiber": "^8.0.27",
     "@tauri-apps/api": "^2.10.1",

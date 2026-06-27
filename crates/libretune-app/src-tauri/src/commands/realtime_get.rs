@@ -21,7 +21,7 @@ pub async fn get_realtime_data(
             cached = channels_cache_guard.as_ref().map(Arc::clone);
         } // cached_output_channels lock released
 
-        let def_guard = state.definition.lock().await;
+        let def_guard = state.definition.read().await;
         if let Some(channels) = cached {
             let endianness = def_guard
                 .as_ref()
@@ -49,7 +49,7 @@ pub async fn get_realtime_data(
     let evaluator_guard = state.evaluator.lock().await;
 
     let data = if let Some(evaluator) = &*evaluator_guard {
-        let def_guard = state.definition.lock().await;
+        let def_guard = state.definition.read().await;
         if let Some(def) = &*def_guard {
             evaluator.process(&raw_data, def)
         } else {

@@ -25,7 +25,7 @@ pub async fn start_logging(
     state: tauri::State<'_, AppState>,
     sample_rate: Option<f64>,
 ) -> Result<(), String> {
-    let def_guard = state.definition.lock().await;
+    let def_guard = state.definition.read().await;
     let def = def_guard.as_ref().ok_or("Definition not loaded")?;
 
     let channels: Vec<String> = def.output_channels.keys().cloned().collect();

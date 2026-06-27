@@ -24,7 +24,7 @@ pub struct ChannelInfo {
 pub async fn get_available_channels(
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<ChannelInfo>, String> {
-    let def_guard = state.definition.lock().await;
+    let def_guard = state.definition.read().await;
     let def = def_guard.as_ref().ok_or("Definition not loaded")?;
 
     let mut channels: Vec<ChannelInfo> = def
@@ -91,7 +91,7 @@ pub struct OutputChannelStatusInfo {
 pub async fn get_output_channel_status(
     state: tauri::State<'_, AppState>,
 ) -> Result<OutputChannelStatusInfo, String> {
-    let def_guard = state.definition.lock().await;
+    let def_guard = state.definition.read().await;
     let def = def_guard.as_ref().ok_or("Definition not loaded")?;
 
     let total_channels = def.output_channels.len();
@@ -167,7 +167,7 @@ pub async fn get_status_bar_defaults(
         return Ok(settings.status_bar_channels);
     }
 
-    let def_guard = state.definition.lock().await;
+    let def_guard = state.definition.read().await;
     let def = def_guard.as_ref().ok_or("Definition not loaded")?;
 
     // Try to get channels from FrontPage gauges first

@@ -44,7 +44,7 @@ pub async fn rebin_table(
 
     // Save the new X/Y axis bins
     {
-        let def_guard = state.definition.lock().await;
+        let def_guard = state.definition.read().await;
         let def = def_guard.as_ref().ok_or("Definition not loaded")?;
         let table = def
             .get_table_by_name_or_map(&table_name)

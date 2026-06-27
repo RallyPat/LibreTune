@@ -39,7 +39,7 @@ pub async fn get_tune_info(state: tauri::State<'_, AppState>) -> Result<TuneInfo
 
 #[tauri::command]
 pub async fn new_tune(state: tauri::State<'_, AppState>) -> Result<(), String> {
-    let def_guard = state.definition.lock().await;
+    let def_guard = state.definition.read().await;
     let signature = def_guard
         .as_ref()
         .map(|d| d.signature.clone())

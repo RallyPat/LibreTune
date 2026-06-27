@@ -41,7 +41,7 @@ pub async fn load_ini(
 
             // Update definition
             let def_clone = def.clone();
-            let mut guard = state.definition.lock().await;
+            let mut guard = state.definition.write().await;
             *guard = Some(def);
             drop(guard);
 

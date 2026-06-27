@@ -38,7 +38,7 @@ pub async fn compare_tables(
     table_a: String,
     table_b: String,
 ) -> Result<TableComparisonResult, String> {
-    let def_guard = state.definition.lock().await;
+    let def_guard = state.definition.read().await;
     let cache_guard = state.tune_cache.lock().await;
 
     let def = def_guard.as_ref().ok_or("Definition not loaded")?;
