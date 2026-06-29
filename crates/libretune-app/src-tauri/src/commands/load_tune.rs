@@ -158,30 +158,14 @@ pub async fn load_tune(
     {
         let def_guard = state.definition.read().await;
         let def = def_guard.as_ref();
-        let mut cache_guard = state.tune_cache.lock().await;
-
-        // Initialize cache if it doesn't exist, or reinitialize if it was reset
-        if cache_guard.is_none() {
-            if let Some(def) = def {
-                eprintln!("[DEBUG] load_tune: Initializing cache from definition");
-                *cache_guard = Some(TuneCache::from_definition(def));
-            } else {
-                eprintln!("[WARN] load_tune: No definition loaded, cannot initialize cache");
-                return Err("No ECU definition loaded. Please open a project first.".to_string());
-            }
+        // Build cache locally WITHOUT holding tune_cache lock — avoids blocking concurrent table reads.
+        if def.is_none() {
+            eprintln!("[WARN] load_tune: No definition loaded, cannot initialize cache");
+            return Err("No ECU definition loaded. Please open a project first.".to_string());
         }
-
-        // Ensure cache is initialized even if it exists but is empty
-        if let Some(cache) = cache_guard.as_mut() {
-            if cache.page_count() == 0 {
-                if let Some(def) = def {
-                    eprintln!("[DEBUG] load_tune: Cache exists but is empty, reinitializing from definition");
-                    *cache_guard = Some(TuneCache::from_definition(def));
-                }
-            }
-        }
-
-        if let Some(cache) = cache_guard.as_mut() {
+        let mut local_cache = def.map(TuneCache::from_definition).unwrap();
+        {
+            let cache = &mut local_cache;
             // First, load any raw page data
             for (page_num, page_data) in &tune.pages {
                 cache.load_page(*page_num, page_data.clone());
@@ -593,6 +577,9 @@ pub async fn load_tune(
                 eprintln!("[DEBUG] load_tune: no definition loaded, skipping constant application");
             }
         }
+        drop(def_guard);
+        // Store fully-populated cache (brief lock — concurrent reads no longer blocked)
+        *state.tune_cache.lock().await = Some(local_cache);
     }
 
     {

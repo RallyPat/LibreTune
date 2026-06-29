@@ -62,80 +62,53 @@ pub async fn create_project(
             let tune =
                 TuneFile::load(tune_path_ref).map_err(|e| format!("Failed to load tune: {}", e))?;
 
-            // Apply tune constants to cache (same logic as load_tune)
+            // Apply tune constants to cache (same logic as load_tune / open_project).
+            // Build locally WITHOUT holding tune_cache lock — avoids blocking concurrent table reads.
             {
-                let mut cache_guard = state.tune_cache.lock().await;
-                if let Some(cache) = cache_guard.as_mut() {
-                    // Load any raw page data
-                    for (page_num, page_data) in &tune.pages {
-                        cache.load_page(*page_num, page_data.clone());
-                    }
+                use libretune_core::tune::TuneValue;
+                let mut local_cache = TuneCache::from_definition(&def);
+                let cache = &mut local_cache;
 
-                    // Apply constants from tune file to cache
-                    use libretune_core::tune::TuneValue;
+                for (page_num, page_data) in &tune.pages {
+                    cache.load_page(*page_num, page_data.clone());
+                }
 
-                    for (name, tune_value) in &tune.constants {
-                        if let Some(constant) = def.constants.get(name) {
-                            // PC variables are stored locally
-                            if constant.is_pc_variable {
-                                match tune_value {
-                                    TuneValue::Scalar(v) => {
-                                        cache.local_values.insert(name.clone(), *v);
-                                    }
-                                    TuneValue::Array(arr) if !arr.is_empty() => {
-                                        cache.local_values.insert(name.clone(), arr[0]);
-                                    }
-                                    _ => {}
-                                }
-                                continue;
-                            }
-
-                            let length = constant.size_bytes() as u16;
-                            if length == 0 {
-                                continue;
-                            }
-
-                            let element_size = constant.data_type.size_bytes();
-                            let element_count = constant.shape.element_count();
-                            let mut raw_data = vec![0u8; length as usize];
-
+                for (name, tune_value) in &tune.constants {
+                    if let Some(constant) = def.constants.get(name) {
+                        if constant.is_pc_variable {
                             match tune_value {
-                                TuneValue::Scalar(v) => {
-                                    let raw_val = constant.display_to_raw(*v);
-                                    constant.data_type.write_to_bytes(
-                                        &mut raw_data,
-                                        0,
-                                        raw_val,
-                                        def.endianness,
-                                    );
-                                    let _ = cache.write_bytes(
-                                        constant.page,
-                                        constant.offset,
-                                        &raw_data,
-                                    );
-                                }
-                                TuneValue::Array(arr) if arr.len() == element_count => {
-                                    for (i, val) in arr.iter().enumerate() {
-                                        let raw_val = constant.display_to_raw(*val);
-                                        let offset = i * element_size;
-                                        constant.data_type.write_to_bytes(
-                                            &mut raw_data,
-                                            offset,
-                                            raw_val,
-                                            def.endianness,
-                                        );
-                                    }
-                                    let _ = cache.write_bytes(
-                                        constant.page,
-                                        constant.offset,
-                                        &raw_data,
-                                    );
-                                }
+                                TuneValue::Scalar(v) => { cache.local_values.insert(name.clone(), *v); }
+                                TuneValue::Array(arr) if !arr.is_empty() => { cache.local_values.insert(name.clone(), arr[0]); }
                                 _ => {}
                             }
+                            continue;
+                        }
+                        let length = constant.size_bytes() as u16;
+                        if length == 0 { continue; }
+                        let element_size = constant.data_type.size_bytes();
+                        let element_count = constant.shape.element_count();
+                        let mut raw_data = vec![0u8; length as usize];
+                        match tune_value {
+                            TuneValue::Scalar(v) => {
+                                let raw_val = constant.display_to_raw(*v);
+                                constant.data_type.write_to_bytes(&mut raw_data, 0, raw_val, def.endianness);
+                                let _ = cache.write_bytes(constant.page, constant.offset, &raw_data);
+                            }
+                            TuneValue::Array(arr) => {
+                                // Handle size mismatches: pad with last value or truncate
+                                let last_value = arr.last().copied().unwrap_or(0.0);
+                                for i in 0..element_count {
+                                    let val = arr.get(i).copied().unwrap_or(last_value);
+                                    let raw_val = constant.display_to_raw(val);
+                                    constant.data_type.write_to_bytes(&mut raw_data, i * element_size, raw_val, def.endianness);
+                                }
+                                let _ = cache.write_bytes(constant.page, constant.offset, &raw_data);
+                            }
+                            _ => {}
                         }
                     }
                 }
+                *state.tune_cache.lock().await = Some(local_cache);
             }
 
             // Store tune in project
@@ -290,13 +263,13 @@ pub async fn open_project(
 
     // Initialize TuneCache and load project tune
     if let Some(tune) = tune_to_load {
-        // Create TuneCache from definition
-        let cache = TuneCache::from_definition(&def_clone);
-        let mut cache_guard = state.tune_cache.lock().await;
-        *cache_guard = Some(cache);
+        // Build cache WITHOUT holding the state lock so concurrent readers (e.g. get_table_data)
+        // are not blocked during the potentially long tune-loading loop.
+        let mut local_cache = TuneCache::from_definition(&def_clone);
 
         // Populate cache from project tune
-        if let Some(cache) = cache_guard.as_mut() {
+        {
+            let cache = &mut local_cache;
             // Load any raw page data first
             for (page_num, page_data) in &tune.pages {
                 cache.load_page(*page_num, page_data.clone());
@@ -606,7 +579,8 @@ pub async fn open_project(
             eprintln!("[INFO]   Total in MSQ: {} constants", tune.constants.len());
             eprintln!("[INFO] ========================================\n");
         }
-        drop(cache_guard);
+        // Store the fully-populated cache (brief lock)
+        *state.tune_cache.lock().await = Some(local_cache);
 
         // Store tune in state
         *state.current_tune.lock().await = Some(tune.clone());

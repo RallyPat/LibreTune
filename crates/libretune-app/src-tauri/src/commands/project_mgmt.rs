@@ -19,9 +19,19 @@ pub async fn close_project(state: tauri::State<'_, AppState>) -> Result<(), Stri
             .map_err(|e| format!("Failed to close project: {}", e))?;
     }
 
-    // Clear definition
-    let mut def_guard = state.definition.write().await;
-    *def_guard = None;
+    // Clear definition — drop write lock before acquiring current_tune to avoid ABBA deadlock
+    // (get_table_data holds current_tune then tries definition.read; we must not hold
+    // definition.write while waiting for current_tune)
+    {
+        let mut def_guard = state.definition.write().await;
+        *def_guard = None;
+    }
+
+    // Clear tune cache
+    {
+        let mut cache_guard = state.tune_cache.lock().await;
+        *cache_guard = None;
+    }
 
     // Clear tune
     let mut tune_guard = state.current_tune.lock().await;

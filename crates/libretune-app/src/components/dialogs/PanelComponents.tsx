@@ -41,6 +41,24 @@ function patchConstantValue(name: string, value: number) {
   useConstantValuesStore.getState().patch(name, value);
 }
 
+type CmdGroup = { __cmdGroup: true; items: DialogComponent[] };
+function groupCommandButtons(components: DialogComponent[]): Array<DialogComponent | CmdGroup> {
+  const result: Array<DialogComponent | CmdGroup> = [];
+  let batch: DialogComponent[] = [];
+  for (const comp of components) {
+    if (comp.type === 'CommandButton' && comp.command) {
+      batch.push(comp);
+    } else {
+      if (batch.length) { result.push({ __cmdGroup: true, items: batch }); batch = []; }
+      result.push(comp);
+    }
+  }
+  if (batch.length) result.push({ __cmdGroup: true, items: batch });
+  return result;
+}
+export type { CmdGroup };
+export { groupCommandButtons };
+
 export const RecursivePanel = memo(function RecursivePanel({
   name,
   openTable,
@@ -153,20 +171,29 @@ export const RecursivePanel = memo(function RecursivePanel({
           };
 
           const loadTable = () => {
+            let tableInfoLoaded = false;
             invoke<TableInfo>('get_table_info', { tableName: name })
               .then((info) => {
-                if (cancelled) return;
+                if (cancelled) return undefined;
+                tableInfoLoaded = true;
                 setTableInfo(info);
                 return invoke<BackendTableData>('get_table_data', { tableName: name });
               })
               .then((data) => {
-                if (cancelled || !data) return;
+                if (cancelled || data === undefined) return;
                 setTableData(data);
                 setPanelType('table');
               })
               .catch(() => {
                 if (cancelled) return;
-                setPanelType('table');
+                // Only enter 'table' state if get_table_info succeeded (tableInfo is set).
+                // If get_table_info itself failed, fall through to unknown so the panel
+                // doesn't go blank.
+                if (tableInfoLoaded) {
+                  setPanelType('table');
+                } else {
+                  setPanelType('unknown');
+                }
               });
           };
 
@@ -276,9 +303,17 @@ export const RecursivePanel = memo(function RecursivePanel({
       <div className="nested-panel">
         {definition.title && definition.title !== name && <div className="panel-title">{definition.title}</div>}
         <div className="panel-content">
-          {(definition.components ?? []).map((comp, i) => (
-            <DialogComponentRenderer key={i} comp={comp} openTable={openTable} context={context} onUpdate={onUpdate} onOptimisticUpdate={applyOptimistic} onFieldFocus={onFieldFocus} showAllHelpIcons={showAllHelpIcons} searchFilter={searchFilter} />
-          ))}
+          {groupCommandButtons(definition.components ?? []).map((item, i) =>
+            '__cmdGroup' in item ? (
+              <div key={i} className="command-button-group">
+                {item.items.map((comp, j) => (
+                  <CommandButton key={j} comp={comp} context={context} />
+                ))}
+              </div>
+            ) : (
+              <DialogComponentRenderer key={i} comp={item} openTable={openTable} context={context} onUpdate={onUpdate} onOptimisticUpdate={applyOptimistic} onFieldFocus={onFieldFocus} showAllHelpIcons={showAllHelpIcons} searchFilter={searchFilter} />
+            )
+          )}
         </div>
       </div>
     );

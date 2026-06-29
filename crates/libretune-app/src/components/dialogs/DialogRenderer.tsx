@@ -18,7 +18,8 @@ import {
   type DialogDefinition,
   type FieldInfo,
 } from './types';
-import { DialogComponentRenderer } from './PanelComponents';
+import { DialogComponentRenderer, groupCommandButtons } from './PanelComponents';
+import { CommandButton } from './fields/CommandButton';
 
 export interface DialogRendererProps {
   definition: DialogDefinition;
@@ -145,7 +146,17 @@ export default function DialogRenderer({
           icon={<SidebarNodeIcon icon={headerIconKey} />}
           count={generalCount || others.length}
         >
-          {others.map((comp, i) => renderComponent(comp, `general-${i}`))}
+          {groupCommandButtons(others).map((item, i) =>
+            '__cmdGroup' in item ? (
+              <div key={`cmd-group-${i}`} className="command-button-group">
+                {item.items.map((comp, j) => (
+                  <CommandButton key={j} comp={comp} context={context ?? {}} />
+                ))}
+              </div>
+            ) : (
+              renderComponent(item, `general-${i}`)
+            )
+          )}
         </ConfiguratorGroup>,
       );
     }

@@ -52,110 +52,88 @@ pub async fn update_project_ini(
             .and_then(|p| p.current_tune.as_ref().cloned())
     };
 
-    // Create new cache from updated definition
-    let cache = TuneCache::from_definition(&def_clone);
-    let mut cache_guard = state.tune_cache.lock().await;
-    *cache_guard = Some(cache);
+    // Build TuneCache locally WITHOUT holding the state lock — prevents blocking
+    // concurrent get_table_data calls that also need tune_cache.
+    let mut local_cache = TuneCache::from_definition(&def_clone);
 
-    // Re-apply project tune constants with new definition
     if let Some(tune) = project_tune {
-        if let Some(cache) = cache_guard.as_mut() {
-            // Load any raw page data first
-            for (page_num, page_data) in &tune.pages {
-                cache.load_page(*page_num, page_data.clone());
-            }
+        let cache = &mut local_cache;
 
-            // Apply constants from tune file to cache (same logic as open_project)
-            use libretune_core::tune::TuneValue;
+        // Load any raw page data first
+        for (page_num, page_data) in &tune.pages {
+            cache.load_page(*page_num, page_data.clone());
+        }
 
-            let mut applied_count = 0;
-            let mut skipped_count = 0;
-            let mut failed_count = 0;
+        use libretune_core::tune::TuneValue;
+        let mut applied_count = 0;
+        let mut skipped_count = 0;
+        let mut failed_count = 0;
 
-            for (name, tune_value) in &tune.constants {
-                if let Some(constant) = def_clone.constants.get(name) {
-                    // PC variables are stored locally
-                    if constant.is_pc_variable {
-                        match tune_value {
-                            TuneValue::Scalar(v) => {
-                                cache.local_values.insert(name.clone(), *v);
-                                applied_count += 1;
-                            }
-                            TuneValue::Array(arr) if !arr.is_empty() => {
-                                cache.local_values.insert(name.clone(), arr[0]);
-                                applied_count += 1;
-                            }
-                            _ => {
-                                skipped_count += 1;
-                            }
-                        }
-                        continue;
-                    }
-
-                    let length = constant.size_bytes() as u16;
-                    if length == 0 {
-                        skipped_count += 1;
-                        continue;
-                    }
-
-                    let element_size = constant.data_type.size_bytes();
-                    let element_count = constant.shape.element_count();
-                    let mut raw_data = vec![0u8; length as usize];
-
+        for (name, tune_value) in &tune.constants {
+            if let Some(constant) = def_clone.constants.get(name) {
+                if constant.is_pc_variable {
                     match tune_value {
                         TuneValue::Scalar(v) => {
-                            let raw_val = constant.display_to_raw(*v);
-                            constant.data_type.write_to_bytes(
-                                &mut raw_data,
-                                0,
-                                raw_val,
-                                def_clone.endianness,
-                            );
-                            if cache.write_bytes(constant.page, constant.offset, &raw_data) {
-                                applied_count += 1;
-                            } else {
-                                failed_count += 1;
-                            }
+                            cache.local_values.insert(name.clone(), *v);
+                            applied_count += 1;
                         }
-                        TuneValue::Array(arr) => {
-                            // Handle size mismatches
-                            let last_value = arr.last().copied().unwrap_or(0.0);
-
-                            for i in 0..element_count {
-                                let val = if i < arr.len() { arr[i] } else { last_value };
-                                let raw_val = constant.display_to_raw(val);
-                                let offset = i * element_size;
-                                constant.data_type.write_to_bytes(
-                                    &mut raw_data,
-                                    offset,
-                                    raw_val,
-                                    def_clone.endianness,
-                                );
-                            }
-
-                            if cache.write_bytes(constant.page, constant.offset, &raw_data) {
-                                applied_count += 1;
-                            } else {
-                                failed_count += 1;
-                            }
+                        TuneValue::Array(arr) if !arr.is_empty() => {
+                            cache.local_values.insert(name.clone(), arr[0]);
+                            applied_count += 1;
                         }
-                        TuneValue::String(_) | TuneValue::Bool(_) => {
-                            skipped_count += 1;
+                        _ => { skipped_count += 1; }
+                    }
+                    continue;
+                }
+
+                let length = constant.size_bytes() as u16;
+                if length == 0 {
+                    skipped_count += 1;
+                    continue;
+                }
+
+                let element_size = constant.data_type.size_bytes();
+                let element_count = constant.shape.element_count();
+                let mut raw_data = vec![0u8; length as usize];
+
+                match tune_value {
+                    TuneValue::Scalar(v) => {
+                        let raw_val = constant.display_to_raw(*v);
+                        constant.data_type.write_to_bytes(&mut raw_data, 0, raw_val, def_clone.endianness);
+                        if cache.write_bytes(constant.page, constant.offset, &raw_data) {
+                            applied_count += 1;
+                        } else {
+                            failed_count += 1;
                         }
                     }
-                } else {
-                    skipped_count += 1;
+                    TuneValue::Array(arr) => {
+                        let last_value = arr.last().copied().unwrap_or(0.0);
+                        for i in 0..element_count {
+                            let val = if i < arr.len() { arr[i] } else { last_value };
+                            let raw_val = constant.display_to_raw(val);
+                            constant.data_type.write_to_bytes(&mut raw_data, i * element_size, raw_val, def_clone.endianness);
+                        }
+                        if cache.write_bytes(constant.page, constant.offset, &raw_data) {
+                            applied_count += 1;
+                        } else {
+                            failed_count += 1;
+                        }
+                    }
+                    TuneValue::String(_) | TuneValue::Bool(_) => { skipped_count += 1; }
                 }
+            } else {
+                skipped_count += 1;
             }
-
-            eprintln!("[DEBUG] update_project_ini: Re-applied tune constants - applied: {}, failed: {}, skipped: {}, total: {}", 
-                applied_count, failed_count, skipped_count, tune.constants.len());
-
-            // Emit event to notify UI that tune data was re-applied
-            let _ = app.emit("tune:loaded", "ini_updated");
         }
+
+        eprintln!("[DEBUG] update_project_ini: Re-applied tune constants - applied: {}, failed: {}, skipped: {}, total: {}",
+            applied_count, failed_count, skipped_count, tune.constants.len());
+
+        let _ = app.emit("tune:loaded", "ini_updated");
     }
-    drop(cache_guard);
+
+    // Store the fully-populated cache atomically (brief lock)
+    *state.tune_cache.lock().await = Some(local_cache);
 
     // If force_resync is requested and we're connected, trigger re-sync
     if force_resync {

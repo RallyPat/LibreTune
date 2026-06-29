@@ -101,7 +101,11 @@ function startFetch(name: string, priority: FetchPriority): Promise<DialogDefini
       return def;
     })
     .catch((err) => {
-      console.warn(`[panelDefinitionCache] Failed to load '${name}':`, err);
+      // Suppress expected "not found" errors — panel names can be tables/curves, not dialogs.
+      const msg = String(err);
+      if (!msg.includes('not found') && !msg.includes('Not found')) {
+        console.warn(`[panelDefinitionCache] Failed to load '${name}':`, err);
+      }
       return null;
     })
     .finally(() => {

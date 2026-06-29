@@ -3,7 +3,7 @@
 use crate::AppState;
 use libretune_core::ini::Constant;
 use libretune_core::protocol::Connection;
-use libretune_core::tune::TuneFile;
+use libretune_core::tune::{TuneCache, TuneFile};
 use serde::Serialize;
 
 #[derive(Serialize)]
@@ -94,10 +94,11 @@ pub async fn get_curve_data(
 
     drop(def_guard);
 
-    // Helper to read constant data from TuneFile (offline) or ECU (online)
+    // Helper to read constant data from TuneCache (primary), TuneFile (fallback), or ECU (online).
     fn read_const_from_source(
         constant: &Constant,
         tune: Option<&TuneFile>,
+        cache: Option<&TuneCache>,
         conn: &mut Option<&mut Connection>,
         endianness: libretune_core::ini::Endianness,
     ) -> Result<Vec<f64>, String> {
@@ -110,80 +111,73 @@ pub async fn get_curve_data(
             constant.name, constant.shape, element_count, element_size, length
         );
 
-        // If offline, read from TuneFile (MSQ file)
+        let decode = |data: &[u8], base: usize| -> Vec<f64> {
+            let mut values = Vec::with_capacity(element_count);
+            for i in 0..element_count {
+                let elem_off = base + i * element_size;
+                if let Some(raw_val) = constant.data_type.read_from_bytes(data, elem_off, endianness) {
+                    values.push(constant.raw_to_display(raw_val));
+                } else {
+                    values.push(0.0);
+                }
+            }
+            values
+        };
+
         if conn.is_none() {
+            // 1. TuneCache (most authoritative)
+            if let Some(cache) = cache {
+                if length > 0 {
+                    if let Some(raw) = cache.read_bytes(constant.page, constant.offset, length) {
+                        eprintln!("[DEBUG] read_const_from_source: '{}' from TuneCache", constant.name);
+                        return Ok(decode(raw, 0));
+                    }
+                }
+            }
+
             if let Some(tune_file) = tune {
-                // First try named constants (parsed from MSQ <constant> tags)
+                // 2. TuneFile.constants (parsed TuneValue entries)
                 if let Some(tune_value) = tune_file.constants.get(&constant.name) {
                     use libretune_core::tune::TuneValue;
-                    eprintln!(
-                        "[DEBUG] read_const_from_source: '{}' found in TuneFile.constants",
-                        constant.name
-                    );
                     match tune_value {
-                        TuneValue::Array(arr) => {
-                            eprintln!("[DEBUG] read_const_from_source: '{}' returning {} array values from constants", constant.name, arr.len());
-                            return Ok(arr.clone());
-                        }
-                        TuneValue::Scalar(v) => {
-                            return Ok(vec![*v]);
-                        }
+                        TuneValue::Array(arr) => return Ok(arr.clone()),
+                        TuneValue::Scalar(v) => return Ok(vec![*v]),
                         _ => {}
                     }
                 }
 
-                // Fallback: try to read from raw page data using INI offset
-                // This handles cases where the constant wasn't explicitly in the MSQ file
+                // 3. TuneFile.pages (raw binary from MSQ <pageData>)
                 if let Some(page_data) = tune_file.pages.get(&constant.page) {
                     let offset = constant.offset as usize;
                     let total_bytes = element_count * element_size;
-
                     if offset + total_bytes <= page_data.len() {
-                        eprintln!("[DEBUG] read_const_from_source: '{}' reading from TuneFile.pages[{}] at offset {}", 
-                            constant.name, constant.page, offset);
-
-                        let mut values = Vec::with_capacity(element_count);
-                        for i in 0..element_count {
-                            let elem_offset = offset + i * element_size;
-                            if let Some(raw_val) = constant.data_type.read_from_bytes(
-                                page_data,
-                                elem_offset,
-                                endianness,
-                            ) {
-                                values.push(constant.raw_to_display(raw_val));
-                            } else {
-                                values.push(0.0);
-                            }
-                        }
-                        eprintln!("[DEBUG] read_const_from_source: '{}' returning {} values from page data", constant.name, values.len());
-                        return Ok(values);
-                    } else {
-                        eprintln!("[WARN] read_const_from_source: '{}' offset {} + size {} exceeds page {} length {}", 
-                            constant.name, offset, total_bytes, constant.page, page_data.len());
+                        eprintln!("[DEBUG] read_const_from_source: '{}' from TuneFile.pages[{}]", constant.name, constant.page);
+                        return Ok(decode(page_data, offset));
                     }
+                    eprintln!("[WARN] read_const_from_source: '{}' offset {} + {} exceeds page {} len {}",
+                        constant.name, offset, total_bytes, constant.page, page_data.len());
                 } else {
-                    eprintln!("[WARN] read_const_from_source: '{}' page {} not found in TuneFile.pages (available: {:?})", 
-                        constant.name, constant.page, tune_file.pages.keys().collect::<Vec<_>>());
+                    eprintln!("[WARN] read_const_from_source: '{}' page {} not in TuneFile.pages", constant.name, constant.page);
                 }
             }
-            // If not found anywhere, return zeros
-            eprintln!(
-                "[DEBUG] read_const_from_source: '{}' returning {} zeros (not in TuneFile)",
-                constant.name, element_count
-            );
+
+            eprintln!("[DEBUG] read_const_from_source: '{}' returning {} zeros", constant.name, element_count);
             return Ok(vec![0.0; element_count]);
         }
 
-        // For ECU reads, we need valid length
+        // Connected: TuneCache first, then live ECU read.
+        if let Some(cache) = cache {
+            if length > 0 {
+                if let Some(raw) = cache.read_bytes(constant.page, constant.offset, length) {
+                    return Ok(decode(raw, 0));
+                }
+            }
+        }
+
         if length == 0 {
-            eprintln!(
-                "[WARN] read_const_from_source: '{}' has length=0, cannot read from ECU",
-                constant.name
-            );
             return Ok(vec![0.0; element_count]);
         }
 
-        // If connected to ECU, read from ECU (live data)
         if let Some(ref mut conn_ptr) = conn {
             let params = libretune_core::protocol::commands::ReadMemoryParams {
                 can_id: 0,
@@ -191,34 +185,21 @@ pub async fn get_curve_data(
                 offset: constant.offset,
                 length,
             };
-
             let raw_data = conn_ptr.read_memory(params).map_err(|e| e.to_string())?;
-
-            let mut values = Vec::new();
-            for i in 0..element_count {
-                let offset = i * element_size;
-                if let Some(raw_val) = constant
-                    .data_type
-                    .read_from_bytes(&raw_data, offset, endianness)
-                {
-                    values.push(constant.raw_to_display(raw_val));
-                } else {
-                    values.push(0.0);
-                }
-            }
-            return Ok(values);
+            return Ok(decode(&raw_data, 0));
         }
 
         Ok(vec![0.0; element_count])
     }
 
-    // Get tune and connection
+    // Acquire in tune_cache → current_tune order (matches update_curve_data to prevent deadlock).
+    let cache_guard = state.tune_cache.lock().await;
     let tune_guard = state.current_tune.lock().await;
     let mut conn_guard = state.connection.lock().await;
     let mut conn = conn_guard.as_mut();
 
-    let x_bins = read_const_from_source(&x_const, tune_guard.as_ref(), &mut conn, endianness)?;
-    let y_bins = read_const_from_source(&y_const, tune_guard.as_ref(), &mut conn, endianness)?;
+    let x_bins = read_const_from_source(&x_const, tune_guard.as_ref(), cache_guard.as_ref(), &mut conn, endianness)?;
+    let y_bins = read_const_from_source(&y_const, tune_guard.as_ref(), cache_guard.as_ref(), &mut conn, endianness)?;
 
     Ok(CurveData {
         name: curve_name_out,

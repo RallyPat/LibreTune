@@ -35,7 +35,7 @@ pub(crate) use commands::types::{
     MatchingIniInfo, SignatureMatchType, SignatureMismatchInfo, SyncProgress, SyncResult,
 };
 pub(crate) use commands::util_helpers::{
-    clean_axis_label, get_conn_lock_holder, parse_runtime_packet_mode, read_raw_value,
+    get_conn_lock_holder, parse_runtime_packet_mode, read_raw_value,
     resolve_table_axis_label, set_conn_lock_holder, stream_log, infer_z_output_channel,
 };
 

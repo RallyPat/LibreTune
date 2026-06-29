@@ -1188,7 +1188,7 @@ export default function TableEditor2D({
         />
       </div>
 
-      {(x_output_channel || y_output_channel || z_output_channel) && (
+      {z_output_channel && (
         <TableLiveReadouts
           xChannel={x_output_channel}
           yChannel={y_output_channel}

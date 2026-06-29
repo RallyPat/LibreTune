@@ -958,7 +958,7 @@ function TableEditorInner({
       </div>
       )}
 
-      {(data.xOutputChannel || data.yOutputChannel || data.zOutputChannel) && (
+      {data.zOutputChannel && (
         <TableLiveReadouts
           xChannel={data.xOutputChannel}
           yChannel={data.yOutputChannel}
