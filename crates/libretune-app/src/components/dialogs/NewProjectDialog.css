@@ -39,10 +39,10 @@
   min-width: 0;
   max-width: 100%;
   box-sizing: border-box;
-  padding: 6px 10px;
+  padding: 7px 12px;
   background: var(--bg-elevated);
   border: 1px solid var(--border-default);
-  border-radius: var(--radius-sm);
+  border-radius: 8px;
   color: var(--text-primary);
   font-size: var(--font-size-sm);
 }
@@ -63,10 +63,10 @@
   width: 100%;
   min-width: 0;
   box-sizing: border-box;
-  padding: 6px 10px;
+  padding: 7px 12px;
   background: var(--bg-elevated);
   border: 1px dashed var(--border-default);
-  border-radius: var(--radius-sm);
+  border-radius: 8px;
   color: var(--text-secondary);
   font-size: var(--font-size-sm);
   font-style: italic;
@@ -74,10 +74,10 @@
 
 .browse-ini-btn {
   white-space: nowrap;
-  padding: 6px 14px;
+  padding: 7px 16px;
   background: var(--bg-elevated);
   border: 1px solid var(--border-default);
-  border-radius: var(--radius-sm);
+  border-radius: 8px;
   color: var(--text-primary);
   font-size: var(--font-size-sm);
   cursor: pointer;
