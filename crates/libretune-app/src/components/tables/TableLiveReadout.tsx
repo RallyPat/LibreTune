@@ -59,7 +59,7 @@ export default function TableLiveReadout({
     if (xChannel) {
       items.push({
         key: 'x',
-        label: gppwm ? 'X' : xLabel,
+        label: gppwm ? 'x' : xLabel,
         value: formatLiveReadoutValue(live[xChannel], 'axis', xChannel),
       });
     }
@@ -67,7 +67,7 @@ export default function TableLiveReadout({
     if (yChannel) {
       items.push({
         key: 'y',
-        label: gppwm ? 'Y' : yLabel,
+        label: gppwm ? 'y' : yLabel,
         value: formatLiveReadoutValue(live[yChannel], 'axis', yChannel),
       });
     }

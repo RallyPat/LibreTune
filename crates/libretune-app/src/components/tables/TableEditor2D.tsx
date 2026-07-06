@@ -1109,7 +1109,7 @@ export default function TableEditor2D({
       )}
 
       <div 
-        className={`editor-content${embedded && (x_output_channel || y_output_channel || isGppwmTable(table_name, x_output_channel, y_output_channel)) ? ' editor-content--with-live' : ''}`}
+        className={`editor-content${isGppwmTable(table_name, x_output_channel, y_output_channel) ? ' editor-content--with-live' : ''}`}
         onContextMenu={e => {
           const target = e.target as HTMLElement;
           if (target.classList.contains('table-cell')) {
@@ -1143,7 +1143,7 @@ export default function TableEditor2D({
           heatmapScheme={heatmapSettings.valueScheme}
           compact={embedded}
         />
-        {embedded && (x_output_channel || y_output_channel || isGppwmTable(table_name, x_output_channel, y_output_channel)) && (
+        {isGppwmTable(table_name, x_output_channel, y_output_channel) && (
           <TableLiveReadout
             tableName={table_name}
             xLabel={x_axis_name}

@@ -8,6 +8,7 @@ import {
   type FieldInfo,
 } from './types';
 import { DialogComponentRenderer } from './PanelComponents';
+import { applyTableSettingsLayout, rowHasTableSplitLayout } from './dialogLayout';
 
 export interface DialogRendererProps {
   definition: DialogDefinition;
@@ -95,20 +96,20 @@ export default function DialogRenderer({ definition, onBack, openTable, context,
   }, [definition]);
   
   // Group components by position for multi-column layout
-  const organizeComponents = () => {
+  const organizeComponents = (components: DialogComponent[]) => {
     const rows: { west: DialogComponent[], east: DialogComponent[], unpositioned: DialogComponent[] }[] = [];
     let currentRow: { west: DialogComponent[], east: DialogComponent[], unpositioned: DialogComponent[] } | null = null;
     
-    for (const comp of definition.components) {
+    for (const comp of components) {
       const position = comp.position?.toLowerCase();
       
       if (position === 'west' || position === 'east') {
-        // Start a new row if we don't have one or if current row already has items in this position
-        if (!currentRow || (position === 'west' && currentRow.west.length > 0) || (position === 'east' && currentRow.east.length > 0)) {
+        // New row only when prior row had unpositioned content (labels above a split row)
+        if (!currentRow || currentRow.unpositioned.length > 0) {
           currentRow = { west: [], east: [], unpositioned: [] };
           rows.push(currentRow);
         }
-        
+
         if (position === 'west') {
           currentRow.west.push(comp);
         } else {
@@ -127,7 +128,10 @@ export default function DialogRenderer({ definition, onBack, openTable, context,
     return rows;
   };
   
-  const componentRows = useMemo(() => organizeComponents(), [definition.components]);
+  const componentRows = useMemo(() => {
+    const { components } = applyTableSettingsLayout(definition.name, definition.components);
+    return organizeComponents(components);
+  }, [definition.name, definition.components]);
   
   return (
     <div className="dialog-view view-transition">
@@ -165,6 +169,8 @@ export default function DialogRenderer({ definition, onBack, openTable, context,
           }
           
           // Has positioned components - use grid layout
+          const tableSplitLayout = rowHasTableSplitLayout(row);
+
           return (
             <React.Fragment key={`row-${rowIndex}`}>
               {row.unpositioned.map((comp, i) => (
@@ -179,7 +185,7 @@ export default function DialogRenderer({ definition, onBack, openTable, context,
                   showAllHelpIcons={showAllHelpIcons} 
                 />
               ))}
-              <div className="dialog-row-container">
+              <div className={`dialog-row-container${tableSplitLayout ? ' dialog-row-container--table-settings' : ''}`}>
                 {row.west.length > 0 && (
                   <div className="dialog-column">
                     {row.west.map((comp, i) => (

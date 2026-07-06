@@ -56,6 +56,31 @@
   align-items: start;
 }
 
+/* Config left, embedded table right (user tables, GPPWM, etc.) */
+.dialog-view .dialog-row-container--table-settings {
+  grid-template-columns: minmax(300px, 400px) minmax(0, 1fr);
+  gap: 12px;
+  width: 100%;
+}
+
+.dialog-view .dialog-row-container--table-settings .dialog-column:first-child {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.dialog-view .dialog-row-container--table-settings .dialog-column:first-child .nested-panel {
+  max-width: 100%;
+}
+
+.dialog-view .dialog-row-container--table-settings .dialog-column:last-child {
+  min-width: 0;
+}
+
+.dialog-view .dialog-row-container--table-settings .dialog-column:last-child .table-editor-2d.embedded {
+  width: auto;
+}
+
 /* Single column within row (for West/East positioning) */
 .dialog-view .dialog-column {
   display: flex;
