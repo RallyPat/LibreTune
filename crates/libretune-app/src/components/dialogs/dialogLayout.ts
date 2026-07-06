@@ -16,6 +16,16 @@ export function isUserTableLiveChannel(name: string | undefined): boolean {
   return /^userTable(?:[XY]Axis|Output)\d+$/i.test(name);
 }
 
+/** GPPWM live channels rendered beside the table via TableLiveReadout — skip INI runtimeValue duplicates. */
+export function isGppwmLiveChannel(name: string | undefined): boolean {
+  if (!name) return false;
+  return /^gppwm(?:Switch|XAxis|YAxis|Output)\d+$/i.test(name);
+}
+
+export function isEmbeddedTableLiveChannel(name: string | undefined): boolean {
+  return isUserTableLiveChannel(name) || isGppwmLiveChannel(name);
+}
+
 export function isTableComponent(comp: DialogComponent): boolean {
   if (comp.type === 'Table' && comp.name) return true;
   if (comp.type === 'Panel' && isEmbeddedTablePanelName(comp.name)) return true;

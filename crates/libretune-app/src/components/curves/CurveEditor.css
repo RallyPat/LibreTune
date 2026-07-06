@@ -130,6 +130,7 @@
   padding: 8px;
   gap: 12px;
   overflow: visible;
+  align-items: flex-start;
 }
 
 /* Chart container */
@@ -145,19 +146,64 @@
   border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
-/* Bottom section for embedded mode (gauge + table side by side) */
-.curve-bottom-section {
-  display: flex;
-  flex-direction: row;
-  gap: 12px;
-  align-items: flex-start;
+.curve-editor.embedded .curve-chart-container {
+  width: var(--curve-embedded-width, 500px);
 }
 
-/* Gauge container in bottom section */
-.curve-gauge-container {
+/* Bottom section for embedded mode (data table + compact live readout) */
+.curve-editor.embedded .curve-bottom-section {
+  width: var(--curve-embedded-width, 500px);
+}
+
+.curve-bottom-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.curve-bottom-section .curve-data-table {
+  width: 100%;
+  flex: none;
+  align-self: stretch;
+  max-height: none;
+  overflow-y: visible;
+}
+
+.curve-bottom-section .curve-live-readout {
   flex-shrink: 0;
-  width: 200px;
-  height: 200px;
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  min-height: 40px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(0, 0, 0, 0.25);
+  box-sizing: border-box;
+}
+
+.curve-bottom-section .curve-live-readout .runtime-value-label {
+  font-size: 13px;
+  color: var(--text-secondary, rgba(255, 255, 255, 0.65));
+  font-weight: 500;
+}
+
+.curve-bottom-section .curve-live-readout .runtime-value-display {
+  padding: 8px 12px;
+  min-width: 88px;
+  background: var(--bg-primary, rgba(20, 20, 24, 0.9));
+  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.12));
+  border-radius: 4px;
+  color: var(--text-primary, #fff);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  min-height: 30px;
+  line-height: 1.3;
+  box-sizing: border-box;
 }
 
 /* Data table */
@@ -173,11 +219,22 @@
 .curve-editor.embedded .curve-data-table {
   max-height: 150px;
   min-width: 0;
-  flex: 1;
+  flex: none;
 }
 
-.curve-bottom-section .curve-data-table {
-  max-height: 200px;
+.curve-editor.embedded .curve-bottom-section .curve-data-table {
+  max-height: none;
+}
+
+.curve-bottom-section .curve-data-table table {
+  width: 100%;
+  table-layout: fixed;
+}
+
+.curve-bottom-section .curve-data-table th,
+.curve-bottom-section .curve-data-table td {
+  padding: 6px 12px;
+  font-size: 12px;
 }
 
 .curve-data-table table {

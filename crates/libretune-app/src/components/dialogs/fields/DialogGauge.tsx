@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import TsGauge from '../../gauges/TsGauge';
-import { useChannelValue } from '../../../stores/realtimeStore';
-import { toTsGaugeConfig, type SimpleGaugeInfo } from '../../curves/CurveEditor';
+import { GaugeLiveReadout } from '../../gauges/GaugeLiveReadout';
+import type { SimpleGaugeInfo } from '../../curves/CurveEditor';
 
 export function DialogGauge({ gaugeName }: { gaugeName: string }) {
   const [gaugeInfo, setGaugeInfo] = useState<SimpleGaugeInfo | null>(null);
@@ -26,9 +25,6 @@ export function DialogGauge({ gaugeName }: { gaugeName: string }) {
     };
   }, [gaugeName]);
 
-  const channel = gaugeInfo?.channel ?? '';
-  const liveValue = useChannelValue(channel);
-
   if (loadError) {
     return null;
   }
@@ -38,8 +34,8 @@ export function DialogGauge({ gaugeName }: { gaugeName: string }) {
   }
 
   return (
-    <div className="dialog-gauge-widget" title={gaugeInfo.title}>
-      <TsGauge config={toTsGaugeConfig(gaugeInfo)} value={liveValue} />
+    <div className="dialog-gauge-widget">
+      <GaugeLiveReadout gaugeInfo={gaugeInfo} />
     </div>
   );
 }

@@ -4,7 +4,9 @@ import {
   applyConfigLiveStateLayout,
   inferLiveStateGateExpression,
   isConfigLiveStateDialog,
+  isGppwmLiveChannel,
   isReferenceGaugePanel,
+  isUserTableLiveChannel,
   partitionHardwareTestComponents,
 } from '../dialogLayout';
 
@@ -79,6 +81,17 @@ describe('config + live-state dialog layout', () => {
       'launchControlEnabled',
     );
     expect(inferLiveStateGateExpression('testSpark')).toBeNull();
+  });
+});
+
+describe('embedded table live channel helpers', () => {
+  it('detects user-table and gppwm live channels', () => {
+    expect(isUserTableLiveChannel('userTableXAxis1')).toBe(true);
+    expect(isUserTableLiveChannel('gppwmXAxis1')).toBe(false);
+    expect(isGppwmLiveChannel('gppwmXAxis1')).toBe(true);
+    expect(isGppwmLiveChannel('gppwmSwitch1')).toBe(true);
+    expect(isGppwmLiveChannel('gppwmOutput4')).toBe(true);
+    expect(isGppwmLiveChannel('rpm')).toBe(false);
   });
 });
 

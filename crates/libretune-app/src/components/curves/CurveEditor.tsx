@@ -8,7 +8,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { ArrowLeft, Save, Flame, Undo2, Redo2, AlertTriangle } from 'lucide-react';
-import TsGauge from '../gauges/TsGauge';
+import { GaugeLiveReadout } from '../gauges/GaugeLiveReadout';
 import { TsGaugeConfig } from '../dashboards/dashTypes';
 import { valueToHeatmapColor } from '../../utils/heatmapColors';
 import { useChannelValue } from '../../stores/realtimeStore';
@@ -655,6 +655,7 @@ Suggestion: {errorInfo.suggestion}
       className={`curve-editor ${embedded ? 'embedded' : 'standalone'}`}
       ref={containerRef}
       tabIndex={0} // Enable keyboard focus for undo/redo shortcuts
+      style={embedded ? ({ '--curve-embedded-width': `${chartWidth}px` } as React.CSSProperties) : undefined}
     >
       {/* Header - only for standalone mode */}
       {!embedded && (
@@ -836,16 +837,6 @@ Suggestion: {errorInfo.suggestion}
         {/* Bottom section: gauge + data table (embedded only uses stacked layout) */}
         {embedded ? (
           <div className="curve-bottom-section">
-            {/* Gauge */}
-            {(gaugeConfig || simpleGaugeInfo) && (
-              <div className="curve-gauge-container">
-                <TsGauge 
-                  config={gaugeConfig || toTsGaugeConfig(simpleGaugeInfo!)} 
-                  value={gaugeValue} 
-                />
-              </div>
-            )}
-            {/* Data table */}
             <div className="curve-data-table">
           <table>
             <thead>
@@ -891,6 +882,14 @@ Suggestion: {errorInfo.suggestion}
             </tbody>
           </table>
         </div>
+            {(gaugeConfig || simpleGaugeInfo) && (
+              <GaugeLiveReadout
+                className="curve-live-readout"
+                gaugeInfo={simpleGaugeInfo}
+                gaugeConfig={gaugeConfig}
+                value={gaugeValue}
+              />
+            )}
           </div>
         ) : (
           /* Standalone mode: table beside chart */

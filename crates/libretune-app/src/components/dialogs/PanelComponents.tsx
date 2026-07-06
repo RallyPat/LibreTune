@@ -28,7 +28,7 @@ import { DialogGaugeStack } from './fields/DialogGauge';
 import { CommandButton } from './fields/CommandButton';
 import DialogField from './fields/DialogField';
 import { RuntimeValueReadout } from './fields/RuntimeValueReadout';
-import { isUserTableLiveChannel, isCommandButtonPanel, inferLiveStateGateExpression } from './dialogLayout';
+import { isUserTableLiveChannel, isGppwmLiveChannel, isCommandButtonPanel, inferLiveStateGateExpression } from './dialogLayout';
 
 export const RecursivePanel = memo(function RecursivePanel({
   name,
@@ -596,7 +596,7 @@ export function DialogComponentRenderer({
     return <DialogFieldWrapper comp={comp} context={context} onUpdate={onUpdate} onOptimisticUpdate={onOptimisticUpdate} onFieldFocus={onFieldFocus} showAllHelpIcons={showAllHelpIcons} />;
   }
   if (comp.type === 'RuntimeValue' && comp.name) {
-    if (isUserTableLiveChannel(comp.name)) {
+    if (isUserTableLiveChannel(comp.name) || isGppwmLiveChannel(comp.name)) {
       return null;
     }
     return (
