@@ -7,7 +7,7 @@
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { ArrowLeft, Save, Zap, Undo2, Redo2, AlertTriangle } from 'lucide-react';
+import { ArrowLeft, Save, Flame, Undo2, Redo2, AlertTriangle } from 'lucide-react';
 import TsGauge from '../gauges/TsGauge';
 import { TsGaugeConfig } from '../dashboards/dashTypes';
 import { valueToHeatmapColor } from '../../utils/heatmapColors';
@@ -685,7 +685,7 @@ Suggestion: {errorInfo.suggestion}
               <Save size={16} />
             </button>
             <button className="toolbar-btn" title="Burn to ECU">
-              <Zap size={16} />
+              <Flame size={16} />
             </button>
           </div>
         </div>
