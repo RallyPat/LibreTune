@@ -124,6 +124,8 @@ pub struct IniCapabilities {
     pub supports_console: bool,
     /// Name of the `cmd_dfu` controller command when defined in the INI.
     pub dfu_command_name: Option<String>,
+    /// Name of the `cmd_openblt` controller command when defined in the INI.
+    pub openblt_command_name: Option<String>,
     /// Name of the ECU Lua script string constant (typically `luaScript`).
     pub lua_script_constant: Option<String>,
 }

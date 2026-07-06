@@ -89,6 +89,15 @@
   min-height: 0;
 }
 
+/* Live-state side panel (WMI, etc.) — config left, compact readouts right */
+.dialog-view .dialog-row-container:has(.readout-panel) {
+  grid-template-columns: minmax(0, 1fr) minmax(200px, 300px);
+}
+
+.dialog-view .dialog-row-container:has(.readout-panel) .nested-panel {
+  max-width: 100%;
+}
+
 /* Field layout — compact TunerStudio-style rows */
 .dialog-view .settings-field {
   display: grid;
@@ -495,6 +504,30 @@
     border-color 0.22s ease;
 }
 
+.dialog-view .readout-panel ~ .indicator-panel--tiles .indicator-tile,
+.dialog-view .panel-content:has(.readout-panel) .indicator-tile,
+.dialog-view .nested-panel:has(.readout-panel) .indicator-tile,
+.dialog-view .dialog-row-container:has(.readout-panel) .indicator-tile {
+  min-height: 40px;
+  padding: 6px 4px;
+  border-radius: 8px;
+}
+
+.dialog-view .readout-panel ~ .indicator-panel--tiles .indicator-tile-label,
+.dialog-view .panel-content:has(.readout-panel) .indicator-tile-label,
+.dialog-view .nested-panel:has(.readout-panel) .indicator-tile-label,
+.dialog-view .dialog-row-container:has(.readout-panel) .indicator-tile-label {
+  font-size: 9px;
+}
+
+.dialog-view .dialog-row-container:has(.readout-panel) .indicator-panel--tiles {
+  padding: 4px;
+}
+
+.dialog-view .dialog-row-container:has(.readout-panel) .indicator-panel-grid {
+  gap: 4px;
+}
+
 .dialog-view .indicator-tile::before {
   content: '';
   position: absolute;
@@ -538,7 +571,7 @@
 }
 
 .dialog-view .panel-content .readout-panel {
-  padding: 6px;
+  padding: 4px 6px;
   box-sizing: border-box;
 }
 
@@ -755,6 +788,45 @@
   display: grid;
   gap: 8px;
   width: 100%;
+}
+
+.dialog-view .readout-panel--compact {
+  gap: 2px 8px;
+}
+
+.dialog-view .readout-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(48px, 72px);
+  align-items: center;
+  gap: 4px 6px;
+  padding: 2px 6px;
+  min-height: 22px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.dialog-view .readout-row:last-child {
+  border-bottom: none;
+}
+
+.dialog-view .readout-row-label {
+  font-size: 10px;
+  color: var(--text-secondary);
+  line-height: 1.2;
+  min-width: 0;
+}
+
+.dialog-view .readout-row-value {
+  padding: 2px 6px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  line-height: 1.2;
+  box-sizing: border-box;
 }
 
 .dialog-view .readout-gauge {

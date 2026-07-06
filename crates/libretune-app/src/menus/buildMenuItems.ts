@@ -34,6 +34,7 @@ export interface BuildMenuItemsDeps {
   setSaveDialogOpen: (open: boolean) => void;
   setLoadDialogOpen: (open: boolean) => void;
   setBurnDialogOpen: (open: boolean) => void;
+  setFirmwareUpdateDialogOpen: (open: boolean) => void;
   setRestorePointsOpen: (open: boolean) => void;
   setTuneHistoryOpen: (open: boolean) => void;
   setSettingsDialogOpen: (open: boolean) => void;
@@ -60,7 +61,7 @@ export function buildMenuItems(deps: BuildMenuItemsDeps): TunerMenuItem[] {
     sidebarVisible, tabs, openTarget, handleStdTarget, openHelpTopic, showToast,
     closeProject, handleCreateRestorePoint,
     setNewProjectDialogOpen, setImportProjectOpen, setSaveDialogOpen, setLoadDialogOpen,
-    setBurnDialogOpen, setRestorePointsOpen, setTuneHistoryOpen, setSettingsDialogOpen,
+    setBurnDialogOpen, setFirmwareUpdateDialogOpen, setRestorePointsOpen, setTuneHistoryOpen, setSettingsDialogOpen,
     setMathChannelsDialogOpen, setBaseMapDialogOpen, setTableComparisonOpen,
     setTuneFileDiffOpen, setDynoOverlayOpen, setPluginPanelOpen, setConnectionDialogOpen,
     setUserManualOpen, setUserManualSection, setAboutDialogOpen, setSidebarVisible,
@@ -215,6 +216,14 @@ export function buildMenuItems(deps: BuildMenuItemsDeps): TunerMenuItem[] {
         label: "ECU &Lua Editor",
         onClick: () => openTarget("lua-console", "ECU Lua Editor"),
         disabled: !currentProject,
+      });
+    }
+    if (caps.dfu_command_name || caps.openblt_command_name) {
+      toolItems.push({
+        id: "firmware-update",
+        label: "Update ECU &Firmware…",
+        onClick: () => setFirmwareUpdateDialogOpen(true),
+        disabled: !currentProject || status.state !== "Connected",
       });
     }
     if (caps.dfu_command_name) {

@@ -67,22 +67,29 @@ pub async fn execute_controller_command(
     state: tauri::State<'_, AppState>,
     command_name: String,
 ) -> Result<(), String> {
-    // Resolve command bytes while holding definition lock, then release definition before acquiring connection
-    let bytes = {
-        let def_guard = state.definition.lock().await;
-        let def = def_guard.as_ref().ok_or("No INI definition loaded")?;
-        resolve_command_bytes(def, &command_name, &mut std::collections::HashSet::new())?
-    };
+    let bytes = resolve_controller_command(&state, &command_name).await?;
+    send_controller_command_bytes(&state, &bytes).await
+}
 
-    // Now acquire connection lock only for the I/O
+/// Resolve a controller command name to raw bytes (for reuse by firmware update, etc.)
+pub async fn resolve_controller_command(
+    state: &AppState,
+    command_name: &str,
+) -> Result<Vec<u8>, String> {
+    let def_guard = state.definition.lock().await;
+    let def = def_guard.as_ref().ok_or("No INI definition loaded")?;
+    resolve_command_bytes(def, command_name, &mut std::collections::HashSet::new())
+}
+
+/// Send pre-resolved controller command bytes to the connected ECU.
+pub async fn send_controller_command_bytes(
+    state: &AppState,
+    bytes: &[u8],
+) -> Result<(), String> {
     let mut conn_guard = state.connection.lock().await;
     let conn = conn_guard.as_mut().ok_or("Not connected to ECU")?;
-
-    // Send bytes to ECU
-    conn.send_raw_bytes(&bytes)
-        .map_err(|e| format!("Failed to send command: {}", e))?;
-
-    Ok(())
+    conn.send_raw_bytes(bytes)
+        .map_err(|e| format!("Failed to send command: {}", e))
 }
 
 /// Recursively resolve a command to raw bytes, handling command chaining

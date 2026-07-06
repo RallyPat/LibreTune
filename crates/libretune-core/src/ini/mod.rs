@@ -344,6 +344,11 @@ impl EcuDefinition {
                 .keys()
                 .find(|k| k.eq_ignore_ascii_case("cmd_dfu"))
                 .cloned(),
+            openblt_command_name: self
+                .controller_commands
+                .keys()
+                .find(|k| k.eq_ignore_ascii_case("cmd_openblt"))
+                .cloned(),
             lua_script_constant: self
                 .constants
                 .iter()

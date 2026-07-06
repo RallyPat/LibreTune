@@ -29,6 +29,7 @@ import ErrorDetailsDialog from "./dialogs/ErrorDetailsDialog";
 import OnboardingDialog from "./dialogs/OnboardingDialog";
 import { PluginPanel } from "./PluginPanel";
 import { ControllerCommandDialog } from "./console/ControllerCommandDialog";
+import { FirmwareUpdateDialog } from "./dialogs/FirmwareUpdateDialog";
 import { ThemeName } from "../themes";
 import {
   type ConnectionStatus,
@@ -39,6 +40,7 @@ import {
   type ProjectInfo,
   type ProtocolDefaults,
   type TabContent,
+  type IniCapabilities,
 } from "../types/app";
 
 type SyncProgress = { percent: number } | null;
@@ -59,6 +61,9 @@ export interface DialogOverlaysProps {
   setLoadDialogOpen: (v: boolean) => void;
   burnDialogOpen: boolean;
   setBurnDialogOpen: (v: boolean) => void;
+  firmwareUpdateDialogOpen: boolean;
+  setFirmwareUpdateDialogOpen: (v: boolean) => void;
+  iniCapabilities: IniCapabilities | null;
   newTuneDialogOpen: boolean;
   setNewTuneDialogOpen: (v: boolean) => void;
 
@@ -186,6 +191,7 @@ export function DialogOverlays(props: DialogOverlaysProps) {
     saveDialogOpen, setSaveDialogOpen, autoBurnOnClose,
     loadDialogOpen, setLoadDialogOpen,
     burnDialogOpen, setBurnDialogOpen,
+    firmwareUpdateDialogOpen, setFirmwareUpdateDialogOpen, iniCapabilities,
     newTuneDialogOpen, setNewTuneDialogOpen,
     settingsDialogOpen, setSettingsDialogOpen,
     setUnitsSystem, setAutoBurnOnClose, setStatus, setStatusBarChannels, setDefaultRuntimePacketMode,
@@ -225,6 +231,12 @@ export function DialogOverlays(props: DialogOverlaysProps) {
       <SaveDialog isOpen={saveDialogOpen} onClose={() => setSaveDialogOpen(false)} autoBurnOnClose={autoBurnOnClose} />
       <LoadDialog isOpen={loadDialogOpen} onClose={() => setLoadDialogOpen(false)} />
       <BurnDialog isOpen={burnDialogOpen} onClose={() => setBurnDialogOpen(false)} connected={status.state === "Connected"} />
+      <FirmwareUpdateDialog
+        isOpen={firmwareUpdateDialogOpen}
+        onClose={() => setFirmwareUpdateDialogOpen(false)}
+        isConnected={status.state === "Connected"}
+        iniCapabilities={iniCapabilities}
+      />
       <NewTuneDialog isOpen={newTuneDialogOpen} onClose={() => setNewTuneDialogOpen(false)} />
       <SettingsDialog
         isOpen={settingsDialogOpen}

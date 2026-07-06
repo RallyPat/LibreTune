@@ -19,11 +19,15 @@ export function ReadoutPanelRenderer({ panel }: { panel: ReadoutPanel }) {
     [panel.readouts],
   );
   const live = useChannels(channelNames);
-  const columns = panel.columns || 1;
+  const configuredColumns = panel.columns || 1;
+  const columns =
+    configuredColumns === 1 && panel.readouts.length >= 4
+      ? 2
+      : configuredColumns;
 
   return (
     <div
-      className="readout-panel"
+      className="readout-panel readout-panel--compact"
       style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}
     >
       {panel.readouts.map((readout) => {
@@ -33,9 +37,9 @@ export function ReadoutPanelRenderer({ panel }: { panel: ReadoutPanel }) {
           : readout.title;
 
         return (
-          <div key={readout.channel} className="readout-gauge">
-            <div className="readout-gauge-value">{formatted}</div>
-            <div className="readout-gauge-label">{label}</div>
+          <div key={readout.channel} className="readout-row">
+            <span className="readout-row-label">{label}</span>
+            <span className="readout-row-value">{formatted}</span>
           </div>
         );
       })}

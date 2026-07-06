@@ -162,6 +162,7 @@ function AppContent() {
   const [saveDialogOpen, setSaveDialogOpen] = useState(false);
   const [loadDialogOpen, setLoadDialogOpen] = useState(false);
   const [burnDialogOpen, setBurnDialogOpen] = useState(false);
+  const [firmwareUpdateDialogOpen, setFirmwareUpdateDialogOpen] = useState(false);
   const [newTuneDialogOpen, setNewTuneDialogOpen] = useState(false);
   const [settingsDialogOpen, setSettingsDialogOpen] = useState(false);
   const [mathChannelsDialogOpen, setMathChannelsDialogOpen] = useState(false);
@@ -1161,7 +1162,7 @@ function AppContent() {
     sidebarVisible, tabs, openTarget, handleStdTarget, openHelpTopic, showToast,
     closeProject, handleCreateRestorePoint,
     setNewProjectDialogOpen, setImportProjectOpen, setSaveDialogOpen, setLoadDialogOpen,
-    setBurnDialogOpen, setRestorePointsOpen, setTuneHistoryOpen, setSettingsDialogOpen,
+    setBurnDialogOpen, setFirmwareUpdateDialogOpen, setRestorePointsOpen, setTuneHistoryOpen, setSettingsDialogOpen,
     setMathChannelsDialogOpen, setBaseMapDialogOpen, setTableComparisonOpen,
     setTuneFileDiffOpen, setDynoOverlayOpen, setPluginPanelOpen, setConnectionDialogOpen,
     setUserManualOpen, setUserManualSection, setAboutDialogOpen, setSidebarVisible,
@@ -1321,6 +1322,9 @@ function AppContent() {
         setLoadDialogOpen={setLoadDialogOpen}
         burnDialogOpen={burnDialogOpen}
         setBurnDialogOpen={setBurnDialogOpen}
+        firmwareUpdateDialogOpen={firmwareUpdateDialogOpen}
+        setFirmwareUpdateDialogOpen={setFirmwareUpdateDialogOpen}
+        iniCapabilities={iniCapabilities}
         newTuneDialogOpen={newTuneDialogOpen}
         setNewTuneDialogOpen={setNewTuneDialogOpen}
         settingsDialogOpen={settingsDialogOpen}

@@ -41,6 +41,7 @@ export function ControllerCommandDialog() {
 
   const executeCommand = useCallback(async (detail: ControllerCommandPromptDetail) => {
     setIsExecuting(true);
+    const isDfu = detail.commandName.toLowerCase().includes('dfu');
     try {
       const timeoutMs = 20000;
       await Promise.race([
@@ -56,7 +57,6 @@ export function ControllerCommandDialog() {
       );
 
       // DFU disconnects the ECU — skip sync for DFU commands
-      const isDfu = detail.commandName.toLowerCase().includes('dfu');
       if (!isDfu) {
         try {
           const syncResult = await invoke<SyncResult>('sync_ecu_data');

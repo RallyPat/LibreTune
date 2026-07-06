@@ -1,0 +1,157 @@
+.firmware-update-dialog .firmware-update-intro {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  margin-bottom: 16px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.firmware-update-field {
+  margin-bottom: 14px;
+}
+
+.firmware-update-field > label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 6px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.firmware-update-methods {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.firmware-method-option {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 10px 12px;
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.firmware-method-option input {
+  margin-top: 3px;
+}
+
+.firmware-checkbox-option {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin-bottom: 14px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.firmware-checkbox-option input {
+  margin-top: 3px;
+}
+
+.firmware-address-input {
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-default);
+  color: inherit;
+  font-family: 'Courier New', monospace;
+  font-size: 13px;
+}
+
+.firmware-file-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.firmware-file-path {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-default);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.firmware-flasher-list {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12px;
+}
+
+.firmware-flasher-list .ok {
+  color: var(--success);
+}
+
+.firmware-flasher-list .missing {
+  color: var(--text-muted);
+}
+
+.firmware-flasher-hint {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.firmware-update-warning,
+.firmware-update-error,
+.firmware-update-success {
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  margin-bottom: 12px;
+}
+
+.firmware-update-warning {
+  background: rgba(255, 170, 0, 0.12);
+  border: 1px solid rgba(255, 170, 0, 0.25);
+  color: #e8c070;
+}
+
+.firmware-update-warning.caution {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.firmware-update-error {
+  background: rgba(255, 80, 80, 0.12);
+  border: 1px solid rgba(255, 80, 80, 0.25);
+  color: var(--error);
+}
+
+.firmware-update-success {
+  background: rgba(0, 200, 100, 0.12);
+  border: 1px solid rgba(0, 200, 100, 0.25);
+  color: #6ee7a0;
+}
+
+.firmware-update-log {
+  max-height: 220px;
+  overflow: auto;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--border-default);
+  font-family: 'Courier New', monospace;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.firmware-update-log-line {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
