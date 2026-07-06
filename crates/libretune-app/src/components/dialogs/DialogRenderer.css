@@ -526,15 +526,12 @@
   align-items: center;
   min-height: 108px;
   padding: 10px 8px;
-  border: 1px solid rgba(0, 0, 0, 0.22);
+  border: 1px solid rgba(0, 0, 0, 0.12);
   border-radius: 12px;
   box-sizing: border-box;
   text-align: center;
   overflow: hidden;
-  transition:
-    box-shadow 0.22s ease,
-    transform 0.18s ease,
-    border-color 0.22s ease;
+  box-shadow: none;
 }
 
 .dialog-view .readout-panel ~ .indicator-panel--tiles .indicator-tile,
@@ -561,33 +558,6 @@
   gap: 4px;
 }
 
-.dialog-view .indicator-tile::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  background: linear-gradient(
-    165deg,
-    rgba(255, 255, 255, 0.32) 0%,
-    rgba(255, 255, 255, 0.08) 36%,
-    transparent 52%,
-    rgba(0, 0, 0, 0.1) 100%
-  );
-  pointer-events: none;
-}
-
-.dialog-view .indicator-tile::after {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 12%;
-  right: 12%;
-  height: 1px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.45);
-  pointer-events: none;
-}
-
 .dialog-view .indicator-tile-label {
   position: relative;
   z-index: 1;
@@ -596,7 +566,6 @@
   line-height: 1.25;
   word-break: break-word;
   letter-spacing: 0.02em;
-  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.35);
 }
 
 .dialog-view .panel-content .indicator-panel--tiles {

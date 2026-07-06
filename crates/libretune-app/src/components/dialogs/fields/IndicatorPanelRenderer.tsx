@@ -5,6 +5,7 @@ import {
   evaluateIndicatorExpression,
   extractExpressionVariables,
 } from '../../../utils/evaluateIndicatorExpression';
+import { resolveIndicatorColor } from '../../../utils/indicatorColors';
 import type { IndicatorPanel } from '../types';
 
 type IndicatorDef = IndicatorPanel['indicators'][number];
@@ -19,31 +20,16 @@ function usesStatusTiles(indicators: IndicatorDef[]): boolean {
   );
 }
 
-function tileShadow(ind: IndicatorDef, isOn: boolean): string {
-  const color = (isOn ? ind.color_on_fg : ind.color_off_fg)?.toLowerCase() ?? '';
-  const glowByColor: Record<string, string> = {
-    green: '0 6px 18px rgba(34, 197, 94, 0.42)',
-    red: '0 6px 18px rgba(239, 68, 68, 0.45)',
-    yellow: '0 6px 18px rgba(234, 179, 8, 0.38)',
-    white: '0 4px 14px rgba(255, 255, 255, 0.12)',
-  };
-  const glow = glowByColor[color] ?? '0 4px 14px rgba(0, 0, 0, 0.28)';
-  return [
-    'inset 0 1px 0 rgba(255, 255, 255, 0.38)',
-    'inset 0 -2px 0 rgba(0, 0, 0, 0.14)',
-    glow,
-  ].join(', ');
-}
-
 function tileStyle(ind: IndicatorDef, isOn: boolean): React.CSSProperties {
+  const background =
+    resolveIndicatorColor(isOn ? ind.color_on_fg : ind.color_off_fg) ??
+    (isOn ? 'var(--success)' : 'var(--border-strong)');
+  const color =
+    resolveIndicatorColor(isOn ? ind.color_on_bg : ind.color_off_bg) ?? '#000';
+
   return {
-    background: isOn
-      ? (ind.color_on_fg || 'var(--success)')
-      : (ind.color_off_fg || 'var(--border-strong)'),
-    color: isOn
-      ? (ind.color_on_bg || '#000')
-      : (ind.color_off_bg || '#000'),
-    boxShadow: tileShadow(ind, isOn),
+    background,
+    color,
   };
 }
 
