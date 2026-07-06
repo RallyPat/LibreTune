@@ -102,6 +102,18 @@
   cursor: not-allowed;
 }
 
+.btn-dfu {
+  background: rgba(255, 100, 50, 0.25);
+  border-color: rgba(255, 120, 60, 0.5);
+  color: #ffb088;
+}
+
+.btn-dfu:hover:not(:disabled) {
+  background: rgba(255, 100, 50, 0.4);
+  border-color: rgba(255, 140, 80, 0.7);
+  color: #ffd0b0;
+}
+
 .console-output {
   flex: 1;
   overflow-y: auto;

@@ -28,6 +28,7 @@ import TuneHistoryPanel from "./TuneHistoryPanel";
 import ErrorDetailsDialog from "./dialogs/ErrorDetailsDialog";
 import OnboardingDialog from "./dialogs/OnboardingDialog";
 import { PluginPanel } from "./PluginPanel";
+import { ControllerCommandDialog } from "./console/ControllerCommandDialog";
 import { ThemeName } from "../themes";
 import {
   type ConnectionStatus,
@@ -420,6 +421,7 @@ export function DialogOverlays(props: DialogOverlaysProps) {
           </div>
         </div>
       )}
+      <ControllerCommandDialog />
     </>
   );
 }

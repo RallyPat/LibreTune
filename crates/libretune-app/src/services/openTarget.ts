@@ -74,7 +74,17 @@ export async function openTargetImpl(
   }
 
   if (name === "lua-console") {
-    showToast("Lua Console is not available for this ECU definition.", "warning");
+    if (!iniCapabilities?.supports_console) {
+      showToast("Lua Console is not available for this ECU definition.", "warning");
+      return;
+    }
+    if (!iniCapabilities?.lua_script_constant) {
+      showToast("This ECU definition has no luaScript constant.", "warning");
+      return;
+    }
+    setTabs([...tabs, { id: "lua-console", title: title || "ECU Lua Editor", icon: "terminal" }]);
+    setTabContents({ ...tabContents, "lua-console": { type: "lua-console" } });
+    setActiveTabId("lua-console");
     return;
   }
 

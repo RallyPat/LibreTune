@@ -122,6 +122,10 @@ pub struct IniCapabilities {
     pub has_wue_analyze: bool,
     pub has_gamma_e: bool,
     pub supports_console: bool,
+    /// Name of the `cmd_dfu` controller command when defined in the INI.
+    pub dfu_command_name: Option<String>,
+    /// Name of the ECU Lua script string constant (typically `luaScript`).
+    pub lua_script_constant: Option<String>,
 }
 
 /// Data types supported by ECU constants

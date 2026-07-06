@@ -1284,6 +1284,7 @@ function AppContent() {
             availableProjects={availableProjects}
             status={status}
             ecuType={ecuType}
+            iniCapabilities={iniCapabilities}
             activeTabId={activeTabId}
             tabs={tabs}
             tabContents={tabContents}

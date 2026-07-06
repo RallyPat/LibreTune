@@ -1,77 +1,187 @@
 .lua-console {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 0;
   height: 100%;
-  padding: 16px;
-  background: var(--bg-surface);
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
   color: var(--text-primary);
+  font-family: 'Courier New', monospace;
+  overflow: hidden;
 }
 
 .lua-console-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  padding: 12px 16px;
+  background: rgba(0, 0, 0, 0.3);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  gap: 12px;
+  flex-shrink: 0;
 }
 
 .lua-console-title {
-  font-size: 16px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
   font-weight: 600;
+  color: var(--accent);
+}
+
+.lua-disconnected-badge {
+  background: var(--error);
+  color: white;
+  padding: 2px 8px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: bold;
+  text-transform: uppercase;
+}
+
+.lua-sync-badge {
+  background: rgba(0, 200, 100, 0.2);
+  color: #6ee7a0;
+  padding: 2px 8px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: bold;
+  text-transform: uppercase;
+  border: 1px solid rgba(0, 200, 100, 0.3);
 }
 
 .lua-console-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
+  justify-content: flex-end;
 }
 
 .lua-btn {
   padding: 6px 12px;
-  border-radius: 6px;
-  border: 1px solid var(--border-default);
-  background: var(--bg-elevated);
-  color: inherit;
+  border-radius: 4px;
+  border: 1px solid rgba(0, 217, 255, 0.3);
+  background: rgba(0, 217, 255, 0.12);
+  color: var(--accent);
   cursor: pointer;
   font-size: 12px;
+  font-family: inherit;
+  transition: all 0.15s ease;
+}
+
+.lua-btn:hover:not(:disabled) {
+  background: rgba(0, 217, 255, 0.22);
+  border-color: rgba(0, 217, 255, 0.5);
 }
 
 .lua-btn.secondary {
-  opacity: 0.75;
+  background: rgba(100, 100, 100, 0.3);
+  border-color: rgba(150, 150, 150, 0.4);
+  color: var(--text-primary);
 }
 
 .lua-btn:disabled {
-  opacity: 0.6;
+  opacity: 0.5;
   cursor: not-allowed;
 }
 
 .lua-console-editor {
-  flex: 0 0 200px;
+  flex: 1;
+  min-height: 180px;
   width: 100%;
-  padding: 12px;
-  background: var(--bg-input);
-  border: 1px solid var(--border-default);
-  border-radius: 8px;
-  color: inherit;
-  font-family: "Fira Code", "SFMono-Regular", Consolas, monospace;
+  padding: 12px 16px;
+  background: rgba(0, 0, 0, 0.45);
+  border: none;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  color: #e8e8e8;
+  font-family: 'Fira Code', 'Courier New', Consolas, monospace;
   font-size: 13px;
-  resize: vertical;
+  line-height: 1.5;
+  resize: none;
+  outline: none;
+}
+
+.lua-console-editor:focus {
+  background: rgba(0, 0, 0, 0.55);
+}
+
+.lua-console-quick-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 12px;
+  background: rgba(0, 0, 0, 0.25);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  flex-shrink: 0;
+}
+
+.lua-quick-btn {
+  padding: 4px 10px;
+  background: rgba(0, 217, 255, 0.08);
+  border: 1px solid rgba(0, 217, 255, 0.2);
+  border-radius: 3px;
+  color: rgba(0, 217, 255, 0.75);
+  font-family: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.lua-quick-btn:hover:not(:disabled) {
+  background: rgba(0, 217, 255, 0.18);
+  color: var(--accent);
+}
+
+.lua-quick-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
 }
 
 .lua-console-output {
-  flex: 1;
+  flex: 0 0 180px;
   padding: 12px;
-  border-radius: 8px;
-  background: rgba(0, 0, 0, 0.35);
-  border: 1px solid var(--border-default);
+  background: rgba(0, 0, 0, 0.5);
   overflow: auto;
+  flex-shrink: 0;
 }
 
 .lua-console-empty {
-  color: var(--text-muted);
+  color: rgba(224, 224, 224, 0.45);
   font-size: 12px;
+  line-height: 1.6;
+}
+
+.lua-console-unavailable {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  padding: 32px;
+  text-align: center;
+  color: rgba(224, 224, 224, 0.6);
+  gap: 8px;
+}
+
+.lua-console-unavailable .hint {
+  font-size: 12px;
+  color: rgba(224, 224, 224, 0.4);
 }
 
 .lua-console-line {
-  font-family: "Fira Code", "SFMono-Regular", Consolas, monospace;
   font-size: 12px;
   padding: 2px 0;
+  word-break: break-all;
+}
+
+.lua-console-line.command {
+  color: var(--accent);
+}
+
+.lua-console-line.response {
+  color: #b0b0b0;
+}
+
+.lua-console-line.error {
+  color: var(--error);
+  font-weight: bold;
 }

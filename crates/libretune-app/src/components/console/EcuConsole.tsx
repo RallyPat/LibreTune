@@ -1,13 +1,15 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { promptControllerCommand } from './ControllerCommandDialog';
 import './EcuConsole.css';
 
 interface EcuConsoleProps {
   ecuType: string;
   isConnected: boolean;
+  dfuCommandName?: string | null;
 }
 
-export const EcuConsole: React.FC<EcuConsoleProps> = ({ ecuType, isConnected }) => {
+export const EcuConsole: React.FC<EcuConsoleProps> = ({ ecuType, isConnected, dfuCommandName }) => {
   const [commandInput, setCommandInput] = useState('');
   const [history, setHistory] = useState<string[]>([]);
   const [historyCopy, setHistoryCopy] = useState<string[]>([]);
@@ -156,6 +158,20 @@ export const EcuConsole: React.FC<EcuConsoleProps> = ({ ecuType, isConnected }) 
           {!isConnected && <span className="disconnected-badge">DISCONNECTED</span>}
         </div>
         <div className="header-controls">
+          {dfuCommandName && (
+            <button
+              className="btn-small btn-dfu"
+              onClick={() => promptControllerCommand({
+                commandName: dfuCommandName,
+                label: 'Enter DFU Mode',
+                description: 'Reset the ECU into DFU (firmware update) mode. The connection will drop — use your board\'s flash tool to update firmware.',
+              })}
+              disabled={isLoading || !isConnected}
+              title="Send ECU to DFU mode for firmware flashing"
+            >
+              Enter DFU
+            </button>
+          )}
           {isFome && (
             <label className="fast-comms-toggle">
               <input

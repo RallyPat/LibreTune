@@ -1553,16 +1553,25 @@ impl Connection {
     /// Send raw bytes to ECU (for controller commands)
     /// This is used by commandButton widgets to send arbitrary commands
     /// WARNING: These commands bypass normal memory synchronization
+    ///
+    /// On modern CRC-framed ECUs (msEnvelope_1.0), the INI command bytes are the
+    /// packet payload only — TunerStudio wraps them in the protocol envelope.
     pub fn send_raw_bytes(&mut self, bytes: &[u8]) -> Result<(), ProtocolError> {
         if bytes.is_empty() {
             return Ok(());
         }
         eprintln!(
-            "[DEBUG] send_raw_bytes: sending {} bytes: {:02x?}",
+            "[DEBUG] send_raw_bytes: sending {} bytes: {:02x?} (modern={})",
             bytes.len(),
-            bytes
+            bytes,
+            self.use_modern_protocol
         );
-        self.send_raw_command_no_response(bytes)
+        if self.use_modern_protocol {
+            let packet = Packet::new(bytes.to_vec());
+            self.send_packet_no_response(packet)
+        } else {
+            self.send_raw_command_no_response(bytes)
+        }
     }
 
     /// Send raw bytes to ECU and read back the response.

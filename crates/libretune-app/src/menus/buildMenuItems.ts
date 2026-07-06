@@ -209,6 +209,30 @@ export function buildMenuItems(deps: BuildMenuItemsDeps): TunerMenuItem[] {
       onClick: () => openTarget("console", `Console - ${ecuType}`),
       disabled: !currentProject || status.state !== "Connected",
     });
+    if (caps.lua_script_constant) {
+      toolItems.push({
+        id: "lua-console",
+        label: "ECU &Lua Editor",
+        onClick: () => openTarget("lua-console", "ECU Lua Editor"),
+        disabled: !currentProject,
+      });
+    }
+    if (caps.dfu_command_name) {
+      toolItems.push({
+        id: "enter-dfu",
+        label: "Enter &DFU Mode…",
+        onClick: () => {
+          window.dispatchEvent(new CustomEvent('controller-command:prompt', {
+            detail: {
+              commandName: caps.dfu_command_name,
+              label: 'Enter DFU Mode',
+              description: 'Reset the ECU into DFU (firmware update) mode. The connection will drop — use STM32CubeProgrammer, dfu-util, or your board\'s flash tool to update firmware.',
+            },
+          }));
+        },
+        disabled: !currentProject || status.state !== "Connected",
+      });
+    }
   }
   if (toolItems.length > 0) toolItems.push({ id: "sep3", label: "", separator: true });
   toolItems.push({ id: "compare-tables", label: "Table &Compare", onClick: () => setTableComparisonOpen(true), disabled: !currentProject });

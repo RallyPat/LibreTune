@@ -17,6 +17,7 @@ import { SettingsView } from "./SettingsView";
 import type {
   ConnectionStatus,
   CurrentProject,
+  IniCapabilities,
   ProjectInfo,
   TabContent,
   PortEditorConfig,
@@ -29,6 +30,7 @@ export interface TabContentRouterProps {
   availableProjects: ProjectInfo[];
   status: ConnectionStatus;
   ecuType: string;
+  iniCapabilities: IniCapabilities | null;
 
   // Tab state
   activeTabId: string | null;
@@ -70,6 +72,7 @@ export function TabContentRouter(props: TabContentRouterProps) {
     availableProjects,
     status,
     ecuType,
+    iniCapabilities,
     activeTabId,
     tabs,
     tabContents,
@@ -220,9 +223,20 @@ export function TabContentRouter(props: TabContentRouterProps) {
     case "och-status":
       return <OutputChannelStatus />;
     case "console":
-      return <EcuConsole ecuType={ecuType} isConnected={status.state === "Connected"} />;
+      return (
+        <EcuConsole
+          ecuType={ecuType}
+          isConnected={status.state === "Connected"}
+          dfuCommandName={iniCapabilities?.dfu_command_name ?? null}
+        />
+      );
     case "lua-console":
-      return <LuaConsole />;
+      return (
+        <LuaConsole
+          isConnected={status.state === "Connected"}
+          luaScriptConstant={iniCapabilities?.lua_script_constant ?? null}
+        />
+      );
     default:
       return null;
   }

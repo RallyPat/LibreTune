@@ -339,6 +339,18 @@ impl EcuDefinition {
             has_gamma_e: self.gamma_e.is_some(),
             supports_console: self.ecu_type.supports_console()
                 && !self.controller_commands.is_empty(),
+            dfu_command_name: self
+                .controller_commands
+                .keys()
+                .find(|k| k.eq_ignore_ascii_case("cmd_dfu"))
+                .cloned(),
+            lua_script_constant: self
+                .constants
+                .iter()
+                .find(|(name, c)| {
+                    name.eq_ignore_ascii_case("luaScript") && c.data_type == DataType::String
+                })
+                .map(|(name, _)| name.clone()),
         }
     }
 }

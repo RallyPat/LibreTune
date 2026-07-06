@@ -68,6 +68,8 @@ export interface IniCapabilities {
   has_wue_analyze: boolean;
   has_gamma_e: boolean;
   supports_console: boolean;
+  dfu_command_name?: string | null;
+  lua_script_constant?: string | null;
 }
 
 export interface ProjectInfo {
