@@ -94,6 +94,19 @@ export interface IndicatorPanel {
   }>;
 }
 
+export interface ReadoutPanel {
+  name: string;
+  columns: number;
+  visibility_condition?: string;
+  readouts: Array<{
+    channel: string;
+    title: string;
+    units: string;
+    digits: number;
+    precision: number;
+  }>;
+}
+
 export interface PortEditorConfig {
   name: string;
   label: string;

@@ -463,3 +463,112 @@ dialog = userTable1left, ""
 
     let _ = std::fs::remove_file(&temp_path);
 }
+
+#[test]
+fn test_parse_readout_panel() {
+    let ini_content = r#"
+[MegaTune]
+signature = "Test ECU"
+queryCommand = "Q"
+
+[Constants]
+page = 1
+
+[UserDefined]
+readoutPanel = wmiReadoutPanel, 1
+    readout = wmiState, "WMI state", "", 0, 0, 0, 0, 4, 4, 0, 0
+    readout = wmiPumpDuty, "WMI pump duty", "%", 0, 0, 0, 0, 100, 100, 1, 1
+"#;
+
+    let temp_path = std::env::temp_dir().join("test_readout_panel.ini");
+    std::fs::write(&temp_path, ini_content).expect("Failed to write temp file");
+
+    let def = EcuDefinition::from_file(&temp_path).expect("Failed to parse INI");
+    let panel = def.readout_panels.get("wmiReadoutPanel").expect("panel missing");
+    assert_eq!(panel.columns, 1);
+    assert_eq!(panel.readouts.len(), 2);
+    assert_eq!(panel.readouts[0].channel, "wmiState");
+    assert_eq!(panel.readouts[0].title, "WMI state");
+    assert_eq!(panel.readouts[1].units, "%");
+    assert_eq!(panel.readouts[1].precision, 1);
+
+    let _ = std::fs::remove_file(&temp_path);
+}
+
+
+#[test]
+fn test_parse_panel_dual_condition() {
+    use libretune_core::ini::{DialogComponent, EcuDefinition};
+
+    let ini_content = r#"
+[MegaTune]
+signature = "Test ECU"
+queryCommand = "Q"
+
+[Constants]
+page = 1
+
+[UserDefined]
+dialog = wmiLiveStateDialog, "WMI live state"
+    panel = wmiReadoutPanel
+    panel = WmiEgtStatusDialog, { 1 }, { isWmiEnableEgtFault }
+
+dialog = userTable1TblSettings
+    panel = userTable1left, West
+    panel = userTable1Tbl, Center, { userTable1Enabled }
+"#;
+
+    let temp_path = std::env::temp_dir().join("test_panel_dual_condition.ini");
+    std::fs::write(&temp_path, ini_content).expect("Failed to write temp file");
+
+    let def = EcuDefinition::from_file(&temp_path).expect("Failed to parse INI");
+
+    let wmi_dialog = def
+        .dialogs
+        .get("wmiLiveStateDialog")
+        .expect("wmiLiveStateDialog missing");
+    assert_eq!(wmi_dialog.components.len(), 2);
+
+    match &wmi_dialog.components[1] {
+        DialogComponent::Panel {
+            name,
+            enabled_condition,
+            visibility_condition,
+            ..
+        } => {
+            assert_eq!(name, "WmiEgtStatusDialog");
+            assert!(enabled_condition.is_none(), "{{1}} is a no-op enable placeholder");
+            assert_eq!(
+                visibility_condition.as_deref(),
+                Some("isWmiEnableEgtFault"),
+                "second brace controls panel visibility"
+            );
+        }
+        other => panic!("expected Panel, got {:?}", other),
+    }
+
+    let user_table_dialog = def
+        .dialogs
+        .get("userTable1TblSettings")
+        .expect("userTable1TblSettings missing");
+    match &user_table_dialog.components[1] {
+        DialogComponent::Panel {
+            name,
+            position,
+            visibility_condition,
+            enabled_condition,
+            ..
+        } => {
+            assert_eq!(name, "userTable1Tbl");
+            assert_eq!(position.as_deref(), Some("Center"));
+            assert!(enabled_condition.is_none());
+            assert_eq!(
+                visibility_condition.as_deref(),
+                Some("userTable1Enabled")
+            );
+        }
+        other => panic!("expected Panel, got {:?}", other),
+    }
+
+    let _ = std::fs::remove_file(&temp_path);
+}

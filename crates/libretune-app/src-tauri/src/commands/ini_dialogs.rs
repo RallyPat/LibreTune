@@ -68,6 +68,20 @@ pub async fn get_indicator_panel(
         .ok_or_else(|| format!("IndicatorPanel {} not found", name))
 }
 
+/// Retrieves a readout panel definition from the INI file.
+#[tauri::command]
+pub async fn get_readout_panel(
+    state: tauri::State<'_, AppState>,
+    name: String,
+) -> Result<libretune_core::ini::ReadoutPanel, String> {
+    let def_guard = state.definition.lock().await;
+    let def = def_guard.as_ref().ok_or("Definition not loaded")?;
+    def.readout_panels
+        .get(&name)
+        .cloned()
+        .ok_or_else(|| format!("ReadoutPanel {} not found", name))
+}
+
 /// Retrieves a port editor configuration from the INI file.
 ///
 /// # Arguments

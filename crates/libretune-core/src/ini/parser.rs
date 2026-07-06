@@ -16,6 +16,7 @@ use super::{
         DatalogView, DialogComponent, DialogDefinition, EcuType, FTPBrowserConfig, FilterOperator,
         FrontPageConfig, FrontPageIndicator, GammaEConfig, HelpTopic, IndicatorDefinition,
         IndicatorPanel, KeyAction, LoggerDefinition, MaintainConstantValue, Menu, MenuItem,
+        ReadoutDefinition, ReadoutPanel,
         PortEditorConfig, ReferenceTable, SettingGroup, SettingOption, VeAnalyzeConfig,
         WueAnalyzeConfig,
     },
@@ -31,6 +32,7 @@ struct ParserState {
     current_table: Option<String>,
     current_dialog: Option<String>,
     current_indicator_panel: Option<String>,
+    current_readout_panel: Option<String>,
     current_curve: Option<String>,
     current_help: Option<String>,
 }
@@ -113,6 +115,7 @@ fn parse_ini_internal(content: &str, ctx: &mut IncludeContext) -> Result<EcuDefi
         current_table: None,
         current_dialog: None,
         current_indicator_panel: None,
+        current_readout_panel: None,
         current_curve: None,
         current_help: None,
     };
@@ -342,6 +345,7 @@ fn parse_ini_internal(content: &str, ctx: &mut IncludeContext) -> Result<EcuDefi
                     value,
                     &mut state.current_dialog,
                     &mut state.current_indicator_panel,
+                    &mut state.current_readout_panel,
                     &mut state.current_help,
                 ),
                 "settingcontexthelp" => parse_setting_context_help(&mut definition, key, value),
@@ -460,6 +464,9 @@ fn merge_definitions(target: &mut EcuDefinition, source: EcuDefinition) {
 
     // Merge indicator panels
     target.indicator_panels.extend(source.indicator_panels);
+
+    // Merge readout panels
+    target.readout_panels.extend(source.readout_panels);
 
     // Merge controller commands
     target
@@ -2151,6 +2158,7 @@ fn parse_user_defined_entry(
     value: &str,
     current_dialog: &mut Option<String>,
     current_indicator_panel: &mut Option<String>,
+    current_readout_panel: &mut Option<String>,
     current_help: &mut Option<String>,
 ) {
     let key = key.to_lowercase();
@@ -2209,6 +2217,8 @@ fn parse_user_defined_entry(
                 };
                 def.dialogs.insert(name.clone(), dialog);
                 *current_dialog = Some(name);
+                *current_indicator_panel = None;
+                *current_readout_panel = None;
             }
         }
         "indicatorpanel" => {
@@ -2236,6 +2246,80 @@ fn parse_user_defined_entry(
                 };
                 def.indicator_panels.insert(name.clone(), panel);
                 *current_indicator_panel = Some(name);
+                *current_readout_panel = None;
+                *current_dialog = None;
+            }
+        }
+        "readoutpanel" => {
+            // Format: readoutPanel = name [, columns] [, {visibility_condition}]
+            let parts = split_ini_line(value);
+            if !parts.is_empty() {
+                let name = parts[0].to_string();
+                let columns = parts
+                    .iter()
+                    .skip(1)
+                    .find(|p| {
+                        let trimmed = p.trim();
+                        !trimmed.starts_with('{') && trimmed.parse::<u8>().is_ok()
+                    })
+                    .and_then(|p| p.trim().parse().ok())
+                    .unwrap_or(1);
+
+                let visibility_condition = parts
+                    .iter()
+                    .skip(1)
+                    .find(|p| {
+                        let trimmed = p.trim();
+                        trimmed.starts_with('{') && trimmed.ends_with('}')
+                    })
+                    .map(|p| {
+                        p.trim()
+                            .trim_matches(|c| c == '{' || c == '}')
+                            .trim()
+                            .to_string()
+                    });
+
+                let panel = ReadoutPanel {
+                    name: name.clone(),
+                    columns,
+                    visibility_condition,
+                    readouts: Vec::new(),
+                };
+                def.readout_panels.insert(name.clone(), panel);
+                *current_readout_panel = Some(name);
+                *current_indicator_panel = None;
+                *current_dialog = None;
+            }
+        }
+        "readout" => {
+            if let Some(panel_name) = current_readout_panel {
+                if let Some(panel) = def.readout_panels.get_mut(panel_name) {
+                    let parts = split_ini_line(value);
+                    if parts.len() >= 2 {
+                        let channel = parts[0].trim().to_string();
+                        let title = parts[1].trim_matches('"').to_string();
+                        let units = parts
+                            .get(2)
+                            .map(|s| s.trim_matches('"').to_string())
+                            .unwrap_or_default();
+                        let digits = parts
+                            .get(parts.len().saturating_sub(2))
+                            .and_then(|s| s.trim().parse().ok())
+                            .unwrap_or(0);
+                        let precision = parts
+                            .last()
+                            .and_then(|s| s.trim().parse().ok())
+                            .unwrap_or(0);
+
+                        panel.readouts.push(ReadoutDefinition {
+                            channel,
+                            title,
+                            units,
+                            digits,
+                            precision,
+                        });
+                    }
+                }
             }
         }
         "panel" => {
@@ -2243,20 +2327,67 @@ fn parse_user_defined_entry(
                 if let Some(dialog) = def.dialogs.get_mut(name) {
                     let parts = split_ini_line(value);
                     let panel_name = parts.first().unwrap_or(&String::new()).trim().to_string();
-                    // Position is the second part (e.g., "West", "East", "Center")
+                    // Position is the first non-brace part after the panel name (West/East/Center)
                     let position = parts
-                        .get(1)
-                        .filter(|p| !p.trim().starts_with('{'))
-                        .map(|p| p.trim().to_string());
-                    // Check for visibility condition in curly braces (last part)
-                    let visibility_condition = parts
                         .iter()
                         .skip(1)
-                        .find(|p| p.trim().starts_with('{') && p.trim().ends_with('}'))
-                        .map(|p| p.trim().trim_matches(|c| c == '{' || c == '}').to_string());
+                        .find(|p| !p.trim().starts_with('{'))
+                        .map(|p| p.trim().to_string());
+                    // TunerStudio panel conditions (opposite order from fields/menus):
+                    //   panel = name, {enable}
+                    //   panel = name, {enable}, {visibility}
+                    //   panel = name, West, {visibility}
+                    let brace_parts: Vec<String> = parts
+                        .iter()
+                        .skip(1)
+                        .filter_map(|p| {
+                            let trimmed = p.trim();
+                            if trimmed.starts_with('{') && trimmed.ends_with('}') {
+                                Some(
+                                    trimmed
+                                        .trim_matches(|c| c == '{' || c == '}')
+                                        .trim()
+                                        .to_string(),
+                                )
+                            } else {
+                                None
+                            }
+                        })
+                        .collect();
+                    let is_trivial_condition = |s: &str| {
+                        s.is_empty() || s == "0" || s == "1"
+                    };
+                    let (enabled_condition, visibility_condition) =
+                        if brace_parts.len() >= 2 {
+                            (
+                                if is_trivial_condition(&brace_parts[0]) {
+                                    None
+                                } else {
+                                    Some(brace_parts[0].clone())
+                                },
+                                if is_trivial_condition(&brace_parts[1]) {
+                                    None
+                                } else {
+                                    Some(brace_parts[1].clone())
+                                },
+                            )
+                        } else if brace_parts.len() == 1 {
+                            // Single brace on a panel controls visibility (hide when false)
+                            (
+                                None,
+                                if is_trivial_condition(&brace_parts[0]) {
+                                    None
+                                } else {
+                                    Some(brace_parts[0].clone())
+                                },
+                            )
+                        } else {
+                            (None, None)
+                        };
                     dialog.components.push(DialogComponent::Panel {
                         name: panel_name,
                         position,
+                        enabled_condition,
                         visibility_condition,
                     });
                 }

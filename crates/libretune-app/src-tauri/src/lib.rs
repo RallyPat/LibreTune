@@ -96,6 +96,7 @@ use commands::hotkeys::{
 };
 use commands::ini_dialogs::{
     evaluate_expression, get_dialog_definition, get_help_topic, get_indicator_panel,
+    get_readout_panel,
     get_port_editor, get_port_editor_assignments, save_port_editor_assignments,
 };
 use commands::ini_meta::{
@@ -233,6 +234,7 @@ pub fn run() {
             get_searchable_index,
             get_dialog_definition,
             get_indicator_panel,
+            get_readout_panel,
             get_port_editor,
             get_port_editor_assignments,
             save_port_editor_assignments,

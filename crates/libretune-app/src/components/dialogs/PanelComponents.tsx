@@ -17,11 +17,13 @@ import {
   type CurveData,
   type FieldInfo,
   type IndicatorPanel,
+  type ReadoutPanel,
   type PortEditorConfig,
   buildStdPlaceholderDefinition,
 } from './types';
 import { Indicator } from './fields/Indicator';
 import { IndicatorPanelRenderer } from './fields/IndicatorPanelRenderer';
+import { ReadoutPanelRenderer } from './fields/ReadoutPanelRenderer';
 import { CommandButton } from './fields/CommandButton';
 import DialogField from './fields/DialogField';
 import { RuntimeValueReadout } from './fields/RuntimeValueReadout';
@@ -47,12 +49,13 @@ export const RecursivePanel = memo(function RecursivePanel({
   
   const [definition, setDefinition] = useState<DialogDefinition | null>(null);
   const [indicatorPanel, setIndicatorPanel] = useState<IndicatorPanel | null>(null);
+  const [readoutPanel, setReadoutPanel] = useState<ReadoutPanel | null>(null);
   const [tableInfo, setTableInfo] = useState<TableInfo | null>(null);
   const [tableData, setTableData] = useState<BackendTableData | null>(null);
   const [curveData, setCurveData] = useState<CurveData | null>(null);
   const [gaugeConfig, setGaugeConfig] = useState<SimpleGaugeInfo | null>(null);
   const [portEditor, setPortEditor] = useState<PortEditorConfig | null>(null);
-  const [panelType, setPanelType] = useState<'loading' | 'dialog' | 'indicatorPanel' | 'table' | 'curve' | 'portEditor' | 'unknown'>('loading');
+  const [panelType, setPanelType] = useState<'loading' | 'dialog' | 'indicatorPanel' | 'readoutPanel' | 'table' | 'curve' | 'portEditor' | 'unknown'>('loading');
 
   // Log mount ID to track component identity
   const mountIdRef = useRef(Math.random().toString(36).substring(7));
@@ -68,6 +71,7 @@ export const RecursivePanel = memo(function RecursivePanel({
     setPanelType('loading');
     setDefinition(null);
     setIndicatorPanel(null);
+    setReadoutPanel(null);
     setTableInfo(null);
     setTableData(null);
     setCurveData(null);
@@ -93,8 +97,17 @@ export const RecursivePanel = memo(function RecursivePanel({
       })
       .catch(() => {
         if (cancelled) return;
-        // Not an indicatorPanel, try as dialog
-        invoke<DialogDefinition>('get_dialog_definition', { name })
+        invoke<ReadoutPanel>('get_readout_panel', { name })
+          .then((panel) => {
+            if (cancelled) return;
+            console.debug(`[RecursivePanel] '${name}' resolved as readoutPanel`);
+            setReadoutPanel(panel);
+            setPanelType('readoutPanel');
+          })
+          .catch(() => {
+            if (cancelled) return;
+            // Not a readoutPanel, try as dialog
+            invoke<DialogDefinition>('get_dialog_definition', { name })
           .then((def) => {
             if (cancelled) return;
             console.debug(`[RecursivePanel] '${name}' resolved as dialog`);
@@ -167,6 +180,7 @@ export const RecursivePanel = memo(function RecursivePanel({
                         // None of the known types - log all errors for debugging
                         console.error(`[RecursivePanel] ❌ Panel '${name}' could not be resolved as any known type:`, {
                           indicatorPanel: 'not an indicatorPanel',
+                          readoutPanel: 'not a readoutPanel',
                           dialog: 'not a dialog',
                           table: String(err),
                           curve: String(err2),
@@ -176,6 +190,7 @@ export const RecursivePanel = memo(function RecursivePanel({
                       });
                   });
               });
+          });
           });
       });
 
@@ -260,6 +275,11 @@ export const RecursivePanel = memo(function RecursivePanel({
   // Render as indicatorPanel
   if (panelType === 'indicatorPanel' && indicatorPanel) {
     return <IndicatorPanelRenderer panel={indicatorPanel} context={context} />;
+  }
+
+  // Render as readoutPanel (live numeric gauges)
+  if (panelType === 'readoutPanel' && readoutPanel) {
+    return <ReadoutPanelRenderer panel={readoutPanel} />;
   }
 
   // Render as dialog

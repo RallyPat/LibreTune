@@ -481,6 +481,10 @@ pub enum DialogComponent {
         name: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         position: Option<String>,
+        /// Enable condition (first brace on dual-condition panels)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        enabled_condition: Option<String>,
+        /// Visibility condition (second brace on dual-condition panels; sole brace when visibility-only)
         #[serde(skip_serializing_if = "Option::is_none")]
         visibility_condition: Option<String>,
     },
@@ -1160,6 +1164,35 @@ pub struct IndicatorDefinition {
     /// Optional background color when on (default: black)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub color_on_bg: Option<String>,
+}
+
+/// Live numeric readout panel (TunerStudio readoutPanel)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReadoutPanel {
+    /// Panel name/ID
+    pub name: String,
+    /// Number of columns for layout
+    pub columns: u8,
+    /// Optional visibility condition
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub visibility_condition: Option<String>,
+    /// Readouts within this panel
+    pub readouts: Vec<ReadoutDefinition>,
+}
+
+/// Individual readout within a readout panel
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReadoutDefinition {
+    /// Output channel name
+    pub channel: String,
+    /// Display title
+    pub title: String,
+    /// Units string
+    pub units: String,
+    /// Digit count (legacy TunerStudio field)
+    pub digits: u8,
+    /// Decimal precision
+    pub precision: u8,
 }
 
 /// Key action (keyboard shortcut) definition

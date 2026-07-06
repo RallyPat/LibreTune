@@ -122,6 +122,9 @@ pub struct EcuDefinition {
     /// Indicator panels (groups of boolean indicators)
     pub indicator_panels: HashMap<String, IndicatorPanel>,
 
+    /// Live numeric readout panels (TunerStudio readoutPanel)
+    pub readout_panels: HashMap<String, ReadoutPanel>,
+
     /// Controller commands
     pub controller_commands: HashMap<String, ControllerCommand>,
 
@@ -370,6 +373,7 @@ impl Default for EcuDefinition {
             default_values: HashMap::new(),
             frontpage: None,
             indicator_panels: HashMap::new(),
+            readout_panels: HashMap::new(),
             controller_commands: HashMap::new(),
             logger_definitions: HashMap::new(),
             port_editors: HashMap::new(),
