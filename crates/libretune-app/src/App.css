@@ -34,7 +34,7 @@
   --glass-border: var(--border-default);
   --glass-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
 
-  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   color: var(--text-primary);

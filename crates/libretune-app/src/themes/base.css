@@ -3,6 +3,7 @@
  * Core reset and global styles using theme variables
  */
 
+@import './fonts.css';
 @import './variables.css';
 
 /* Reset */

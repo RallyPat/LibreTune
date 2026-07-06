@@ -7,10 +7,10 @@
  */
 
 :root {
-  /* Font families */
-  --font-sans: 'Segoe UI', system-ui, -apple-system, sans-serif;
-  --font-mono: 'Consolas', 'Monaco', 'Courier New', monospace;
-  --font-lcd: 'LCD', 'DSEG7 Classic', 'Consolas', monospace;
+  /* Font families — IBM Plex gives a technical, non-generic desktop-tool identity */
+  --font-sans: 'IBM Plex Sans', system-ui, -apple-system, sans-serif;
+  --font-mono: 'IBM Plex Mono', 'Consolas', 'Courier New', monospace;
+  --font-lcd: 'IBM Plex Mono', 'DSEG7 Classic', 'Consolas', monospace;
   
   /* Font sizes */
   --font-size-xs: 10px;
