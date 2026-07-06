@@ -2,18 +2,32 @@ import { describe, expect, it } from 'vitest';
 import { applyTableSettingsLayout } from '../dialogLayout';
 
 describe('applyTableSettingsLayout', () => {
-  it('splits user-table dialog (table component + settings panel)', () => {
+  it('stacks user-table dialog with settings above table (no side split)', () => {
     const components = [
-      { type: 'Table' as const, name: 'userTable2Tbl' },
+      { type: 'Panel' as const, name: 'userTable2Tbl' },
       { type: 'Panel' as const, name: 'userTable2Settings' },
     ];
     const { components: out, hasTableSplit } = applyTableSettingsLayout(
       'userTable2TblSettings',
       components,
     );
-    expect(hasTableSplit).toBe(true);
-    expect(out[0].position).toBe('East');
-    expect(out[1].position).toBe('West');
+    expect(hasTableSplit).toBe(false);
+    expect(out.map((c) => c.name)).toEqual(['userTable2Settings', 'userTable2Tbl']);
+    expect(out.every((c) => !c.position)).toBe(true);
+  });
+
+  it('strips West/Center positions and orders settings before table (epicEFI)', () => {
+    const components = [
+      { type: 'Panel' as const, name: 'userTable1left', position: 'West' },
+      { type: 'Panel' as const, name: 'userTable1Tbl', position: 'Center' },
+    ];
+    const { components: out, hasTableSplit } = applyTableSettingsLayout(
+      'userTable1TblSettings',
+      components,
+    );
+    expect(hasTableSplit).toBe(false);
+    expect(out.map((c) => c.name)).toEqual(['userTable1left', 'userTable1Tbl']);
+    expect(out.every((c) => !c.position)).toBe(true);
   });
 
   it('does not split Generic PWM dialog', () => {

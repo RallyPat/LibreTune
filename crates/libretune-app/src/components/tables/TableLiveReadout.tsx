@@ -3,7 +3,9 @@ import { useChannels } from '../../stores/realtimeStore';
 import {
   formatLiveReadoutValue,
   isGppwmTable,
+  isUserTable,
   resolveGppwmOutputChannel,
+  resolveUserTableOutputChannel,
 } from './tableLiveChannels';
 
 export interface TableLiveReadoutProps {
@@ -28,12 +30,14 @@ export default function TableLiveReadout({
   xChannel,
   yChannel,
 }: TableLiveReadoutProps) {
-  const outputChannel = useMemo(
-    () => resolveGppwmOutputChannel(tableName, xChannel, yChannel),
-    [tableName, xChannel, yChannel],
-  );
-
   const gppwm = isGppwmTable(tableName, xChannel, yChannel);
+  const userTable = isUserTable(tableName, xChannel, yChannel);
+
+  const outputChannel = useMemo(() => {
+    if (gppwm) return resolveGppwmOutputChannel(tableName, xChannel, yChannel);
+    if (userTable) return resolveUserTableOutputChannel(tableName, xChannel, yChannel);
+    return null;
+  }, [gppwm, userTable, tableName, xChannel, yChannel]);
 
   const channelNames = useMemo(() => {
     const names: string[] = [];
@@ -47,6 +51,7 @@ export default function TableLiveReadout({
 
   const rows = useMemo((): LiveRow[] => {
     const items: LiveRow[] = [];
+    const compactLabels = gppwm || userTable;
 
     if (gppwm && outputChannel) {
       items.push({
@@ -59,7 +64,7 @@ export default function TableLiveReadout({
     if (xChannel) {
       items.push({
         key: 'x',
-        label: gppwm ? 'x' : xLabel,
+        label: compactLabels ? 'x' : xLabel,
         value: formatLiveReadoutValue(live[xChannel], 'axis', xChannel),
       });
     }
@@ -67,7 +72,7 @@ export default function TableLiveReadout({
     if (yChannel) {
       items.push({
         key: 'y',
-        label: gppwm ? 'y' : yLabel,
+        label: compactLabels ? 'y' : yLabel,
         value: formatLiveReadoutValue(live[yChannel], 'axis', yChannel),
       });
     }
@@ -82,7 +87,7 @@ export default function TableLiveReadout({
     }
 
     return items;
-  }, [gppwm, xChannel, yChannel, outputChannel, xLabel, yLabel, live]);
+  }, [gppwm, userTable, xChannel, yChannel, outputChannel, xLabel, yLabel, live]);
 
   if (rows.length === 0) return null;
 

@@ -420,3 +420,46 @@ fn test_parse_windows_1252_ini_with_portuguese() {
         "signature must not contain replacement chars: {sig:?}"
     );
 }
+
+#[test]
+fn test_parse_runtime_value_dialog_component() {
+    let ini_content = r#"
+[MegaTune]
+signature = "Test ECU"
+queryCommand = "Q"
+
+[Constants]
+page = 1
+
+[UserDefined]
+dialog = userTable1left, ""
+    field = "Enabled", userTable1Enabled
+    runtimeValue = "X Axis value", userTableXAxis1, { userTable1Enabled }
+    runtimeValue = "Output value", userTableOutput1
+"#;
+
+    let temp_path = std::env::temp_dir().join("test_runtime_value.ini");
+    std::fs::write(&temp_path, ini_content).expect("Failed to write temp file");
+
+    let def = EcuDefinition::from_file(&temp_path).expect("Failed to parse INI");
+    let dialog = def.dialogs.get("userTable1left").expect("dialog missing");
+    assert_eq!(dialog.components.len(), 3);
+
+    match &dialog.components[1] {
+        libretune_core::ini::DialogComponent::RuntimeValue {
+            label,
+            name,
+            visibility_condition,
+        } => {
+            assert_eq!(label, "X Axis value");
+            assert_eq!(name, "userTableXAxis1");
+            assert_eq!(
+                visibility_condition.as_deref(),
+                Some("userTable1Enabled")
+            );
+        }
+        other => panic!("expected RuntimeValue, got {other:?}"),
+    }
+
+    let _ = std::fs::remove_file(&temp_path);
+}

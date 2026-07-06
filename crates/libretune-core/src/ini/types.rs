@@ -493,6 +493,13 @@ pub enum DialogComponent {
         #[serde(skip_serializing_if = "Option::is_none")]
         enabled_condition: Option<String>,
     },
+    /// Live output-channel readout (TunerStudio runtimeValue)
+    RuntimeValue {
+        label: String,
+        name: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        visibility_condition: Option<String>,
+    },
     /// A live graph visualization
     LiveGraph {
         name: String,

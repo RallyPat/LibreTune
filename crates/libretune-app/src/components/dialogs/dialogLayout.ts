@@ -6,6 +6,16 @@ export function isEmbeddedTablePanelName(name: string | undefined): boolean {
   return /(?:Tbl|Map)$/i.test(name);
 }
 
+export function isUserTableName(name: string | undefined): boolean {
+  if (!name) return false;
+  return /userTable\s*\d+/i.test(name) || /usertables?\d+/i.test(name);
+}
+
+export function isUserTableLiveChannel(name: string | undefined): boolean {
+  if (!name) return false;
+  return /^userTable(?:[XY]Axis|Output)\d+$/i.test(name);
+}
+
 export function isTableComponent(comp: DialogComponent): boolean {
   if (comp.type === 'Table' && comp.name) return true;
   if (comp.type === 'Panel' && isEmbeddedTablePanelName(comp.name)) return true;
@@ -14,6 +24,7 @@ export function isTableComponent(comp: DialogComponent): boolean {
 
 function isConfigComponent(comp: DialogComponent): boolean {
   if (isTableComponent(comp)) return false;
+  if (comp.type === 'RuntimeValue') return false;
   return (
     comp.type === 'Field' ||
     comp.type === 'Label' ||
@@ -25,32 +36,25 @@ function isConfigComponent(comp: DialogComponent): boolean {
 
 /**
  * User Tables only (Advanced → User tables 1–8).
- * Generic PWM and other table dialogs keep the default stacked layout.
  */
 export function isUserTableDialog(dialogName: string, components: DialogComponent[]): boolean {
   if (/^gppwm/i.test(dialogName)) return false;
+  if (/^scriptTable/i.test(dialogName)) return false;
 
-  if (/^userTable\d+TblSettings$/i.test(dialogName)) return true;
-  if (/^usertables\d+TblSettings$/i.test(dialogName)) return true;
+  if (/userTable\s*\d+TblSettings$/i.test(dialogName)) return true;
+  if (/usertables?\d+TblSettings$/i.test(dialogName)) return true;
 
-  // Fallback when dialog name differs but table/settings components match
-  const hasUserTable = components.some((c) => {
-    const name = c.name ?? '';
-    return (
-      (c.type === 'Table' || c.type === 'Panel') &&
-      (/^userTable\d+Tbl$/i.test(name) || /^usertables\d+Tbl$/i.test(name))
-    );
-  });
-  const hasSettingsPanel = components.some(
-    (c) => c.type === 'Panel' && /settings/i.test(c.name ?? ''),
+  const hasUserTable = components.some(
+    (c) => isTableComponent(c) && isUserTableName(c.name),
   );
+  if (!hasUserTable) return false;
 
-  return hasUserTable && (hasSettingsPanel || components.some((c) => c.type === 'Field'));
+  return components.some(isConfigComponent);
 }
 
 /**
- * Side-by-side layout for User Tables: config West (left), table East (right).
- * Does not apply to Generic PWM (gppwm*) or other dialogs.
+ * Stacked layout for User Tables (same as Generic PWM): config on top, table below.
+ * Strips INI West/East/Center positions and puts settings before the table.
  */
 export function applyTableSettingsLayout(
   dialogName: string,
@@ -63,37 +67,71 @@ export function applyTableSettingsLayout(
     return { components, hasTableSplit: false };
   }
 
-  const hasExplicitPosition = components.some((c) => {
-    const pos = c.position?.toLowerCase();
-    return pos === 'west' || pos === 'east';
-  });
-  if (hasExplicitPosition) {
-    return { components, hasTableSplit: false };
-  }
-
   const hasTable = components.some(isTableComponent);
   const hasConfig = components.some(isConfigComponent);
   if (!hasTable || !hasConfig) {
     return { components, hasTableSplit: false };
   }
 
-  const updated = components.map((comp) => {
-    if (comp.position) return comp;
-    if (isTableComponent(comp)) {
-      return { ...comp, position: 'East' };
-    }
-    if (isConfigComponent(comp)) {
-      return { ...comp, position: 'West' };
-    }
-    return comp;
+  const config = components.filter(isConfigComponent).map((comp) => {
+    const { position: _position, ...rest } = comp;
+    return rest as DialogComponent;
   });
+  const tables = components.filter(isTableComponent).map((comp) => {
+    const { position: _position, ...rest } = comp;
+    return rest as DialogComponent;
+  });
+  const other = components
+    .filter((c) => !isConfigComponent(c) && !isTableComponent(c))
+    .map((comp) => {
+      const { position: _position, ...rest } = comp;
+      return rest as DialogComponent;
+    });
 
-  return { components: updated, hasTableSplit: true };
+  return {
+    components: [...config, ...other, ...tables],
+    hasTableSplit: false,
+  };
 }
 
-export function rowHasTableSplitLayout(
-  row: { west: DialogComponent[]; east: DialogComponent[] },
-): boolean {
+export type DialogComponentRow = {
+  west: DialogComponent[];
+  east: DialogComponent[];
+  unpositioned: DialogComponent[];
+};
+
+/** Group dialog components into West/East rows for grid layout. */
+export function organizeComponents(components: DialogComponent[]): DialogComponentRow[] {
+  const rows: DialogComponentRow[] = [];
+  let currentRow: DialogComponentRow | null = null;
+
+  for (const comp of components) {
+    const position = comp.position?.toLowerCase();
+
+    if (position === 'west' || position === 'east') {
+      if (!currentRow || currentRow.unpositioned.length > 0) {
+        currentRow = { west: [], east: [], unpositioned: [] };
+        rows.push(currentRow);
+      }
+
+      if (position === 'west') {
+        currentRow.west.push(comp);
+      } else {
+        currentRow.east.push(comp);
+      }
+    } else {
+      if (!currentRow) {
+        currentRow = { west: [], east: [], unpositioned: [] };
+        rows.push(currentRow);
+      }
+      currentRow.unpositioned.push(comp);
+    }
+  }
+
+  return rows;
+}
+
+export function rowHasTableSplitLayout(row: DialogComponentRow): boolean {
   const hasTableEast = row.east.some(isTableComponent);
   const hasConfigWest = row.west.some(isConfigComponent);
   return hasTableEast && hasConfigWest;

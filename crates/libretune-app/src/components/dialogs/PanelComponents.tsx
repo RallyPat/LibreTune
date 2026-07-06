@@ -24,6 +24,8 @@ import { Indicator } from './fields/Indicator';
 import { IndicatorPanelRenderer } from './fields/IndicatorPanelRenderer';
 import { CommandButton } from './fields/CommandButton';
 import DialogField from './fields/DialogField';
+import { RuntimeValueReadout } from './fields/RuntimeValueReadout';
+import { isUserTableLiveChannel } from './dialogLayout';
 
 export const RecursivePanel = memo(function RecursivePanel({
   name,
@@ -480,6 +482,19 @@ export function DialogComponentRenderer({
 }) {
   if (comp.type === 'Field' && comp.name) {
     return <DialogFieldWrapper comp={comp} context={context} onUpdate={onUpdate} onOptimisticUpdate={onOptimisticUpdate} onFieldFocus={onFieldFocus} showAllHelpIcons={showAllHelpIcons} />;
+  }
+  if (comp.type === 'RuntimeValue' && comp.name) {
+    if (isUserTableLiveChannel(comp.name)) {
+      return null;
+    }
+    return (
+      <RuntimeValueReadout
+        label={comp.label || comp.name}
+        channel={comp.name}
+        visibilityCondition={comp.visibility_condition}
+        context={context}
+      />
+    );
   }
   if (comp.type === 'Label' && comp.text) {
     const text = comp.text.trim();

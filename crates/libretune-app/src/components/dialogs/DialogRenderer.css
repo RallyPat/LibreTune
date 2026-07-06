@@ -345,12 +345,43 @@
 .dialog-view .panel-content--multi > .dialog-label,
 .dialog-view .panel-content--multi > .dialog-label.dialog-link,
 .dialog-view .panel-content--multi > .embedded-graph-placeholder,
-.dialog-view .panel-content--multi > .command-button-field {
+.dialog-view .panel-content--multi > .command-button-field,
+.dialog-view .panel-content--multi > .runtime-value-row {
   grid-column: 1 / -1;
 }
 
 .dialog-view .panel-content--multi .settings-field {
   grid-template-columns: minmax(0, 1fr) minmax(88px, 132px);
+}
+
+/* Live output-channel readouts (TunerStudio runtimeValue — user tables, etc.) */
+.dialog-view .runtime-value-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(96px, 148px);
+  align-items: center;
+  gap: 4px 10px;
+  padding: 4px 10px;
+  min-height: 28px;
+}
+
+.dialog-view .runtime-value-label {
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.dialog-view .runtime-value-display {
+  padding: 4px 8px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  min-height: 22px;
+  line-height: 1.2;
+  box-sizing: border-box;
 }
 
 /* Allow panels with tables to grow and fill space */

@@ -2288,6 +2288,36 @@ fn parse_user_defined_entry(
                 }
             }
         }
+        "runtimevalue" => {
+            if let Some(name) = current_dialog {
+                if let Some(dialog) = def.dialogs.get_mut(name) {
+                    let parts = split_ini_line(value);
+                    if parts.len() >= 2 {
+                        let label = parts[0].trim_matches('"').to_string();
+                        let channel = parts[1].trim().to_string();
+                        let visibility_condition = parts
+                            .iter()
+                            .skip(2)
+                            .find(|p| {
+                                let trimmed = p.trim();
+                                trimmed.starts_with('{') && trimmed.ends_with('}')
+                            })
+                            .map(|p| {
+                                p.trim()
+                                    .trim_matches(|c| c == '{' || c == '}')
+                                    .trim()
+                                    .to_string()
+                            });
+
+                        dialog.components.push(DialogComponent::RuntimeValue {
+                            label,
+                            name: channel,
+                            visibility_condition,
+                        });
+                    }
+                }
+            }
+        }
         "field" => {
             if let Some(name) = current_dialog {
                 if let Some(dialog) = def.dialogs.get_mut(name) {
