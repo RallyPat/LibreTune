@@ -37,14 +37,14 @@
 .dialog-view .dialog-container {
   flex: 1;
   overflow-y: auto;
-  overflow-x: hidden; /* Prevent horizontal scroll */
-  padding: 10px 12px;
+  overflow-x: hidden;
+  padding: 16px 20px 20px;
   display: flex;
   flex-direction: column;
-  gap: 8px; /* Compact spacing between sections (TunerStudio-like density) */
-  min-height: 0; /* Critical for nested flex scroll */
-  max-height: 100%; /* Explicit height constraint for scroll */
-  max-width: none; /* Override App.css 600px constraint */
+  gap: 12px;
+  min-height: 0;
+  max-height: 100%;
+  max-width: none;
   width: 100%;
 }
 
@@ -64,28 +64,133 @@
   min-height: 0;
 }
 
-/* Field layout - use .dialog-view parent for specificity over App.css */
+/* Field layout — two-column grid so controls align vertically */
 .dialog-view .settings-field {
-  display: flex;
-  flex-direction: row;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(160px, 240px);
   align-items: center;
-  justify-content: space-between; /* Label left, value right (TunerStudio-like) */
-  gap: 12px;
-  padding: 4px 10px; /* Compact rows */
-  background: var(--bg-secondary);
-  border-radius: 4px;
+  gap: 8px 20px;
+  padding: 9px 16px;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--border-subtle);
+  border-radius: 0;
+  transition: background 0.15s ease;
 }
 
-.dialog-view .settings-field label {
+.dialog-view .settings-field:last-child {
+  border-bottom: none;
+}
+
+.dialog-view .settings-field:hover {
+  background: var(--bg-hover);
+}
+
+.dialog-view .settings-field.is-disabled {
+  opacity: 0.55;
+}
+
+.dialog-view .settings-field.is-disabled:hover {
+  background: transparent;
+}
+
+.dialog-view .settings-field label,
+.dialog-view .settings-field .field-label {
   font-size: 13px;
   color: var(--text-secondary);
   font-weight: 500;
   text-align: left;
-  flex: 1; /* Let the label take available width, pushing the value to the right */
   min-width: 0;
   display: flex;
   align-items: center;
   gap: 6px;
+  flex: unset;
+}
+
+.dialog-view .settings-field .field-label-text {
+  min-width: 0;
+  line-height: 1.35;
+}
+
+.dialog-view .field-input-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  flex: unset;
+}
+
+.dialog-view .field-input-wrap input:not([type='checkbox']) {
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+  padding: 6px 10px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  color: var(--text-primary);
+  font-size: 13px;
+  text-align: left;
+  box-sizing: border-box;
+}
+
+.dialog-view .field-input-wrap input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(var(--accent-rgb, 100, 149, 237), 0.15);
+}
+
+.dialog-view .field-input-wrap input[type='text'] {
+  width: 100%;
+}
+
+.dialog-view .field-input-wrap select {
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+  padding: 6px 10px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  color: var(--text-primary);
+  font-size: 13px;
+  box-sizing: border-box;
+}
+
+.dialog-view .field-input-wrap select:focus {
+  outline: none;
+  border-color: var(--border-focus);
+  box-shadow: 0 0 0 2px rgba(var(--accent-rgb, 100, 149, 237), 0.15);
+}
+
+/* Checkbox / boolean rows — same grid, toggle in control column */
+.dialog-view .settings-field--checkbox label.field-label {
+  cursor: default;
+}
+
+.dialog-view .field-checkbox-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.dialog-view .settings-field input[type='checkbox'] {
+  margin: 0;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.dialog-view .field-checkbox-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-weight: 400;
 }
 
 .help-icon {
@@ -113,58 +218,6 @@
   outline-offset: 2px;
 }
 
-.dialog-view .field-input-wrap {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end; /* Align value/input to the right */
-  gap: 8px;
-  flex: 0 0 auto;
-}
-
-.dialog-view .field-input-wrap input {
-  min-width: 100px;
-  max-width: 240px;
-  width: auto; /* Override App.css width: 80px */
-  padding: 4px 8px; /* Compact inputs */
-  background: var(--bg-input);
-  border: 1px solid var(--border-color);
-  border-radius: 4px;
-  color: var(--text-primary);
-  font-size: 13px;
-  text-align: left;
-}
-
-.dialog-view .field-input-wrap input:focus {
-  outline: none;
-  border-color: var(--accent);
-}
-
-.dialog-view .field-input-wrap input[type="text"] {
-  max-width: 300px;
-}
-
-.dialog-view .field-input-wrap select {
-  min-width: 130px;
-  max-width: 280px;
-  padding: 4px 8px; /* Compact selects */
-  background: var(--bg-input);
-  border: 1.5px solid var(--border-default);
-  border-radius: 4px;
-  color: var(--text-primary);
-  font-size: 13px;
-}
-
-.dialog-view .field-input-wrap select:focus {
-  outline: none;
-  border-color: var(--border-focus);
-}
-
-.dialog-view .settings-field input[type="checkbox"] {
-  margin-right: 8px;
-  width: 16px;
-  height: 16px;
-}
-
 .field-unit {
   font-size: 12px;
   color: var(--text-muted);
@@ -185,48 +238,67 @@
 }
 
 .dialog-label {
-  font-size: 14px;
-  color: var(--text-primary);
-  padding: 8px 0;
+  font-size: 13px;
+  color: var(--text-muted);
+  padding: 6px 16px 2px;
+  line-height: 1.4;
+}
+
+.dialog-label.dialog-link {
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.dialog-label.dialog-link a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.dialog-label.dialog-link a:hover {
+  text-decoration: underline;
 }
 
 /* Use .dialog-view parent for higher specificity over App.css */
 .dialog-view .nested-panel {
   background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  overflow: hidden; /* Contain panel content */
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
-  flex-shrink: 0; /* Prevent flex shrinking */
-  width: 100%; /* Expand to fill container width */
-  max-width: 100%; /* Prevent horizontal overflow */
+  flex-shrink: 0;
+  width: 100%;
+  max-width: 760px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
 }
 
 /* Allow panels with tables to grow and fill space */
 .dialog-view .nested-panel:has(.table-editor-2d) {
   flex: 1;
-  min-height: 400px; /* Larger min-height for table panels */
+  min-height: 400px;
+  max-width: none;
 }
 
 .dialog-view .panel-title {
-  padding: 8px 14px; /* Compact panel header */
+  padding: 10px 16px;
   background: var(--bg-subtle);
-  font-size: 14px;
+  font-size: 12px;
   font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
   color: var(--text-primary);
-  border-bottom: 1px solid var(--border-color);
-  text-align: left; /* Left-justify panel titles */
+  border-bottom: 1px solid var(--border-subtle);
+  text-align: left;
 }
 
 .panel-content {
-  padding: 10px 12px; /* Compact section padding */
+  padding: 4px 0;
   display: flex;
   flex-direction: column;
-  gap: 6px; /* Compact spacing between fields */
+  gap: 0;
   flex: 1;
-  min-height: 0; /* Allow flex shrinking for proper scrolling */
-  overflow-y: auto; /* Allow panel content to scroll if needed */
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .panel-loading {

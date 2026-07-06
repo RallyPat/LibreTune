@@ -480,6 +480,16 @@ export function DialogComponentRenderer({
     return <DialogFieldWrapper comp={comp} context={context} onUpdate={onUpdate} onOptimisticUpdate={onOptimisticUpdate} onFieldFocus={onFieldFocus} showAllHelpIcons={showAllHelpIcons} />;
   }
   if (comp.type === 'Label' && comp.text) {
+    const text = comp.text.trim();
+    if (/^https?:\/\//i.test(text)) {
+      return (
+        <div className="dialog-label dialog-link">
+          <a href={text} target="_blank" rel="noopener noreferrer">
+            {text}
+          </a>
+        </div>
+      );
+    }
     return <div className="dialog-label">{comp.text}</div>;
   }
   if (comp.type === 'Table' && comp.name) {
