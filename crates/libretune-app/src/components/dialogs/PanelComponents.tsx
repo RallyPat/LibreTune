@@ -4,7 +4,7 @@
  * RecursivePanel) so they live together in this file.
  */
 
-import { useState, useEffect, useLayoutEffect, useRef, memo, useMemo } from 'react';
+import { useState, useEffect, useLayoutEffect, useRef, memo, useMemo, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { Activity, Grid3X3, AlertTriangle } from 'lucide-react';
 import CurveEditor, { SimpleGaugeInfo } from '../curves/CurveEditor';
@@ -328,41 +328,72 @@ export function DialogFieldWrapper({
   
   // Evaluate visibility condition (hides field if false)
   useEffect(() => {
-    const visCondition = comp.visibility_condition || (comp.condition && comp.enabled_condition ? undefined : comp.condition);
+    const visCondition =
+      comp.visibility_condition ||
+      (comp.condition && comp.enabled_condition ? comp.condition : undefined);
+    const enCondition =
+      comp.enabled_condition ||
+      (comp.condition && !comp.visibility_condition ? comp.condition : undefined);
+
+    const evaluate = (expression: string) =>
+      invoke<boolean>('evaluate_expression', {
+        expression,
+        context,
+      });
+
     if (visCondition) {
-      invoke<boolean>('evaluate_expression', { 
-        expression: visCondition, 
-        context 
-      })
-        .then((result) => {
-          console.log(`[DialogFieldWrapper] Visibility condition '${visCondition}' for '${comp.name}' evaluated to:`, result);
-          setFieldVisible(result);
-        })
+      evaluate(visCondition)
+        .then((result) => setFieldVisible(result))
         .catch((err) => {
-          console.warn(`[DialogFieldWrapper] Failed to evaluate visibility condition '${visCondition}' for '${comp.name}':`, err);
-          setFieldVisible(true); // Show on error
+          console.warn(
+            `[DialogFieldWrapper] Failed to evaluate visibility condition '${visCondition}' for '${comp.name}':`,
+            err,
+          );
+          setFieldVisible(true);
         });
-    } else {
-      setFieldVisible(true);
+      return;
     }
-  }, [comp.visibility_condition, comp.condition, comp.enabled_condition, context, comp.name]);
-  
-  // Evaluate enable condition (disables field if false)
-  // Per closed-source program suggestion: "all 12 channels should be visible but disabled"
-  useEffect(() => {
-    const enCondition = comp.enabled_condition || (comp.condition && !comp.visibility_condition ? comp.condition : undefined);
+
     if (enCondition) {
-      invoke<boolean>('evaluate_expression', { 
-        expression: enCondition, 
-        context 
+      evaluate(enCondition)
+        .then((result) => setFieldVisible(result))
+        .catch((err) => {
+          console.warn(
+            `[DialogFieldWrapper] Failed to evaluate enable condition '${enCondition}' for '${comp.name}':`,
+            err,
+          );
+          setFieldVisible(true);
+        });
+      return;
+    }
+
+    setFieldVisible(true);
+  }, [comp.visibility_condition, comp.condition, comp.enabled_condition, context, comp.name]);
+
+  // Evaluate enable condition (disables field if false when a separate visibility condition exists)
+  useEffect(() => {
+    if (!comp.visibility_condition) {
+      setFieldEnabled(true);
+      return;
+    }
+
+    const enCondition =
+      comp.enabled_condition ||
+      (comp.condition && !comp.visibility_condition ? comp.condition : undefined);
+    if (enCondition) {
+      invoke<boolean>('evaluate_expression', {
+        expression: enCondition,
+        context,
       })
         .then((result) => {
-          console.log(`[DialogFieldWrapper] Enable condition '${enCondition}' for '${comp.name}' evaluated to:`, result);
           setFieldEnabled(result);
         })
         .catch((err) => {
-          console.warn(`[DialogFieldWrapper] Failed to evaluate enable condition '${enCondition}' for '${comp.name}':`, err);
-          setFieldEnabled(true); // Enable on error
+          console.warn(
+            `[DialogFieldWrapper] Failed to evaluate enable condition '${enCondition}' for '${comp.name}':`,
+            err,
+          );
+          setFieldEnabled(true);
         });
     } else {
       setFieldEnabled(true);
@@ -400,53 +431,121 @@ export function PanelVisibilityWrapper({
   showAllHelpIcons?: boolean;
 }) {
   const [panelVisible, setPanelVisible] = useState<boolean>(true);
-  
+
   const contextRef = useRef(context);
   contextRef.current = context;
-  
-  const normalizedVisibilityExpression = useMemo(() => {
-    if (!comp.visibility_condition) return '';
-    let expression = comp.visibility_condition;
+
+  const normalizeExpression = useCallback((expression: string) => {
     if (!expression.includes('{') && !expression.includes('(') && !expression.includes(' ')) {
-      expression = `{${expression}}`;
+      return `{${expression}}`;
     }
     return expression;
-  }, [comp.visibility_condition]);
+  }, []);
 
-  const visibilityContextKey = useMemo(() => {
-    if (!normalizedVisibilityExpression) return '';
-    const varMatches = normalizedVisibilityExpression.match(/\{?(\w+)\}?/g);
-    if (!varMatches) return '';
-    return varMatches
-      .map(v => {
-        const varName = v.replace(/[{}]/g, '');
-        const value = contextRef.current[varName];
-        return `${varName}:${value ?? 0}`;
-      })
+  const conditionContextKey = useMemo(() => {
+    const expressions = [
+      comp.visibility_condition,
+      comp.enabled_condition,
+      comp.name === 'wmiLiveStateDialog' ? 'isWmiEnabled' : null,
+    ].filter(Boolean) as string[];
+
+    const vars = new Set<string>();
+    for (const expression of expressions) {
+      for (const match of expression.matchAll(/\{?(\w+)\}?/g)) {
+        vars.add(match[1]);
+      }
+    }
+
+    return Array.from(vars)
+      .sort()
+      .map((varName) => `${varName}:${context[varName] ?? 0}`)
       .join('|');
-  }, [normalizedVisibilityExpression, context]);
+  }, [comp.visibility_condition, comp.enabled_condition, comp.name, context]);
 
   useEffect(() => {
-    if (normalizedVisibilityExpression) {
-      invoke<boolean>('evaluate_expression', { 
-        expression: normalizedVisibilityExpression, 
-        context: contextRef.current 
-      })
-        .then(setPanelVisible)
-        .catch((err) => {
-          console.warn(`[PanelVisibilityWrapper] Failed to evaluate panel visibility condition '${normalizedVisibilityExpression}':`, err);
+    let cancelled = false;
+
+    const evaluateCondition = async (expression: string) => {
+      return invoke<boolean>('evaluate_expression', {
+        expression: normalizeExpression(expression),
+        context: contextRef.current,
+      });
+    };
+
+    (async () => {
+      try {
+        if (comp.visibility_condition) {
+          const visible = await evaluateCondition(comp.visibility_condition);
+          if (cancelled) return;
+          if (!visible) {
+            setPanelVisible(false);
+            return;
+          }
+        }
+
+        if (comp.enabled_condition) {
+          const enabled = await evaluateCondition(comp.enabled_condition);
+          if (cancelled) return;
+          if (!enabled) {
+            setPanelVisible(false);
+            return;
+          }
+        }
+
+        // WMI live readouts have no panel-level condition in the INI — gate on isWmiEnabled.
+        if (
+          !comp.visibility_condition &&
+          !comp.enabled_condition &&
+          comp.name === 'wmiLiveStateDialog'
+        ) {
+          const enabled = await evaluateCondition('isWmiEnabled');
+          if (cancelled) return;
+          if (!enabled) {
+            setPanelVisible(false);
+            return;
+          }
+        }
+
+        if (!cancelled) {
           setPanelVisible(true);
-        });
-    } else {
-      setPanelVisible(true);
-    }
-  }, [comp.visibility_condition, comp.name, normalizedVisibilityExpression, visibilityContextKey]);
-  
+        }
+      } catch (err) {
+        console.warn(
+          `[PanelVisibilityWrapper] Failed to evaluate panel conditions for '${comp.name}':`,
+          err,
+        );
+        if (!cancelled) {
+          setPanelVisible(true);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    comp.visibility_condition,
+    comp.enabled_condition,
+    comp.name,
+    conditionContextKey,
+    normalizeExpression,
+  ]);
+
   if (!panelVisible || !comp.name) {
     return null;
   }
-  
-  return <RecursivePanel key={`panel-${comp.name}`} name={comp.name} openTable={openTable} context={context} onUpdate={onUpdate} onFieldFocus={onFieldFocus} showAllHelpIcons={showAllHelpIcons} />;
+
+  return (
+    <RecursivePanel
+      key={`panel-${comp.name}`}
+      name={comp.name}
+      openTable={openTable}
+      context={context}
+      onUpdate={onUpdate}
+      onFieldFocus={onFieldFocus}
+      showAllHelpIcons={showAllHelpIcons}
+    />
+  );
 }
 
 export function DialogComponentRenderer({

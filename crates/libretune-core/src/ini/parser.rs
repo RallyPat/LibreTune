@@ -2336,7 +2336,7 @@ fn parse_user_defined_entry(
                     // TunerStudio panel conditions (opposite order from fields/menus):
                     //   panel = name, {enable}
                     //   panel = name, {enable}, {visibility}
-                    //   panel = name, West, {visibility}
+                    //   panel = name, West, {visibility}  (position before braces)
                     let brace_parts: Vec<String> = parts
                         .iter()
                         .skip(1)
@@ -2372,14 +2372,15 @@ fn parse_user_defined_entry(
                                 },
                             )
                         } else if brace_parts.len() == 1 {
-                            // Single brace on a panel controls visibility (hide when false)
+                            // Single brace on a panel is the enable expression in TunerStudio.
+                            // LibreTune hides the panel when this is false (collapsed module UX).
                             (
-                                None,
                                 if is_trivial_condition(&brace_parts[0]) {
                                     None
                                 } else {
                                     Some(brace_parts[0].clone())
                                 },
+                                None,
                             )
                         } else {
                             (None, None)

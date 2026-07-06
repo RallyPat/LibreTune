@@ -91,11 +91,19 @@
 
 /* Live-state side panel (WMI, etc.) — config left, compact readouts right */
 .dialog-view .dialog-row-container:has(.readout-panel) {
-  grid-template-columns: minmax(0, 1fr) minmax(200px, 300px);
+  grid-template-columns: minmax(0, 1fr) minmax(240px, 340px);
 }
 
 .dialog-view .dialog-row-container:has(.readout-panel) .nested-panel {
   max-width: 100%;
+}
+
+.dialog-view .dialog-row-container .dialog-column:not(:has(*)) {
+  display: none;
+}
+
+.dialog-view .dialog-row-container:has(.readout-panel) .dialog-column:not(:has(*)) {
+  display: none;
 }
 
 /* Field layout — compact TunerStudio-style rows */

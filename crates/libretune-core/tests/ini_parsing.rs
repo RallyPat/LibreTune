@@ -561,9 +561,9 @@ dialog = userTable1TblSettings
         } => {
             assert_eq!(name, "userTable1Tbl");
             assert_eq!(position.as_deref(), Some("Center"));
-            assert!(enabled_condition.is_none());
+            assert!(visibility_condition.is_none());
             assert_eq!(
-                visibility_condition.as_deref(),
+                enabled_condition.as_deref(),
                 Some("userTable1Enabled")
             );
         }
