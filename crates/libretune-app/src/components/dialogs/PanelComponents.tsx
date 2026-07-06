@@ -44,9 +44,6 @@ export const RecursivePanel = memo(function RecursivePanel({
   onFieldFocus?: (info: FieldInfo) => void;
   showAllHelpIcons?: boolean;
 }) {
-  // Debug log on every render
-  console.log(`[RecursivePanel] 🎯 Component render for '${name}'`);
-  
   const [definition, setDefinition] = useState<DialogDefinition | null>(null);
   const [indicatorPanel, setIndicatorPanel] = useState<IndicatorPanel | null>(null);
   const [readoutPanel, setReadoutPanel] = useState<ReadoutPanel | null>(null);
@@ -57,17 +54,9 @@ export const RecursivePanel = memo(function RecursivePanel({
   const [portEditor, setPortEditor] = useState<PortEditorConfig | null>(null);
   const [panelType, setPanelType] = useState<'loading' | 'dialog' | 'indicatorPanel' | 'readoutPanel' | 'table' | 'curve' | 'portEditor' | 'unknown'>('loading');
 
-  // Log mount ID to track component identity
-  const mountIdRef = useRef(Math.random().toString(36).substring(7));
-  console.log(`[RecursivePanel] 🎯 Component render for '${name}' (mount: ${mountIdRef.current}, panelType: ${panelType}, curveData: ${curveData ? 'SET' : 'NULL'})`);
-
-  // Use useLayoutEffect instead of useEffect to run synchronously
-  // This prevents the effect from being skipped during rapid re-renders
   useLayoutEffect(() => {
-    // Reset state when name changes and track cancellation
     let cancelled = false;
     
-    console.error(`[RecursivePanel] ⚡⚡⚡ LAYOUT EFFECT FIRED for '${name}' (mount: ${mountIdRef.current})`);
     setPanelType('loading');
     setDefinition(null);
     setIndicatorPanel(null);
@@ -412,10 +401,6 @@ export function PanelVisibilityWrapper({
 }) {
   const [panelVisible, setPanelVisible] = useState<boolean>(true);
   
-  // Log on every render to verify component is being rendered
-  console.log(`[PanelVisibilityWrapper] Rendering for panel '${comp.name}', condition: '${comp.visibility_condition}', current visible state: ${panelVisible}`);
-  
-  // Use ref to track context without causing re-renders
   const contextRef = useRef(context);
   contextRef.current = context;
   
@@ -443,31 +428,14 @@ export function PanelVisibilityWrapper({
 
   useEffect(() => {
     if (normalizedVisibilityExpression) {
-      // Log visibility condition evaluation for debugging
-      console.log(`[PanelVisibilityWrapper] Evaluating visibility for '${comp.name}': original='${comp.visibility_condition}', parsed='${normalizedVisibilityExpression}'`);
-      
-      // Extract variable names from condition and log their values
-      const varMatches = normalizedVisibilityExpression.match(/\{?(\w+)\}?/g);
-      if (varMatches) {
-        const varValues = varMatches.map(v => {
-          const varName = v.replace(/[{}]/g, '');
-          const value = contextRef.current[varName];
-          return `${varName}=${value !== undefined ? value : 'undefined (defaults to 0)'}`;
-        });
-        console.log(`[PanelVisibilityWrapper] Context for '${comp.name}':`, varValues.join(', '));
-      }
-      
       invoke<boolean>('evaluate_expression', { 
         expression: normalizedVisibilityExpression, 
         context: contextRef.current 
       })
-        .then((result) => {
-          console.log(`[PanelVisibilityWrapper] '${comp.name}' visibility: ${normalizedVisibilityExpression} = ${result}`);
-          setPanelVisible(result);
-        })
+        .then(setPanelVisible)
         .catch((err) => {
           console.warn(`[PanelVisibilityWrapper] Failed to evaluate panel visibility condition '${normalizedVisibilityExpression}':`, err);
-          setPanelVisible(true); // Show on error
+          setPanelVisible(true);
         });
     } else {
       setPanelVisible(true);
@@ -475,11 +443,9 @@ export function PanelVisibilityWrapper({
   }, [comp.visibility_condition, comp.name, normalizedVisibilityExpression, visibilityContextKey]);
   
   if (!panelVisible || !comp.name) {
-    console.log(`[PanelVisibilityWrapper] Skipping render for '${comp.name}': panelVisible=${panelVisible}, comp.name=${comp.name}`);
     return null;
   }
   
-  console.log(`[PanelVisibilityWrapper] ✅ About to render RecursivePanel for '${comp.name}'`);
   return <RecursivePanel key={`panel-${comp.name}`} name={comp.name} openTable={openTable} context={context} onUpdate={onUpdate} onFieldFocus={onFieldFocus} showAllHelpIcons={showAllHelpIcons} />;
 }
 

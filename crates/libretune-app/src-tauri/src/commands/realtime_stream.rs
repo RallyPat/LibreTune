@@ -407,6 +407,11 @@ pub async fn start_realtime_stream(
             cached_def_data.is_some()
         ));
 
+        // Cache app settings once — load_settings() reads from disk and must not run every tick.
+        let rpm_settings = load_settings(&app_handle);
+        let rpm_key_on_threshold = rpm_settings.key_on_threshold_rpm;
+        let rpm_key_off_timeout = rpm_settings.key_off_timeout_sec;
+
         // Determine transfer mode once and initialize stream stats
         {
             let (mode_label, mode_reason) = {
@@ -508,13 +513,12 @@ pub async fn start_realtime_stream(
                             .copied()
                             .unwrap_or(0.0);
 
-                        let settings = load_settings(&app_handle);
                         let mut tracker = app_state.rpm_state_tracker.lock().await;
 
                         if let Some(new_state) = tracker.update(
                             rpm,
-                            settings.key_on_threshold_rpm,
-                            settings.key_off_timeout_sec,
+                            rpm_key_on_threshold,
+                            rpm_key_off_timeout,
                         ) {
                             // Emit event when state changes
                             let state_str = match new_state {
@@ -702,11 +706,10 @@ pub async fn start_realtime_stream(
                                 .unwrap_or(0.0);
 
                             if let Ok(mut tracker) = app_state.rpm_state_tracker.try_lock() {
-                                let settings = load_settings(&app_handle);
                                 if let Some(new_state) = tracker.update(
                                     rpm,
-                                    settings.key_on_threshold_rpm,
-                                    settings.key_off_timeout_sec,
+                                    rpm_key_on_threshold,
+                                    rpm_key_off_timeout,
                                 ) {
                                     let state_str = match new_state {
                                         RpmState::On => "on",

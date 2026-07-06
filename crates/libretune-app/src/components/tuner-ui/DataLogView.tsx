@@ -3,7 +3,7 @@ import { BarChart3, Circle, FolderOpen, Key, Square, CircleDot, Trash2, Save, Pa
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { save, open } from '@tauri-apps/plugin-dialog';
-import { useRealtimeStore } from '../../stores/realtimeStore';
+import { useChannels, useRealtimeStore } from '../../stores/realtimeStore';
 import LoggerStatsPanel from './LoggerStatsPanel';
 import './DataLogView.css';
 
@@ -185,9 +185,6 @@ const LineChart: React.FC<{
 
 // DataLogView no longer requires props - uses Zustand store for realtime data
 export const DataLogView: React.FC = () => {
-  // Get realtime data from Zustand store
-  const realtimeData = useRealtimeStore((state) => state.channels);
-
   const [isRecording, setIsRecording] = useState(false);
   const [status, setStatus] = useState<LoggingStatus | null>(null);
   const [logData, setLogData] = useState<{ x: number; values: Record<string, number> }[]>([]);
@@ -256,20 +253,33 @@ export const DataLogView: React.FC = () => {
     return () => clearInterval(interval);
   }, [isRecording]);
   
-  // Update available channels from realtime data
+  // Seed channel list once when ECU data first arrives (avoid subscribing to all channels at 20Hz).
   useEffect(() => {
-    const channels = Object.keys(realtimeData);
-    if (channels.length > 0 && availableChannels.length === 0) {
+    if (availableChannels.length > 0) return;
+
+    const applyChannels = () => {
+      const channels = Object.keys(useRealtimeStore.getState().channels);
+      if (channels.length === 0) return false;
       setAvailableChannels(channels);
-      // Set default selected channels
-      const defaults = ['RPM', 'MAP', 'AFR', 'coolant', 'TPS'].filter(c => channels.includes(c));
+      const defaults = ['RPM', 'MAP', 'AFR', 'coolant', 'TPS'].filter((c) => channels.includes(c));
       if (defaults.length > 0) {
         setSelectedChannels(defaults.slice(0, 4));
       } else {
         setSelectedChannels(channels.slice(0, 4));
       }
-    }
-  }, [realtimeData, availableChannels]);
+      return true;
+    };
+
+    if (applyChannels()) return;
+
+    const interval = window.setInterval(() => {
+      if (applyChannels()) {
+        window.clearInterval(interval);
+      }
+    }, 500);
+
+    return () => window.clearInterval(interval);
+  }, [availableChannels.length]);
 
   // Listen for key-state changes and auto-record if enabled
   useEffect(() => {
@@ -558,8 +568,10 @@ export const DataLogView: React.FC = () => {
     return `${minutes}:${secs.toString().padStart(2, '0')}`;
   };
   
+  const liveValues = useChannels(selectedChannels);
+  
   // Get display values - use playback or realtime based on mode
-  const displayValues = viewMode === 'playback' ? getCurrentPlaybackValues() : realtimeData;
+  const displayValues = viewMode === 'playback' ? getCurrentPlaybackValues() : liveValues;
   
   return (
     <div className="datalog-view">

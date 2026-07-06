@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useMemo } from 'react';
 import './IndicatorRow.css';
 import { useRealtimeStore } from '../../stores/realtimeStore';
 import { useShallow } from 'zustand/react/shallow';
+import { evaluateIndicatorExpression } from '../../utils/evaluateIndicatorExpression';
 
 export interface FrontPageIndicator {
   expression: string;
@@ -19,58 +20,6 @@ interface IndicatorRowProps {
   columnCount?: number | 'auto';
   fillEmptyCells?: boolean;
   textFitMode?: 'scale' | 'wrap';
-}
-
-/**
- * Evaluates a simple boolean expression against realtime data.
- * Supports: variable names, comparisons (<, >, <=, >=, ==, !=), 
- * bitwise AND (&), logical AND (&&), logical OR (||), parentheses.
- */
-function evaluateIndicatorExpression(
-  expression: string,
-  data: Record<string, number>,
-  constants: Record<string, number> = {}
-): boolean {
-  // Merge realtime data with constants (realtime takes precedence)
-  const context = { ...constants, ...data };
-  
-  try {
-    // Clean up the expression
-    let expr = expression.trim();
-    
-    // Handle simple variable name (truthy check)
-    if (/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(expr)) {
-      const val = context[expr];
-      return val !== undefined && val !== 0;
-    }
-    
-    // Replace variable names with their values
-    // This is a simple replacement - more complex expressions would need a proper parser
-    const tokens = expr.match(/([a-zA-Z_][a-zA-Z0-9_]*|[0-9.]+|&&|\|\||[<>=!&]+|[()]+)/g);
-    if (!tokens) return false;
-    
-    let result = '';
-    for (const token of tokens) {
-      if (/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(token)) {
-        const val = context[token];
-        result += val !== undefined ? val : 0;
-      } else {
-        result += token;
-      }
-    }
-    
-    // Safely evaluate the expression
-    // Replace bitwise & with JavaScript's bitwise AND behavior for truthiness
-    // Note: This is a simplified evaluator - complex expressions may need more robust parsing
-    
-    // Convert bitwise AND results to boolean
-    // e.g., "status & 8" should be truthy if bit 3 is set
-    const evalFn = new Function('return (' + result + ') ? true : false');
-    return evalFn();
-  } catch (e) {
-    console.warn(`Failed to evaluate indicator expression: ${expression}`, e);
-    return false;
-  }
 }
 
 /**

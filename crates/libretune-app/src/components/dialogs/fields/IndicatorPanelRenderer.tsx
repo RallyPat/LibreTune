@@ -1,5 +1,10 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { invoke } from '@tauri-apps/api/core';
+import { useMemo } from 'react';
+import { useShallow } from 'zustand/react/shallow';
+import { useRealtimeStore } from '../../../stores/realtimeStore';
+import {
+  evaluateIndicatorExpression,
+  extractExpressionVariables,
+} from '../../../utils/evaluateIndicatorExpression';
 import type { IndicatorPanel } from '../types';
 
 type IndicatorDef = IndicatorPanel['indicators'][number];
@@ -51,26 +56,35 @@ export function IndicatorPanelRenderer({
   panel: IndicatorPanel;
   context: Record<string, number>;
 }) {
-  const [indicatorValues, setIndicatorValues] = useState<Record<string, boolean>>({});
+  const usedVars = useMemo(
+    () => extractExpressionVariables(panel.indicators.map((ind) => ind.expression)),
+    [panel.indicators],
+  );
 
-  useEffect(() => {
-    const evaluations = panel.indicators.map((ind) =>
-      invoke<boolean>('evaluate_expression', {
-        expression: ind.expression,
+  const realtimeSlice = useRealtimeStore(
+    useShallow((state) => {
+      const slice: Record<string, number> = {};
+      for (const name of usedVars) {
+        const value = state.channels[name];
+        if (value !== undefined) {
+          slice[name] = value;
+        }
+      }
+      return slice;
+    }),
+  );
+
+  const indicatorValues = useMemo(() => {
+    const values: Record<string, boolean> = {};
+    for (const ind of panel.indicators) {
+      values[ind.expression] = evaluateIndicatorExpression(
+        ind.expression,
+        realtimeSlice,
         context,
-      })
-        .then((value) => ({ expression: ind.expression, value }))
-        .catch(() => ({ expression: ind.expression, value: false })),
-    );
-
-    Promise.all(evaluations).then((results) => {
-      const values: Record<string, boolean> = {};
-      results.forEach(({ expression, value }) => {
-        values[expression] = value;
-      });
-      setIndicatorValues(values);
-    });
-  }, [panel.indicators, context]);
+      );
+    }
+    return values;
+  }, [panel.indicators, realtimeSlice, context]);
 
   const statusTiles = useMemo(
     () => usesStatusTiles(panel.indicators),

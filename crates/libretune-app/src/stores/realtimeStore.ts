@@ -73,22 +73,49 @@ export const useRealtimeStore = create<RealtimeState>()(
     lastUpdateTime: 0,
     
     updateChannels: (data) => {
-      // Update non-reactive circular history buffer (O(1) per channel, no GC pressure)
-      for (const [name, value] of Object.entries(data)) {
-        let buf = _channelHistoryBuffer[name];
-        if (!buf) {
-          buf = { data: new Float64Array(HISTORY_SIZE), writeIdx: 0, count: 0 };
-          _channelHistoryBuffer[name] = buf;
+      set((state) => {
+        let valuesChanged = false;
+        for (const [name, value] of Object.entries(data)) {
+          if (state.channels[name] !== value) {
+            valuesChanged = true;
+            break;
+          }
         }
-        buf.data[buf.writeIdx] = value;
-        buf.writeIdx = (buf.writeIdx + 1) % HISTORY_SIZE;
-        if (buf.count < HISTORY_SIZE) buf.count++;
-      }
-      
-      // Only reactive state update: channel values + timestamp (lightweight)
-      set({ 
-        channels: data,
-        lastUpdateTime: Date.now() 
+        if (!valuesChanged) {
+          const existingKeys = Object.keys(state.channels);
+          if (
+            existingKeys.length !== Object.keys(data).length ||
+            existingKeys.some((key) => !(key in data))
+          ) {
+            valuesChanged = true;
+          }
+        }
+
+        for (const [name, value] of Object.entries(data)) {
+          let buf = _channelHistoryBuffer[name];
+          if (!buf) {
+            buf = { data: new Float64Array(HISTORY_SIZE), writeIdx: 0, count: 0 };
+            _channelHistoryBuffer[name] = buf;
+          }
+          if (buf.count > 0) {
+            const lastIdx = (buf.writeIdx - 1 + HISTORY_SIZE) % HISTORY_SIZE;
+            if (buf.data[lastIdx] === value) {
+              continue;
+            }
+          }
+          buf.data[buf.writeIdx] = value;
+          buf.writeIdx = (buf.writeIdx + 1) % HISTORY_SIZE;
+          if (buf.count < HISTORY_SIZE) buf.count++;
+        }
+
+        if (!valuesChanged) {
+          return { ...state, lastUpdateTime: Date.now() };
+        }
+
+        return {
+          channels: { ...state.channels, ...data },
+          lastUpdateTime: Date.now(),
+        };
       });
     },
     

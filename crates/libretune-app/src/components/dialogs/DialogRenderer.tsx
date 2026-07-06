@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { ArrowLeft } from 'lucide-react';
 import './DialogRenderer.css';
@@ -84,14 +84,6 @@ export default function DialogRenderer({ definition, onBack, openTable, context,
   const handleFieldFocus = (info: FieldInfo) => {
     setSelectedField(info);
   };
-  
-  // Log all components for debugging
-  useEffect(() => {
-    console.log(`[DialogRenderer] Rendering dialog '${definition.name}' with ${definition.components.length} components:`);
-    definition.components.forEach((comp, i) => {
-      console.log(`  [${i}] type=${comp.type}, name=${comp.name || 'N/A'}, position=${comp.position || 'none'}, visibility=${comp.visibility_condition || 'none'}`);
-    });
-  }, [definition]);
   
   return (
     <div className="dialog-view view-transition">
