@@ -48,6 +48,65 @@
   padding-right: 4px;
 }
 
+.editor-content--with-live {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 1.25rem;
+  padding: 0.75rem;
+}
+
+.table-live-readout {
+  flex: 0 0 auto;
+  min-width: 7rem;
+  padding: 0.5rem 0.25rem;
+  border-left: 1px solid var(--border-subtle);
+  padding-left: 1rem;
+}
+
+.table-live-readout-hint {
+  font-size: 0.6875rem;
+  color: var(--text-muted);
+  margin-bottom: 0.5rem;
+  line-height: 1.3;
+}
+
+.table-live-readout-list {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.625rem;
+}
+
+.table-live-readout-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+}
+
+.table-live-readout-label {
+  margin: 0;
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: lowercase;
+  color: var(--text-muted);
+}
+
+.table-live-readout-value {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 1.125rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+  line-height: 1.2;
+}
+
+.table-live-readout-row.is-highlight .table-live-readout-value {
+  color: var(--accent);
+}
+
 /* Embedded header with pop-out button */
 .embedded-header {
   display: flex;

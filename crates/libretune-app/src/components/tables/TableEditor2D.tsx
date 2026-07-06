@@ -12,6 +12,8 @@ import { useToast } from '../../contexts/ToastContext';
 import { getHotkeyManager } from '../../services/hotkeyService';
 import './TableComponents.css';
 import './TableEditor2D.css';
+import TableLiveReadout from './TableLiveReadout';
+import { isGppwmTable, resolveGppwmOutputChannel } from './tableLiveChannels';
 
 type TableOperationResult = {
   table_name: string;
@@ -126,11 +128,13 @@ export default function TableEditor2D({
     const channels: string[] = [];
     if (x_output_channel) channels.push(x_output_channel);
     if (y_output_channel) channels.push(y_output_channel);
+    const output = resolveGppwmOutputChannel(table_name, x_output_channel, y_output_channel);
+    if (output) channels.push(output);
     if (channels.length === 0) {
       channels.push('rpm', 'map');
     }
     return channels;
-  }, [x_output_channel, y_output_channel]);
+  }, [table_name, x_output_channel, y_output_channel]);
   const realtimeData = useChannels(outputChannels);
   
   // Use safe fallback values for hooks when data is invalid
@@ -1105,7 +1109,7 @@ export default function TableEditor2D({
       )}
 
       <div 
-        className="editor-content"
+        className={`editor-content${embedded && (x_output_channel || y_output_channel || isGppwmTable(table_name, x_output_channel, y_output_channel)) ? ' editor-content--with-live' : ''}`}
         onContextMenu={e => {
           const target = e.target as HTMLElement;
           if (target.classList.contains('table-cell')) {
@@ -1139,6 +1143,15 @@ export default function TableEditor2D({
           heatmapScheme={heatmapSettings.valueScheme}
           compact={embedded}
         />
+        {embedded && (x_output_channel || y_output_channel || isGppwmTable(table_name, x_output_channel, y_output_channel)) && (
+          <TableLiveReadout
+            tableName={table_name}
+            xLabel={x_axis_name}
+            yLabel={y_axis_name}
+            xChannel={x_output_channel}
+            yChannel={y_output_channel}
+          />
+        )}
       </div>
 
       <TableContextMenu
