@@ -1720,8 +1720,11 @@ fn parse_curve_editor_entry(
                     }
                 }
                 "ybins" => {
-                    // Format: yBins = valueVariable
-                    curve.y_bins = value.trim().to_string();
+                    // Format: yBins = valueVariable[, outputChannel]
+                    let parts = split_ini_line(value);
+                    if !parts.is_empty() {
+                        curve.y_bins = parts[0].trim().to_string();
+                    }
                 }
                 "size" => {
                     // Format: size = count

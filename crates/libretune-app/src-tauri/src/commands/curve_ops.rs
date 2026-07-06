@@ -257,8 +257,7 @@ pub async fn update_curve_data(
     let def = def_guard.as_ref().ok_or("Definition not loaded")?;
 
     let curve = def
-        .curves
-        .get(&curve_name)
+        .get_curve_by_name_or_map(&curve_name)
         .ok_or_else(|| format!("Curve {} not found", curve_name))?;
 
     // Get the Y-bins constant (the values we're updating)

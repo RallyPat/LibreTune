@@ -611,3 +611,24 @@ dialog = userTable1TblSettings
 
     let _ = std::fs::remove_file(&temp_path);
 }
+
+#[test]
+fn test_parse_curve_ybins_with_output_channel() {
+    let ini = r#"
+[MegaTune]
+signature = "test"
+
+[CurveEditor]
+curve = cltIdleRPMCurve, "Idle Target RPM"
+    xBins = cltIdleRpmBins, coolant
+    yBins = cltIdleRpm, RPMValue
+"#;
+
+    let def = EcuDefinition::from_str(ini).expect("parse curve yBins");
+    let curve = def
+        .get_curve_by_name_or_map("cltIdleRPMCurve")
+        .expect("curve");
+    assert_eq!(curve.x_bins, "cltIdleRpmBins");
+    assert_eq!(curve.x_output_channel.as_deref(), Some("coolant"));
+    assert_eq!(curve.y_bins, "cltIdleRpm");
+}
