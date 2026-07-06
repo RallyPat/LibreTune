@@ -10,7 +10,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { ArrowLeft, Save, Flame, Undo2, Redo2, AlertTriangle } from 'lucide-react';
 import { GaugeLiveReadout } from '../gauges/GaugeLiveReadout';
 import { TsGaugeConfig } from '../dashboards/dashTypes';
-import { valueToHeatmapColor } from '../../utils/heatmapColors';
+import { valueToHeatmapColor, textColorForBackground } from '../../utils/heatmapColors';
 import { useChannelValue } from '../../stores/realtimeStore';
 import './CurveEditor.css';
 
@@ -217,6 +217,14 @@ export default function CurveEditor({
   const getCellColor = useCallback((value: number, min: number, max: number): string => {
     return valueToHeatmapColor(value, min, max, 'tunerstudio');
   }, []);
+
+  const getHeatmapCellStyle = useCallback((value: number, min: number, max: number): React.CSSProperties => {
+    const backgroundColor = getCellColor(value, min, max);
+    return {
+      backgroundColor,
+      color: textColorForBackground(backgroundColor),
+    };
+  }, [getCellColor]);
 
   // Chart dimensions based on mode
   const chartWidth = embedded ? 500 : 500;
@@ -848,8 +856,8 @@ Suggestion: {errorInfo.suggestion}
             <tbody>
               {data.x_bins.map((x, i) => {
                 const yValue = localYBins[i];
-                const yColor = getCellColor(yValue, yAxis.min, yAxis.max);
-                const xColor = getCellColor(x, xAxis.min, xAxis.max);
+                const xCellStyle = getHeatmapCellStyle(x, xAxis.min, xAxis.max);
+                const yCellStyle = getHeatmapCellStyle(yValue, yAxis.min, yAxis.max);
                 
                 return (
                   <tr
@@ -857,10 +865,10 @@ Suggestion: {errorInfo.suggestion}
                     className={selectedPoint === i ? 'selected' : ''}
                     onClick={() => handleRowClick(i)}
                   >
-                    <td className="x-cell" style={{ backgroundColor: xColor }}>{x.toFixed(2)}</td>
+                    <td className="x-cell" style={xCellStyle}>{x.toFixed(2)}</td>
                     <td
                       className="y-cell"
-                      style={{ backgroundColor: yColor }}
+                      style={yCellStyle}
                       onDoubleClick={() => handleCellDoubleClick(i)}
                     >
                       {editingCell === i ? (
@@ -904,8 +912,8 @@ Suggestion: {errorInfo.suggestion}
               <tbody>
                 {data.x_bins.map((x, i) => {
                   const yValue = localYBins[i];
-                  const yColor = getCellColor(yValue, yAxis.min, yAxis.max);
-                  const xColor = getCellColor(x, xAxis.min, xAxis.max);
+                  const xCellStyle = getHeatmapCellStyle(x, xAxis.min, xAxis.max);
+                  const yCellStyle = getHeatmapCellStyle(yValue, yAxis.min, yAxis.max);
                   
                   return (
                     <tr
@@ -913,10 +921,10 @@ Suggestion: {errorInfo.suggestion}
                       className={selectedPoint === i ? 'selected' : ''}
                       onClick={() => handleRowClick(i)}
                     >
-                      <td className="x-cell" style={{ backgroundColor: xColor }}>{x.toFixed(2)}</td>
+                      <td className="x-cell" style={xCellStyle}>{x.toFixed(2)}</td>
                       <td
                         className="y-cell"
-                        style={{ backgroundColor: yColor }}
+                        style={yCellStyle}
                         onDoubleClick={() => handleCellDoubleClick(i)}
                       >
                         {editingCell === i ? (

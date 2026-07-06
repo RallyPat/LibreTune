@@ -145,6 +145,37 @@ export function rgbToCss(rgb: RGBColor): string {
   return `rgb(${Math.round(rgb.r)}, ${Math.round(rgb.g)}, ${Math.round(rgb.b)})`;
 }
 
+/** Parse rgb() or hex CSS color strings into RGB components. */
+export function parseCssColor(color: string): RGBColor {
+  const trimmed = color.trim();
+  const rgbMatch = /^rgb\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)$/i.exec(trimmed);
+  if (rgbMatch) {
+    return {
+      r: parseInt(rgbMatch[1], 10),
+      g: parseInt(rgbMatch[2], 10),
+      b: parseInt(rgbMatch[3], 10),
+    };
+  }
+  if (trimmed.startsWith('#')) {
+    return hexToRgb(trimmed);
+  }
+  return { r: 128, g: 128, b: 128 };
+}
+
+/** WCAG relative luminance for sRGB colors. */
+export function relativeLuminance(rgb: RGBColor): number {
+  const channel = (c: number) => {
+    const s = c / 255;
+    return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+  };
+  return 0.2126 * channel(rgb.r) + 0.7152 * channel(rgb.g) + 0.0722 * channel(rgb.b);
+}
+
+/** Pick a readable foreground color for heatmap cell backgrounds. */
+export function textColorForBackground(background: string): string {
+  return relativeLuminance(parseCssColor(background)) > 0.179 ? '#111111' : '#ffffff';
+}
+
 /**
  * Interpolate between two colors
  * @param color1 - Start color (hex)

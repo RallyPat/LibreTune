@@ -280,16 +280,11 @@
 }
 
 .curve-data-table tr.selected td {
-  color: var(--text-primary);
+  box-shadow: inset 0 0 0 2px rgba(74, 158, 255, 0.85);
 }
 
-.curve-data-table .x-cell {
-  color: var(--text-muted);
-  background: rgba(0, 0, 0, 0.2);
-}
-
+.curve-data-table .x-cell,
 .curve-data-table .y-cell {
-  color: #f5d742;
   font-weight: 500;
 }
 
