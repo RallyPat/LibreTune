@@ -10,26 +10,42 @@
   height: 100%;
 }
 
-/* Embedded mode (in dialog) */
+/* Embedded mode (in dialog / menu panels — GP#1–4, etc.) */
 .table-editor-2d.embedded {
   flex: 1;
-  min-height: 200px;
-  width: 100%; /* Expand to fill container width */
+  min-height: 0;
+  width: 100%;
   overflow: hidden;
-  background: rgba(0, 0, 0, 0.2);
-  border-radius: 6px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: var(--bg-primary);
+  border-radius: 0;
+  border: none;
   gap: 0;
 }
 
 .table-editor-2d.embedded .editor-content {
   flex: 1;
   overflow: auto;
-  min-height: 0; /* Allow flex shrinking for proper scrolling */
+  min-height: 0;
+  gap: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
 }
 
 .table-editor-2d.embedded .table-grid-container {
-  min-width: max-content;
+  flex: 0 0 auto;
+  width: fit-content;
+  height: fit-content;
+}
+
+.table-editor-2d.embedded .table-grid-container--compact .table-cell,
+.table-editor-2d.embedded .table-grid-container--compact .axis-bin-label {
+  font-size: 0.85rem;
+}
+
+.table-editor-2d.embedded .table-grid-container--compact .axis-bin-label.y-bin {
+  padding-right: 4px;
 }
 
 /* Embedded header with pop-out button */
@@ -165,6 +181,7 @@
   flex: 1;
   display: flex;
   flex-direction: column;
+  align-items: flex-start;
   gap: 0.5rem;
   position: relative;
 }

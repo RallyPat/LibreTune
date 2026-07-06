@@ -331,8 +331,18 @@
 /* Allow panels with tables to grow and fill space */
 .dialog-view .nested-panel:has(.table-editor-2d) {
   flex: 1;
-  min-height: 400px;
+  min-height: 0;
   max-width: none;
+}
+
+/* Table-only panels (e.g. GP#1–4 in Generic PWM) — tight grid, no wasted padding */
+.dialog-view .dialog-container:has(.table-editor-2d.embedded) {
+  padding: 0;
+  gap: 0;
+}
+
+.dialog-view .table-editor-2d.embedded {
+  min-height: 240px;
 }
 
 .panel-loading {

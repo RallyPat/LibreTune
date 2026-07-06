@@ -1137,6 +1137,7 @@ export default function TableEditor2D({
           // Heatmap color settings
           showColorShade={showColorShade}
           heatmapScheme={heatmapSettings.valueScheme}
+          compact={embedded}
         />
       </div>
 

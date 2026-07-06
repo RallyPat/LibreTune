@@ -7,9 +7,22 @@
 /* Flat grid layout - headers and cells all in one grid for guaranteed alignment */
 .table-editor-2d .table-grid-container {
   display: grid;
-  gap: 1px;
+  gap: 0;
   overflow: auto;
-  /* grid-template-columns set via inline style: auto repeat(N, 3rem) */
+  width: fit-content;
+  height: fit-content;
+  flex: none;
+  padding: 0;
+  align-content: start;
+  border: 1px solid var(--table-grid-line);
+  box-sizing: border-box;
+  /* grid-template-columns set via inline style; row height via grid-auto-rows */
+  --table-row-h: 2rem;
+  grid-auto-rows: var(--table-row-h);
+}
+
+.table-editor-2d .table-grid-container--compact {
+  --table-row-h: 2rem;
 }
 
 /* Corner cell where axes meet */
@@ -19,22 +32,29 @@
   top: 0;
   left: 0;
   z-index: 3;
+  border-right: 1px solid var(--table-grid-line);
+  border-bottom: 1px solid var(--table-grid-line);
 }
 
 .table-editor-2d .table-cell {
-  width: 3rem;
-  height: 2rem;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
   padding: 0;
-  min-width: unset;
+  margin: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-family: 'Courier New', monospace;
-  font-size: 0.9rem;
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
   cursor: pointer;
-  border: 1px solid var(--border);
+  border: none;
+  border-right: 1px solid var(--table-grid-line);
+  border-bottom: 1px solid var(--table-grid-line);
   transition: background-color 0.15s, box-shadow 0.15s;
   position: relative;
+  box-sizing: border-box;
 }
 
 .table-editor-2d .table-cell.selected {
@@ -111,29 +131,34 @@
 }
 
 .table-editor-2d .axis-bin-label {
-  width: 3rem;
-  height: 2rem;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 0.8rem;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
   text-align: center;
-  border: 1px solid var(--border);
+  border: none;
+  border-right: 1px solid var(--table-grid-line);
+  border-bottom: 1px solid var(--table-grid-line);
   background: var(--surface);
   color: var(--text-primary);
   cursor: pointer;
   user-select: none;
   transition: all 0.1s ease;
+  box-sizing: border-box;
 }
 
 .table-editor-2d .axis-bin-label:hover {
   background: var(--surface-bright);
-  border-color: var(--border-hover);
 }
 
 .table-editor-2d .axis-bin-label.selected {
   background: var(--primary);
-  border-color: var(--primary-border);
   color: white;
   font-weight: bold;
 }

@@ -27,6 +27,8 @@ interface TableGridProps {
   // Heatmap color props
   showColorShade?: boolean; // Whether to show heatmap colors
   heatmapScheme?: HeatmapScheme | string[]; // Scheme name or custom color stops
+  /** Embedded/dialog tables: fixed compact layout (GP#1–4, etc.) */
+  compact?: boolean;
 }
 
 export default function TableGrid({
@@ -47,6 +49,7 @@ export default function TableGrid({
   showLiveCursor = false,
   showColorShade = true,
   heatmapScheme = 'tunerstudio',
+  compact = false,
 }: TableGridProps) {
   const gridRef = useRef<HTMLDivElement>(null);
   const [editingCell, setEditingCell] = useState<[number, number] | null>(null);
@@ -292,13 +295,18 @@ export default function TableGrid({
     );
   };
 
+  // Fixed column widths — tuning tables must not stretch with the panel
+  const axisCol = compact ? '3.25rem' : '2.75rem';
+  const dataCol = compact ? '3.5rem' : '3rem';
+  const gridTemplateColumns = `${axisCol} repeat(${x_size}, ${dataCol})`;
+
   return (
     <div 
       ref={gridRef}
-      className="table-grid-container"
+      className={`table-grid-container${compact ? ' table-grid-container--compact' : ''}`}
       onMouseUp={handleMouseUp}
       onMouseMove={handleCellMouseMove}
-      style={{ gridTemplateColumns: `max-content repeat(${x_size}, 3rem)` }}
+      style={{ gridTemplateColumns }}
     >
       {/* Corner cell (row 0, col 0) */}
       <div className="axis-corner" />
