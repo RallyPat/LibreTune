@@ -33,13 +33,16 @@
   align-items: flex-start;
 }
 
-/* GPPWM: table left, live values (switch / x / y / output) on the right */
 .table-editor-2d.embedded .editor-content.editor-content--with-live {
+  flex: 0 0 auto;
   flex-direction: row;
   flex-wrap: nowrap;
   align-items: flex-start;
+  align-self: flex-start;
   gap: 1rem;
   padding: 0.5rem 0.75rem 0.75rem;
+  width: fit-content;
+  max-width: 100%;
 }
 
 .table-editor-2d.embedded .editor-content.editor-content--with-live .table-grid-container {
@@ -61,22 +64,30 @@
   padding-right: 4px;
 }
 
-.editor-content--with-live {
+.editor-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.5rem;
+  position: relative;
+}
+
+/* Must follow .editor-content — same specificity, row layout for GPPWM live strip */
+.editor-content.editor-content--with-live {
   flex-direction: row;
   flex-wrap: nowrap;
   align-items: flex-start;
   gap: 1rem;
+  width: fit-content;
+  max-width: 100%;
 }
 
 .table-live-readout {
   flex: 0 0 auto;
   min-width: 4.5rem;
   padding: 0.25rem 0 0 0.75rem;
-  border-left: none;
-  align-self: stretch;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
+  align-self: flex-start;
 }
 
 .table-live-readout-list {
@@ -253,15 +264,6 @@
 .action-icon {
   font-size: 1.25rem;
   line-height: 1;
-}
-
-.editor-content {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 0.5rem;
-  position: relative;
 }
 
 .rebin-dialog-overlay {
