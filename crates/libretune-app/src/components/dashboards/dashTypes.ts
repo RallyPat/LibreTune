@@ -81,7 +81,9 @@ export type GaugePainter =
   | 'RoundGauge'
   | 'RoundDashedGauge'
   | 'FuelMeter'
-  | 'Tachometer';
+  | 'Tachometer'
+  | 'TelemetryStat'
+  | 'MultiChannelTrend';
 
 export const SUPPORTED_GAUGE_PAINTERS = [
   'AnalogGauge',
@@ -102,6 +104,8 @@ export const SUPPORTED_GAUGE_PAINTERS = [
   'RoundDashedGauge',
   'FuelMeter',
   'Tachometer',
+  'TelemetryStat',
+  'MultiChannelTrend',
 ] as const satisfies readonly GaugePainter[];
 
 /** Indicator painter type */

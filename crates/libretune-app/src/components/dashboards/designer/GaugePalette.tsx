@@ -32,6 +32,8 @@ const PAINTER_LABELS: Record<GaugePainter, string> = {
   RoundDashedGauge: 'Round Dashed',
   FuelMeter: 'Fuel Meter',
   Tachometer: 'Tachometer',
+  TelemetryStat: 'Telemetry Stat',
+  MultiChannelTrend: 'Multi-Channel Trend',
 };
 
 export default function GaugePalette({ collapsed = false }: Props) {

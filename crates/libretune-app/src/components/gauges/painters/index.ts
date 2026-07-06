@@ -22,6 +22,8 @@ import { tachometerPainter } from './tachometer';
 import { analogGaugePainter } from './analogGauge';
 import { analogBarGaugePainter } from './analogBarGauge';
 import { analogMovingBarGaugePainter } from './analogMovingBarGauge';
+import { telemetryStatPainter } from './telemetryStat';
+import { multiChannelTrendPainter } from './multiChannelTrend';
 
 export { painterRegistry, type Painter, type PainterContext } from './types';
 
@@ -53,4 +55,6 @@ export function ensurePaintersRegistered(): void {
   registerPainter('CircleAnalogGauge', analogGaugePainter);
   registerPainter('AnalogBarGauge', analogBarGaugePainter);
   registerPainter('AnalogMovingBarGauge', analogMovingBarGaugePainter);
+  registerPainter('TelemetryStat', telemetryStatPainter);
+  registerPainter('MultiChannelTrend', multiChannelTrendPainter);
 }

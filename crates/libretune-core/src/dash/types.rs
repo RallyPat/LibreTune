@@ -208,6 +208,15 @@ pub enum GaugePainter {
     FuelMeter,
     /// Tachometer gauge
     Tachometer,
+    /// Flat, modern stat tile (LibreTune-native): accent bar + label + big value +
+    /// mini range bar. No metallic bezel — designed for compact telemetry-style
+    /// dashboards (Plan: F1 Telemetry template).
+    TelemetryStat,
+    /// LibreTune-native multi-channel overlay trend chart. Plots the primary
+    /// `output_channel` plus up to 3 additional channels (configured via
+    /// `extra_attrs["lt_seriesN_*"]`) on one time-series graph with a legend,
+    /// each series independently normalized to its own min/max.
+    MultiChannelTrend,
 }
 
 impl GaugePainter {
@@ -249,6 +258,8 @@ impl GaugePainter {
             "Analog Moving Bar Gauge" | "AnalogMovingBarGaugePainter" => Self::AnalogMovingBarGauge,
             "Histogram" | "HistogramPainter" => Self::Histogram,
             "Line Graph" | "LineGraphPainter" => Self::LineGraph,
+            "Telemetry Stat" => Self::TelemetryStat,
+            "Multi Channel Trend" => Self::MultiChannelTrend,
             _ if lower.contains("analoggaugepainter") => Self::AnalogGauge,
             _ if lower.contains("basicreadoutgaugepainter") => Self::BasicReadout,
             _ if lower.contains("horizontalbarpainter") => Self::HorizontalBarGauge,
@@ -284,6 +295,8 @@ impl GaugePainter {
             Self::RoundDashedGauge => "Round Dashed Gauge",
             Self::FuelMeter => "Fuel Meter",
             Self::Tachometer => "Tachometer",
+            Self::TelemetryStat => "Telemetry Stat",
+            Self::MultiChannelTrend => "Multi Channel Trend",
         }
     }
 }

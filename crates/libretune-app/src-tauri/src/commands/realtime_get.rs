@@ -1,5 +1,6 @@
 //! Single-shot realtime data fetch command.
 
+use crate::commands::realtime_stream::apply_channel_aliases;
 use crate::state::AppState;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -71,6 +72,9 @@ pub async fn get_realtime_data(
 
         results
     };
+
+    let mut data = data;
+    apply_channel_aliases(&mut data);
 
     Ok(data)
 }

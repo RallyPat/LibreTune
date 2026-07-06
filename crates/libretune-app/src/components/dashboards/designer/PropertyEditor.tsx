@@ -108,6 +108,8 @@ export default function PropertyEditor({ component, onChange }: Props) {
             <option value="FuelMeter">Fuel Meter</option>
             <option value="LineGraph">Line Graph</option>
             <option value="Histogram">Histogram</option>
+            <option value="TelemetryStat">Telemetry Stat</option>
+            <option value="MultiChannelTrend">Multi-Channel Trend</option>
           </select>
         </div>
 
@@ -132,6 +134,10 @@ export default function PropertyEditor({ component, onChange }: Props) {
             Lock Aspect Ratio
           </label>
         </div>
+
+        {gauge.gauge_painter === 'MultiChannelTrend' && (
+          <TrendSeriesEditor gauge={gauge} updateGauge={updateGauge} />
+        )}
 
         <div className="property-section">
           <h4>Position & Size</h4>
@@ -331,4 +337,91 @@ export default function PropertyEditor({ component, onChange }: Props) {
   }
 
   return <p>Unknown component type</p>;
+}
+
+/**
+ * Editor for the extra overlay series on a `MultiChannelTrend` gauge.
+ * Series 1 is always the gauge's own Output Channel / Title / Min / Max
+ * (edited above); slots 2-3 are stored as `lt_seriesN_*` keys in
+ * `extra_attrs` so they round-trip through the `.ltdash.xml` format
+ * without requiring a schema change.
+ */
+function TrendSeriesEditor({
+  gauge,
+  updateGauge,
+}: {
+  gauge: TsGaugeConfig;
+  updateGauge: (updates: Partial<TsGaugeConfig>) => void;
+}) {
+  const attrs = gauge.extra_attrs || {};
+
+  const setAttr = (key: string, value: string) => {
+    const next = { ...attrs };
+    if (value) next[key] = value;
+    else delete next[key];
+    updateGauge({ extra_attrs: next });
+  };
+
+  const seriesSlots = [2, 3] as const;
+
+  return (
+    <div className="property-section">
+      <h4>Trend Series (Overlay Channels)</h4>
+      <p className="property-hint">
+        The chart always plots the Output Channel above as series 1. Add up to two more
+        channels here to overlay on the same graph, each scaled to its own min/max.
+      </p>
+      {seriesSlots.map((n) => (
+        <div key={n} className="property-subsection">
+          <label className="property-subsection-label">Series {n}</label>
+          <div className="property-row">
+            <div className="property-group half">
+              <label>Channel</label>
+              <input
+                type="text"
+                placeholder="e.g. boost"
+                value={attrs[`lt_series${n}_channel`] || ''}
+                onChange={(e) => setAttr(`lt_series${n}_channel`, e.target.value)}
+              />
+            </div>
+            <div className="property-group half">
+              <label>Label</label>
+              <input
+                type="text"
+                placeholder="e.g. BOOST"
+                value={attrs[`lt_series${n}_label`] || ''}
+                onChange={(e) => setAttr(`lt_series${n}_label`, e.target.value)}
+              />
+            </div>
+          </div>
+          <div className="property-row">
+            <div className="property-group half">
+              <label>Min</label>
+              <input
+                type="number"
+                value={attrs[`lt_series${n}_min`] ?? ''}
+                onChange={(e) => setAttr(`lt_series${n}_min`, e.target.value)}
+              />
+            </div>
+            <div className="property-group half">
+              <label>Max</label>
+              <input
+                type="number"
+                value={attrs[`lt_series${n}_max`] ?? ''}
+                onChange={(e) => setAttr(`lt_series${n}_max`, e.target.value)}
+              />
+            </div>
+          </div>
+          <div className="property-group">
+            <label>Color</label>
+            <input
+              type="color"
+              value={attrs[`lt_series${n}_color`] || '#94a3b8'}
+              onChange={(e) => setAttr(`lt_series${n}_color`, e.target.value)}
+            />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
 }

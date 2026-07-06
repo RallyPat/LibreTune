@@ -2,7 +2,8 @@
 
 use crate::paths::get_dashboards_dir;
 use libretune_core::dash::{
-    self, create_basic_dashboard, create_racing_dashboard, create_tuning_dashboard,
+    self, create_basic_dashboard, create_racing_dashboard, create_telemetry_live_dashboard,
+    create_tuning_dashboard,
 };
 use serde::Serialize;
 use std::path::Path;
@@ -51,8 +52,9 @@ fn scan_dash_directory(dir: &Path, _category: &str, dashes: &mut Vec<DashFileInf
 }
 
 /// List all available dashboard files (.ltdash.xml and .dash for import)
-/// List all available dashboard files from the user dashboards directory
-/// Creates 3 default LibreTune dashboards if the directory is empty
+/// List all available dashboard files from the user dashboards directory.
+/// Ensures every built-in default dashboard exists, creating any that are
+/// missing (fresh install or upgrade) without touching existing files.
 #[tauri::command]
 pub async fn list_available_dashes(app: tauri::AppHandle) -> Result<Vec<DashFileInfo>, String> {
     let dash_dir = get_dashboards_dir(&app);
@@ -63,25 +65,11 @@ pub async fn list_available_dashes(app: tauri::AppHandle) -> Result<Vec<DashFile
             .map_err(|e| format!("Failed to create dashboards directory: {}", e))?;
     }
 
-    // Ensure default dashboards exist if no native LibreTune dashboards are present
-    let has_native_dash = std::fs::read_dir(&dash_dir)
-        .ok()
-        .and_then(|entries| {
-            entries.flatten().map(|entry| entry.path()).find(|path| {
-                path.file_name()
-                    .map(|n| n.to_string_lossy().to_lowercase().ends_with(".ltdash.xml"))
-                    .unwrap_or(false)
-            })
-        })
-        .is_some();
-
-    if !has_native_dash {
-        println!(
-            "[list_available_dashes] Creating default dashboards in {:?}",
-            dash_dir
-        );
-        create_default_dashboard_files(&dash_dir)?;
-    }
+    // Ensure every current built-in default exists. On a fresh install this
+    // creates all of them; on an existing install (e.g. upgrading from a
+    // version with fewer built-in templates) it only adds the ones missing,
+    // leaving any user-customized copies of the others untouched.
+    ensure_missing_default_dashboards(&dash_dir)?;
 
     let mut dashes = Vec::new();
 
@@ -106,7 +94,7 @@ pub struct DashConflictInfo {
     pub suggested_name: Option<String>,
 }
 
-/// Reset dashboards to defaults - removes all user dashboards and recreates the 3 defaults
+/// Reset dashboards to defaults - removes all user dashboards and recreates the 4 defaults
 #[tauri::command]
 pub async fn reset_dashboards_to_defaults(app: tauri::AppHandle) -> Result<(), String> {
     let dash_dir = get_dashboards_dir(&app);
@@ -126,10 +114,10 @@ pub async fn reset_dashboards_to_defaults(app: tauri::AppHandle) -> Result<(), S
     std::fs::create_dir_all(&dash_dir)
         .map_err(|e| format!("Failed to create dashboards directory: {}", e))?;
 
-    // Create the 3 defaults
+    // Create the 4 defaults
     create_default_dashboard_files(&dash_dir)?;
 
-    println!("[reset_dashboards_to_defaults] Reset complete - 3 default dashboards created");
+    println!("[reset_dashboards_to_defaults] Reset complete - 4 default dashboards created");
     Ok(())
 }
 
@@ -297,30 +285,58 @@ pub async fn import_dash_file(
     })
 }
 
-/// Create default dashboard XML files in the given directory
+/// (file name, builder) pairs for every built-in default dashboard. Adding a
+/// new built-in template only requires appending a row here.
+fn default_dashboard_specs() -> Vec<(&'static str, fn() -> dash::DashFile)> {
+    vec![
+        ("Basic.ltdash.xml", create_basic_dashboard),
+        ("Tuning.ltdash.xml", create_tuning_dashboard),
+        ("Racing.ltdash.xml", create_racing_dashboard),
+        ("Telemetry Live.ltdash.xml", create_telemetry_live_dashboard),
+    ]
+}
+
+/// Write a single default dashboard file, overwriting any existing copy.
+fn write_default_dashboard(dir: &Path, file_name: &str, dash_file: &dash::DashFile) -> Result<(), String> {
+    let xml = dash::write_dash_file(dash_file)
+        .map_err(|e| format!("Failed to serialize {}: {}", file_name, e))?;
+    std::fs::write(dir.join(file_name), xml)
+        .map_err(|e| format!("Failed to write {}: {}", file_name, e))
+}
+
+/// Create (overwrite) all built-in default dashboard XML files in the given
+/// directory. Used for fresh installs and "Reset to Defaults".
 pub(crate) fn create_default_dashboard_files(dir: &Path) -> Result<(), String> {
-    // Basic Dashboard
-    let basic = create_basic_dashboard();
-    let basic_xml = dash::write_dash_file(&basic)
-        .map_err(|e| format!("Failed to serialize basic dashboard: {}", e))?;
-    std::fs::write(dir.join("Basic.ltdash.xml"), basic_xml)
-        .map_err(|e| format!("Failed to write Basic.ltdash.xml: {}", e))?;
+    for (file_name, builder) in default_dashboard_specs() {
+        write_default_dashboard(dir, file_name, &builder())?;
+    }
+    println!(
+        "[create_default_dashboard_files] Created {} default dashboards",
+        default_dashboard_specs().len()
+    );
+    Ok(())
+}
 
-    // Tuning Dashboard
-    let tuning = create_tuning_dashboard();
-    let tuning_xml = dash::write_dash_file(&tuning)
-        .map_err(|e| format!("Failed to serialize tuning dashboard: {}", e))?;
-    std::fs::write(dir.join("Tuning.ltdash.xml"), tuning_xml)
-        .map_err(|e| format!("Failed to write Tuning.ltdash.xml: {}", e))?;
-
-    // Racing Dashboard
-    let racing = create_racing_dashboard();
-    let racing_xml = dash::write_dash_file(&racing)
-        .map_err(|e| format!("Failed to serialize racing dashboard: {}", e))?;
-    std::fs::write(dir.join("Racing.ltdash.xml"), racing_xml)
-        .map_err(|e| format!("Failed to write Racing.ltdash.xml: {}", e))?;
-
-    println!("[create_default_dashboard_files] Created 3 default dashboards");
+/// Additive, non-destructive version of [`create_default_dashboard_files`]:
+/// writes only the built-in defaults that don't already exist in `dir`,
+/// leaving any present (including user-edited copies) untouched. This lets
+/// newly-added built-in templates (e.g. a future 5th default) reach existing
+/// installs without wiping user customizations, unlike a full reset.
+pub(crate) fn ensure_missing_default_dashboards(dir: &Path) -> Result<(), String> {
+    let mut created = 0;
+    for (file_name, builder) in default_dashboard_specs() {
+        if dir.join(file_name).exists() {
+            continue;
+        }
+        write_default_dashboard(dir, file_name, &builder())?;
+        created += 1;
+    }
+    if created > 0 {
+        println!(
+            "[ensure_missing_default_dashboards] Added {} missing default dashboard(s) in {:?}",
+            created, dir
+        );
+    }
     Ok(())
 }
 
@@ -342,6 +358,12 @@ pub async fn get_dashboard_templates() -> Result<Vec<DashboardTemplateInfo>, Str
             id: "tuning".to_string(),
             name: "Tuning Dashboard".to_string(),
             description: "AFR, VE, Spark advance, and correction factors".to_string(),
+        },
+        DashboardTemplateInfo {
+            id: "telemetry_live".to_string(),
+            name: "Telemetry Live".to_string(),
+            description: "Dense Grafana-style live view: 22 stat tiles, 4 multi-series charts, 16 sparklines"
+                .to_string(),
         },
     ])
 }

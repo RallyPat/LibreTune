@@ -311,6 +311,33 @@
   color: var(--text-secondary);
 }
 
+.property-hint {
+  margin: 0 0 10px 0;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-secondary);
+  opacity: 0.75;
+}
+
+.property-subsection {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  margin-bottom: 8px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+}
+
+.property-subsection-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-primary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
 .checkbox-label {
   display: flex !important;
   flex-direction: row !important;

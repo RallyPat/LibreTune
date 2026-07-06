@@ -11,6 +11,151 @@ use libretune_core::autotune::VEDataPoint;
 use libretune_core::demo::DemoSimulator;
 use tauri::{Emitter, Manager};
 
+/// Canonical dashboard channel names → ECU-specific output channel names.
+/// Only inserts when the canonical name is absent from `data`.
+const REALTIME_CHANNEL_ALIASES: &[(&str, &[&str])] = &[
+    ("rpm", &["RPMValue", "rpm", "RPM", "engineSpeed", "rpmSensor"]),
+    ("afr", &["AFRValue", "RealAFRValue", "afr", "AFR", "afr1"]),
+    (
+        "coolant",
+        &["coolant", "CLTValue", "clt", "CLT", "coolantTemp"],
+    ),
+    (
+        "map",
+        &["MAPValue", "map", "MAP", "manifoldPressure", "fuelLoad"],
+    ),
+    (
+        "tps",
+        &["TPSValue", "tps", "TPS", "throttlePosition", "throttle"],
+    ),
+    (
+        "battery",
+        &[
+            "VBatt",
+            "vBatt",
+            "battery",
+            "Battery",
+            "vbatt",
+            "batteryVoltage",
+        ],
+    ),
+    (
+        "iat",
+        &["IATValue", "iat", "IAT", "intakeAirTemp", "intake"],
+    ),
+    (
+        "advance",
+        &[
+            "correctedIgnitionAdvance",
+            "baseIgnitionAdvance",
+            "runningAdvance",
+            "SA",
+            "advance",
+            "timing",
+            "ignitionAdvance",
+            "ignAdv",
+            "Advance",
+        ],
+    ),
+    (
+        "ve",
+        &[
+            "veValue", "VE1", "ve1", "veMain", "VEValue", "ve", "VE", "veCurr",
+        ],
+    ),
+    (
+        "boost",
+        &[
+            "boostControlTarget",
+            "boostOutput",
+            "boostPressure",
+            "boost",
+            "Boost",
+        ],
+    ),
+    (
+        "speed",
+        &["vehicleSpeedKph", "speed", "Speed", "wheelSpeed"],
+    ),
+    ("oilPressure", &["oilPressure", "OilPressure", "oilpress"]),
+    (
+        "fuelLevel",
+        &["fuelLevel", "FuelLevel", "fuel", "fuelTankLevel"],
+    ),
+    (
+        "pulseWidth",
+        &[
+            "actualLastInjection",
+            "pulseWidth1",
+            "pulseWidth",
+            "pw1",
+            "PW1",
+        ],
+    ),
+    (
+        "dutyCycle",
+        &["injectorDutyCycle", "dutyCycle", "injDuty", "InjectorDuty"],
+    ),
+    ("lambda", &["lambda", "Lambda", "lambdaValue", "wbo2"]),
+    (
+        "dwell",
+        &[
+            "sparkDwell",
+            "sparkDwellValue",
+            "dwell",
+            "Dwell",
+            "dwellAngle",
+            "baseDwell",
+        ],
+    ),
+    ("baro", &["baroPressure", "baro", "BaroPressure"]),
+    ("afrTarget", &["targetAFR", "targetAfr", "afrTarget", "AFRTarget"]),
+    (
+        "egt",
+        &[
+            "egt1", "egt2", "egt3", "egt4", "egt5", "egt6", "egt7", "egt8", "egt",
+        ],
+    ),
+    (
+        "correction",
+        &[
+            "stftCorrection1",
+            "stftCorrection2",
+            "ltftCorrection1",
+            "correction",
+            "fuelCorrection",
+            "egoCorrection",
+        ],
+    ),
+    (
+        "sync",
+        &["isMapValid", "sync", "engineSync", "hasSync", "triggerSync"],
+    ),
+];
+
+/// Map ECU-specific output channel names to the canonical names used by default
+/// dashboards. Also applies derived aliases (e.g. totalFuelCorrection → correction %).
+pub(crate) fn apply_channel_aliases(data: &mut HashMap<String, f64>) {
+    for (alias, candidates) in REALTIME_CHANNEL_ALIASES {
+        if data.contains_key(*alias) {
+            continue;
+        }
+        for &candidate in *candidates {
+            if let Some(&val) = data.get(candidate) {
+                data.insert(alias.to_string(), val);
+                break;
+            }
+        }
+    }
+
+    // rusEFI/FOME: totalFuelCorrection is a multiplier (1.0 = 100%); dashboards expect %.
+    if !data.contains_key("correction") {
+        if let Some(&v) = data.get("totalFuelCorrection") {
+            data.insert("correction".to_string(), v * 100.0);
+        }
+    }
+}
+
 pub(crate) async fn feed_autotune_data(
     app_state: &AppState,
     data: &HashMap<String, f64>,
@@ -341,111 +486,7 @@ pub async fn start_realtime_stream(
                         }
                     }
 
-                    // Add common-name aliases so default dashboards work across ECUs.
-                    // Demo simulator uses names like rpm, afr, VE1, advance, pulseWidth —
-                    // same alias map as real ECU path ensures consistent channel names.
-                    {
-                        let alias_map: &[(&str, &[&str])] = &[
-                            (
-                                "rpm",
-                                &["RPMValue", "rpm", "RPM", "engineSpeed", "rpmSensor"],
-                            ),
-                            ("afr", &["AFRValue", "afr", "AFR", "afr1", "lambdaValue"]),
-                            (
-                                "coolant",
-                                &["coolant", "CLTValue", "clt", "CLT", "coolantTemp"],
-                            ),
-                            (
-                                "map",
-                                &["MAPValue", "map", "MAP", "manifoldPressure", "fuelLoad"],
-                            ),
-                            (
-                                "tps",
-                                &["TPSValue", "tps", "TPS", "throttlePosition", "throttle"],
-                            ),
-                            (
-                                "battery",
-                                &[
-                                    "VBatt",
-                                    "vBatt",
-                                    "battery",
-                                    "Battery",
-                                    "vbatt",
-                                    "batteryVoltage",
-                                ],
-                            ),
-                            (
-                                "iat",
-                                &["IATValue", "iat", "IAT", "intakeAirTemp", "intake"],
-                            ),
-                            (
-                                "advance",
-                                &[
-                                    "correctedIgnitionAdvance",
-                                    "baseIgnitionAdvance",
-                                    "SA",
-                                    "advance",
-                                    "timing",
-                                    "ignitionAdvance",
-                                    "ignAdv",
-                                    "Advance",
-                                ],
-                            ),
-                            (
-                                "ve",
-                                &[
-                                    "veValue", "VE1", "ve1", "veMain", "VEValue", "ve", "VE",
-                                    "veCurr",
-                                ],
-                            ),
-                            ("boost", &["boostPressure", "boost", "Boost"]),
-                            (
-                                "speed",
-                                &["vehicleSpeedKph", "speed", "Speed", "wheelSpeed"],
-                            ),
-                            ("oilPressure", &["oilPressure", "OilPressure", "oilpress"]),
-                            (
-                                "fuelLevel",
-                                &["fuelLevel", "FuelLevel", "fuel", "fuelTankLevel"],
-                            ),
-                            (
-                                "pulseWidth",
-                                &[
-                                    "actualLastInjection",
-                                    "pulseWidth1",
-                                    "pulseWidth",
-                                    "pw1",
-                                    "PW1",
-                                ],
-                            ),
-                            (
-                                "dutyCycle",
-                                &["injectorDutyCycle", "dutyCycle", "injDuty", "InjectorDuty"],
-                            ),
-                            ("lambda", &["lambda", "Lambda", "lambdaValue", "wbo2"]),
-                            (
-                                "dwell",
-                                &[
-                                    "sparkDwell",
-                                    "sparkDwellValue",
-                                    "dwell",
-                                    "Dwell",
-                                    "dwellAngle",
-                                    "baseDwell",
-                                ],
-                            ),
-                        ];
-                        for (alias, candidates) in alias_map {
-                            if !data.contains_key(*alias) {
-                                for &candidate in *candidates {
-                                    if let Some(&val) = data.get(candidate) {
-                                        data.insert(alias.to_string(), val);
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    apply_channel_aliases(&mut data);
 
                     // Sanitize NaN/Infinity — serde_json cannot serialize these,
                     // which would silently break app_handle.emit().
@@ -614,98 +655,7 @@ pub async fn start_realtime_stream(
                             }
                         }
 
-                        // Add common-name aliases so default dashboards work across ECUs.
-                        // FOME/rusEFI use names like RPMValue, TPSValue, MAPValue, AFRValue, VBatt
-                        // while default dashboard XMLs reference rpm, tps, map, afr, battery.
-                        // Only insert an alias when the canonical name is absent.
-                        {
-                            let alias_map: &[(&str, &[&str])] = &[
-                                (
-                                    "rpm",
-                                    &["RPMValue", "rpm", "RPM", "engineSpeed", "rpmSensor"],
-                                ),
-                                ("afr", &["AFRValue", "afr", "AFR", "afr1", "lambdaValue"]),
-                                (
-                                    "coolant",
-                                    &["coolant", "CLTValue", "clt", "CLT", "coolantTemp"],
-                                ),
-                                ("map", &["MAPValue", "map", "MAP", "manifoldPressure"]),
-                                ("tps", &["TPSValue", "tps", "TPS", "throttlePosition"]),
-                                (
-                                    "battery",
-                                    &["VBatt", "battery", "Battery", "vbatt", "vBatt"],
-                                ),
-                                (
-                                    "iat",
-                                    &["IATValue", "iat", "IAT", "intakeAirTemp", "intake"],
-                                ),
-                                (
-                                    "advance",
-                                    &[
-                                        "correctedIgnitionAdvance",
-                                        "baseIgnitionAdvance",
-                                        "SA",
-                                        "advance",
-                                        "ignitionAdvance",
-                                        "ignAdv",
-                                        "Advance",
-                                    ],
-                                ),
-                                (
-                                    "ve",
-                                    &[
-                                        "veValue", "VE1", "ve1", "veMain", "VEValue", "ve", "VE",
-                                        "veCurr",
-                                    ],
-                                ),
-                                ("boost", &["boostPressure", "boost", "Boost"]),
-                                (
-                                    "speed",
-                                    &["vehicleSpeedKph", "speed", "Speed", "wheelSpeed"],
-                                ),
-                                ("oilPressure", &["oilPressure", "OilPressure", "oilpress"]),
-                                (
-                                    "fuelLevel",
-                                    &["fuelLevel", "FuelLevel", "fuel", "fuelTankLevel"],
-                                ),
-                                (
-                                    "pulseWidth",
-                                    &[
-                                        "actualLastInjection",
-                                        "pulseWidth1",
-                                        "pulseWidth",
-                                        "pw1",
-                                        "PW1",
-                                    ],
-                                ),
-                                (
-                                    "dutyCycle",
-                                    &["injectorDutyCycle", "dutyCycle", "injDuty", "InjectorDuty"],
-                                ),
-                                ("lambda", &["lambda", "Lambda", "lambdaValue", "wbo2"]),
-                                (
-                                    "dwell",
-                                    &[
-                                        "sparkDwell",
-                                        "sparkDwellValue",
-                                        "dwell",
-                                        "Dwell",
-                                        "dwellAngle",
-                                        "baseDwell",
-                                    ],
-                                ),
-                            ];
-                            for (alias, candidates) in alias_map {
-                                if !data.contains_key(*alias) {
-                                    for &candidate in *candidates {
-                                        if let Some(&val) = data.get(candidate) {
-                                            data.insert(alias.to_string(), val);
-                                            break;
-                                        }
-                                    }
-                                }
-                            }
-                        }
+                        apply_channel_aliases(&mut data);
 
                         // Sanitize NaN/Infinity — serde_json cannot serialize these,
                         // which would silently break app_handle.emit().
