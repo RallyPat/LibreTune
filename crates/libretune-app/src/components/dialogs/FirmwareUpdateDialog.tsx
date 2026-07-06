@@ -13,10 +13,22 @@ interface FirmwareFlasherInfo {
   bootcommander: string | null;
 }
 
+interface FirmwareUpdateGuidance {
+  recommended_method: string;
+  file_kind: string;
+  risk_level: string;
+  warnings: string[];
+  requires_risk_acknowledgement: boolean;
+  suggested_file_hint: string;
+  openblt_available: boolean;
+  dfu_available: boolean;
+}
+
 interface FirmwareUpdateResult {
   success: boolean;
   log: string[];
   message: string;
+  should_reconnect: boolean;
 }
 
 export interface FirmwareUpdateDialogProps {
@@ -28,6 +40,10 @@ export interface FirmwareUpdateDialogProps {
 
 type UpdateMethod = 'dfu' | 'openblt';
 type DialogMode = 'update' | 'recovery';
+
+function requestReconnect(source: string) {
+  window.dispatchEvent(new CustomEvent('reconnect:request', { detail: { source } }));
+}
 
 export function FirmwareUpdateDialog({
   isOpen,
@@ -42,10 +58,13 @@ export function FirmwareUpdateDialog({
   const [fullErase, setFullErase] = useState(true);
   const [method, setMethod] = useState<UpdateMethod>('openblt');
   const [flasherInfo, setFlasherInfo] = useState<FirmwareFlasherInfo | null>(null);
+  const [guidance, setGuidance] = useState<FirmwareUpdateGuidance | null>(null);
+  const [acknowledgeRisk, setAcknowledgeRisk] = useState(false);
   const [log, setLog] = useState<string[]>([]);
   const [isUpdating, setIsUpdating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [resultMessage, setResultMessage] = useState<string | null>(null);
+  const [shouldReconnect, setShouldReconnect] = useState(false);
 
   const dfuAvailable = !!iniCapabilities?.dfu_command_name;
   const openbltAvailable = !!iniCapabilities?.openblt_command_name;
@@ -55,6 +74,8 @@ export function FirmwareUpdateDialog({
     setLog([]);
     setError(null);
     setResultMessage(null);
+    setShouldReconnect(false);
+    setAcknowledgeRisk(false);
     invoke<FirmwareFlasherInfo>('get_firmware_flasher_info')
       .then(setFlasherInfo)
       .catch((e) => setError(String(e)));
@@ -70,6 +91,23 @@ export function FirmwareUpdateDialog({
   }, [isOpen, dfuAvailable, openbltAvailable]);
 
   useEffect(() => {
+    if (!isOpen || mode !== 'update') {
+      setGuidance(null);
+      return;
+    }
+    invoke<FirmwareUpdateGuidance>('get_firmware_update_guidance', {
+      firmwarePath: firmwarePath ?? null,
+      method,
+    })
+      .then(setGuidance)
+      .catch(() => setGuidance(null));
+  }, [isOpen, mode, firmwarePath, method]);
+
+  useEffect(() => {
+    setAcknowledgeRisk(false);
+  }, [firmwarePath, method]);
+
+  useEffect(() => {
     if (!isOpen) return undefined;
     const unlisten = listen<{ line: string }>('firmware-update:log', (event) => {
       setLog((prev) => [...prev, event.payload.line]);
@@ -80,17 +118,23 @@ export function FirmwareUpdateDialog({
   }, [isOpen]);
 
   const browseFirmware = useCallback(async () => {
-    const extensions =
+    const filters =
       method === 'dfu'
-        ? ['dfu', 'hex', 'bin', 'srec', 's19']
-        : ['srec', 's19', 'hex'];
+        ? [
+            { name: 'Recommended (DFU / SREC)', extensions: ['dfu', 'srec', 's19'] },
+            { name: 'Other firmware', extensions: ['hex'] },
+            { name: 'Raw binary (advanced)', extensions: ['bin'] },
+            { name: 'All Files', extensions: ['*'] },
+          ]
+        : [
+            { name: 'OpenBLT update bundle', extensions: ['srec', 's19'] },
+            { name: 'Other firmware', extensions: ['hex'] },
+            { name: 'All Files', extensions: ['*'] },
+          ];
     const selected = await open({
       title: 'Select Firmware File',
       multiple: false,
-      filters: [
-        { name: 'Firmware Files', extensions },
-        { name: 'All Files', extensions: ['*'] },
-      ],
+      filters,
     });
     if (selected && typeof selected === 'string') {
       setFirmwarePath(selected);
@@ -129,6 +173,8 @@ export function FirmwareUpdateDialog({
   }, []);
 
   const isBinFirmware = firmwarePath?.toLowerCase().endsWith('.bin') ?? false;
+  const riskAckRequired = guidance?.requires_risk_acknowledgement ?? false;
+  const riskAckSatisfied = !riskAckRequired || acknowledgeRisk;
 
   const canFlash =
     mode === 'recovery'
@@ -138,6 +184,7 @@ export function FirmwareUpdateDialog({
         !!flasherInfo?.stm32_programmer_cli
       : isConnected &&
         firmwarePath &&
+        riskAckSatisfied &&
         (!isBinFirmware || binFlashAddress.trim().length > 0) &&
         ((method === 'dfu' &&
           dfuAvailable &&
@@ -149,6 +196,7 @@ export function FirmwareUpdateDialog({
     setIsUpdating(true);
     setError(null);
     setResultMessage(null);
+    setShouldReconnect(false);
     setLog([]);
     try {
       const result =
@@ -163,11 +211,15 @@ export function FirmwareUpdateDialog({
               firmwarePath,
               method,
               binFlashAddress: isBinFirmware ? binFlashAddress : null,
+              acknowledgeRisk,
             });
       setLog(result.log);
       setResultMessage(result.message);
+      setShouldReconnect(result.should_reconnect);
       if (!result.success) {
         setError(result.message);
+      } else if (result.should_reconnect) {
+        requestReconnect('firmware-update');
       }
     } catch (e) {
       setError(String(e));
@@ -182,6 +234,7 @@ export function FirmwareUpdateDialog({
     fullErase,
     method,
     isBinFirmware,
+    acknowledgeRisk,
   ]);
 
   const missingFlasher =
@@ -191,7 +244,11 @@ export function FirmwareUpdateDialog({
         ? !flasherInfo?.stm32_programmer_cli && !flasherInfo?.dfu_util
         : !flasherInfo?.bootcommander;
 
-  const showBinDfuWarning = mode === 'update' && method === 'dfu' && isBinFirmware;
+  const showMethodHint =
+    guidance &&
+    guidance.recommended_method !== method &&
+    mode === 'update' &&
+    firmwarePath;
 
   return (
     <Dialog
@@ -390,21 +447,45 @@ export function FirmwareUpdateDialog({
                       Browse…
                     </Button>
                   </div>
-                  {method === 'openblt' && (
-                    <p className="firmware-flasher-hint">
-                      Use <code>rusefi_*_update.srec</code> from your firmware{' '}
-                      <code>deliver/</code> folder — it includes CRC and the correct layout for
-                      OpenBLT.
-                    </p>
-                  )}
-                  {method === 'dfu' && (
-                    <p className="firmware-flasher-hint">
-                      Prefer the packaged <code>.dfu</code> from <code>deliver/</code>. Do not
-                      use raw <code>build/rusefi.bin</code> unless you know the ECU still has a
-                      valid OpenBLT bootloader.
-                    </p>
-                  )}
+                  <p className="firmware-flasher-hint">
+                    Suggested: <code>{guidance?.suggested_file_hint ?? 'deliver/'}</code>
+                  </p>
                 </div>
+
+                {guidance && guidance.warnings.length > 0 && (
+                  <div
+                    className={`firmware-update-warning caution firmware-risk-${guidance.risk_level}`}
+                  >
+                    <AlertTriangle size={16} aria-hidden />
+                    <div>
+                      <strong className="firmware-risk-label">
+                        {guidance.risk_level === 'high'
+                          ? 'High risk'
+                          : guidance.risk_level === 'medium'
+                            ? 'Caution'
+                            : 'Note'}
+                      </strong>
+                      <ul className="firmware-guidance-warnings">
+                        {guidance.warnings.map((warning) => (
+                          <li key={warning}>{warning}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  </div>
+                )}
+
+                {showMethodHint && (
+                  <div className="firmware-update-field">
+                    <Button
+                      variant="secondary"
+                      onClick={() => setMethod(guidance!.recommended_method as UpdateMethod)}
+                      disabled={isUpdating}
+                    >
+                      Switch to recommended method (
+                      {guidance!.recommended_method === 'openblt' ? 'OpenBLT' : 'DFU'})
+                    </Button>
+                  </div>
+                )}
 
                 {method === 'dfu' && isBinFirmware && (
                   <div className="firmware-update-field">
@@ -421,16 +502,19 @@ export function FirmwareUpdateDialog({
                   </div>
                 )}
 
-                {showBinDfuWarning && (
-                  <div className="firmware-update-warning caution">
-                    <AlertTriangle size={16} aria-hidden />
+                {riskAckRequired && (
+                  <label className="firmware-checkbox-option firmware-risk-ack">
+                    <input
+                      type="checkbox"
+                      checked={acknowledgeRisk}
+                      onChange={(e) => setAcknowledgeRisk(e.target.checked)}
+                      disabled={isUpdating}
+                    />
                     <span>
-                      Raw <code>.bin</code> via DFU only updates the application region. If the
-                      OpenBLT bootloader at <code>0x08000000</code> is missing or corrupt, the ECU
-                      will not boot. Switch to <strong>DFU recovery</strong> mode or use OpenBLT
-                      + <code>*_update.srec</code> instead.
+                      I understand this update is high risk and may brick the ECU if the
+                      bootloader is missing or corrupt.
                     </span>
-                  </div>
+                  </label>
                 )}
 
                 <div className="firmware-update-field">
@@ -489,7 +573,14 @@ export function FirmwareUpdateDialog({
 
         {error && <div className="firmware-update-error">{error}</div>}
         {resultMessage && !error && (
-          <div className="firmware-update-success">{resultMessage}</div>
+          <div className="firmware-update-success">
+            {resultMessage}
+            {shouldReconnect && (
+              <p className="firmware-reconnect-hint">
+                Reconnecting automatically… If the ECU does not come back, click Reconnect below.
+              </p>
+            )}
+          </div>
         )}
 
         {log.length > 0 && (
@@ -507,6 +598,11 @@ export function FirmwareUpdateDialog({
         <Button variant="secondary" onClick={onClose} disabled={isUpdating}>
           Close
         </Button>
+        {shouldReconnect && !isUpdating && (
+          <Button variant="secondary" onClick={() => requestReconnect('firmware-update-manual')}>
+            Reconnect
+          </Button>
+        )}
         <Button
           variant="primary"
           onClick={() => void handleUpdate()}

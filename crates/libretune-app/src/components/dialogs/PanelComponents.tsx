@@ -27,7 +27,7 @@ import { ReadoutPanelRenderer } from './fields/ReadoutPanelRenderer';
 import { CommandButton } from './fields/CommandButton';
 import DialogField from './fields/DialogField';
 import { RuntimeValueReadout } from './fields/RuntimeValueReadout';
-import { isUserTableLiveChannel } from './dialogLayout';
+import { isUserTableLiveChannel, isCommandButtonPanel } from './dialogLayout';
 
 export const RecursivePanel = memo(function RecursivePanel({
   name,
@@ -275,10 +275,17 @@ export const RecursivePanel = memo(function RecursivePanel({
   if (panelType === 'dialog' && definition) {
     const fieldCount = definition.components.filter((c) => c.type === 'Field').length;
     const multiColumn = fieldCount >= 8;
+    const commandGrid = isCommandButtonPanel(definition.components);
+    const testOtherPanel = /^testother$/i.test(name);
     return (
-      <div className={`nested-panel${multiColumn ? ' nested-panel--multi' : ''}`}>
+      <div
+        className={`nested-panel${multiColumn ? ' nested-panel--multi' : ''}${commandGrid ? ' nested-panel--compact-commands' : ''}${testOtherPanel ? ' nested-panel--test-other' : ''}`}
+        data-panel={name}
+      >
         {definition.title && definition.title !== name && <div className="panel-title">{definition.title}</div>}
-        <div className={`panel-content${multiColumn ? ' panel-content--multi' : ''}`}>
+        <div
+          className={`panel-content${multiColumn ? ' panel-content--multi' : ''}${commandGrid ? ' panel-content--command-grid' : ''}${testOtherPanel ? ' panel-content--test-other' : ''}`}
+        >
           {definition.components.map((comp, i) => (
             <DialogComponentRenderer key={i} comp={comp} openTable={openTable} context={context} onUpdate={onUpdate} onFieldFocus={onFieldFocus} showAllHelpIcons={showAllHelpIcons} />
           ))}

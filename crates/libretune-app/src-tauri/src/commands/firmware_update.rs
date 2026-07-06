@@ -22,6 +22,7 @@ pub struct FirmwareUpdateResult {
     pub success: bool,
     pub log: Vec<String>,
     pub message: String,
+    pub should_reconnect: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -301,6 +302,186 @@ fn flash_with_bootcommander(
     }
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct FirmwareUpdateGuidance {
+    pub recommended_method: String,
+    pub file_kind: String,
+    pub risk_level: String,
+    pub warnings: Vec<String>,
+    pub requires_risk_acknowledgement: bool,
+    pub suggested_file_hint: String,
+    pub openblt_available: bool,
+    pub dfu_available: bool,
+}
+
+fn ini_has_command(def: &libretune_core::ini::EcuDefinition, name: &str) -> bool {
+    def.controller_commands
+        .keys()
+        .any(|k| k.eq_ignore_ascii_case(name))
+}
+
+fn classify_firmware_file(path: &Path, method: &str) -> FirmwareUpdateGuidance {
+    let file_name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    let ext = firmware_extension(path);
+
+    let file_kind = if file_name.contains("_update") && matches!(ext.as_str(), "srec" | "s19") {
+        "update_srec"
+    } else if ext == "dfu" {
+        "dfu_package"
+    } else if ext == "bin" {
+        "raw_bin"
+    } else if matches!(ext.as_str(), "srec" | "s19") {
+        "srec"
+    } else if ext == "hex" {
+        "hex"
+    } else {
+        "unknown"
+    };
+
+    let mut warnings = Vec::new();
+    let mut risk_level = "low";
+    let mut requires_risk_acknowledgement = false;
+
+    match (method, file_kind) {
+        ("dfu", "raw_bin") => {
+            risk_level = "high";
+            requires_risk_acknowledgement = true;
+            warnings.push(
+                "Raw .bin via DFU only writes the application region (typically 0x08008000)."
+                    .into(),
+            );
+            warnings.push(
+                "If OpenBLT at 0x08000000 is missing or corrupt, the ECU will not boot."
+                    .into(),
+            );
+            warnings.push(
+                "Prefer OpenBLT + *_update.srec, a deliver/ .dfu package, or DFU recovery mode."
+                    .into(),
+            );
+        }
+        ("dfu", "srec" | "update_srec") => {
+            risk_level = "medium";
+            warnings.push(
+                "DFU with .srec may not update the OpenBLT bootloader region correctly."
+                    .into(),
+            );
+            warnings.push(
+                "Use OpenBLT + *_update.srec for routine updates when available.".into(),
+            );
+        }
+        ("dfu", "dfu_package") => {
+            risk_level = "low";
+        }
+        ("openblt", "update_srec") => {
+            risk_level = "low";
+        }
+        ("openblt", "srec") => {
+            risk_level = "medium";
+            warnings.push(
+                "This .srec may not be an OpenBLT update bundle. Prefer rusefi_*_update.srec from deliver/."
+                    .into(),
+            );
+        }
+        ("openblt", "hex") => {
+            risk_level = "medium";
+            warnings.push("Verify this .hex is built for OpenBLT before flashing.".into());
+        }
+        ("openblt", "raw_bin" | "dfu_package" | "unknown") => {
+            risk_level = "high";
+            requires_risk_acknowledgement = true;
+            warnings.push("This file type is not recommended for OpenBLT updates.".into());
+            warnings.push("Use rusefi_*_update.srec from your firmware deliver/ folder.".into());
+        }
+        _ => {}
+    }
+
+    if file_name.contains("rusefi.bin") || file_name.ends_with(".bin") && method == "dfu" {
+        if risk_level == "low" {
+            risk_level = "medium";
+        }
+    }
+
+    let suggested_file_hint = if method == "openblt" {
+        "deliver/rusefi_*_update.srec".into()
+    } else {
+        "deliver/*.dfu (or use DFU recovery for OpenBLT + rusefi.bin)".into()
+    };
+
+    FirmwareUpdateGuidance {
+        recommended_method: "openblt".into(),
+        file_kind: file_kind.into(),
+        risk_level: risk_level.into(),
+        warnings,
+        requires_risk_acknowledgement,
+        suggested_file_hint,
+        openblt_available: false,
+        dfu_available: false,
+    }
+}
+
+/// Analyze a firmware file and return safety guidance for the chosen update method.
+#[tauri::command]
+pub async fn get_firmware_update_guidance(
+    state: tauri::State<'_, AppState>,
+    firmware_path: Option<String>,
+    method: String,
+) -> Result<FirmwareUpdateGuidance, String> {
+    let def_guard = state.definition.lock().await;
+    let def = def_guard.as_ref().ok_or("No INI definition loaded")?;
+    let openblt_available = ini_has_command(def, "cmd_openblt");
+    let dfu_available = ini_has_command(def, "cmd_dfu");
+    drop(def_guard);
+
+    let mut guidance = if let Some(path) = firmware_path.filter(|p| !p.is_empty()) {
+        classify_firmware_file(Path::new(&path), &method)
+    } else {
+        FirmwareUpdateGuidance {
+            recommended_method: if openblt_available {
+                "openblt".into()
+            } else {
+                "dfu".into()
+            },
+            file_kind: "none".into(),
+            risk_level: "low".into(),
+            warnings: Vec::new(),
+            requires_risk_acknowledgement: false,
+            suggested_file_hint: if openblt_available {
+                "deliver/rusefi_*_update.srec".into()
+            } else {
+                "deliver/*.dfu".into()
+            },
+            openblt_available,
+            dfu_available,
+        }
+    };
+
+    guidance.openblt_available = openblt_available;
+    guidance.dfu_available = dfu_available;
+    if openblt_available {
+        guidance.recommended_method = "openblt".into();
+    } else if dfu_available {
+        guidance.recommended_method = "dfu".into();
+    }
+
+    if method != guidance.recommended_method && guidance.risk_level == "low" {
+        guidance.warnings.push(format!(
+            "This ECU supports {} — that is the recommended update method.",
+            if guidance.recommended_method == "openblt" {
+                "OpenBLT + *_update.srec"
+            } else {
+                "DFU"
+            }
+        ));
+        guidance.risk_level = "medium".into();
+    }
+
+    Ok(guidance)
+}
+
 fn validate_firmware_file(path: &Path, method: &str) -> Result<(), String> {
     if !path.is_file() {
         return Err(format!("Firmware file not found: {}", path.display()));
@@ -330,9 +511,17 @@ pub async fn update_ecu_firmware(
     firmware_path: String,
     method: String,
     bin_flash_address: Option<String>,
+    acknowledge_risk: bool,
 ) -> Result<FirmwareUpdateResult, String> {
     let path = PathBuf::from(&firmware_path);
     validate_firmware_file(&path, &method)?;
+
+    let guidance = classify_firmware_file(&path, &method);
+    if guidance.requires_risk_acknowledgement && !acknowledge_risk {
+        return Err(
+            "High-risk firmware update blocked. Read the warnings and confirm you understand the risks before proceeding.".to_string(),
+        );
+    }
 
     let ext = firmware_extension(&path);
     let resolved_bin_address = if ext == "bin" {
@@ -451,6 +640,7 @@ pub async fn update_ecu_firmware(
         success: true,
         log,
         message: message.to_string(),
+        should_reconnect: method == "openblt",
     })
 }
 
@@ -615,5 +805,6 @@ pub async fn recover_ecu_firmware_dfu(
         success: true,
         log,
         message: message.to_string(),
+        should_reconnect: false,
     })
 }

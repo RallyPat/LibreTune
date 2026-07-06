@@ -87,7 +87,8 @@ use commands::diagnostic_loggers::{
 use commands::dyno::{compare_dyno_runs, detect_dyno_headers, load_dyno_run};
 use commands::find_inis::find_matching_inis;
 use commands::firmware_update::{
-    get_firmware_flasher_info, recover_ecu_firmware_dfu, update_ecu_firmware,
+    get_firmware_flasher_info, get_firmware_update_guidance, recover_ecu_firmware_dfu,
+    update_ecu_firmware,
 };
 use commands::get_table_data::get_table_data;
 use commands::git::{
@@ -317,6 +318,7 @@ pub fn run() {
             burn_to_ecu,
             execute_controller_command,
             get_firmware_flasher_info,
+            get_firmware_update_guidance,
             update_ecu_firmware,
             recover_ecu_firmware_dfu,
             use_project_tune,

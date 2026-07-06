@@ -147,9 +147,15 @@ export function CommandButton({
     executeCommand();
   };
 
+  const isAbortAction =
+    comp.label?.toLowerCase().includes('abort') ||
+    comp.command?.toLowerCase().includes('cancel');
+
   return (
     <>
-      <div className="command-button-field">
+      <div
+        className={`command-button-field${isAbortAction ? ' command-button-field--full-row' : ''}`}
+      >
         <button
           className={`command-button ${isExecuting ? 'executing' : ''}`}
           onClick={handleClick}

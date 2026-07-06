@@ -3,7 +3,9 @@ import type { DialogComponent, FieldInfo } from './types';
 import { DialogComponentRenderer } from './PanelComponents';
 import {
   applyTableSettingsLayout,
+  isHardwareTestDialog,
   organizeComponents,
+  partitionHardwareTestComponents,
   rowHasTableSplitLayout,
 } from './dialogLayout';
 
@@ -46,19 +48,41 @@ export function DialogComponentsLayout({
     />
   );
 
+  const hardwareTestLayout = isHardwareTestDialog(dialogName);
+
   return (
     <>
       {componentRows.map((row, rowIndex) => {
         const hasPositioned = row.west.length > 0 || row.east.length > 0;
 
         if (!hasPositioned) {
-          return (
-            <React.Fragment key={`row-${rowIndex}`}>
-              {row.unpositioned.map((comp, i) =>
-                renderComponent(comp, `unpositioned-${rowIndex}-${i}`),
-              )}
-            </React.Fragment>
+          const items = row.unpositioned.map((comp, i) =>
+            renderComponent(comp, `unpositioned-${rowIndex}-${i}`),
           );
+          if (hardwareTestLayout && items.length > 0) {
+            const { compact, auxiliary } = partitionHardwareTestComponents(row.unpositioned);
+            const wrapCell = (comp: DialogComponent, key: string) => {
+              const panelName =
+                comp.type === 'Panel' && comp.name ? comp.name.toLowerCase() : undefined;
+              return (
+                <div
+                  key={key}
+                  className="hardware-test-cell"
+                  data-hw-panel={panelName}
+                >
+                  {renderComponent(comp, key)}
+                </div>
+              );
+            };
+
+            return (
+              <div key={`row-${rowIndex}`} className="hardware-test-layout">
+                {compact.map((comp, i) => wrapCell(comp, `hw-compact-${rowIndex}-${i}`))}
+                {auxiliary.map((comp, i) => wrapCell(comp, `hw-aux-${rowIndex}-${i}`))}
+              </div>
+            );
+          }
+          return <React.Fragment key={`row-${rowIndex}`}>{items}</React.Fragment>;
         }
 
         const tableSplitLayout = rowHasTableSplitLayout(row);

@@ -136,3 +136,77 @@ export function rowHasTableSplitLayout(row: DialogComponentRow): boolean {
   const hasConfigWest = row.west.some(isConfigComponent);
   return hasTableEast && hasConfigWest;
 }
+
+/** Bench / hardware test dialogs (Spark, Injector, etc.) */
+export function isHardwareTestDialog(dialogName: string): boolean {
+  return /^ioTest$/i.test(dialogName) || /^injTest$/i.test(dialogName);
+}
+
+/** Command-only panels grouped on the first row (similar height). */
+const HARDWARE_TEST_COMPACT_PANELS = new Set([
+  'testspark',
+  'testinjectors',
+  'testluaout',
+  'testmisc',
+]);
+
+/** Settings / gauge panels on the second row (often taller). */
+const HARDWARE_TEST_AUX_PANELS = new Set(['testother', 'injtest_r']);
+
+export function partitionHardwareTestComponents(components: DialogComponent[]): {
+  compact: DialogComponent[];
+  auxiliary: DialogComponent[];
+} {
+  const compact: DialogComponent[] = [];
+  const auxiliary: DialogComponent[] = [];
+  const overflow: DialogComponent[] = [];
+
+  for (const comp of components) {
+    const panelName =
+      comp.type === 'Panel' && comp.name ? comp.name.toLowerCase() : '';
+    if (HARDWARE_TEST_COMPACT_PANELS.has(panelName)) {
+      compact.push(comp);
+    } else if (HARDWARE_TEST_AUX_PANELS.has(panelName)) {
+      auxiliary.push(comp);
+    } else {
+      overflow.push(comp);
+    }
+  }
+
+  const orderIndex = (name: string, order: string[]) => {
+    const idx = order.indexOf(name);
+    return idx === -1 ? order.length : idx;
+  };
+
+  const compactOrder = ['testspark', 'testinjectors', 'testluaout', 'testmisc'];
+  compact.sort(
+    (a, b) =>
+      orderIndex((a.type === 'Panel' && a.name ? a.name : '').toLowerCase(), compactOrder) -
+      orderIndex((b.type === 'Panel' && b.name ? b.name : '').toLowerCase(), compactOrder),
+  );
+
+  const auxOrder = ['testother', 'injtest_r'];
+  auxiliary.sort(
+    (a, b) =>
+      orderIndex((a.type === 'Panel' && a.name ? a.name : '').toLowerCase(), auxOrder) -
+      orderIndex((b.type === 'Panel' && b.name ? b.name : '').toLowerCase(), auxOrder),
+  );
+
+  return {
+    compact,
+    auxiliary: [...auxiliary, ...overflow],
+  };
+}
+
+/** Nested panel whose only interactive content is controller command buttons. */
+export function isCommandButtonPanel(components: DialogComponent[]): boolean {
+  const interactive = components.filter(
+    (c) =>
+      c.type === 'CommandButton' ||
+      (c.type === 'Field' && !!c.name) ||
+      c.type === 'Table' ||
+      c.type === 'Panel',
+  );
+  if (interactive.length === 0) return false;
+  return interactive.every((c) => c.type === 'CommandButton');
+}

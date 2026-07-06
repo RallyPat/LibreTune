@@ -616,6 +616,114 @@
   padding: 8px 0;
 }
 
+.dialog-view .hardware-test-layout {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  align-items: start;
+  width: 100%;
+}
+
+.dialog-view .hardware-test-cell {
+  min-width: 0;
+}
+
+.dialog-view .hardware-test-cell[data-hw-panel='testother'] {
+  grid-column: 1 / span 3;
+}
+
+.dialog-view .hardware-test-cell[data-hw-panel='injtest_r'] {
+  grid-column: 4;
+}
+
+@media (max-width: 899px) {
+  .dialog-view .hardware-test-layout {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .dialog-view .hardware-test-cell[data-hw-panel='testother'],
+  .dialog-view .hardware-test-cell[data-hw-panel='injtest_r'] {
+    grid-column: 1 / -1;
+  }
+}
+
+.dialog-view .hardware-test-layout .nested-panel {
+  width: 100%;
+  max-width: none;
+}
+
+.dialog-view .panel-content--test-other {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  padding: 8px;
+}
+
+.dialog-view .panel-content--test-other > .settings-field {
+  grid-template-columns: minmax(0, 1fr) minmax(52px, 68px);
+  min-height: 22px;
+  padding: 2px 6px;
+  border-bottom: none;
+}
+
+.dialog-view .panel-content--test-other > .nested-panel,
+.dialog-view .panel-content--test-other > .command-button-field {
+  grid-column: 1 / -1;
+}
+
+.dialog-view .panel-content--test-other > .command-button-field {
+  padding: 0;
+}
+
+.dialog-view .panel-content--test-other > .command-button-field .command-button {
+  width: auto;
+  padding: 5px 12px;
+  font-size: 11px;
+}
+
+.dialog-view .nested-panel--compact-commands {
+  max-width: none;
+}
+
+.dialog-view .panel-content--command-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 5px;
+  padding: 8px;
+}
+
+.dialog-view .panel-content--command-grid .command-button-field {
+  padding: 0;
+}
+
+.dialog-view .panel-content--command-grid .command-button-field--full-row {
+  grid-column: 1 / -1;
+  margin-top: 2px;
+}
+
+.dialog-view .panel-content--command-grid .command-button {
+  width: 100%;
+  padding: 5px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 4px;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dialog-view .panel-content--command-grid .command-button-field--full-row .command-button {
+  background: var(--bg-subtle);
+  border-color: var(--border-strong);
+  color: var(--text-primary);
+}
+
+.dialog-view .panel-content--command-grid .command-button-field--full-row .command-button:hover:not(:disabled) {
+  background: var(--bg-hover);
+  transform: none;
+}
+
 .command-button {
   padding: 10px 20px;
   background: var(--accent);

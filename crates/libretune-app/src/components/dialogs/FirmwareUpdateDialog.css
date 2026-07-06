@@ -127,6 +127,47 @@
   align-items: flex-start;
 }
 
+.firmware-risk-high {
+  background: rgba(255, 80, 80, 0.12);
+  border-color: rgba(255, 80, 80, 0.35);
+  color: #f0a0a0;
+}
+
+.firmware-risk-medium {
+  background: rgba(255, 170, 0, 0.12);
+  border-color: rgba(255, 170, 0, 0.35);
+}
+
+.firmware-risk-label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.firmware-guidance-warnings {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.firmware-guidance-warnings li {
+  margin-bottom: 4px;
+}
+
+.firmware-risk-ack {
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 80, 80, 0.35);
+  border-radius: 8px;
+  background: rgba(255, 80, 80, 0.08);
+}
+
+.firmware-reconnect-hint {
+  margin: 8px 0 0;
+  font-size: 12px;
+  opacity: 0.9;
+}
+
 .firmware-update-error {
   background: rgba(255, 80, 80, 0.12);
   border: 1px solid rgba(255, 80, 80, 0.25);
