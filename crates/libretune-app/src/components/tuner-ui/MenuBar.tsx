@@ -143,8 +143,8 @@ export function MenuBar({ items }: MenuBarProps) {
             {isOpen && item.items && (
               <MenuDropdown
                 items={item.items}
-                onClose={closeMenu}
-                parentLabel={item.label}
+                onDismissAll={closeMenu}
+                level={0}
               />
             )}
           </div>
@@ -156,12 +156,12 @@ export function MenuBar({ items }: MenuBarProps) {
 
 interface MenuDropdownProps {
   items: MenuItem[];
-  onClose: () => void;
-  parentLabel: string;
+  onDismissAll: () => void;
+  onCloseSubmenu?: () => void;
   level?: number;
 }
 
-function MenuDropdown({ items, onClose, level = 0 }: MenuDropdownProps) {
+function MenuDropdown({ items, onDismissAll, onCloseSubmenu, level = 0 }: MenuDropdownProps) {
   const [focusedIndex, setFocusedIndex] = useState(0);
   const [openSubmenuId, setOpenSubmenuId] = useState<string | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -176,12 +176,12 @@ function MenuDropdown({ items, onClose, level = 0 }: MenuDropdownProps) {
 
   const handleItemClick = (item: MenuItem) => {
     if (item.disabled || item.separator) return;
-    
+
     if (item.items && item.items.length > 0) {
       setOpenSubmenuId(openSubmenuId === item.id ? null : item.id);
-    } else if (item.onClick) {
-      item.onClick();
-      onClose();
+    } else {
+      item.onClick?.();
+      onDismissAll();
     }
   };
 
@@ -220,9 +220,9 @@ function MenuDropdown({ items, onClose, level = 0 }: MenuDropdownProps) {
         break;
       case 'ArrowLeft':
         e.stopPropagation();
-        if (level > 0) {
+        if (level > 0 && onCloseSubmenu) {
           e.preventDefault();
-          onClose();
+          onCloseSubmenu();
         }
         break;
       case 'Enter':
@@ -234,7 +234,11 @@ function MenuDropdown({ items, onClose, level = 0 }: MenuDropdownProps) {
       case 'Escape':
         e.preventDefault();
         e.stopPropagation();
-        onClose();
+        if (level > 0 && onCloseSubmenu) {
+          onCloseSubmenu();
+        } else {
+          onDismissAll();
+        }
         break;
     }
   };
@@ -321,8 +325,8 @@ function MenuDropdown({ items, onClose, level = 0 }: MenuDropdownProps) {
             {isOpen && hasSubmenu && (
               <MenuDropdown
                 items={item.items!}
-                onClose={() => setOpenSubmenuId(null)}
-                parentLabel={item.label}
+                onDismissAll={onDismissAll}
+                onCloseSubmenu={() => setOpenSubmenuId(null)}
                 level={level + 1}
               />
             )}

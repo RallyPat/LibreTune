@@ -163,6 +163,7 @@ export function buildMenuItems(deps: BuildMenuItemsDeps): TunerMenuItem[] {
           return {
             id: `${prefix}-submenu-${idx}`,
             label: item.label || "",
+            disabled: item.enabled === false,
             items: convertMenuItems(item.items, `${prefix}-${idx}`),
           };
         }
@@ -170,6 +171,7 @@ export function buildMenuItems(deps: BuildMenuItemsDeps): TunerMenuItem[] {
           return {
             id: item.target || `${prefix}-std-${idx}`,
             label: item.label || "",
+            disabled: item.enabled === false,
             onClick: () => handleStdTarget(item.target || "", item.label || ""),
           };
         }
@@ -177,12 +179,14 @@ export function buildMenuItems(deps: BuildMenuItemsDeps): TunerMenuItem[] {
           return {
             id: item.target || `${prefix}-help-${idx}`,
             label: item.label || "",
+            disabled: item.enabled === false,
             onClick: () => openHelpTopic(item.target || "", item.label || ""),
           };
         }
         return {
           id: item.target || `${prefix}-item-${idx}`,
           label: item.label || "",
+          disabled: item.enabled === false,
           onClick: () => item.target && openTarget(item.target, item.label),
         };
       });
