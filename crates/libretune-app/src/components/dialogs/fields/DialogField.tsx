@@ -222,7 +222,7 @@ export default function DialogField({
     );
   }
 
-  // Bits field (dropdown or checkbox)
+  // Bits field — always a dropdown (enum-style INI bits constants)
   if (constant.value_type === 'bits') {
     // If no bit_options at all in INI, show read-only display
     if (bitOptions.length === 0) {
@@ -262,52 +262,8 @@ export default function DialogField({
       filteredSelectedBit = selectedBit;
     }
     
-    // If only 2 valid options, render as checkbox
-    if (validBitOptions.length === 2) {
-      // Find original indices for the two valid options
-      const validIndices = bitOptions
-        .map((opt, i) => ({ opt, i }))
-        .filter(({ opt }) => opt?.trim().toUpperCase() !== 'INVALID')
-        .map(({ i }) => i);
-      
-      const checkedIndex = validIndices[1] ?? validIndices[0];
-      const uncheckedIndex = validIndices[0];
-      
-      // Get the option labels for display
-      const uncheckedLabel = bitOptions[uncheckedIndex]?.trim() || 'Off';
-      const checkedLabel = bitOptions[checkedIndex]?.trim() || 'On';
-      
-      return (
-        <div className={fieldRowClass('settings-field--checkbox')}>
-          {renderLabel()}
-          <div className="field-input-wrap">
-            <label className="field-checkbox-control">
-              <input
-                type="checkbox"
-                checked={selectedBit === checkedIndex}
-                disabled={!isEnabled}
-                onFocus={handleFocus}
-                onChange={(e) => {
-                  const newVal = e.target.checked ? checkedIndex : uncheckedIndex;
-                  setSelectedBit(newVal);
-                  invoke('update_constant', { name, value: newVal })
-                    .then(() => {
-                      onOptimisticUpdate?.(name, newVal);
-                      onUpdate?.();
-                    })
-                    .catch((e) => alert('Update failed: ' + e));
-                }}
-              />
-              <span className="field-checkbox-hint">
-                {selectedBit === checkedIndex ? checkedLabel : uncheckedLabel}
-              </span>
-            </label>
-          </div>
-        </div>
-      );
-    }
-    // Otherwise render as dropdown
-    // Ensure filteredSelectedBit is valid
+    // Always render bits fields as dropdowns (TunerStudio-style), including
+    // binary choices like "Four Stroke" / "Two Stroke" or false / true.
     const safeSelectedBit = (filteredSelectedBit !== undefined && filteredSelectedBit >= 0 && filteredSelectedBit < validBitOptions.length)
       ? filteredSelectedBit
       : (selectedBit >= 0 && selectedBit < bitOptions.length && originalToFilteredMap.has(selectedBit))

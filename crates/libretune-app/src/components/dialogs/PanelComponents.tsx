@@ -262,10 +262,12 @@ export const RecursivePanel = memo(function RecursivePanel({
 
   // Render as dialog
   if (panelType === 'dialog' && definition) {
+    const fieldCount = definition.components.filter((c) => c.type === 'Field').length;
+    const multiColumn = fieldCount >= 8;
     return (
-      <div className="nested-panel">
+      <div className={`nested-panel${multiColumn ? ' nested-panel--multi' : ''}`}>
         {definition.title && definition.title !== name && <div className="panel-title">{definition.title}</div>}
-        <div className="panel-content">
+        <div className={`panel-content${multiColumn ? ' panel-content--multi' : ''}`}>
           {definition.components.map((comp, i) => (
             <DialogComponentRenderer key={i} comp={comp} openTable={openTable} context={context} onUpdate={onUpdate} onFieldFocus={onFieldFocus} showAllHelpIcons={showAllHelpIcons} />
           ))}
