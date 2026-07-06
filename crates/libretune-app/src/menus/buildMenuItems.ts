@@ -1,5 +1,6 @@
 import type { TFunction } from "i18next";
 import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { MenuItem as TunerMenuItem, Tab } from "../components/tuner-ui";
 import { THEME_INFO, ThemeName } from "../themes";
 import type {
@@ -55,6 +56,12 @@ export interface BuildMenuItemsDeps {
   setActiveTabId: (id: string) => void;
 }
 
+function quitApp(): void {
+  getCurrentWindow()
+    .close()
+    .catch((err) => console.error("[quitApp] Failed to close window:", err));
+}
+
 export function buildMenuItems(deps: BuildMenuItemsDeps): TunerMenuItem[] {
   const {
     t, currentProject, status, ecuType, iniCapabilities, backendMenus, theme,
@@ -84,7 +91,7 @@ export function buildMenuItems(deps: BuildMenuItemsDeps): TunerMenuItem[] {
         { id: "sep3", label: "", separator: true },
         { id: "burn", label: "&Burn to ECU\tCtrl+B", onClick: () => setBurnDialogOpen(true), disabled: status.state !== "Connected" },
         { id: "sep4", label: "", separator: true },
-        { id: "exit", label: "E&xit", onClick: () => window.close() },
+        { id: "exit", label: "E&xit", onClick: quitApp },
       ]
     : [
         { id: "new-project", label: "&New Project...\tCtrl+N", onClick: () => setNewProjectDialogOpen(true) },
@@ -92,7 +99,7 @@ export function buildMenuItems(deps: BuildMenuItemsDeps): TunerMenuItem[] {
         { id: "sep1", label: "", separator: true },
         { id: "settings", label: "&Settings...", onClick: () => setSettingsDialogOpen(true) },
         { id: "sep2", label: "", separator: true },
-        { id: "exit", label: "E&xit", onClick: () => window.close() },
+        { id: "exit", label: "E&xit", onClick: quitApp },
       ];
 
   const fileMenu: TunerMenuItem = { id: "file", label: t('file.title'), items: fileMenuItems };
