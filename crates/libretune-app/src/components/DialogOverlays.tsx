@@ -100,7 +100,7 @@ export interface DialogOverlaysProps {
   handleTimeoutChange: (v: number) => void;
   connect: () => Promise<void> | void;
   disconnect: () => Promise<void> | void;
-  refreshPorts: () => Promise<void> | void;
+  refreshPorts: () => Promise<string[]> | Promise<void> | void;
   connecting: boolean;
   syncing: boolean;
   syncProgress: SyncProgress;

@@ -610,10 +610,13 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
                     checked={autoConnect}
                     onChange={(e) => setAutoConnect(e.target.checked)}
                   />
-                  {' '}Auto-connect to ECU on project open
+                  {' '}Auto-connect to ECU when port is available
                 </label>
                 <span className="dialog-form-note">
-                  When enabled, LibreTune will automatically attempt to connect to the last used COM port when opening this project.
+                  Remembers the last successful COM port for this project. When enabled,
+                  LibreTune checks every few seconds whether that port is present and
+                  attempts to connect automatically (on startup, project open, or when you
+                  plug in the ECU).
                 </span>
               </div>
               

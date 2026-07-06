@@ -32,6 +32,7 @@ import { useIniDefaultsLoader } from "./hooks/useIniDefaultsLoader";
 import { useTableCurveRefresh } from "./hooks/useTableCurveRefresh";
 import { useGlobalShortcuts } from "./hooks/useGlobalShortcuts";
 import { useEcuEventListeners } from "./hooks/useEcuEventListeners";
+import { useAutoConnect, type ConnectOptions } from "./hooks/useAutoConnect";
 import { PinConfig } from "./components/hardware/PortEditor";
 import { useLoading } from "./contexts/LoadingContext";
 import { useToast } from "./contexts/ToastContext";
@@ -340,6 +341,12 @@ function AppContent() {
       
       if (project) {
         setCurrentProject(project);
+        if (project.connection.port) {
+          setSelectedPort(project.connection.port);
+        }
+        if (project.connection.baud_rate) {
+          setBaudRate(project.connection.baud_rate);
+        }
         try {
           // Fetch menus for the project
           const values = await fetchConstants();
@@ -462,10 +469,15 @@ function AppContent() {
         }
       }
       
-      // Refresh serial ports
+      // Refresh serial ports — prefer the project's last successful port
       const p = await invoke<string[]>("get_serial_ports");
       setPorts(p);
-      if (p.length > 0 && !selectedPort) setSelectedPort(p[0]);
+      const rememberedPort = project?.connection.port;
+      if (rememberedPort && p.includes(rememberedPort)) {
+        setSelectedPort(rememberedPort);
+      } else if (p.length > 0 && !rememberedPort && !selectedPort) {
+        setSelectedPort(p[0]);
+      }
     } catch (e) {
       console.error("Failed to initialize app:", e);
       showToast("Failed to initialize application: " + e, "error");
@@ -569,6 +581,14 @@ function AppContent() {
     showLoading,
     hideLoading,
     showToast,
+  });
+
+  useAutoConnect({
+    currentProject,
+    status,
+    connecting,
+    connect,
+    refreshPorts,
   });
 
   // API functions
@@ -697,26 +717,41 @@ function AppContent() {
     }
   }
 
-  async function connect() {
+  async function connect(options?: ConnectOptions) {
+    const targetPort = options?.port ?? selectedPort;
     setConnecting(true);
     setSyncProgress(null);
     setSyncStatus(null);
     try {
-      // Sanity-check selected port is still available; refresh list if necessary
-      if (!ports.includes(selectedPort)) {
-        await refreshPorts();
+      if (options?.port && options.port !== selectedPort) {
+        setSelectedPort(options.port);
       }
 
-      // If still not present, pick first available and notify user
-      if (!ports.includes(selectedPort)) {
-        if (ports.length > 0) {
-          const old = selectedPort;
-          setSelectedPort(ports[0]);
-          showToast(`Selected port '${old}' is not available; using '${ports[0]}' instead.`, "warning");
+      // Sanity-check selected port is still available; refresh list if necessary
+      let availablePorts = ports;
+      if (!availablePorts.includes(targetPort)) {
+        availablePorts = await refreshPorts();
+      }
+
+      if (!availablePorts.includes(targetPort)) {
+        if (options?.strictPort) {
+          return;
+        }
+        if (availablePorts.length > 0) {
+          const fallback = availablePorts[0];
+          setSelectedPort(fallback);
+          showToast(
+            `Selected port '${targetPort}' is not available; using '${fallback}' instead.`,
+            "warning",
+          );
         } else {
           throw new Error('No serial ports available');
         }
       }
+
+      const portToUse = availablePorts.includes(targetPort)
+        ? targetPort
+        : availablePorts[0];
 
       // Connect and get mismatch info directly (no async race)
       let runtimeMode = connectionRuntimePacketMode || defaultRuntimePacketMode;
@@ -735,7 +770,7 @@ function AppContent() {
       }
 
       const result = await invoke<ConnectResult>("connect_to_ecu", { 
-        portName: selectedPort, 
+        portName: portToUse, 
         baudRate, 
         timeoutMs, 
         runtimePacketMode: runtimeMode,
@@ -773,7 +808,7 @@ function AppContent() {
         if (currentProject) {
           try {
             await invoke("update_project_connection", {
-              port: selectedPort,
+              port: portToUse,
               baudRate: baudRate,
             });
             console.log("Saved connection settings to project");
@@ -782,12 +817,20 @@ function AppContent() {
             // Don't show error to user as connection was successful
           }
         }
+
+        if (options?.silent) {
+          showToast(`Auto-connected to ECU on ${portToUse}`, "success");
+        }
       }
     } catch (e) {
       // IMPORTANT: Always check status after connection attempt, even on error
       // This ensures the UI shows the correct disconnected state
       await checkStatus();
-      showToast("Connection failed: " + e, "error");
+      if (!options?.silent) {
+        showToast("Connection failed: " + e, "error");
+      } else {
+        console.debug("Auto-connect attempt failed:", e);
+      }
     } finally {
       setConnecting(false);
       setSyncing(false);
@@ -804,23 +847,27 @@ function AppContent() {
     }
   }
 
-  async function refreshPorts() {
+  async function refreshPorts(): Promise<string[]> {
     try {
       const p = await invoke<string[]>("get_serial_ports");
       setPorts(p);
 
       if (p.length > 0) {
-        // Prefer explicit ttyACM0 if present, otherwise pick first available
-        const acm0 = p.find((x) => x.endsWith("ttyACM0"));
-        const preferred = acm0 || p[0];
-
-        // If user hasn't chosen a port yet, or current selection is missing, use preferred
-        if (!selectedPort || !p.includes(selectedPort)) {
-          setSelectedPort(preferred);
+        const remembered = currentProject?.connection.port;
+        if (remembered && p.includes(remembered)) {
+          setSelectedPort(remembered);
+        } else {
+          const acm0 = p.find((x) => x.endsWith("ttyACM0"));
+          const preferred = acm0 || p[0];
+          if (!selectedPort || !p.includes(selectedPort)) {
+            setSelectedPort(preferred);
+          }
         }
       }
+      return p;
     } catch (e) {
       console.error("Failed to refresh ports:", e);
+      return [];
     }
   }
 
@@ -945,21 +992,6 @@ function AppContent() {
       } catch (menuError) {
         console.error("Failed to load menus:", menuError);
         showToast("Project opened but menu loading failed. Some features may be unavailable.", "warning");
-      }
-      
-      // Auto-connect if enabled and port is set
-      if (project.connection.auto_connect && project.connection.port) {
-        hideLoading(); // Hide the project loading first
-        showToast("Auto-connecting to ECU...", "info");
-        // Small delay to let the UI update
-        setTimeout(async () => {
-          try {
-            await connect();
-          } catch (e) {
-            console.error("Auto-connect failed:", e);
-            // Don't show error toast as connect() already does that
-          }
-        }, 500);
       }
     } catch (e) {
       const { message, details } = formatError(e);
