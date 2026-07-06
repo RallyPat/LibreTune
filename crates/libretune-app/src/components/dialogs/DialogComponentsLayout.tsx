@@ -3,9 +3,12 @@ import type { DialogComponent, FieldInfo } from './types';
 import { DialogComponentRenderer } from './PanelComponents';
 import {
   applyTableSettingsLayout,
+  applyConfigLiveStateLayout,
   isHardwareTestDialog,
+  isReferenceGaugePanel,
   organizeComponents,
   partitionHardwareTestComponents,
+  rowHasConfigLiveStateSplit,
   rowHasTableSplitLayout,
 } from './dialogLayout';
 
@@ -30,10 +33,20 @@ export function DialogComponentsLayout({
   onFieldFocus,
   showAllHelpIcons,
 }: DialogComponentsLayoutProps) {
-  const componentRows = useMemo(() => {
-    const { components: laidOut } = applyTableSettingsLayout(dialogName, components);
-    return organizeComponents(laidOut);
-  }, [dialogName, components]);
+  const { components: tableLaidOut, hasTableSplit: _tableSplit } = useMemo(
+    () => applyTableSettingsLayout(dialogName, components),
+    [dialogName, components],
+  );
+
+  const { components: laidOutComponents, useConfigLiveSplit } = useMemo(
+    () => applyConfigLiveStateLayout(dialogName, tableLaidOut),
+    [dialogName, tableLaidOut],
+  );
+
+  const componentRows = useMemo(
+    () => organizeComponents(laidOutComponents),
+    [laidOutComponents],
+  );
 
   const renderComponent = (comp: DialogComponent, key: string) => (
     <DialogComponentRenderer
@@ -64,10 +77,11 @@ export function DialogComponentsLayout({
             const wrapCell = (comp: DialogComponent, key: string) => {
               const panelName =
                 comp.type === 'Panel' && comp.name ? comp.name.toLowerCase() : undefined;
+              const refGauge = isReferenceGaugePanel(comp.type === 'Panel' ? comp.name : undefined);
               return (
                 <div
                   key={key}
-                  className="hardware-test-cell"
+                  className={`hardware-test-cell${refGauge ? ' hardware-test-cell--gauges' : ''}`}
                   data-hw-panel={panelName}
                 >
                   {renderComponent(comp, key)}
@@ -86,6 +100,7 @@ export function DialogComponentsLayout({
         }
 
         const tableSplitLayout = rowHasTableSplitLayout(row);
+        const configLiveSplit = useConfigLiveSplit || rowHasConfigLiveStateSplit(row);
 
         return (
           <React.Fragment key={`row-${rowIndex}`}>
@@ -93,7 +108,7 @@ export function DialogComponentsLayout({
               renderComponent(comp, `pre-${rowIndex}-${i}`),
             )}
             <div
-              className={`dialog-row-container${tableSplitLayout ? ' dialog-row-container--table-settings' : ''}`}
+              className={`dialog-row-container${tableSplitLayout ? ' dialog-row-container--table-settings' : ''}${configLiveSplit ? ' dialog-row-container--config-live' : ''}`}
             >
               {row.west.length > 0 && (
                 <div className="dialog-column">

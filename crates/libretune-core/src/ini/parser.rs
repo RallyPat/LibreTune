@@ -2599,6 +2599,24 @@ fn parse_user_defined_entry(
                 }
             }
         }
+        "gauge" => {
+            if let Some(name) = current_dialog {
+                if let Some(dialog) = def.dialogs.get_mut(name) {
+                    let parts = split_ini_line(value);
+                    if !parts.is_empty() {
+                        let gauge_name = parts[0].trim().to_string();
+                        let position = parts
+                            .get(1)
+                            .map(|p| p.trim().to_string())
+                            .filter(|p| !p.is_empty());
+                        dialog.components.push(DialogComponent::Gauge {
+                            name: gauge_name,
+                            position,
+                        });
+                    }
+                }
+            }
+        }
         _ => {}
     }
 }

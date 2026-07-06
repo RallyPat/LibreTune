@@ -104,6 +104,8 @@ export interface DialogOverlaysProps {
   connecting: boolean;
   syncing: boolean;
   syncProgress: SyncProgress;
+  lastSerialPort: string | null;
+  connectionPhase?: import('../utils/connectionWorkflow').ConnectionPhase;
   iniDefaults: ProtocolDefaults | null;
   applyIniDefaults: () => void;
   connectionRuntimePacketMode: any;
@@ -201,7 +203,8 @@ export function DialogOverlays(props: DialogOverlaysProps) {
     ports, selectedPort, baudRate, timeoutMs, connectionType, setConnectionType,
     tcpHost, setTcpHost, tcpPort, setTcpPort, setSelectedPort,
     handleBaudChange, handleTimeoutChange, connect, disconnect, refreshPorts,
-    connecting, syncing, syncProgress, iniDefaults, applyIniDefaults,
+    connecting, syncing, syncProgress, lastSerialPort, connectionPhase,
+    iniDefaults, applyIniDefaults,
     connectionRuntimePacketMode, setConnectionRuntimePacketMode,
     newProjectDialogOpen, setNewProjectDialogOpen,
     repositoryInis, setRepositoryInis, createProject, handleImportTuneIntoProject,
@@ -271,6 +274,9 @@ export function DialogOverlays(props: DialogOverlaysProps) {
         onTcpPortChange={setTcpPort}
         connected={status.state === "Connected"}
         connecting={connecting || syncing}
+        autoConnectEnabled={!!currentProject?.connection.auto_connect}
+        rememberedPort={currentProject?.connection.port ?? lastSerialPort}
+        connectionPhase={connectionPhase}
         onPortChange={setSelectedPort}
         onBaudChange={handleBaudChange}
         onTimeoutChange={handleTimeoutChange}

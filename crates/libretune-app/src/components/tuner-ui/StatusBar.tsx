@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { StatusItem } from './TunerLayout';
 import { useChannelValue } from '../../stores/realtimeStore';
+import type { ConnectionPhase } from '../../utils/connectionWorkflow';
+import { connectionPhaseLabel } from '../../utils/connectionWorkflow';
 import './StatusBar.css';
 
 export interface ChannelInfoForStatusBar {
@@ -14,6 +16,9 @@ interface StatusBarProps {
   items: StatusItem[];
   connected: boolean;
   ecuName?: string;
+  connectionPhase?: ConnectionPhase;
+  connectionPort?: string;
+  onConnectionClick?: () => void;
   unitsSystem?: 'metric' | 'imperial';
   /** Channel names to show live values for */
   realtimeChannels?: string[];
@@ -21,7 +26,16 @@ interface StatusBarProps {
   channelInfoMap?: Record<string, ChannelInfoForStatusBar>;
 }
 
-export function StatusBar({ items, connected, ecuName, realtimeChannels, channelInfoMap }: StatusBarProps) {
+export function StatusBar({
+  items,
+  connected,
+  ecuName,
+  connectionPhase = connected ? 'connected' : 'disconnected',
+  connectionPort,
+  onConnectionClick,
+  realtimeChannels,
+  channelInfoMap,
+}: StatusBarProps) {
   const [currentPage, setCurrentPage] = useState(0);
   const itemsPerPage = 6;
 
@@ -62,14 +76,49 @@ export function StatusBar({ items, connected, ecuName, realtimeChannels, channel
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [totalPages]);
 
+  const statusLabel = connectionPhaseLabel(connectionPhase, {
+    port: connectionPort,
+    ecuName,
+  });
+  const isActivePhase =
+    connectionPhase === 'connecting' ||
+    connectionPhase === 'syncing' ||
+    connectionPhase === 'auto-connect' ||
+    connectionPhase === 'auto-connect-waiting';
+
+  const connectionClass = connected
+    ? connectionPhase === 'signature-mismatch'
+      ? 'warning'
+      : 'connected'
+    : isActivePhase
+      ? 'pending'
+      : 'disconnected';
+
+  const connectionContent = (
+    <>
+      <ConnectionIcon connected={connected} pending={isActivePhase} warning={connectionPhase === 'signature-mismatch'} />
+      <span>{statusLabel}</span>
+    </>
+  );
+
   return (
     <div className="statusbar">
       {/* Connection status (always on left) */}
       <div className="statusbar-section statusbar-section-left">
-        <div className={`statusbar-connection ${connected ? 'connected' : 'disconnected'}`}>
-          <ConnectionIcon connected={connected} />
-          <span>{connected ? (ecuName || 'Connected') : 'Disconnected'}</span>
-        </div>
+        {onConnectionClick ? (
+          <button
+            type="button"
+            className={`statusbar-connection statusbar-connection-clickable ${connectionClass}`}
+            onClick={onConnectionClick}
+            title="Open connection settings"
+          >
+            {connectionContent}
+          </button>
+        ) : (
+          <div className={`statusbar-connection ${connectionClass}`}>
+            {connectionContent}
+          </div>
+        )}
       </div>
 
       {/* Center items with pagination */}
@@ -156,12 +205,39 @@ function StatusBarItem({ item }: { item: StatusItem }) {
   );
 }
 
-function ConnectionIcon({ connected }: { connected: boolean }) {
+function ConnectionIcon({
+  connected,
+  pending = false,
+  warning = false,
+}: {
+  connected: boolean;
+  pending?: boolean;
+  warning?: boolean;
+}) {
+  if (connected && warning) {
+    return (
+      <svg viewBox="0 0 16 16" fill="currentColor" className="statusbar-icon">
+        <circle cx="8" cy="8" r="4" fill="var(--warning, #f59e0b)" />
+        <circle cx="8" cy="8" r="6" fill="none" stroke="var(--warning, #f59e0b)" strokeWidth="1" opacity="0.5" />
+      </svg>
+    );
+  }
+
   if (connected) {
     return (
       <svg viewBox="0 0 16 16" fill="currentColor" className="statusbar-icon">
         <circle cx="8" cy="8" r="4" fill="var(--success)" />
         <circle cx="8" cy="8" r="6" fill="none" stroke="var(--success)" strokeWidth="1" opacity="0.5" />
+      </svg>
+    );
+  }
+
+  if (pending) {
+    return (
+      <svg viewBox="0 0 16 16" fill="currentColor" className="statusbar-icon statusbar-icon-pending">
+        <circle cx="8" cy="8" r="4" fill="var(--warning, #f59e0b)">
+          <animate attributeName="opacity" values="1;0.35;1" dur="1.2s" repeatCount="indefinite" />
+        </circle>
       </svg>
     );
   }

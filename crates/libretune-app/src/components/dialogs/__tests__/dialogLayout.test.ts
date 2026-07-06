@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { applyTableSettingsLayout } from '../dialogLayout';
+import {
+  applyTableSettingsLayout,
+  applyConfigLiveStateLayout,
+  inferLiveStateGateExpression,
+  isConfigLiveStateDialog,
+  isReferenceGaugePanel,
+  partitionHardwareTestComponents,
+} from '../dialogLayout';
 
 describe('applyTableSettingsLayout', () => {
   it('stacks user-table dialog with settings above table (no side split)', () => {
@@ -47,5 +54,48 @@ describe('applyTableSettingsLayout', () => {
     ];
     const { hasTableSplit } = applyTableSettingsLayout('scriptTable1TblSettings', components);
     expect(hasTableSplit).toBe(false);
+  });
+});
+
+describe('config + live-state dialog layout', () => {
+  it('detects WMI and launch control shell dialogs', () => {
+    expect(isConfigLiveStateDialog('WmiControlDialog')).toBe(true);
+    expect(isConfigLiveStateDialog('smLaunchControl')).toBe(true);
+    expect(isConfigLiveStateDialog('ioTest')).toBe(false);
+  });
+
+  it('preserves west/east split for shell dialogs', () => {
+    const components = [
+      { type: 'Panel' as const, name: 'WmiSettingsDialog', position: 'West' },
+      { type: 'Panel' as const, name: 'wmiLiveStateDialog', position: 'East' },
+    ];
+    const { useConfigLiveSplit } = applyConfigLiveStateLayout('WmiControlDialog', components);
+    expect(useConfigLiveSplit).toBe(true);
+  });
+
+  it('infers live-state gate expressions', () => {
+    expect(inferLiveStateGateExpression('wmiLiveStateDialog')).toBe('isWmiEnabled');
+    expect(inferLiveStateGateExpression('launch_control_stateDialog')).toBe(
+      'launchControlEnabled',
+    );
+    expect(inferLiveStateGateExpression('testSpark')).toBeNull();
+  });
+});
+
+describe('hardware test layout helpers', () => {
+  it('identifies reference gauge panel', () => {
+    expect(isReferenceGaugePanel('injTest_r')).toBe(true);
+    expect(isReferenceGaugePanel('testSpark')).toBe(false);
+  });
+
+  it('partitions ioTest panels into compact and auxiliary rows', () => {
+    const components = [
+      { type: 'Panel' as const, name: 'testSpark' },
+      { type: 'Panel' as const, name: 'injTest_r' },
+      { type: 'Panel' as const, name: 'testOther' },
+    ];
+    const { compact, auxiliary } = partitionHardwareTestComponents(components);
+    expect(compact.map((c) => c.name)).toEqual(['testSpark']);
+    expect(auxiliary.map((c) => c.name)).toEqual(['testOther', 'injTest_r']);
   });
 });

@@ -5,6 +5,7 @@ import { open } from '@tauri-apps/plugin-dialog';
 import { AlertTriangle, Cpu } from 'lucide-react';
 import { Dialog, Button } from '../common';
 import type { IniCapabilities } from '../../types/app';
+import { requestReconnect } from '../../utils/connectionWorkflow';
 import './FirmwareUpdateDialog.css';
 
 interface FirmwareFlasherInfo {
@@ -40,10 +41,6 @@ export interface FirmwareUpdateDialogProps {
 
 type UpdateMethod = 'dfu' | 'openblt';
 type DialogMode = 'update' | 'recovery';
-
-function requestReconnect(source: string) {
-  window.dispatchEvent(new CustomEvent('reconnect:request', { detail: { source } }));
-}
 
 export function FirmwareUpdateDialog({
   isOpen,
@@ -219,7 +216,11 @@ export function FirmwareUpdateDialog({
       if (!result.success) {
         setError(result.message);
       } else if (result.should_reconnect) {
-        requestReconnect('firmware-update');
+        requestReconnect({
+          source: 'firmware-update',
+          delayMs: 8000,
+          retries: 10,
+        });
       }
     } catch (e) {
       setError(String(e));
@@ -599,7 +600,16 @@ export function FirmwareUpdateDialog({
           Close
         </Button>
         {shouldReconnect && !isUpdating && (
-          <Button variant="secondary" onClick={() => requestReconnect('firmware-update-manual')}>
+          <Button
+            variant="secondary"
+            onClick={() =>
+              requestReconnect({
+                source: 'firmware-update-manual',
+                delayMs: 0,
+                retries: 6,
+              })
+            }
+          >
             Reconnect
           </Button>
         )}

@@ -33,6 +33,11 @@ import { useTableCurveRefresh } from "./hooks/useTableCurveRefresh";
 import { useGlobalShortcuts } from "./hooks/useGlobalShortcuts";
 import { useEcuEventListeners } from "./hooks/useEcuEventListeners";
 import { useAutoConnect, type ConnectOptions } from "./hooks/useAutoConnect";
+import { useReconnectHandler } from "./hooks/useReconnectHandler";
+import {
+  resolvePreferredPort,
+  type ConnectionPhase,
+} from "./utils/connectionWorkflow";
 import { PinConfig } from "./components/hardware/PortEditor";
 import { useLoading } from "./contexts/LoadingContext";
 import { useToast } from "./contexts/ToastContext";
@@ -85,6 +90,7 @@ function AppContent() {
   const [ecuType, setEcuType] = useState<string>("Unknown");
   const [ports, setPorts] = useState<string[]>([]);
   const [selectedPort, setSelectedPort] = useState("");
+  const [lastSerialPort, setLastSerialPort] = useState<string | null>(null);
   const [baudRate, setBaudRate] = useState(115200);
   const [timeoutMs, setTimeoutMs] = useState(2000);
   const [connectionType, setConnectionType] = useState<'Serial' | 'Tcp'>("Serial");
@@ -286,6 +292,7 @@ function AppContent() {
         if (settings.units_system) setUnitsSystem(settings.units_system as 'metric' | 'imperial');
         if (settings.auto_burn_on_close !== undefined) setAutoBurnOnClose(settings.auto_burn_on_close);
         if (settings.status_bar_channels) setStatusBarChannels(settings.status_bar_channels);
+        if (settings.last_serial_port) setLastSerialPort(settings.last_serial_port);
         // Honor saved UI language preference (mirror to localStorage so the
         // i18n LanguageDetector picks it up on next app start, and switch live now).
         if (settings.language && typeof settings.language === 'string') {
@@ -341,11 +348,19 @@ function AppContent() {
       
       if (project) {
         setCurrentProject(project);
-        if (project.connection.port) {
-          setSelectedPort(project.connection.port);
-        }
         if (project.connection.baud_rate) {
           setBaudRate(project.connection.baud_rate);
+        }
+        const initialPorts = await invoke<string[]>("get_serial_ports");
+        setPorts(initialPorts);
+        const preferred = resolvePreferredPort({
+          projectPort: project.connection.port,
+          lastSerialPort: settings.last_serial_port ?? null,
+          availablePorts: initialPorts,
+          currentSelected: project.connection.port ?? undefined,
+        });
+        if (preferred) {
+          setSelectedPort(preferred);
         }
         try {
           // Fetch menus for the project
@@ -564,31 +579,36 @@ function AppContent() {
   // reconnect:request, ini:changed, demo:changed (extracted to hook).
   useEcuEventListeners({
     isTauri,
-    connecting,
-    selectedPort,
-    baudRate,
-    timeoutMs,
-    connectionRuntimePacketMode,
-    defaultRuntimePacketMode,
     status,
     currentProject,
     activeTabId,
-    connect,
     doSync,
     checkStatus,
     fetchConstants,
     fetchMenuTree,
     showLoading,
     hideLoading,
-    showToast,
   });
 
-  useAutoConnect({
+  const autoConnectPhase = useAutoConnect({
     currentProject,
+    lastSerialPort,
     status,
     connecting,
+    syncing,
     connect,
     refreshPorts,
+  });
+
+  useReconnectHandler({
+    connecting,
+    syncing,
+    status,
+    projectPort: currentProject?.connection.port ?? null,
+    lastSerialPort,
+    connect,
+    refreshPorts,
+    showToast,
   });
 
   // API functions
@@ -804,18 +824,35 @@ function AppContent() {
       if (newStatus.state === "Connected" && newStatus.has_definition) {
         await doSync();
         
-        // Save the successful connection port to project config
+        // Save the successful connection port to project config and app memory
         if (currentProject) {
           try {
             await invoke("update_project_connection", {
               port: portToUse,
               baudRate: baudRate,
             });
+            setCurrentProject({
+              ...currentProject,
+              connection: {
+                ...currentProject.connection,
+                port: portToUse,
+                baud_rate: baudRate,
+              },
+            });
             console.log("Saved connection settings to project");
           } catch (saveError) {
             console.error("Failed to save connection settings:", saveError);
-            // Don't show error to user as connection was successful
           }
+        }
+
+        try {
+          await invoke("update_setting", {
+            key: "last_serial_port",
+            value: portToUse,
+          });
+          setLastSerialPort(portToUse);
+        } catch (saveError) {
+          console.error("Failed to save last serial port:", saveError);
         }
 
         if (options?.silent) {
@@ -853,15 +890,14 @@ function AppContent() {
       setPorts(p);
 
       if (p.length > 0) {
-        const remembered = currentProject?.connection.port;
-        if (remembered && p.includes(remembered)) {
-          setSelectedPort(remembered);
-        } else {
-          const acm0 = p.find((x) => x.endsWith("ttyACM0"));
-          const preferred = acm0 || p[0];
-          if (!selectedPort || !p.includes(selectedPort)) {
-            setSelectedPort(preferred);
-          }
+        const preferred = resolvePreferredPort({
+          projectPort: currentProject?.connection.port ?? null,
+          lastSerialPort,
+          availablePorts: p,
+          currentSelected: selectedPort,
+        });
+        if (preferred) {
+          setSelectedPort(preferred);
         }
       }
       return p;
@@ -976,12 +1012,19 @@ function AppContent() {
     try {
       const project = await invoke<CurrentProject>("open_project", { path });
       setCurrentProject(project);
-      
-      // Update port selection from project settings
-      if (project.connection.port) {
-        setSelectedPort(project.connection.port);
-      }
       setBaudRate(project.connection.baud_rate || 115200);
+
+      const portList = await invoke<string[]>("get_serial_ports");
+      setPorts(portList);
+      const preferred = resolvePreferredPort({
+        projectPort: project.connection.port,
+        lastSerialPort,
+        availablePorts: portList,
+        currentSelected: project.connection.port ?? undefined,
+      });
+      if (preferred) {
+        setSelectedPort(preferred);
+      }
       
       try {
         // Refresh menus for the project
@@ -1286,6 +1329,37 @@ function AppContent() {
     return items;
   }, [status.state, statusBarChannels, isLogging, logDuration, syncStatus]);
 
+  const connectionPhase: ConnectionPhase = useMemo(() => {
+    if (signatureMismatchOpen && status.state === "Connected") {
+      return "signature-mismatch";
+    }
+    if (connecting) {
+      return "connecting";
+    }
+    if (syncing) {
+      return "syncing";
+    }
+    if (autoConnectPhase) {
+      return autoConnectPhase;
+    }
+    if (status.state === "Connected") {
+      return "connected";
+    }
+    return "disconnected";
+  }, [
+    signatureMismatchOpen,
+    status.state,
+    connecting,
+    syncing,
+    autoConnectPhase,
+  ]);
+
+  const connectionPort =
+    selectedPort ||
+    currentProject?.connection.port ||
+    lastSerialPort ||
+    undefined;
+
 
   return (
     <>
@@ -1306,6 +1380,9 @@ function AppContent() {
         statusItems={statusItems}
         connected={status.state === "Connected"}
         ecuName={(status.state === "Connected" ? status.signature : (status.ini_name ? status.ini_name : undefined)) as string | undefined}
+        connectionPhase={connectionPhase}
+        connectionPort={connectionPort}
+        onConnectionClick={() => setConnectionDialogOpen(true)}
         projectName={currentProject?.name}
         unitsSystem={unitsSystem}
         realtimeChannels={statusBarChannels}
@@ -1391,6 +1468,8 @@ function AppContent() {
         connecting={connecting}
         syncing={syncing}
         syncProgress={syncProgress}
+        lastSerialPort={lastSerialPort}
+        connectionPhase={connectionPhase}
         iniDefaults={iniDefaults}
         applyIniDefaults={applyIniDefaults}
         connectionRuntimePacketMode={connectionRuntimePacketMode}

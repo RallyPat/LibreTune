@@ -495,6 +495,45 @@ readoutPanel = wmiReadoutPanel, 1
     let _ = std::fs::remove_file(&temp_path);
 }
 
+#[test]
+fn test_parse_dialog_gauge_components() {
+    use libretune_core::ini::{DialogComponent, EcuDefinition};
+
+    let ini_content = r#"
+[MegaTune]
+signature = "Test ECU"
+queryCommand = "Q"
+
+[Constants]
+page = 1
+
+[GaugeConfigurations]
+gauge = VBattGauge, "Battery", "V", volts, 8, 16, 10, 14, 8, 15, 1
+
+[UserDefined]
+dialog = injTest_r, "Reference gauges", yAxis
+    gauge = VBattGauge, North
+    gauge = testBenchIterGauge, South
+"#;
+
+    let temp_path = std::env::temp_dir().join("test_dialog_gauge.ini");
+    std::fs::write(&temp_path, ini_content).expect("Failed to write temp file");
+
+    let def = EcuDefinition::from_file(&temp_path).expect("Failed to parse INI");
+    let dialog = def.dialogs.get("injTest_r").expect("injTest_r missing");
+    assert_eq!(dialog.components.len(), 2);
+
+    match &dialog.components[0] {
+        DialogComponent::Gauge { name, position } => {
+            assert_eq!(name, "VBattGauge");
+            assert_eq!(position.as_deref(), Some("North"));
+        }
+        other => panic!("expected Gauge, got {:?}", other),
+    }
+
+    let _ = std::fs::remove_file(&temp_path);
+}
+
 
 #[test]
 fn test_parse_panel_dual_condition() {

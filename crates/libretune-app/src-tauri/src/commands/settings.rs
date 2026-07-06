@@ -66,6 +66,17 @@ pub async fn update_setting(
         "runtime_packet_mode" => {
             settings.runtime_packet_mode = value;
         }
+        "last_serial_port" => {
+            settings.last_serial_port = if value.is_empty() { None } else { Some(value) }
+        }
+        "auto_reconnect_after_controller_command" => {
+            settings.auto_reconnect_after_controller_command =
+                value.parse().map_err(|_| "Invalid boolean value")?
+        }
+        "auto_reconnect_after_firmware" => {
+            settings.auto_reconnect_after_firmware =
+                value.parse().map_err(|_| "Invalid boolean value")?
+        }
         "onboarding_completed" => {
             settings.onboarding_completed = value.parse().map_err(|_| "Invalid boolean value")?
         }

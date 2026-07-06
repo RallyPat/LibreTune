@@ -36,6 +36,9 @@ export interface TunerLayoutProps {
   // Connection status
   connected: boolean;
   ecuName?: string;
+  connectionPhase?: import('../../utils/connectionWorkflow').ConnectionPhase;
+  connectionPort?: string;
+  onConnectionClick?: () => void;
 
   // Current project name (shown in sidebar header)
   projectName?: string;
@@ -113,6 +116,9 @@ export function TunerLayout({
   statusItems,
   connected,
   ecuName,
+  connectionPhase,
+  connectionPort,
+  onConnectionClick,
   projectName,
   unitsSystem,
   realtimeChannels,
@@ -171,6 +177,9 @@ export function TunerLayout({
         items={statusItems}
         connected={connected}
         ecuName={ecuName}
+        connectionPhase={connectionPhase}
+        connectionPort={connectionPort}
+        onConnectionClick={onConnectionClick}
         unitsSystem={unitsSystem}
         realtimeChannels={realtimeChannels}
         channelInfoMap={channelInfoMap}

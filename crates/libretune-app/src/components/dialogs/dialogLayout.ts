@@ -142,6 +142,74 @@ export function isHardwareTestDialog(dialogName: string): boolean {
   return /^ioTest$/i.test(dialogName) || /^injTest$/i.test(dialogName);
 }
 
+/** Reference gauge panel embedded in hardware test (injTest_r). */
+export function isReferenceGaugePanel(panelName: string | undefined): boolean {
+  if (!panelName) return false;
+  return /^injTest_r$/i.test(panelName);
+}
+
+/** Shell dialogs: settings West, live state East (WMI, launch control, …). */
+const CONFIG_LIVE_STATE_DIALOGS = new Set([
+  'wmicontroldialog',
+  'smlaunchcontrol',
+]);
+
+export function isConfigLiveStateDialog(dialogName: string): boolean {
+  return CONFIG_LIVE_STATE_DIALOGS.has(dialogName.toLowerCase());
+}
+
+/** Gate expression for live-state side panels when the INI omits a panel condition. */
+export function inferLiveStateGateExpression(panelName: string): string | null {
+  const lower = panelName.toLowerCase();
+  if (lower === 'wmilivestatedialog') return 'isWmiEnabled';
+  if (lower === 'launch_control_statedialog') return 'launchControlEnabled';
+  if (lower.endsWith('livestatedialog')) {
+    if (lower.includes('wmi')) return 'isWmiEnabled';
+  }
+  if (lower.endsWith('_statedialog') || lower.endsWith('statedialog')) {
+    const base = panelName.replace(/Dialog$/i, '');
+    if (/launch/i.test(base)) return 'launchControlEnabled';
+  }
+  return null;
+}
+
+export function rowHasConfigLiveStateSplit(row: DialogComponentRow): boolean {
+  const west = row.west.length > 0;
+  const east = row.east.length > 0;
+  if (!west || !east) return false;
+  const eastPanels = row.east.filter((c) => c.type === 'Panel' && c.name);
+  return eastPanels.some((c) => inferLiveStateGateExpression(c.name!) !== null);
+}
+
+/**
+ * Preserve West/East layout for config + live-state shell dialogs.
+ * Strips Center-only noise so WMI / launch control render as a two-column split.
+ */
+export function applyConfigLiveStateLayout(
+  dialogName: string,
+  components: DialogComponent[],
+): { components: DialogComponent[]; useConfigLiveSplit: boolean } {
+  if (!isConfigLiveStateDialog(dialogName)) {
+    return { components, useConfigLiveSplit: false };
+  }
+
+  const west = components.filter((c) => c.position?.toLowerCase() === 'west');
+  const east = components.filter((c) => c.position?.toLowerCase() === 'east');
+  const rest = components.filter((c) => {
+    const pos = c.position?.toLowerCase();
+    return pos !== 'west' && pos !== 'east';
+  });
+
+  if (west.length === 0 || east.length === 0) {
+    return { components, useConfigLiveSplit: false };
+  }
+
+  return {
+    components: [...west, ...east, ...rest],
+    useConfigLiveSplit: true,
+  };
+}
+
 /** Command-only panels grouped on the first row (similar height). */
 const HARDWARE_TEST_COMPACT_PANELS = new Set([
   'testspark',

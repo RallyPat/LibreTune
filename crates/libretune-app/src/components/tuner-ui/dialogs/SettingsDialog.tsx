@@ -78,7 +78,8 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
   const [commitMessageFormat, setCommitMessageFormat] = useState('Tune saved on {date} at {time}');
   const [runtimePacketMode, setRuntimePacketMode] = useState<'Auto'|'ForceBurst'|'ForceOCH'|'Disabled'>('Auto');
   // Auto-reconnect setting: whether to automatically sync & reconnect after controller commands
-  const [autoReconnectAfterControllerCommand, setAutoReconnectAfterControllerCommand] = useState<boolean>(false);
+  const [autoReconnectAfterControllerCommand, setAutoReconnectAfterControllerCommand] = useState<boolean>(true);
+  const [autoReconnectAfterFirmware, setAutoReconnectAfterFirmware] = useState<boolean>(true);
   
   // Auto-record settings for data logging
   const [autoRecordEnabled, setAutoRecordEnabled] = useState(false);
@@ -144,6 +145,7 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
         if (settings.commit_message_format !== undefined) setCommitMessageFormat(settings.commit_message_format);
         if (settings.runtime_packet_mode !== undefined) setRuntimePacketMode(settings.runtime_packet_mode);
         if (settings.auto_reconnect_after_controller_command !== undefined) setAutoReconnectAfterControllerCommand(!!settings.auto_reconnect_after_controller_command);
+        if (settings.auto_reconnect_after_firmware !== undefined) setAutoReconnectAfterFirmware(!!settings.auto_reconnect_after_firmware);
         // Auto-record settings
         if (settings.auto_record_enabled !== undefined) setAutoRecordEnabled(!!settings.auto_record_enabled);
         if (settings.key_on_threshold_rpm !== undefined) setKeyOnThresholdRpm(settings.key_on_threshold_rpm);
@@ -315,6 +317,7 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
     // Update runtime packet mode
     await invoke('update_setting', { key: 'runtime_packet_mode', value: runtimePacketMode });
     await invoke('update_setting', { key: 'auto_reconnect_after_controller_command', value: autoReconnectAfterControllerCommand.toString() });
+    await invoke('update_setting', { key: 'auto_reconnect_after_firmware', value: autoReconnectAfterFirmware.toString() });
     // Update auto-record settings
     await invoke('update_setting', { key: 'auto_record_enabled', value: autoRecordEnabled.toString() });
     await invoke('update_setting', { key: 'key_on_threshold_rpm', value: keyOnThresholdRpm.toString() });
@@ -342,7 +345,7 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
     
     onSettingsChange?.({ units: localUnits, autoBurnOnClose, indicatorColumnCount, indicatorFillEmpty, indicatorTextFit, statusBarChannels, runtimePacketMode, autoSyncGaugeRanges });
     onClose();
-  }, [localTheme, localLanguage, localUnits, autoBurnOnClose, statusBarChannels, indicatorColumnCount, indicatorFillEmpty, indicatorTextFit, heatmapValueScheme, heatmapChangeScheme, heatmapCoverageScheme, gaugeSnapToGrid, gaugeFreeMove, gaugeLock, autoSyncGaugeRanges, autoCommitOnSave, commitMessageFormat, runtimePacketMode, autoReconnectAfterControllerCommand, autoRecordEnabled, keyOnThresholdRpm, keyOffTimeoutSec, alertLargeChangeEnabled, alertLargeChangeAbs, alertLargeChangePercent, hotkeyBindings, autoConnect, currentProject, onThemeChange, onSettingsChange, onClose]);
+  }, [localTheme, localLanguage, localUnits, autoBurnOnClose, statusBarChannels, indicatorColumnCount, indicatorFillEmpty, indicatorTextFit, heatmapValueScheme, heatmapChangeScheme, heatmapCoverageScheme, gaugeSnapToGrid, gaugeFreeMove, gaugeLock, autoSyncGaugeRanges, autoCommitOnSave, commitMessageFormat, runtimePacketMode, autoReconnectAfterControllerCommand, autoReconnectAfterFirmware, autoRecordEnabled, keyOnThresholdRpm, keyOffTimeoutSec, alertLargeChangeEnabled, alertLargeChangeAbs, alertLargeChangePercent, hotkeyBindings, autoConnect, currentProject, onThemeChange, onSettingsChange, onClose]);
 
   return (
     <Dialog
@@ -580,6 +583,20 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
               Auto-sync & reconnect after controller commands
             </label>
             <span className="dialog-form-note">When enabled, the app will automatically sync and reconnect to the ECU after executing controller commands that modify ECU settings (e.g., applying base maps).</span>
+          </div>
+
+          <div className="dialog-form-group" style={{ marginTop: '0.5rem' }}>
+            <label>
+              <input
+                type="checkbox"
+                checked={autoReconnectAfterFirmware}
+                onChange={(e) => setAutoReconnectAfterFirmware(e.target.checked)}
+              />
+              Auto-reconnect after firmware updates
+            </label>
+            <span className="dialog-form-note">
+              After OpenBLT updates, LibreTune waits for the ECU to reboot and retries the last known port automatically.
+            </span>
           </div>
 
           {/* Show small live metrics in connection dialog too */}

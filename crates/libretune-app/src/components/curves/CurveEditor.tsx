@@ -29,8 +29,8 @@ export interface SimpleGaugeInfo {
   digits: number;
 }
 
-/** Convert SimpleGaugeInfo to TsGaugeConfig for rendering */
-function toTsGaugeConfig(gauge: SimpleGaugeInfo): TsGaugeConfig {
+/** Convert SimpleGaugeInfo to TsGaugeConfig for embedded dialog/curve gauges */
+export function toTsGaugeConfig(gauge: SimpleGaugeInfo): TsGaugeConfig {
   return {
     id: gauge.name,
     gauge_painter: 'AnalogGauge',

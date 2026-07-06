@@ -210,6 +210,9 @@ pub async fn get_searchable_index(
                 libretune_core::ini::DialogComponent::CommandButton { label, .. } => {
                     terms.push(label.clone());
                 }
+                libretune_core::ini::DialogComponent::Gauge { name, .. } => {
+                    terms.push(name.clone());
+                }
             }
         }
     }

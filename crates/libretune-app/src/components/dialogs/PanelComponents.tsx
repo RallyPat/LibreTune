@@ -24,10 +24,11 @@ import {
 import { Indicator } from './fields/Indicator';
 import { IndicatorPanelRenderer } from './fields/IndicatorPanelRenderer';
 import { ReadoutPanelRenderer } from './fields/ReadoutPanelRenderer';
+import { DialogGaugeStack } from './fields/DialogGauge';
 import { CommandButton } from './fields/CommandButton';
 import DialogField from './fields/DialogField';
 import { RuntimeValueReadout } from './fields/RuntimeValueReadout';
-import { isUserTableLiveChannel, isCommandButtonPanel } from './dialogLayout';
+import { isUserTableLiveChannel, isCommandButtonPanel, inferLiveStateGateExpression } from './dialogLayout';
 
 export const RecursivePanel = memo(function RecursivePanel({
   name,
@@ -273,6 +274,23 @@ export const RecursivePanel = memo(function RecursivePanel({
 
   // Render as dialog
   if (panelType === 'dialog' && definition) {
+    const gaugeOnly =
+      definition.components.length > 0 &&
+      definition.components.every((c) => c.type === 'Gauge' && c.name);
+    if (gaugeOnly) {
+      const gaugeNames = definition.components
+        .map((c) => c.name)
+        .filter((n): n is string => !!n);
+      return (
+        <div className="nested-panel nested-panel--gauge-stack" data-panel={name}>
+          {definition.title && definition.title !== name && (
+            <div className="panel-title">{definition.title}</div>
+          )}
+          <DialogGaugeStack gaugeNames={gaugeNames} />
+        </div>
+      );
+    }
+
     const fieldCount = definition.components.filter((c) => c.type === 'Field').length;
     const multiColumn = fieldCount >= 8;
     const commandGrid = isCommandButtonPanel(definition.components);
@@ -449,11 +467,13 @@ export function PanelVisibilityWrapper({
     return expression;
   }, []);
 
+  const liveStateGate = inferLiveStateGateExpression(comp.name ?? '');
+
   const conditionContextKey = useMemo(() => {
     const expressions = [
       comp.visibility_condition,
       comp.enabled_condition,
-      comp.name === 'wmiLiveStateDialog' ? 'isWmiEnabled' : null,
+      liveStateGate,
     ].filter(Boolean) as string[];
 
     const vars = new Set<string>();
@@ -499,13 +519,12 @@ export function PanelVisibilityWrapper({
           }
         }
 
-        // WMI live readouts have no panel-level condition in the INI — gate on isWmiEnabled.
         if (
           !comp.visibility_condition &&
           !comp.enabled_condition &&
-          comp.name === 'wmiLiveStateDialog'
+          liveStateGate
         ) {
-          const enabled = await evaluateCondition('isWmiEnabled');
+          const enabled = await evaluateCondition(liveStateGate);
           if (cancelled) return;
           if (!enabled) {
             setPanelVisible(false);
@@ -534,6 +553,7 @@ export function PanelVisibilityWrapper({
     comp.visibility_condition,
     comp.enabled_condition,
     comp.name,
+    liveStateGate,
     conditionContextKey,
     normalizeExpression,
   ]);
@@ -599,7 +619,15 @@ export function DialogComponentRenderer({
         </div>
       );
     }
-    return <div className="dialog-label">{comp.text}</div>;
+    const isSection = text.startsWith('#');
+    const isNote = text.startsWith('!');
+    return (
+      <div
+        className={`dialog-label${isSection ? ' dialog-section-header' : ''}${isNote ? ' dialog-note' : ''}`}
+      >
+        {isSection ? text.replace(/^#+\s*/, '') : isNote ? text.replace(/^!+\s*/, '') : comp.text}
+      </div>
+    );
   }
   if (comp.type === 'Table' && comp.name) {
     // Use RecursivePanel to handle table rendering (embedded or link fallback)
@@ -614,8 +642,10 @@ export function DialogComponentRenderer({
     );
   }
   if (comp.type === 'Panel' && comp.name) {
-    console.log(`[DialogComponentRenderer] Rendering Panel component: ${comp.name}, visibility_condition: ${comp.visibility_condition || 'none'}`);
     return <PanelVisibilityWrapper comp={comp} openTable={openTable} context={context} onUpdate={onUpdate} onFieldFocus={onFieldFocus} showAllHelpIcons={showAllHelpIcons} />;
+  }
+  if (comp.type === 'Gauge' && comp.name) {
+    return <DialogGaugeStack gaugeNames={[comp.name]} />;
   }
   if (comp.type === 'Indicator') {
     return <Indicator comp={comp} context={context} />;

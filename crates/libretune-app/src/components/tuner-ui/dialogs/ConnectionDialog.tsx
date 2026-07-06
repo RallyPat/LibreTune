@@ -41,6 +41,9 @@ interface ConnectionDialogProps extends DialogProps {
   onApplyIniDefaults?: () => void;
   runtimePacketMode?: 'Auto'|'ForceBurst'|'ForceOCH'|'Disabled';
   onRuntimePacketModeChange?: (mode: 'Auto'|'ForceBurst'|'ForceOCH'|'Disabled') => void;
+  autoConnectEnabled?: boolean;
+  rememberedPort?: string | null;
+  connectionPhase?: string;
 }
 
 export function ConnectionDialog({ 
@@ -69,6 +72,9 @@ export function ConnectionDialog({
   onApplyIniDefaults,
   runtimePacketMode,
   onRuntimePacketModeChange,
+  autoConnectEnabled,
+  rememberedPort,
+  connectionPhase,
 }: ConnectionDialogProps) {
   // Track previous connected state to detect connection transitions
   const prevConnectedRef = useRef<boolean>(false);
@@ -139,6 +145,14 @@ export function ConnectionDialog({
                     <RotateCw size={14} /> Refresh
                   </button>
                 </div>
+                {rememberedPort && (
+                  <p className="field-help">
+                    Last successful port: <code>{rememberedPort}</code>
+                    {autoConnectEnabled && !connected
+                      ? ' — auto-connect is enabled in Settings'
+                      : ''}
+                  </p>
+                )}
               </div>
               
               <div className="dialog-form-group">
@@ -235,7 +249,17 @@ export function ConnectionDialog({
           
           <div className="dialog-status">
             <span className={`status-indicator ${connected ? 'connected' : 'disconnected'}`} />
-            {statusMessage ? statusMessage : (connected ? 'Connected' : connecting ? 'Connecting...' : 'Disconnected')}
+            {statusMessage
+              ? statusMessage
+              : connected
+                ? 'Connected'
+                : connecting
+                  ? 'Connecting...'
+                  : connectionPhase === 'auto-connect-waiting'
+                    ? `Waiting for ${rememberedPort ?? 'ECU'}…`
+                    : connectionPhase === 'auto-connect'
+                      ? `Auto-connecting${rememberedPort ? ` to ${rememberedPort}` : ''}…`
+                      : 'Disconnected'}
           </div>
       </Dialog.Body>
 

@@ -47,8 +47,28 @@
   color: var(--success);
 }
 
+.statusbar-connection.warning {
+  color: var(--warning, #f59e0b);
+}
+
+.statusbar-connection.pending {
+  color: var(--warning, #f59e0b);
+}
+
 .statusbar-connection.disconnected {
   color: var(--text-muted);
+}
+
+.statusbar-connection-clickable {
+  border: none;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+
+.statusbar-connection-clickable:hover {
+  background: var(--bg-hover);
 }
 
 .statusbar-icon {

@@ -6,23 +6,15 @@ import { CurrentProject, ConnectionStatus } from "../types/app";
 
 export interface UseEcuEventListenersDeps {
   isTauri: boolean;
-  connecting: boolean;
-  selectedPort: string;
-  baudRate: number;
-  timeoutMs: number;
-  connectionRuntimePacketMode: 'Auto' | 'ForceBurst' | 'ForceOCH' | 'Disabled';
-  defaultRuntimePacketMode: 'Auto' | 'ForceBurst' | 'ForceOCH' | 'Disabled';
   status: ConnectionStatus;
   currentProject: CurrentProject | null;
   activeTabId: string | null;
-  connect: () => Promise<void>;
   doSync: () => Promise<unknown>;
   checkStatus: () => Promise<void>;
   fetchConstants: () => Promise<Record<string, number>>;
   fetchMenuTree: (context?: Record<string, number>) => Promise<void>;
   showLoading: (msg: string) => void;
   hideLoading: () => void;
-  showToast: (msg: string, type: 'info' | 'success' | 'error' | 'warning') => void;
 }
 
 /**
@@ -33,23 +25,15 @@ export interface UseEcuEventListenersDeps {
 export function useEcuEventListeners(deps: UseEcuEventListenersDeps) {
   const {
     isTauri,
-    connecting,
-    selectedPort,
-    baudRate,
-    timeoutMs,
-    connectionRuntimePacketMode,
-    defaultRuntimePacketMode,
     status,
     currentProject,
     activeTabId,
-    connect,
     doSync,
     checkStatus,
     fetchConstants,
     fetchMenuTree,
     showLoading,
     hideLoading,
-    showToast,
   } = deps;
 
   // Update window title with project name
@@ -72,34 +56,6 @@ export function useEcuEventListeners(deps: UseEcuEventListenersDeps) {
         .catch(e => console.warn("Failed to save last_active_tab", e));
     }
   }, [activeTabId, currentProject]);
-
-  // Listen for frontend reconnect requests
-  useEffect(() => {
-    let unlisten: UnlistenFn | null = null;
-    (async () => {
-      try {
-        unlisten = await listen<any>("reconnect:request", async (event) => {
-          console.log('Reconnect requested from:', event.payload);
-          try {
-            if (typeof import.meta !== 'undefined' && (import.meta as any).env && (import.meta as any).env.MODE !== 'production') {
-              console.debug('reconnect:request received', event.payload);
-              try { (window as any).__libretuneTelemetry?.trackEvent?.('reconnect_request_received', { source: event.payload?.source ?? 'unknown' }); } catch (_e) { /* ignore */ }
-            }
-          } catch (dbgErr) {
-            console.error('Failed to log reconnect telemetry:', dbgErr);
-          }
-          if (!connecting) {
-            await connect();
-          } else {
-            showToast('Reconnect requested but connection is already in progress', 'info');
-          }
-        });
-      } catch (e) {
-        console.error('Failed to listen for reconnect:request events:', e);
-      }
-    })();
-    return () => { if (unlisten) unlisten(); };
-  }, [connecting, selectedPort, baudRate, timeoutMs, connectionRuntimePacketMode, defaultRuntimePacketMode, connect, showToast]);
 
   // Listen for INI change events (requires re-sync)
   useEffect(() => {

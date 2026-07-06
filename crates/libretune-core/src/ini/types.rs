@@ -538,6 +538,12 @@ pub enum DialogComponent {
         #[serde(skip_serializing_if = "Option::is_none")]
         on_close_behavior: Option<CommandButtonCloseAction>,
     },
+    /// Embedded gauge from [GaugeConfigurations] (TunerStudio dialog gauge = lines)
+    Gauge {
+        name: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        position: Option<String>,
+    },
 }
 
 /// Behavior for commandButton on dialog close

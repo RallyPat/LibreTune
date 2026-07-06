@@ -56,6 +56,18 @@ pub(crate) struct Settings {
     #[serde(default = "default_runtime_packet_mode")]
     pub(crate) runtime_packet_mode: String,
 
+    /// Last serial port that successfully connected (app-wide, survives project switches).
+    #[serde(default)]
+    pub(crate) last_serial_port: Option<String>,
+
+    /// Auto-sync and reconnect after controller commands that reboot the ECU.
+    #[serde(default = "default_true")]
+    pub(crate) auto_reconnect_after_controller_command: bool,
+
+    /// Automatically reconnect after firmware updates when the ECU reboots.
+    #[serde(default = "default_true")]
+    pub(crate) auto_reconnect_after_firmware: bool,
+
     /// FOME-specific fast comms mode for console commands
     /// When enabled for FOME ECUs, attempts a faster protocol path; falls back on error
     #[serde(default = "default_true")]
