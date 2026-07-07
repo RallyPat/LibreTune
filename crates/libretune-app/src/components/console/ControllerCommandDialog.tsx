@@ -12,13 +12,6 @@ export interface ControllerCommandPromptDetail {
 
 const COMMAND_WARNINGS_DISABLED_KEY = 'libretune_command_warnings_disabled';
 
-interface SyncResult {
-  pages_synced: number;
-  pages_failed: number;
-  total_pages: number;
-  errors: string[];
-}
-
 /**
  * Global confirmation dialog for raw controller commands (e.g. Enter DFU Mode).
  * Trigger via: window.dispatchEvent(new CustomEvent('controller-command:prompt', { detail: { commandName, label } }))
@@ -26,18 +19,7 @@ interface SyncResult {
 export function ControllerCommandDialog() {
   const [prompt, setPrompt] = useState<ControllerCommandPromptDetail | null>(null);
   const [isExecuting, setIsExecuting] = useState(false);
-  const [autoReconnectEnabled, setAutoReconnectEnabled] = useState(false);
   const { showToast } = useToast();
-
-  useEffect(() => {
-    invoke<{ auto_reconnect_after_controller_command?: boolean }>('get_settings')
-      .then((settings) => {
-        if (settings.auto_reconnect_after_controller_command !== undefined) {
-          setAutoReconnectEnabled(!!settings.auto_reconnect_after_controller_command);
-        }
-      })
-      .catch(() => {});
-  }, []);
 
   const executeCommand = useCallback(async (detail: ControllerCommandPromptDetail) => {
     setIsExecuting(true);
@@ -53,24 +35,8 @@ export function ControllerCommandDialog() {
         isDfu
           ? `${detail.label ?? detail.commandName} sent — ECU should reboot into DFU mode`
           : `${detail.label ?? detail.commandName} sent to ECU`,
-        'success'
+        'success',
       );
-
-      // DFU disconnects the ECU — skip sync for DFU commands
-      if (!isDfu) {
-        try {
-          const syncResult = await invoke<SyncResult>('sync_ecu_data');
-          if (syncResult?.pages_synced > 0) {
-            showToast(`Sync complete: ${syncResult.pages_synced} pages`, 'info');
-          }
-        } catch (syncErr) {
-          console.error('Sync after command failed:', syncErr);
-        }
-      }
-
-      if (autoReconnectEnabled && !isDfu) {
-        window.dispatchEvent(new CustomEvent('reconnect:request', { detail: { source: 'controller-command' } }));
-      }
     } catch (err) {
       console.error('Controller command failed:', err);
       showToast(`Command failed: ${err}`, 'error');
@@ -78,7 +44,7 @@ export function ControllerCommandDialog() {
       setIsExecuting(false);
       setPrompt(null);
     }
-  }, [autoReconnectEnabled, showToast]);
+  }, [showToast]);
 
   useEffect(() => {
     const handler = (event: Event) => {
@@ -122,27 +88,7 @@ export function ControllerCommandDialog() {
               : 'This sends a raw command directly to the ECU, bypassing normal memory synchronization.'
           )}
         </p>
-        {!isDfu && (
-          <>
-            <p>Only proceed if you understand what this command does.</p>
-            <div style={{ marginTop: 8 }}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <input
-                  type="checkbox"
-                  checked={autoReconnectEnabled}
-                  onChange={(e) => {
-                    const val = e.target.checked;
-                    setAutoReconnectEnabled(val);
-                    invoke('update_setting', { key: 'auto_reconnect_after_controller_command', value: val }).catch(console.error);
-                  }}
-                />
-                <span style={{ fontSize: '0.9em' }}>
-                  Auto-sync and reconnect after executing
-                </span>
-              </label>
-            </div>
-          </>
-        )}
+        {!isDfu && <p>Only proceed if you understand what this command does.</p>}
         <div className="command-warning-buttons">
           <button onClick={() => setPrompt(null)} disabled={isExecuting}>Cancel</button>
           <button onClick={() => handleConfirm(false)} disabled={isExecuting}>

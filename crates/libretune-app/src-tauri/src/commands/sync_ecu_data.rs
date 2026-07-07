@@ -2,7 +2,46 @@
 
 use crate::{set_conn_lock_holder, AppState, SyncProgress, SyncResult};
 use libretune_core::tune::TuneFile;
+use std::collections::{HashMap, HashSet};
 use tauri::Emitter;
+
+async fn snapshot_baseline_pages(state: &AppState) -> HashMap<u8, Vec<u8>> {
+    let cache_guard = state.tune_cache.lock().await;
+    if let Some(cache) = cache_guard.as_ref() {
+        let mut snapshot = HashMap::new();
+        for page in 0..cache.page_count() {
+            if let Some(data) = cache.get_page(page) {
+                snapshot.insert(page, data.to_vec());
+            }
+        }
+        return snapshot;
+    }
+    HashMap::new()
+}
+
+fn pages_with_differences(
+    baseline: &HashMap<u8, Vec<u8>>,
+    ecu: &HashMap<u8, Vec<u8>>,
+    n_pages: u8,
+) -> Vec<u8> {
+    let all_pages: HashSet<u8> = baseline
+        .keys()
+        .chain(ecu.keys())
+        .copied()
+        .filter(|p| *p < n_pages)
+        .collect();
+
+    let mut diff_pages = Vec::new();
+    for page_num in all_pages {
+        match (baseline.get(&page_num), ecu.get(&page_num)) {
+            (Some(b), Some(e)) if b == e => {}
+            (None, None) => {}
+            _ => diff_pages.push(page_num),
+        }
+    }
+    diff_pages.sort_unstable();
+    diff_pages
+}
 
 #[tauri::command]
 pub async fn sync_ecu_data(
@@ -18,6 +57,10 @@ pub async fn sync_ecu_data(
     let page_sizes: Vec<u32> = def.protocol.page_sizes.clone();
     let total_bytes: usize = page_sizes.iter().map(|&s| s as usize).sum();
     drop(def_guard);
+
+    // Compare against the in-memory tune cache (authoritative editing state),
+    // not the raw TuneFile which may have empty pages for MSQ-based projects.
+    let baseline_pages = snapshot_baseline_pages(state.inner()).await;
 
     // Create new tune file
     let mut tune = TuneFile::new(&signature);
@@ -101,16 +144,14 @@ pub async fn sync_ecu_data(
     }
 
     // Store tune file in state (even if partial)
-    let mut tune_guard = state.current_tune.lock().await;
-    let project_tune = tune_guard.clone(); // Keep copy for comparison
-    let ecu_tune = tune.clone(); // Keep copy for comparison
-    *tune_guard = Some(tune);
+    let ecu_tune = tune.clone();
+    {
+        let mut tune_guard = state.current_tune.lock().await;
+        *tune_guard = Some(tune);
+    }
 
     // Mark as not modified (freshly synced from ECU)
-    let mut modified_guard = state.tune_modified.lock().await;
-    *modified_guard = false;
-    drop(modified_guard);
-    drop(tune_guard);
+    *state.tune_modified.lock().await = false;
 
     // Emit complete
     let progress = SyncProgress {
@@ -123,52 +164,19 @@ pub async fn sync_ecu_data(
     };
     let _ = app.emit("sync:progress", &progress);
 
-    // Check if project tune exists and differs from ECU tune
-    if let Some(ref project) = project_tune {
-        if project.signature == ecu_tune.signature {
-            // Compare page data
-            let mut has_differences = false;
-            let mut diff_pages: Vec<u8> = Vec::new();
-
-            // Check all pages that exist in either tune
-            let all_pages: std::collections::HashSet<u8> = project
-                .pages
-                .keys()
-                .chain(ecu_tune.pages.keys())
-                .copied()
-                .collect();
-
-            for page_num in all_pages {
-                let project_page = project.pages.get(&page_num);
-                let ecu_page = ecu_tune.pages.get(&page_num);
-
-                match (project_page, ecu_page) {
-                    (Some(p), Some(e)) if p != e => {
-                        has_differences = true;
-                        diff_pages.push(page_num);
-                    }
-                    (Some(_), None) | (None, Some(_)) => {
-                        has_differences = true;
-                        diff_pages.push(page_num);
-                    }
-                    _ => {}
-                }
-            }
-
-            if has_differences {
-                // Emit event for frontend to show dialog
-                let ecu_page_nums: Vec<u8> = ecu_tune.pages.keys().copied().collect();
-                let project_page_nums: Vec<u8> = project.pages.keys().copied().collect();
-                let _ = app.emit(
-                    "tune:mismatch",
-                    &serde_json::json!({
-                        "ecu_pages": ecu_page_nums,
-                        "project_pages": project_page_nums,
-                        "diff_pages": diff_pages,
-                    }),
-                );
-            }
-        }
+    // Compare baseline (pre-sync cache) with ECU read — only prompt when bytes differ.
+    let diff_pages = pages_with_differences(&baseline_pages, &ecu_tune.pages, n_pages);
+    if !diff_pages.is_empty() && pages_synced > 0 {
+        let baseline_page_nums: Vec<u8> = baseline_pages.keys().copied().collect();
+        let ecu_page_nums: Vec<u8> = ecu_tune.pages.keys().copied().collect();
+        let _ = app.emit(
+            "tune:mismatch",
+            &serde_json::json!({
+                "ecu_pages": ecu_page_nums,
+                "project_pages": baseline_page_nums,
+                "diff_pages": diff_pages,
+            }),
+        );
     }
 
     // Log detailed errors for debugging
@@ -189,4 +197,29 @@ pub async fn sync_ecu_data(
         total_pages: n_pages,
         errors,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pages_with_differences_detects_mismatch() {
+        let mut baseline = HashMap::new();
+        baseline.insert(0, vec![1, 2, 3]);
+        let mut ecu = HashMap::new();
+        ecu.insert(0, vec![1, 2, 4]);
+        assert_eq!(pages_with_differences(&baseline, &ecu, 2), vec![0]);
+    }
+
+    #[test]
+    fn pages_with_differences_ignores_matching_pages() {
+        let mut baseline = HashMap::new();
+        baseline.insert(0, vec![1, 2, 3]);
+        baseline.insert(1, vec![9, 9]);
+        let mut ecu = HashMap::new();
+        ecu.insert(0, vec![1, 2, 3]);
+        ecu.insert(1, vec![9, 9]);
+        assert!(pages_with_differences(&baseline, &ecu, 2).is_empty());
+    }
 }

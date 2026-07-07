@@ -875,9 +875,12 @@ function AppContent() {
   }
 
   async function disconnect() {
+    setConnecting(false);
+    setSyncing(false);
     try {
       await invoke("stop_realtime_stream").catch(() => {});
       await invoke("disconnect_ecu");
+      useRealtimeStore.getState().clearChannels();
       await checkStatus();
     } catch (e) {
       console.error(e);

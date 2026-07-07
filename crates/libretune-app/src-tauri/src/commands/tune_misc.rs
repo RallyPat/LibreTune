@@ -131,18 +131,33 @@ pub async fn use_project_tune(
         return Err("Project tune file not found".to_string());
     }
 
-    Ok(())
+    // Push project tune to ECU when connected
+    drop(project_guard);
+    if state.connection.lock().await.is_some() {
+        crate::commands::project_tune_sync::write_project_tune_to_ecu(app, state).await
+    } else {
+        Ok(())
+    }
 }
 
 /// Use the ECU's tune data, discarding project file changes.
 ///
-/// Keeps the currently synced ECU data and marks the tune as unmodified.
-/// Used when there's a conflict between project and ECU data.
+/// Keeps the currently synced ECU data, saves it to the project tune file,
+/// and marks the tune as unmodified.
 ///
 /// Returns: Nothing on success
 #[tauri::command]
-pub async fn use_ecu_tune(state: tauri::State<'_, AppState>) -> Result<(), String> {
-    // ECU tune is already loaded from sync, just mark as not modified
+pub async fn use_ecu_tune(
+    state: tauri::State<'_, AppState>,
+    app: tauri::AppHandle,
+) -> Result<(), String> {
     *state.tune_modified.lock().await = false;
+
+    let has_project = state.current_project.lock().await.is_some();
+    if has_project {
+        crate::commands::project_tune_sync::save_tune_to_project(state.clone()).await?;
+        let _ = app.emit("tune:loaded", "ecu");
+    }
+
     Ok(())
 }

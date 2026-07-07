@@ -12,10 +12,20 @@ use std::path::Path;
 /// Returns: Nothing on success
 #[tauri::command]
 pub async fn disconnect_ecu(state: tauri::State<'_, AppState>) -> Result<(), String> {
-    // Stop metrics task first
+    // Stop metrics and realtime streaming before dropping the connection
     stop_metrics_task(state.clone()).await;
 
+    {
+        let mut task_guard = state.streaming_task.lock().await;
+        if let Some(handle) = task_guard.take() {
+            handle.abort();
+        }
+    }
+
     let mut guard = state.connection.lock().await;
+    if let Some(conn) = guard.as_mut() {
+        conn.disconnect();
+    }
     *guard = None;
     Ok(())
 }
@@ -35,7 +45,12 @@ pub async fn get_connection_status(
     // Holding multiple locks simultaneously causes deadlocks with the realtime stream task.
     let demo_mode = *state.demo_mode.lock().await;
 
-    let (state_val, signature) = if demo_mode {
+    let streaming_active = {
+        let task_guard = state.streaming_task.lock().await;
+        task_guard.is_some()
+    };
+
+    let (state_val, signature) = if demo_mode && streaming_active {
         (
             ConnectionState::Connected,
             Some("DEMO - Simulated epicEFI".to_string()),
