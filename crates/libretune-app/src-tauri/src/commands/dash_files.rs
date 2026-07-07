@@ -3,8 +3,8 @@
 use crate::commands::dash_layout::generate_unique_filename;
 use crate::paths::{get_dashboards_dir, get_projects_dir};
 use libretune_core::dash::{
-    self, create_basic_dashboard, create_racing_dashboard, create_telemetry_live_dashboard,
-    create_tuning_dashboard, DashComponent, DashFile, VersionInfo,
+    self, create_basic_dashboard, create_racing_dashboard, create_telemetry_compact_dashboard,
+    create_telemetry_live_dashboard, create_tuning_dashboard, DashComponent, DashFile, VersionInfo,
 };
 use libretune_core::ini::EcuDefinition;
 use std::path::{Path, PathBuf};
@@ -159,6 +159,7 @@ pub async fn create_new_dashboard(
         "racing" => create_racing_dashboard(),
         "tuning" => create_tuning_dashboard(),
         "telemetry_live" | "f1_telemetry" => create_telemetry_live_dashboard(),
+        "telemetry_compact" => create_telemetry_compact_dashboard(),
         _ => create_basic_dashboard(),
     };
 

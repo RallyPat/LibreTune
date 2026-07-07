@@ -144,7 +144,7 @@ export default function TsDashboard({ initialDashPath, isConnected = false }: Ts
   );
 
   // Dynamic scaling: shrink the dashboard when the viewport is too small.
-  const { scale, wrapperRef: dashboardWrapperRef, recompute: computeScale } =
+  const { scale, scrollable, wrapperRef: dashboardWrapperRef, recompute: computeScale } =
     useDashboardScale(dashboardBounds.aspectRatio);
 
   // Validation: re-runs whenever the dash file changes.
@@ -478,6 +478,7 @@ export default function TsDashboard({ initialDashPath, isConnected = false }: Ts
         designerMode={designerMode}
         legacyMode={legacyMode}
         scale={scale}
+        scrollable={scrollable}
         aspectRatio={dashboardBounds.aspectRatio}
         bgColor={bgColor}
         backgroundImageLayers={backgroundImageLayers}

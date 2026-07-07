@@ -1453,6 +1453,113 @@ pub fn create_telemetry_live_dashboard() -> DashFile {
     dash
 }
 
+/// Laptop-friendly live telemetry — fewer panels, stacked layout, larger charts.
+/// Best on screens under ~1400px wide; scroll vertically for the sparkline section.
+pub fn create_telemetry_compact_dashboard() -> DashFile {
+    let mut dash = DashFile {
+        bibliography: Bibliography {
+            author: "LibreTune".to_string(),
+            company: "LibreTune Project".to_string(),
+            write_date: chrono::Utc::now().format("%Y-%m-%d").to_string(),
+        },
+        version_info: VersionInfo {
+            file_format: "3.0".to_string(),
+            firmware_signature: None,
+        },
+        gauge_cluster: GaugeCluster {
+            anti_aliasing: true,
+            force_aspect: true,
+            force_aspect_width: 4.0,
+            force_aspect_height: 5.0,
+            cluster_background_color: LT_LOG_BG,
+            background_dither_color: None,
+            cluster_background_image_file_name: None,
+            cluster_background_image_style: BackgroundStyle::Stretch,
+            embedded_images: Vec::new(),
+            components: Vec::new(),
+            cluster_layout: None,
+            enabled_condition: None,
+            extra_attrs: std::collections::BTreeMap::new(),
+        },
+        additional_clusters: Vec::new(),
+        extra_attrs: std::collections::BTreeMap::new(),
+    };
+
+    let top_stats = [
+        LogStatSpec { id: "tc_rpm", title: "RPM", channel: "rpm", units: "", min: 0.0, max: 9000.0, digits: 0, x: 0.010, y: 0.010, w: 0.190, h: 0.060, color: LT_LOG_BLUE },
+        LogStatSpec { id: "tc_map", title: "MAP", channel: "map", units: "kPa", min: 0.0, max: 250.0, digits: 0, x: 0.210, y: 0.010, w: 0.190, h: 0.060, color: LT_LOG_CYAN },
+        LogStatSpec { id: "tc_tps", title: "TPS", channel: "tps", units: "%", min: 0.0, max: 100.0, digits: 0, x: 0.410, y: 0.010, w: 0.190, h: 0.060, color: LT_LOG_ORANGE },
+        LogStatSpec { id: "tc_afr", title: "AFR", channel: "afr", units: ":1", min: 10.0, max: 20.0, digits: 1, x: 0.610, y: 0.010, w: 0.190, h: 0.060, color: LT_LOG_GREEN },
+        LogStatSpec { id: "tc_clt", title: "CLT", channel: "coolant", units: "°C", min: -20.0, max: 120.0, digits: 0, x: 0.810, y: 0.010, w: 0.180, h: 0.060, color: LT_LOG_BLUE },
+    ];
+    for spec in top_stats {
+        dash.gauge_cluster.components.push(log_stat_tile(spec));
+    }
+
+    dash.gauge_cluster.components.push(log_multi_trend(
+        "tc_trend_engine",
+        "ENGINE DYNAMICS",
+        LogSeriesEntry { channel: "rpm", label: "RPM", color: "#5794f2", min: 0.0, max: 9000.0 },
+        &[
+            LogSeriesEntry { channel: "map", label: "MAP", color: "#33b5ff", min: 0.0, max: 250.0 },
+            LogSeriesEntry { channel: "tps", label: "TPS", color: "#ff9830", min: 0.0, max: 100.0 },
+            LogSeriesEntry { channel: "advance", label: "ADV", color: "#73bf69", min: -10.0, max: 50.0 },
+        ],
+        0.010, 0.085, 0.980, 0.155,
+    ));
+
+    dash.gauge_cluster.components.push(log_multi_trend(
+        "tc_trend_fuel",
+        "FUEL & AFR",
+        LogSeriesEntry { channel: "afr", label: "AFR", color: "#73bf69", min: 10.0, max: 20.0 },
+        &[
+            LogSeriesEntry { channel: "lambda", label: "LAM", color: "#56a64b", min: 0.7, max: 1.3 },
+            LogSeriesEntry { channel: "pulseWidth", label: "PW", color: "#5794f2", min: 0.0, max: 25.0 },
+            LogSeriesEntry { channel: "ve", label: "VE", color: "#fade2a", min: 0.0, max: 150.0 },
+        ],
+        0.010, 0.255, 0.980, 0.155,
+    ));
+
+    dash.gauge_cluster.components.push(log_multi_trend(
+        "tc_trend_temp",
+        "TEMPERATURES",
+        LogSeriesEntry { channel: "coolant", label: "CLT", color: "#5794f2", min: -20.0, max: 120.0 },
+        &[
+            LogSeriesEntry { channel: "iat", label: "IAT", color: "#ff9830", min: -20.0, max: 80.0 },
+            LogSeriesEntry { channel: "egt", label: "EGT", color: "#f2495c", min: 0.0, max: 1000.0 },
+        ],
+        0.010, 0.425, 0.980, 0.130,
+    ));
+
+    dash.gauge_cluster.components.push(log_multi_trend(
+        "tc_trend_pressure",
+        "PRESSURES & LOAD",
+        LogSeriesEntry { channel: "map", label: "MAP", color: "#33b5ff", min: 0.0, max: 250.0 },
+        &[
+            LogSeriesEntry { channel: "boost", label: "BOOST", color: "#f2495c", min: 0.0, max: 300.0 },
+            LogSeriesEntry { channel: "oilPressure", label: "OILP", color: "#fade2a", min: 0.0, max: 700.0 },
+        ],
+        0.010, 0.570, 0.980, 0.130,
+    ));
+
+    let spark_w = 0.485;
+    let spark_h = 0.125;
+    let spark_y0 = 0.720;
+    let sparks = [
+        LogSparkSpec { id: "tc_sp_rpm", title: "RPM", channel: "rpm", units: "", min: 0.0, max: 9000.0, digits: 0, x: 0.010, y: spark_y0, w: spark_w, h: spark_h, color: LT_LOG_BLUE },
+        LogSparkSpec { id: "tc_sp_map", title: "MAP", channel: "map", units: "kPa", min: 0.0, max: 250.0, digits: 0, x: 0.505, y: spark_y0, w: spark_w, h: spark_h, color: LT_LOG_CYAN },
+        LogSparkSpec { id: "tc_sp_afr", title: "AFR", channel: "afr", units: ":1", min: 10.0, max: 20.0, digits: 2, x: 0.010, y: spark_y0 + spark_h + 0.012, w: spark_w, h: spark_h, color: LT_LOG_GREEN },
+        LogSparkSpec { id: "tc_sp_clt", title: "COOLANT", channel: "coolant", units: "°C", min: -20.0, max: 120.0, digits: 0, x: 0.505, y: spark_y0 + spark_h + 0.012, w: spark_w, h: spark_h, color: LT_LOG_BLUE },
+        LogSparkSpec { id: "tc_sp_bst", title: "BOOST", channel: "boost", units: "kPa", min: 0.0, max: 300.0, digits: 0, x: 0.010, y: spark_y0 + (spark_h + 0.012) * 2.0, w: spark_w, h: spark_h, color: LT_LOG_RED },
+        LogSparkSpec { id: "tc_sp_adv", title: "TIMING", channel: "advance", units: "°", min: -10.0, max: 50.0, digits: 1, x: 0.505, y: spark_y0 + (spark_h + 0.012) * 2.0, w: spark_w, h: spark_h, color: LT_LOG_CYAN },
+    ];
+    for spec in sparks {
+        dash.gauge_cluster.components.push(log_sparkline(spec));
+    }
+
+    dash
+}
+
 /// Backward-compatible alias — the old "F1 Telemetry" name pointed here.
 pub fn create_f1_telemetry_dashboard() -> DashFile {
     create_telemetry_live_dashboard()

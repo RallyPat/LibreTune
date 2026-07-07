@@ -23,6 +23,7 @@ interface Props {
   designerMode: boolean;
   legacyMode: boolean;
   scale: number;
+  scrollable?: boolean;
   aspectRatio: number;
   bgColor: string;
   backgroundImageLayers: string;
@@ -49,6 +50,7 @@ export default function DashboardCanvas({
   designerMode,
   legacyMode,
   scale,
+  scrollable = false,
   aspectRatio,
   bgColor,
   backgroundImageLayers,
@@ -118,7 +120,10 @@ export default function DashboardCanvas({
   };
 
   return (
-    <div ref={wrapperRef} className="ts-dashboard-wrapper">
+    <div
+      ref={wrapperRef}
+      className={`ts-dashboard-wrapper${scrollable ? ' ts-dashboard-wrapper--scroll' : ''}`}
+    >
       <div
         className={`ts-dashboard ${designerMode ? 'designer-mode' : ''}`}
         style={{
@@ -128,7 +133,8 @@ export default function DashboardCanvas({
           backgroundRepeat: backgroundRepeatLayers,
           backgroundPosition: 'center',
           aspectRatio: `${aspectRatio}`,
-          transform: scale < 1 ? `scale(${scale})` : undefined,
+          width: scrollable ? '100%' : undefined,
+          transform: !scrollable && scale < 1 ? `scale(${scale})` : undefined,
           transformOrigin: 'top center',
         }}
         onContextMenu={(e) => onContextMenu(e, null)}

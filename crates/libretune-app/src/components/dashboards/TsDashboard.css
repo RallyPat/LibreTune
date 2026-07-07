@@ -224,6 +224,20 @@
   min-height: 0; /* Allow flex to shrink below content size */
 }
 
+/* Laptop / short viewports: full-width readable layout with vertical scroll */
+.ts-dashboard-wrapper--scroll {
+  overflow-x: hidden;
+  overflow-y: auto;
+  align-items: stretch;
+  justify-content: flex-start;
+  scrollbar-gutter: stable;
+}
+
+.ts-dashboard-wrapper--scroll .ts-dashboard {
+  flex-shrink: 0;
+  max-width: 100%;
+}
+
 /* Dashboard container - centers dashboard and handles scaling */
 .ts-dashboard-container {
   display: flex;
@@ -546,6 +560,42 @@
 }
 
 /* Responsive adjustments */
+@media (max-width: 1200px) {
+  .ts-dashboard-header {
+    padding: 6px 10px;
+    gap: 6px;
+  }
+
+  .ts-dashboard-header-right .ts-dashboard-action-btn {
+    padding: 4px 6px;
+    font-size: 0;
+    gap: 0;
+    min-width: 28px;
+    justify-content: center;
+  }
+
+  .ts-dashboard-header-right .ts-dashboard-action-btn svg {
+    margin: 0;
+  }
+
+  .ts-dashboard-selector-btn {
+    padding: 4px 8px;
+    font-size: 11px;
+  }
+
+  .ts-dashboard-title {
+    font-size: 13px;
+    max-width: 140px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .ts-dashboard-wrapper {
+    padding: 4px;
+  }
+}
+
 @media (max-width: 768px) {
   .ts-dashboard-selector {
     min-width: 90%;
