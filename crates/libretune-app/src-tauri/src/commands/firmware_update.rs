@@ -79,11 +79,6 @@ fn windows_user_path_from_registry() -> Option<std::ffi::OsString> {
     None
 }
 
-#[cfg(not(windows))]
-fn windows_user_path_from_registry() -> Option<std::ffi::OsString> {
-    None
-}
-
 #[cfg(windows)]
 fn expand_windows_env_path(path: &str) -> String {
     let mut out = path.to_string();
