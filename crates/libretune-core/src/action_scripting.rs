@@ -269,13 +269,12 @@ impl ActionPlayer {
                                 ));
                             }
                         }
-                        "rebin" => {
+                        "rebin"
                             if !parameters.contains_key("x_bins")
-                                || !parameters.contains_key("y_bins")
-                            {
-                                errors
-                                    .push(format!("Action {}: rebin missing bin parameters", idx));
-                            }
+                                || !parameters.contains_key("y_bins") =>
+                        {
+                            errors
+                                .push(format!("Action {}: rebin missing bin parameters", idx));
                         }
                         _ => {} // Other operations
                     }
