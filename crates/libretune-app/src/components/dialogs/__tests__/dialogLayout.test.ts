@@ -8,6 +8,7 @@ import {
   isReferenceGaugePanel,
   isUserTableLiveChannel,
   partitionHardwareTestComponents,
+  rowHasDualSettingsSplit,
 } from '../dialogLayout';
 
 describe('applyTableSettingsLayout', () => {
@@ -81,6 +82,24 @@ describe('config + live-state dialog layout', () => {
       'launchControlEnabled',
     );
     expect(inferLiveStateGateExpression('testSpark')).toBeNull();
+  });
+
+  it('detects dual settings west/east rows (fan + water pump style)', () => {
+    const row = {
+      west: [{ type: 'Panel' as const, name: 'fanSettingsWest' }],
+      east: [{ type: 'Panel' as const, name: 'waterPumpSettingsEast' }],
+      unpositioned: [],
+    };
+    expect(rowHasDualSettingsSplit(row)).toBe(true);
+  });
+
+  it('does not treat WMI live-state east as dual settings', () => {
+    const row = {
+      west: [{ type: 'Panel' as const, name: 'WmiSettingsDialog' }],
+      east: [{ type: 'Panel' as const, name: 'wmiLiveStateDialog' }],
+      unpositioned: [],
+    };
+    expect(rowHasDualSettingsSplit(row)).toBe(false);
   });
 });
 

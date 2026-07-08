@@ -6,6 +6,7 @@ import type { ConnectionStatus, IniCapabilities } from "../types/app";
 
 export interface BuildToolbarItemsDeps {
   status: ConnectionStatus;
+  tuneModified: boolean;
   iniCapabilities: IniCapabilities | null;
   isLogging: boolean;
   connectionRuntimePacketMode: string | null;
@@ -21,15 +22,29 @@ export interface BuildToolbarItemsDeps {
 
 export function buildToolbarItems(deps: BuildToolbarItemsDeps): ToolbarItem[] {
   const {
-    status, iniCapabilities, isLogging, connectionRuntimePacketMode, defaultRuntimePacketMode,
+    status, tuneModified, iniCapabilities, isLogging, connectionRuntimePacketMode, defaultRuntimePacketMode,
     setLoadDialogOpen, setSaveDialogOpen, setBurnDialogOpen, setConnectionDialogOpen,
     setSettingsDialogOpen, setActiveTabId, setIsLogging,
   } = deps;
 
+  const connected = status.state === 'Connected';
+  const canBurn = connected && tuneModified;
+
   const items: ToolbarItem[] = [
     { id: "open", icon: "open", tooltip: "Open Tune", onClick: () => setLoadDialogOpen(true) },
     { id: "save", icon: "save", tooltip: "Save Tune", onClick: () => setSaveDialogOpen(true), disabled: !status.has_definition },
-    { id: "burn", icon: "burn", tooltip: "Burn to ECU", onClick: () => setBurnDialogOpen(true), disabled: status.state !== "Connected" },
+    {
+      id: "burn",
+      icon: "burn",
+      tooltip: !connected
+        ? "Connect to ECU to burn changes"
+        : tuneModified
+          ? "Burn pending changes to ECU"
+          : "No changes to burn to ECU",
+      onClick: () => setBurnDialogOpen(true),
+      disabled: !canBurn,
+      variant: canBurn ? 'burn-pending' : undefined,
+    },
     { id: "sep1", icon: "", tooltip: "", separator: true },
     {
       id: "connect",

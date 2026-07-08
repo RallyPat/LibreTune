@@ -12,6 +12,13 @@ interface FirmwareFlasherInfo {
   stm32_programmer_cli: string | null;
   dfu_util: string | null;
   bootcommander: string | null;
+  objcopy: string | null;
+}
+
+interface FirmwareCompanionSuggestion {
+  companion_path: string | null;
+  companion_kind: string;
+  message: string;
 }
 
 interface FirmwareUpdateGuidance {
@@ -56,6 +63,7 @@ export function FirmwareUpdateDialog({
   const [method, setMethod] = useState<UpdateMethod>('openblt');
   const [flasherInfo, setFlasherInfo] = useState<FirmwareFlasherInfo | null>(null);
   const [guidance, setGuidance] = useState<FirmwareUpdateGuidance | null>(null);
+  const [companion, setCompanion] = useState<FirmwareCompanionSuggestion | null>(null);
   const [acknowledgeRisk, setAcknowledgeRisk] = useState(false);
   const [log, setLog] = useState<string[]>([]);
   const [isUpdating, setIsUpdating] = useState(false);
@@ -73,6 +81,7 @@ export function FirmwareUpdateDialog({
     setResultMessage(null);
     setShouldReconnect(false);
     setAcknowledgeRisk(false);
+    setCompanion(null);
     invoke<FirmwareFlasherInfo>('get_firmware_flasher_info')
       .then(setFlasherInfo)
       .catch((e) => setError(String(e)));
@@ -80,9 +89,7 @@ export function FirmwareUpdateDialog({
 
   useEffect(() => {
     if (!isOpen) return;
-    if (openbltAvailable) {
-      setMethod('openblt');
-    } else if (dfuAvailable) {
+    if (dfuAvailable) {
       setMethod('dfu');
     }
   }, [isOpen, dfuAvailable, openbltAvailable]);
@@ -99,6 +106,18 @@ export function FirmwareUpdateDialog({
       .then(setGuidance)
       .catch(() => setGuidance(null));
   }, [isOpen, mode, firmwarePath, method]);
+
+  useEffect(() => {
+    if (!isOpen || !firmwarePath) {
+      setCompanion(null);
+      return;
+    }
+    invoke<FirmwareCompanionSuggestion>('suggest_firmware_companion', {
+      firmwarePath,
+    })
+      .then(setCompanion)
+      .catch(() => setCompanion(null));
+  }, [isOpen, firmwarePath]);
 
   useEffect(() => {
     setAcknowledgeRisk(false);
@@ -118,14 +137,13 @@ export function FirmwareUpdateDialog({
     const filters =
       method === 'dfu'
         ? [
-            { name: 'Recommended (DFU / SREC)', extensions: ['dfu', 'srec', 's19'] },
-            { name: 'Other firmware', extensions: ['hex'] },
+            { name: 'Recommended', extensions: ['hex', 'dfu'] },
             { name: 'Raw binary (advanced)', extensions: ['bin'] },
             { name: 'All Files', extensions: ['*'] },
           ]
         : [
-            { name: 'OpenBLT update bundle', extensions: ['srec', 's19'] },
-            { name: 'Other firmware', extensions: ['hex'] },
+            { name: 'Recommended (rusEFI Console)', extensions: ['bin'] },
+            { name: 'Other formats', extensions: ['hex', 'srec', 's19'] },
             { name: 'All Files', extensions: ['*'] },
           ];
     const selected = await open({
@@ -172,6 +190,7 @@ export function FirmwareUpdateDialog({
   const isBinFirmware = firmwarePath?.toLowerCase().endsWith('.bin') ?? false;
   const riskAckRequired = guidance?.requires_risk_acknowledgement ?? false;
   const riskAckSatisfied = !riskAckRequired || acknowledgeRisk;
+  const openbltNeedsObjcopy = method === 'openblt' && isBinFirmware && !flasherInfo?.objcopy;
 
   const canFlash =
     mode === 'recovery'
@@ -182,7 +201,8 @@ export function FirmwareUpdateDialog({
       : isConnected &&
         firmwarePath &&
         riskAckSatisfied &&
-        (!isBinFirmware || binFlashAddress.trim().length > 0) &&
+        !openbltNeedsObjcopy &&
+        (method !== 'dfu' || !isBinFirmware || binFlashAddress.trim().length > 0) &&
         ((method === 'dfu' &&
           dfuAvailable &&
           (flasherInfo?.stm32_programmer_cli || flasherInfo?.dfu_util)) ||
@@ -305,10 +325,9 @@ export function FirmwareUpdateDialog({
         {mode === 'recovery' && (
           <>
             <div className="firmware-update-warning">
-              Flashing only <code>rusefi.bin</code> via DFU writes the application at{' '}
-              <code>0x08008000</code> but leaves the OpenBLT bootloader at{' '}
-              <code>0x08000000</code> untouched — unless a full erase wiped it. Recovery
-              re-flashes both regions.
+              Use <code>rusefi.hex</code> or <code>rusefi.bin</code> from{' '}
+              <code>firmware/build/</code>. Recovery re-flashes the OpenBLT bootloader at{' '}
+              <code>0x08000000</code> and the application at <code>0x08008000</code>.
             </div>
 
             <div className="firmware-update-field">
@@ -327,8 +346,7 @@ export function FirmwareUpdateDialog({
               </div>
               <p className="firmware-flasher-hint">
                 From your firmware build:{' '}
-                <code>firmware/bootloader/blbuild/openblt_&lt;board&gt;.bin</code> (build the
-                bootloader target first). Flashed at <code>0x08000000</code>.
+                <code>firmware/bootloader/blbuild/openblt_&lt;board&gt;.bin</code>
               </p>
             </div>
 
@@ -346,6 +364,9 @@ export function FirmwareUpdateDialog({
                   Browse…
                 </Button>
               </div>
+              <p className="firmware-flasher-hint">
+                Recommended: <code>firmware/build/rusefi.hex</code>
+              </p>
             </div>
 
             <div className="firmware-update-field">
@@ -396,42 +417,13 @@ export function FirmwareUpdateDialog({
 
             {(dfuAvailable || openbltAvailable) && (
               <>
-                <div className="firmware-update-field">
-                  <label>Update method</label>
-                  <div className="firmware-update-methods">
-                    {openbltAvailable && (
-                      <label className="firmware-method-option">
-                        <input
-                          type="radio"
-                          name="fw-method"
-                          value="openblt"
-                          checked={method === 'openblt'}
-                          onChange={() => setMethod('openblt')}
-                          disabled={isUpdating}
-                        />
-                        <span>
-                          <strong>OpenBLT</strong> — recommended (.srec from{' '}
-                          <code>deliver/</code>, via serial)
-                        </span>
-                      </label>
-                    )}
-                    {dfuAvailable && (
-                      <label className="firmware-method-option">
-                        <input
-                          type="radio"
-                          name="fw-method"
-                          value="dfu"
-                          checked={method === 'dfu'}
-                          onChange={() => setMethod('dfu')}
-                          disabled={isUpdating}
-                        />
-                        <span>
-                          <strong>DFU</strong> — emergency only (.dfu from{' '}
-                          <code>deliver/</code> preferred)
-                        </span>
-                      </label>
-                    )}
-                  </div>
+                <div className="firmware-update-warning caution">
+                  <AlertTriangle size={16} aria-hidden />
+                  <span>
+                    <strong>Serial firmware update is disabled.</strong> Use rusEFI Console with{' '}
+                    <code>firmware/build/rusefi.bin</code>. Below is DFU recovery only (ECU must be
+                    in STM32 bootloader mode).
+                  </span>
                 </div>
 
                 <div className="firmware-update-field">
@@ -449,9 +441,16 @@ export function FirmwareUpdateDialog({
                     </Button>
                   </div>
                   <p className="firmware-flasher-hint">
-                    Suggested: <code>{guidance?.suggested_file_hint ?? 'deliver/'}</code>
+                    From your build folder:{' '}
+                    <code>{guidance?.suggested_file_hint ?? 'firmware/build/rusefi.bin'}</code>
                   </p>
                 </div>
+
+                {companion?.message && (
+                  <div className="firmware-update-warning note">
+                    <p>{companion.message}</p>
+                  </div>
+                )}
 
                 {guidance && guidance.warnings.length > 0 && (
                   <div
@@ -483,7 +482,10 @@ export function FirmwareUpdateDialog({
                       disabled={isUpdating}
                     >
                       Switch to recommended method (
-                      {guidance!.recommended_method === 'openblt' ? 'OpenBLT' : 'DFU'})
+                      {guidance!.recommended_method === 'openblt'
+                        ? 'Serial / rusefi.bin'
+                        : 'DFU / rusefi.hex'}
+                      )
                     </Button>
                   </div>
                 )}
@@ -500,6 +502,9 @@ export function FirmwareUpdateDialog({
                       spellCheck={false}
                       placeholder="0x08008000"
                     />
+                    <p className="firmware-flasher-hint">
+                      Only needed for raw .bin — prefer <code>rusefi.hex</code> instead.
+                    </p>
                   </div>
                 )}
 
@@ -532,18 +537,50 @@ export function FirmwareUpdateDialog({
                         </li>
                       </>
                     ) : (
-                      <li className={flasherInfo?.bootcommander ? 'ok' : 'missing'}>
-                        BootCommander: {flasherInfo?.bootcommander ?? 'not found'}
-                      </li>
+                      <>
+                        <li className={flasherInfo?.bootcommander ? 'ok' : 'missing'}>
+                          BootCommander: {flasherInfo?.bootcommander ?? 'not found'}
+                        </li>
+                        <li className={flasherInfo?.objcopy ? 'ok' : 'missing'}>
+                          arm-none-eabi-objcopy: {flasherInfo?.objcopy ?? 'not found'}
+                        </li>
+                      </>
                     )}
                   </ul>
                   {missingFlasher && (
                     <p className="firmware-flasher-hint">
-                      Install{' '}
-                      {method === 'dfu'
-                        ? 'STM32CubeProgrammer (recommended on Windows) or dfu-util'
-                        : 'OpenBLT BootCommander'}{' '}
-                      and ensure it is on your PATH.
+                      {method === 'dfu' ? (
+                        <>
+                          Install{' '}
+                          <a
+                            href="https://www.st.com/en/development-tools/stm32cubeprog.html"
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            STM32CubeProgrammer
+                          </a>{' '}
+                          for DFU recovery with <code>rusefi.hex</code>.
+                        </>
+                      ) : (
+                        <>
+                          Install{' '}
+                          <a
+                            href="https://www.feaser.com/openblt/doku.php?id=manual:bootcommander"
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            OpenBLT BootCommander
+                          </a>{' '}
+                          for serial updates. <code>arm-none-eabi-objcopy</code> (from your rusEFI
+                          build toolchain) converts <code>rusefi.bin</code> automatically.
+                        </>
+                      )}
+                    </p>
+                  )}
+                  {openbltNeedsObjcopy && (
+                    <p className="firmware-flasher-hint">
+                      Add your ARM GCC toolchain to PATH — the same one used to compile rusEFI
+                      (contains <code>arm-none-eabi-objcopy</code>).
                     </p>
                   )}
                 </div>

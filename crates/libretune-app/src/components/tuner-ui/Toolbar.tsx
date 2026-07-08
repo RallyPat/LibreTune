@@ -61,11 +61,12 @@ export function Toolbar({ items }: ToolbarProps) {
 
         const IconComponent = iconMap[item.icon] || iconMap['default'];
         const isRecording = item.icon === 'log-start' && item.active;
+        const isBurnPending = item.variant === 'burn-pending';
 
         return (
           <button
             key={item.id}
-            className={`toolbar-button ${item.active ? 'toolbar-button-active' : ''}`}
+            className={`toolbar-button${item.active ? ' toolbar-button-active' : ''}${isBurnPending ? ' toolbar-button-burn-pending' : ''}`}
             onClick={item.onClick}
             disabled={item.disabled}
             title={item.tooltip}

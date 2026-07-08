@@ -2,7 +2,7 @@
 
 use crate::{set_conn_lock_holder, AppState, SyncProgress, SyncResult};
 use libretune_core::tune::TuneFile;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use tauri::Emitter;
 
 async fn snapshot_baseline_pages(state: &AppState) -> HashMap<u8, Vec<u8>> {
@@ -19,28 +19,55 @@ async fn snapshot_baseline_pages(state: &AppState) -> HashMap<u8, Vec<u8>> {
     HashMap::new()
 }
 
+/// Compare only non-empty pages that were successfully read from the ECU.
 fn pages_with_differences(
     baseline: &HashMap<u8, Vec<u8>>,
     ecu: &HashMap<u8, Vec<u8>>,
     n_pages: u8,
+    page_sizes: &[u32],
 ) -> Vec<u8> {
-    let all_pages: HashSet<u8> = baseline
-        .keys()
-        .chain(ecu.keys())
-        .copied()
-        .filter(|p| *p < n_pages)
-        .collect();
-
     let mut diff_pages = Vec::new();
-    for page_num in all_pages {
+    for page_num in 0..n_pages {
+        let page_size = page_sizes.get(page_num as usize).copied().unwrap_or(0);
+        if page_size == 0 {
+            continue;
+        }
         match (baseline.get(&page_num), ecu.get(&page_num)) {
-            (Some(b), Some(e)) if b == e => {}
-            (None, None) => {}
-            _ => diff_pages.push(page_num),
+            (Some(b), Some(e)) if b != e => diff_pages.push(page_num),
+            (None, Some(_)) => diff_pages.push(page_num),
+            // Missing ECU page (read failure) is not treated as a diff.
+            _ => {}
         }
     }
-    diff_pages.sort_unstable();
     diff_pages
+}
+
+async fn restore_baseline_pages(state: &AppState, baseline: &HashMap<u8, Vec<u8>>) {
+    {
+        let mut cache_guard = state.tune_cache.lock().await;
+        if let Some(cache) = cache_guard.as_mut() {
+            for (page_num, data) in baseline {
+                cache.load_page(*page_num, data.clone());
+            }
+        }
+    }
+
+    let signature = {
+        let def_guard = state.definition.lock().await;
+        def_guard
+            .as_ref()
+            .map(|d| d.signature.clone())
+            .unwrap_or_default()
+    };
+
+    if !signature.is_empty() {
+        let mut tune = TuneFile::new(&signature);
+        for (page_num, data) in baseline {
+            tune.pages.insert(*page_num, data.clone());
+        }
+        let mut tune_guard = state.current_tune.lock().await;
+        *tune_guard = Some(tune);
+    }
 }
 
 #[tauri::command]
@@ -57,6 +84,38 @@ pub async fn sync_ecu_data(
     let page_sizes: Vec<u32> = def.protocol.page_sizes.clone();
     let total_bytes: usize = page_sizes.iter().map(|&s| s as usize).sum();
     drop(def_guard);
+
+    let was_modified = *state.tune_modified.lock().await;
+    let cache_fully_loaded = {
+        let cache_guard = state.tune_cache.lock().await;
+        cache_guard
+            .as_ref()
+            .is_some_and(|cache| cache.is_fully_loaded())
+    };
+
+    // Reconnect with no local edits: keep the in-memory tune instead of re-reading ECU pages
+    // (avoids false drift from partial/unstable reads after a quick disconnect/reconnect).
+    if !was_modified && cache_fully_loaded {
+        eprintln!(
+            "[INFO] sync_ecu_data: skipping ECU re-read — in-memory tune unchanged since last sync"
+        );
+        let progress = SyncProgress {
+            current_page: n_pages,
+            total_pages: n_pages,
+            bytes_read: total_bytes,
+            total_bytes,
+            complete: true,
+            failed_page: None,
+        };
+        let _ = app.emit("sync:progress", &progress);
+        return Ok(SyncResult {
+            success: true,
+            pages_synced: n_pages,
+            pages_failed: 0,
+            total_pages: n_pages,
+            errors: vec![],
+        });
+    }
 
     // Compare against the in-memory tune cache (authoritative editing state),
     // not the raw TuneFile which may have empty pages for MSQ-based projects.
@@ -84,8 +143,14 @@ pub async fn sync_ecu_data(
         let _ = app.emit("sync:progress", &progress);
 
         if page_size == 0 {
-            // Empty page, skip but count as success
             pages_synced += 1;
+            tune.pages.insert(page, vec![]);
+            {
+                let mut cache_guard = state.tune_cache.lock().await;
+                if let Some(cache) = cache_guard.as_mut() {
+                    cache.load_page(page, vec![]);
+                }
+            }
             continue;
         }
 
@@ -150,9 +215,6 @@ pub async fn sync_ecu_data(
         *tune_guard = Some(tune);
     }
 
-    // Mark as not modified (freshly synced from ECU)
-    *state.tune_modified.lock().await = false;
-
     // Emit complete
     let progress = SyncProgress {
         current_page: n_pages,
@@ -165,8 +227,10 @@ pub async fn sync_ecu_data(
     let _ = app.emit("sync:progress", &progress);
 
     // Compare baseline (pre-sync cache) with ECU read — only prompt when bytes differ.
-    let diff_pages = pages_with_differences(&baseline_pages, &ecu_tune.pages, n_pages);
-    if !diff_pages.is_empty() && pages_synced > 0 {
+    let diff_pages = pages_with_differences(&baseline_pages, &ecu_tune.pages, n_pages, &page_sizes);
+    let should_emit_mismatch = was_modified && pages_failed == 0 && !diff_pages.is_empty();
+
+    if should_emit_mismatch {
         let baseline_page_nums: Vec<u8> = baseline_pages.keys().copied().collect();
         let ecu_page_nums: Vec<u8> = ecu_tune.pages.keys().copied().collect();
         let _ = app.emit(
@@ -177,6 +241,11 @@ pub async fn sync_ecu_data(
                 "diff_pages": diff_pages,
             }),
         );
+    } else if pages_failed > 0 && !was_modified {
+        // Partial read with no local edits — restore pre-sync cache instead of leaving drift.
+        restore_baseline_pages(state.inner(), &baseline_pages).await;
+    } else if pages_failed == 0 {
+        *state.tune_modified.lock().await = false;
     }
 
     // Log detailed errors for debugging
@@ -209,7 +278,7 @@ mod tests {
         baseline.insert(0, vec![1, 2, 3]);
         let mut ecu = HashMap::new();
         ecu.insert(0, vec![1, 2, 4]);
-        assert_eq!(pages_with_differences(&baseline, &ecu, 2), vec![0]);
+        assert_eq!(pages_with_differences(&baseline, &ecu, 2, &[3, 0]), vec![0]);
     }
 
     #[test]
@@ -220,6 +289,26 @@ mod tests {
         let mut ecu = HashMap::new();
         ecu.insert(0, vec![1, 2, 3]);
         ecu.insert(1, vec![9, 9]);
-        assert!(pages_with_differences(&baseline, &ecu, 2).is_empty());
+        assert!(pages_with_differences(&baseline, &ecu, 2, &[3, 2]).is_empty());
+    }
+
+    #[test]
+    fn pages_with_differences_ignores_failed_ecu_reads() {
+        let mut baseline = HashMap::new();
+        baseline.insert(0, vec![1, 2, 3]);
+        baseline.insert(1, vec![9, 9]);
+        let mut ecu = HashMap::new();
+        ecu.insert(0, vec![1, 2, 3]);
+        assert!(pages_with_differences(&baseline, &ecu, 2, &[3, 2]).is_empty());
+    }
+
+    #[test]
+    fn pages_with_differences_skips_zero_size_pages() {
+        let mut baseline = HashMap::new();
+        baseline.insert(0, vec![]);
+        baseline.insert(1, vec![1]);
+        let mut ecu = HashMap::new();
+        ecu.insert(1, vec![2]);
+        assert_eq!(pages_with_differences(&baseline, &ecu, 2, &[0, 1]), vec![1]);
     }
 }

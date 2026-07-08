@@ -71,6 +71,8 @@ export interface ToolbarItem {
   tooltip: string;
   disabled?: boolean;
   active?: boolean;
+  /** Visual emphasis for pending ECU burn (red flame icon). */
+  variant?: 'burn-pending';
   separator?: boolean;
   onClick?: () => void;
   /** Optional custom content to render instead of a standard icon button */

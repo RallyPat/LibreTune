@@ -106,6 +106,12 @@ export interface CurveData {
   gauge?: string | null;
 }
 
+/** Values edited in a curve table (X = coolant/temperature bins, Y = PWM/output). */
+export interface CurveBinValues {
+  xBins: number[];
+  yBins: number[];
+}
+
 interface CurveEditorProps {
   /** Curve data from backend */
   data: CurveData;
@@ -115,8 +121,8 @@ interface CurveEditorProps {
   gaugeConfig?: TsGaugeConfig | null;
   /** Simple gauge info from INI (alternative to gaugeConfig) */
   simpleGaugeInfo?: SimpleGaugeInfo | null;
-  /** Callback when Y values are modified */
-  onValuesChange?: (yBins: number[]) => void;
+  /** Callback when X or Y bin values are modified */
+  onValuesChange?: (values: CurveBinValues) => void;
   /** Callback when user wants to go back (standalone mode) */
   onBack?: () => void;
   /** Menu label for display in title */
@@ -160,12 +166,14 @@ export default function CurveEditor({
 
   // Use safe fallback values for hooks when data is invalid
   const safeYBins = hasValidData ? data.y_bins : [0];
+  const safeXBinsArray = hasValidData ? data.x_bins : [0];
   const safeXOutputChannel = hasValidData && data.x_output_channel ? data.x_output_channel : '';
 
   // Get realtime value for the X output channel from Zustand store
   const xOutputChannelValue = useChannelValue(safeXOutputChannel, undefined);
   
-  // Local copy of Y values for editing
+  // Local copies for editing
+  const [localXBins, setLocalXBins] = useState<number[]>([...safeXBinsArray]);
   const [localYBins, setLocalYBins] = useState<number[]>([...safeYBins]);
   // Selected point index
   const [selectedPoint, setSelectedPoint] = useState<number | null>(null);
@@ -173,10 +181,10 @@ export default function CurveEditor({
   const [isDragging, setIsDragging] = useState(false);
   const [dragPointIndex, setDragPointIndex] = useState<number | null>(null);
   // Table input value for editing
-  const [editingCell, setEditingCell] = useState<number | null>(null);
+  const [editingCell, setEditingCell] = useState<{ index: number; axis: 'x' | 'y' } | null>(null);
   const [editValue, setEditValue] = useState<string>('');
   // Undo/Redo history
-  const [history, setHistory] = useState<number[][]>([]);
+  const [history, setHistory] = useState<CurveBinValues[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
   // Context menu state
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
@@ -190,9 +198,10 @@ export default function CurveEditor({
   // Update local values when data changes
   useEffect(() => {
     if (hasValidData) {
+      setLocalXBins([...data.x_bins]);
       setLocalYBins([...data.y_bins]);
     }
-  }, [hasValidData, data?.y_bins]);
+  }, [hasValidData, data?.x_bins, data?.y_bins]);
 
   // Click-outside handler for context menu
   useEffect(() => {
@@ -359,22 +368,22 @@ export default function CurveEditor({
 
   // Polyline points
   const polylinePoints = useMemo(() => {
-    if (!hasValidData || !data?.x_bins || data.x_bins.length === 0) return '';
-    return data.x_bins.map((x, i) => `${scaleX(x)},${scaleY(localYBins[i] ?? 0)}`).join(' ');
-  }, [hasValidData, data?.x_bins, localYBins, scaleX, scaleY]);
+    if (!hasValidData || localXBins.length === 0) return '';
+    return localXBins.map((x, i) => `${scaleX(x)},${scaleY(localYBins[i] ?? 0)}`).join(' ');
+  }, [hasValidData, localXBins, localYBins, scaleX, scaleY]);
 
   // Live cursor position
   const liveCursor = useMemo(() => {
-    if (!hasValidData || !data?.x_bins || data.x_bins.length === 0) return null;
+    if (!hasValidData || localXBins.length === 0) return null;
     if (xOutputChannelValue === undefined || !data.x_output_channel) return null;
     const xValue = xOutputChannelValue;
     
     // Find the interpolated Y value (supports ascending or descending bins)
     let yValue = localYBins[0] ?? 0;
-    const ascending = data.x_bins[0] <= data.x_bins[data.x_bins.length - 1];
-    for (let i = 0; i < data.x_bins.length - 1; i++) {
-      const start = data.x_bins[i];
-      const end = data.x_bins[i + 1];
+    const ascending = localXBins[0] <= localXBins[localXBins.length - 1];
+    for (let i = 0; i < localXBins.length - 1; i++) {
+      const start = localXBins[i];
+      const end = localXBins[i + 1];
       const inRange = ascending
         ? xValue >= start && xValue <= end
         : xValue <= start && xValue >= end;
@@ -385,38 +394,49 @@ export default function CurveEditor({
         break;
       }
     }
-    if ((ascending && xValue > data.x_bins[data.x_bins.length - 1]) || (!ascending && xValue < data.x_bins[data.x_bins.length - 1])) {
+    if ((ascending && xValue > localXBins[localXBins.length - 1]) || (!ascending && xValue < localXBins[localXBins.length - 1])) {
       yValue = localYBins[localYBins.length - 1] ?? 0;
     }
     
     return { x: xValue, y: yValue, screenX: scaleX(xValue), screenY: scaleY(yValue) };
-  }, [hasValidData, xOutputChannelValue, data?.x_output_channel, data?.x_bins, localYBins, scaleX, scaleY]);
+  }, [hasValidData, xOutputChannelValue, data?.x_output_channel, localXBins, localYBins, scaleX, scaleY]);
 
   // Persist changes to backend
-  const persistCurveValues = useCallback(async (yBins: number[]) => {
+  const persistCurveValues = useCallback(async (xBins: number[], yBins: number[]) => {
     try {
-      await invoke('update_curve_data', { curveName: data.name, yValues: yBins });
-      onValuesChange?.(yBins);
+      await invoke('update_curve_data', {
+        curveName: data.name,
+        xValues: xBins,
+        yValues: yBins,
+      });
+      onValuesChange?.({ xBins, yBins });
     } catch (err) {
       console.error('Failed to update curve:', err);
     }
   }, [data.name, onValuesChange]);
 
+  const currentSnapshot = useCallback(
+    (): CurveBinValues => ({ xBins: [...localXBins], yBins: [...localYBins] }),
+    [localXBins, localYBins],
+  );
+
   // Push current state to history before making changes
   const pushHistory = useCallback(() => {
+    const snapshot = currentSnapshot();
     const newHistory = history.slice(0, historyIndex + 1);
-    newHistory.push([...localYBins]);
+    newHistory.push(snapshot);
     setHistory(newHistory);
     setHistoryIndex(newHistory.length - 1);
-  }, [localYBins, history, historyIndex]);
+  }, [currentSnapshot, history, historyIndex]);
 
   // Undo last change
   const undo = useCallback(() => {
     if (historyIndex >= 0) {
       const previousState = history[historyIndex];
-      setLocalYBins(previousState);
+      setLocalXBins(previousState.xBins);
+      setLocalYBins(previousState.yBins);
       setHistoryIndex(historyIndex - 1);
-      persistCurveValues(previousState);
+      persistCurveValues(previousState.xBins, previousState.yBins);
     }
   }, [history, historyIndex, persistCurveValues]);
 
@@ -425,8 +445,9 @@ export default function CurveEditor({
     if (historyIndex < history.length - 1) {
       const nextState = history[historyIndex + 1];
       setHistoryIndex(historyIndex + 1);
-      setLocalYBins(nextState);
-      persistCurveValues(nextState);
+      setLocalXBins(nextState.xBins);
+      setLocalYBins(nextState.yBins);
+      persistCurveValues(nextState.xBins, nextState.yBins);
     }
   }, [history, historyIndex, persistCurveValues]);
 
@@ -478,48 +499,57 @@ export default function CurveEditor({
   // Handle mouse up to end dragging
   const handleMouseUp = useCallback(() => {
     if (isDragging && dragPointIndex !== null) {
-      // Commit the change to backend
-      persistCurveValues(localYBins);
+      persistCurveValues(localXBins, localYBins);
     }
     setIsDragging(false);
     setDragPointIndex(null);
-  }, [isDragging, dragPointIndex, localYBins, persistCurveValues]);
+  }, [isDragging, dragPointIndex, localXBins, localYBins, persistCurveValues]);
 
-  // Handle table cell edit
-  const handleCellDoubleClick = (index: number) => {
-    pushHistory(); // Save state before editing
-    setEditingCell(index);
-    setEditValue(localYBins[index].toFixed(2));
-  };
-
-  const handleCellKeyDown = (e: React.KeyboardEvent, index: number) => {
-    if (e.key === 'Enter') {
+  const commitCellEdit = useCallback(
+    (index: number, axis: 'x' | 'y') => {
       const parsed = parseFloat(editValue);
-      if (!isNaN(parsed)) {
-        let clamped = parsed;
-        clamped = Math.max(yAxis.min, Math.min(yAxis.max, clamped));
+      if (isNaN(parsed)) {
+        setEditingCell(null);
+        return;
+      }
+
+      if (axis === 'x') {
+        const clamped = Math.max(xAxis.min, Math.min(xAxis.max, parsed));
+        const newXBins = [...localXBins];
+        newXBins[index] = clamped;
+        setLocalXBins(newXBins);
+        persistCurveValues(newXBins, localYBins);
+      } else {
+        const clamped = Math.max(yAxis.min, Math.min(yAxis.max, parsed));
         const newYBins = [...localYBins];
         newYBins[index] = clamped;
         setLocalYBins(newYBins);
-        persistCurveValues(newYBins);
+        persistCurveValues(localXBins, newYBins);
       }
       setEditingCell(null);
+    },
+    [editValue, xAxis, yAxis, localXBins, localYBins, persistCurveValues],
+  );
+
+  // Handle table cell edit
+  const handleCellDoubleClick = (index: number, axis: 'x' | 'y') => {
+    pushHistory();
+    setEditingCell({ index, axis });
+    setEditValue(
+      (axis === 'x' ? localXBins[index] : localYBins[index]).toFixed(2),
+    );
+  };
+
+  const handleCellKeyDown = (e: React.KeyboardEvent, index: number, axis: 'x' | 'y') => {
+    if (e.key === 'Enter') {
+      commitCellEdit(index, axis);
     } else if (e.key === 'Escape') {
       setEditingCell(null);
     }
   };
 
-  const handleCellBlur = (index: number) => {
-    const parsed = parseFloat(editValue);
-    if (!isNaN(parsed)) {
-      let clamped = parsed;
-      clamped = Math.max(yAxis.min, Math.min(yAxis.max, clamped));
-      const newYBins = [...localYBins];
-      newYBins[index] = clamped;
-      setLocalYBins(newYBins);
-      persistCurveValues(newYBins);
-    }
-    setEditingCell(null);
+  const handleCellBlur = (index: number, axis: 'x' | 'y') => {
+    commitCellEdit(index, axis);
   };
 
   // Handle row click to select
@@ -656,7 +686,61 @@ Suggestion: {errorInfo.suggestion}
   // Gauge value from store
   const gaugeValue = xOutputChannelValue ?? 0;
 
-  console.log(`[CurveEditor] Rendering curve '${data.name}' in ${embedded ? 'embedded' : 'standalone'} mode with ${data.x_bins.length} points`);
+  console.log(`[CurveEditor] Rendering curve '${data.name}' in ${embedded ? 'embedded' : 'standalone'} mode with ${localXBins.length} points`);
+
+  const renderCurveTableBody = () =>
+    localXBins.map((x, i) => {
+      const yValue = localYBins[i];
+      const xCellStyle = getHeatmapCellStyle(x, xAxis.min, xAxis.max);
+      const yCellStyle = getHeatmapCellStyle(yValue, yAxis.min, yAxis.max);
+      const editingX = editingCell?.index === i && editingCell.axis === 'x';
+      const editingY = editingCell?.index === i && editingCell.axis === 'y';
+
+      return (
+        <tr
+          key={i}
+          className={selectedPoint === i ? 'selected' : ''}
+          onClick={() => handleRowClick(i)}
+        >
+          <td
+            className="x-cell"
+            style={xCellStyle}
+            onDoubleClick={() => handleCellDoubleClick(i, 'x')}
+          >
+            {editingX ? (
+              <input
+                type="text"
+                value={editValue}
+                onChange={(e) => setEditValue(e.target.value)}
+                onKeyDown={(e) => handleCellKeyDown(e, i, 'x')}
+                onBlur={() => handleCellBlur(i, 'x')}
+                autoFocus
+              />
+            ) : (
+              x.toFixed(2)
+            )}
+          </td>
+          <td
+            className="y-cell"
+            style={yCellStyle}
+            onDoubleClick={() => handleCellDoubleClick(i, 'y')}
+          >
+            {editingY ? (
+              <input
+                type="text"
+                value={editValue}
+                onChange={(e) => setEditValue(e.target.value)}
+                onKeyDown={(e) => handleCellKeyDown(e, i, 'y')}
+                onBlur={() => handleCellBlur(i, 'y')}
+                autoFocus
+              />
+            ) : (
+              yValue.toFixed(2)
+            )}
+          </td>
+        </tr>
+      );
+    });
 
   return (
     <div 
@@ -801,7 +885,7 @@ Suggestion: {errorInfo.suggestion}
             />
 
             {/* Data points */}
-            {data.x_bins.map((x, i) => (
+            {localXBins.map((x, i) => (
               <circle
                 key={i}
                 cx={scaleX(x)}
@@ -853,41 +937,7 @@ Suggestion: {errorInfo.suggestion}
                 <th>{data.y_label}</th>
               </tr>
             </thead>
-            <tbody>
-              {data.x_bins.map((x, i) => {
-                const yValue = localYBins[i];
-                const xCellStyle = getHeatmapCellStyle(x, xAxis.min, xAxis.max);
-                const yCellStyle = getHeatmapCellStyle(yValue, yAxis.min, yAxis.max);
-                
-                return (
-                  <tr
-                    key={i}
-                    className={selectedPoint === i ? 'selected' : ''}
-                    onClick={() => handleRowClick(i)}
-                  >
-                    <td className="x-cell" style={xCellStyle}>{x.toFixed(2)}</td>
-                    <td
-                      className="y-cell"
-                      style={yCellStyle}
-                      onDoubleClick={() => handleCellDoubleClick(i)}
-                    >
-                      {editingCell === i ? (
-                        <input
-                          type="text"
-                          value={editValue}
-                          onChange={(e) => setEditValue(e.target.value)}
-                          onKeyDown={(e) => handleCellKeyDown(e, i)}
-                          onBlur={() => handleCellBlur(i)}
-                          autoFocus
-                        />
-                      ) : (
-                        yValue.toFixed(2)
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
+            <tbody>{renderCurveTableBody()}</tbody>
           </table>
         </div>
             {(gaugeConfig || simpleGaugeInfo) && (
@@ -909,41 +959,7 @@ Suggestion: {errorInfo.suggestion}
                   <th>{data.y_label}</th>
                 </tr>
               </thead>
-              <tbody>
-                {data.x_bins.map((x, i) => {
-                  const yValue = localYBins[i];
-                  const xCellStyle = getHeatmapCellStyle(x, xAxis.min, xAxis.max);
-                  const yCellStyle = getHeatmapCellStyle(yValue, yAxis.min, yAxis.max);
-                  
-                  return (
-                    <tr
-                      key={i}
-                      className={selectedPoint === i ? 'selected' : ''}
-                      onClick={() => handleRowClick(i)}
-                    >
-                      <td className="x-cell" style={xCellStyle}>{x.toFixed(2)}</td>
-                      <td
-                        className="y-cell"
-                        style={yCellStyle}
-                        onDoubleClick={() => handleCellDoubleClick(i)}
-                      >
-                        {editingCell === i ? (
-                          <input
-                            type="text"
-                            value={editValue}
-                            onChange={(e) => setEditValue(e.target.value)}
-                            onKeyDown={(e) => handleCellKeyDown(e, i)}
-                            onBlur={() => handleCellBlur(i)}
-                            autoFocus
-                          />
-                        ) : (
-                          yValue.toFixed(2)
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
+              <tbody>{renderCurveTableBody()}</tbody>
             </table>
           </div>
         )}

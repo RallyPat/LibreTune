@@ -57,6 +57,8 @@ pub async fn burn_to_ecu(
     conn.send_burn_command()
         .map_err(|e| format!("Burn failed: {}", e))?;
 
+    *state.tune_modified.lock().await = false;
+
     Ok(())
 }
 

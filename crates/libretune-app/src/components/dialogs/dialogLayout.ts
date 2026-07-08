@@ -191,6 +191,16 @@ export function rowHasConfigLiveStateSplit(row: DialogComponentRow): boolean {
   return eastPanels.some((c) => inferLiveStateGateExpression(c.name!) !== null);
 }
 
+/** West + East both hold settings panels (e.g. fan + water pump) — not config/live readouts. */
+export function rowHasDualSettingsSplit(row: DialogComponentRow): boolean {
+  if (row.west.length === 0 || row.east.length === 0) return false;
+  if (rowHasTableSplitLayout(row)) return false;
+  if (rowHasConfigLiveStateSplit(row)) return false;
+  const isSettingsPanel = (c: DialogComponent) =>
+    c.type === 'Panel' && !!c.name && !isTableComponent(c);
+  return row.west.some(isSettingsPanel) && row.east.some(isSettingsPanel);
+}
+
 /**
  * Preserve West/East layout for config + live-state shell dialogs.
  * Strips Center-only noise so WMI / launch control render as a two-column split.

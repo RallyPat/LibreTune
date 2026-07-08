@@ -48,12 +48,37 @@
   width: 100%;
 }
 
-/* Multi-column layout support for dialogs with East/West positioned panels */
+/* Multi-column layout support for dialogs with East/West positioned panels.
+   Default: equal split so dense settings panels (fan + water pump) share space. */
 .dialog-view .dialog-row-container {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
   align-items: start;
+  width: 100%;
+}
+
+.dialog-view .dialog-row-container:not(.dialog-row-container--config-live) .dialog-column .nested-panel {
+  max-width: none;
+  width: 100%;
+}
+
+.dialog-view .dialog-row-container .dialog-column {
+  min-width: 0;
+}
+
+.dialog-view .dialog-row-container .dialog-column:last-child:not(:only-child) {
+  min-width: 0;
+}
+
+@container (max-width: 440px) {
+  .dialog-view .panel-content--multi {
+    grid-template-columns: 1fr;
+  }
+}
+
+.dialog-view .dialog-row-container--settings-split {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
 }
 
 /* Config left, embedded table right (user tables, GPPWM, etc.) */
@@ -87,11 +112,12 @@
   flex-direction: column;
   gap: 6px;
   min-height: 0;
+  container-type: inline-size;
 }
 
-/* Live-state side panel (WMI, launch control, etc.) — config left, compact readouts right */
-.dialog-view .dialog-row-container--config-live,
-.dialog-view .dialog-row-container:has(.readout-panel) {
+/* Live-state side panel (WMI, launch control, etc.) — config left, compact readouts right.
+   Applied only via dialog-row-container--config-live (not :has(.readout-panel)). */
+.dialog-view .dialog-row-container--config-live {
   grid-template-columns: minmax(0, 1fr) minmax(240px, 340px);
 }
 
@@ -379,7 +405,7 @@
 /* Split long forms into two side-by-side columns */
 .dialog-view .panel-content--multi {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(220px, 1fr));
   column-gap: 12px;
   padding: 0 8px 4px;
 }

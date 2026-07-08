@@ -73,6 +73,22 @@
   align-items: center;
 }
 
+.firmware-companion-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 10px;
+}
+
+.firmware-companion-row .firmware-file-path {
+  flex: 1;
+  min-width: 0;
+}
+
+.firmware-flasher-hint a {
+  color: var(--accent);
+}
+
 .firmware-file-path {
   flex: 1;
   min-width: 0;

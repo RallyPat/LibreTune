@@ -41,6 +41,15 @@
   color: var(--primary);
 }
 
+.toolbar-button-burn-pending:not(:disabled) {
+  color: var(--error);
+}
+
+.toolbar-button-burn-pending:not(:disabled):hover {
+  background: rgba(255, 80, 80, 0.15);
+  color: var(--error);
+}
+
 .toolbar-button:disabled {
   color: var(--text-disabled);
   cursor: not-allowed;
