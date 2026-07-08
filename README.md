@@ -21,7 +21,7 @@ Modern, open-source ECU tuning software for Speeduino, rusEFI, epicEFI, and othe
 
 > ⚠️ **Nightly builds** are automatically generated from the latest code and may be unstable.
 
-![LibreTune Table Editor](docs/screenshots/table-editor.png)
+![LibreTune Table Editor](docs/screenshots/LibreTune_table_editor.png)
 
 ## Features
 
@@ -55,7 +55,7 @@ For full documentation, see the [User Manual](https://rallypat.github.io/LibreTu
 
 | Welcome Screen | Settings Dialog | Table Editor |
 |:--------------:|:---------------:|:------------:|
-| ![Welcome](docs/screenshots/welcome.png) | ![Settings](docs/screenshots/settings-dialog.png) | ![Table Editor](docs/screenshots/table-editor.png) |
+| ![Welcome](docs/screenshots/welcome.png) | ![Settings](docs/screenshots/LibreTune_Config.png) | ![Table Editor](docs/screenshots/table-editor.png) |
 
 ## Supported ECUs
 

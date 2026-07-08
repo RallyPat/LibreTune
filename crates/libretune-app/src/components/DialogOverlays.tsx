@@ -61,6 +61,7 @@ export interface DialogOverlaysProps {
   setLoadDialogOpen: (v: boolean) => void;
   burnDialogOpen: boolean;
   setBurnDialogOpen: (v: boolean) => void;
+  refreshTuneModified?: () => void | Promise<void>;
   firmwareUpdateDialogOpen: boolean;
   setFirmwareUpdateDialogOpen: (v: boolean) => void;
   iniCapabilities: IniCapabilities | null;
@@ -192,7 +193,7 @@ export function DialogOverlays(props: DialogOverlaysProps) {
     status, currentProject, theme, setTheme, showToast,
     saveDialogOpen, setSaveDialogOpen, autoBurnOnClose,
     loadDialogOpen, setLoadDialogOpen,
-    burnDialogOpen, setBurnDialogOpen,
+    burnDialogOpen, setBurnDialogOpen, refreshTuneModified,
     firmwareUpdateDialogOpen, setFirmwareUpdateDialogOpen, iniCapabilities,
     newTuneDialogOpen, setNewTuneDialogOpen,
     settingsDialogOpen, setSettingsDialogOpen,
@@ -231,9 +232,19 @@ export function DialogOverlays(props: DialogOverlaysProps) {
 
   return (
     <>
-      <SaveDialog isOpen={saveDialogOpen} onClose={() => setSaveDialogOpen(false)} autoBurnOnClose={autoBurnOnClose} />
+      <SaveDialog
+        isOpen={saveDialogOpen}
+        onClose={() => setSaveDialogOpen(false)}
+        autoBurnOnClose={autoBurnOnClose}
+        onSaved={() => { void refreshTuneModified?.(); }}
+      />
       <LoadDialog isOpen={loadDialogOpen} onClose={() => setLoadDialogOpen(false)} />
-      <BurnDialog isOpen={burnDialogOpen} onClose={() => setBurnDialogOpen(false)} connected={status.state === "Connected"} />
+      <BurnDialog
+        isOpen={burnDialogOpen}
+        onClose={() => setBurnDialogOpen(false)}
+        connected={status.state === "Connected"}
+        onBurned={() => { void refreshTuneModified?.(); }}
+      />
       <FirmwareUpdateDialog
         isOpen={firmwareUpdateDialogOpen}
         onClose={() => setFirmwareUpdateDialogOpen(false)}

@@ -234,53 +234,28 @@ pub async fn get_curve_data(
     })
 }
 
-/// Updates table Z values in the tune cache and optionally writes to ECU.
-///
-/// Converts display values to raw bytes and writes to the tune cache.
-/// If connected to ECU, also writes to ECU memory. Works in offline mode.
-///
-/// # Arguments
-/// * `curve_name` - Curve name from INI definition
-/// * `y_values` - Vector of new Y values in display units
-///
-/// Returns: Nothing on success
-#[tauri::command]
-pub async fn update_curve_data(
-    state: tauri::State<'_, AppState>,
-    curve_name: String,
-    y_values: Vec<f64>,
+fn write_constant_array_values(
+    def: &libretune_core::ini::EcuDefinition,
+    constant: &libretune_core::ini::Constant,
+    values: &[f64],
+    cache: &mut libretune_core::tune::TuneCache,
+    tune: &mut Option<libretune_core::tune::TuneFile>,
+    tune_modified: &mut bool,
+    conn: &mut Option<&mut Connection>,
 ) -> Result<(), String> {
-    let mut conn_guard = state.connection.lock().await;
-    let def_guard = state.definition.lock().await;
-    let mut cache_guard = state.tune_cache.lock().await;
-
-    let def = def_guard.as_ref().ok_or("Definition not loaded")?;
-
-    let curve = def
-        .get_curve_by_name_or_map(&curve_name)
-        .ok_or_else(|| format!("Curve {} not found", curve_name))?;
-
-    // Get the Y-bins constant (the values we're updating)
-    let constant = def.constants.get(&curve.y_bins).ok_or_else(|| {
-        format!(
-            "Constant {} not found for curve {}",
-            curve.y_bins, curve_name
-        )
-    })?;
-
-    if y_values.len() != constant.shape.element_count() {
+    if values.len() != constant.shape.element_count() {
         return Err(format!(
-            "Invalid data size: expected {}, got {}",
+            "Invalid data size for {}: expected {}, got {}",
+            constant.name,
             constant.shape.element_count(),
-            y_values.len()
+            values.len()
         ));
     }
 
-    // Convert display values to raw bytes
     let element_size = constant.data_type.size_bytes();
     let mut raw_data = vec![0u8; constant.size_bytes()];
 
-    for (i, val) in y_values.iter().enumerate() {
+    for (i, val) in values.iter().enumerate() {
         let raw_val = constant.display_to_raw(*val);
         let offset = i * element_size;
         constant
@@ -288,53 +263,126 @@ pub async fn update_curve_data(
             .write_to_bytes(&mut raw_data, offset, raw_val, def.endianness);
     }
 
-    // Write to TuneCache if available (enables offline editing)
-    if let Some(cache) = cache_guard.as_mut() {
-        if cache.write_bytes(constant.page, constant.offset, &raw_data) {
-            // Also update TuneFile in memory
-            let mut tune_guard = state.current_tune.lock().await;
-            if let Some(tune) = tune_guard.as_mut() {
-                // Update the parsed constants map (used by get_curve_data)
-                tune.constants.insert(
-                    constant.name.clone(),
-                    libretune_core::tune::TuneValue::Array(y_values.clone()),
-                );
+    if cache.write_bytes(constant.page, constant.offset, &raw_data) {
+        if let Some(tune) = tune.as_mut() {
+            tune.constants.insert(
+                constant.name.clone(),
+                libretune_core::tune::TuneValue::Array(values.to_vec()),
+            );
 
-                // Also update raw page data
-                let page_data = tune.pages.entry(constant.page).or_insert_with(|| {
-                    vec![
-                        0u8;
-                        def.page_sizes
-                            .get(constant.page as usize)
-                            .copied()
-                            .unwrap_or(256) as usize
-                    ]
-                });
+            let page_data = tune.pages.entry(constant.page).or_insert_with(|| {
+                vec![
+                    0u8;
+                    def.page_sizes
+                        .get(constant.page as usize)
+                        .copied()
+                        .unwrap_or(256) as usize
+                ]
+            });
 
-                let start = constant.offset as usize;
-                let end = start + raw_data.len();
-                if end <= page_data.len() {
-                    page_data[start..end].copy_from_slice(&raw_data);
-                }
+            let start = constant.offset as usize;
+            let end = start + raw_data.len();
+            if end <= page_data.len() {
+                page_data[start..end].copy_from_slice(&raw_data);
             }
-
-            // Mark tune as modified
-            *state.tune_modified.lock().await = true;
         }
+
+        *tune_modified = true;
     }
 
-    // Write to ECU if connected
-    if let Some(conn) = conn_guard.as_mut() {
+    if let Some(conn) = conn.as_mut() {
         let params = libretune_core::protocol::commands::WriteMemoryParams {
             can_id: 0,
             page: constant.page,
             offset: constant.offset,
-            data: raw_data.clone(),
+            data: raw_data,
         };
 
         if let Err(e) = conn.write_memory(params) {
-            eprintln!("[WARN] Failed to write curve to ECU (offline mode?): {}", e);
+            eprintln!(
+                "[WARN] Failed to write constant '{}' to ECU: {}",
+                constant.name, e
+            );
         }
+    }
+
+    Ok(())
+}
+
+/// Updates curve X and/or Y bin values in the tune cache and optionally writes to ECU.
+#[tauri::command]
+pub async fn update_curve_data(
+    state: tauri::State<'_, AppState>,
+    curve_name: String,
+    y_values: Option<Vec<f64>>,
+    x_values: Option<Vec<f64>>,
+) -> Result<(), String> {
+    if y_values.is_none() && x_values.is_none() {
+        return Err("No curve values provided".to_string());
+    }
+
+    let mut conn_guard = state.connection.lock().await;
+    let def_guard = state.definition.lock().await;
+    let mut cache_guard = state.tune_cache.lock().await;
+    let mut tune_guard = state.current_tune.lock().await;
+    let mut modified_guard = state.tune_modified.lock().await;
+
+    let def = def_guard.as_ref().ok_or("Definition not loaded")?;
+
+    let curve = def
+        .get_curve_by_name_or_map(&curve_name)
+        .ok_or_else(|| format!("Curve {} not found", curve_name))?;
+
+    let x_const_name = curve.x_bins.clone();
+    let y_const_name = curve.y_bins.clone();
+    let x_const = def
+        .constants
+        .get(&x_const_name)
+        .ok_or_else(|| {
+            format!(
+                "Constant {} not found for curve {}",
+                x_const_name, curve_name
+            )
+        })?
+        .clone();
+    let y_const = def
+        .constants
+        .get(&y_const_name)
+        .ok_or_else(|| {
+            format!(
+                "Constant {} not found for curve {}",
+                y_const_name, curve_name
+            )
+        })?
+        .clone();
+
+    let cache = cache_guard
+        .as_mut()
+        .ok_or("Tune cache not initialized — open or create a project first")?;
+    let mut conn = conn_guard.as_mut();
+
+    if let Some(values) = x_values {
+        write_constant_array_values(
+            def,
+            &x_const,
+            &values,
+            cache,
+            &mut tune_guard,
+            &mut modified_guard,
+            &mut conn,
+        )?;
+    }
+
+    if let Some(values) = y_values {
+        write_constant_array_values(
+            def,
+            &y_const,
+            &values,
+            cache,
+            &mut tune_guard,
+            &mut modified_guard,
+            &mut conn,
+        )?;
     }
 
     Ok(())

@@ -9,6 +9,7 @@ import {
   organizeComponents,
   partitionHardwareTestComponents,
   rowHasConfigLiveStateSplit,
+  rowHasDualSettingsSplit,
   rowHasTableSplitLayout,
 } from './dialogLayout';
 
@@ -101,6 +102,7 @@ export function DialogComponentsLayout({
 
         const tableSplitLayout = rowHasTableSplitLayout(row);
         const configLiveSplit = useConfigLiveSplit || rowHasConfigLiveStateSplit(row);
+        const dualSettingsSplit = rowHasDualSettingsSplit(row);
 
         return (
           <React.Fragment key={`row-${rowIndex}`}>
@@ -108,7 +110,7 @@ export function DialogComponentsLayout({
               renderComponent(comp, `pre-${rowIndex}-${i}`),
             )}
             <div
-              className={`dialog-row-container${tableSplitLayout ? ' dialog-row-container--table-settings' : ''}${configLiveSplit ? ' dialog-row-container--config-live' : ''}`}
+              className={`dialog-row-container${tableSplitLayout ? ' dialog-row-container--table-settings' : ''}${configLiveSplit ? ' dialog-row-container--config-live' : ''}${dualSettingsSplit ? ' dialog-row-container--settings-split' : ''}`}
             >
               {row.west.length > 0 && (
                 <div className="dialog-column">

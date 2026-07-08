@@ -88,7 +88,7 @@ use commands::dyno::{compare_dyno_runs, detect_dyno_headers, load_dyno_run};
 use commands::find_inis::find_matching_inis;
 use commands::firmware_update::{
     get_firmware_flasher_info, get_firmware_update_guidance, recover_ecu_firmware_dfu,
-    update_ecu_firmware,
+    release_serial_port_blockers, suggest_firmware_companion, update_ecu_firmware,
 };
 use commands::get_table_data::get_table_data;
 use commands::git::{
@@ -318,8 +318,10 @@ pub fn run() {
             execute_controller_command,
             get_firmware_flasher_info,
             get_firmware_update_guidance,
+            suggest_firmware_companion,
             update_ecu_firmware,
             recover_ecu_firmware_dfu,
+            release_serial_port_blockers,
             use_project_tune,
             use_ecu_tune,
             mark_tune_modified,

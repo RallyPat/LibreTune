@@ -15,6 +15,7 @@ import type {
 export interface BuildMenuItemsDeps {
   t: TFunction;
   currentProject: CurrentProject | null;
+  tuneModified: boolean;
   status: ConnectionStatus;
   ecuType: string;
   iniCapabilities: IniCapabilities | null;
@@ -35,6 +36,7 @@ export interface BuildMenuItemsDeps {
   setSaveDialogOpen: (open: boolean) => void;
   setLoadDialogOpen: (open: boolean) => void;
   setBurnDialogOpen: (open: boolean) => void;
+  refreshTuneModified?: () => void | Promise<void>;
   setFirmwareUpdateDialogOpen: (open: boolean) => void;
   setRestorePointsOpen: (open: boolean) => void;
   setTuneHistoryOpen: (open: boolean) => void;
@@ -64,7 +66,7 @@ function quitApp(): void {
 
 export function buildMenuItems(deps: BuildMenuItemsDeps): TunerMenuItem[] {
   const {
-    t, currentProject, status, ecuType, iniCapabilities, backendMenus, theme,
+    t, currentProject, tuneModified, status, ecuType, iniCapabilities, backendMenus, theme,
     sidebarVisible, tabs, openTarget, handleStdTarget, openHelpTopic, showToast,
     closeProject, handleCreateRestorePoint,
     setNewProjectDialogOpen, setImportProjectOpen, setSaveDialogOpen, setLoadDialogOpen,
@@ -89,7 +91,7 @@ export function buildMenuItems(deps: BuildMenuItemsDeps): TunerMenuItem[] {
         { id: "restore-points", label: "Restore &Points...", onClick: () => setRestorePointsOpen(true) },
         { id: "tune-history", label: "Tune &History...", onClick: () => setTuneHistoryOpen(true) },
         { id: "sep3", label: "", separator: true },
-        { id: "burn", label: "&Burn to ECU\tCtrl+B", onClick: () => setBurnDialogOpen(true), disabled: status.state !== "Connected" },
+        { id: "burn", label: "&Burn to ECU\tCtrl+B", onClick: () => setBurnDialogOpen(true), disabled: status.state !== "Connected" || !tuneModified },
         { id: "sep4", label: "", separator: true },
         { id: "exit", label: "E&xit", onClick: quitApp },
       ]

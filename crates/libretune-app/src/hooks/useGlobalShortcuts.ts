@@ -2,6 +2,7 @@ import { useEffect } from "react";
 
 export interface UseGlobalShortcutsDeps {
   isConnected: boolean;
+  tuneModified: boolean;
   setNewProjectDialogOpen: (open: boolean) => void;
   setLoadDialogOpen: (open: boolean) => void;
   setSaveDialogOpen: (open: boolean) => void;
@@ -18,6 +19,7 @@ export interface UseGlobalShortcutsDeps {
 export function useGlobalShortcuts(deps: UseGlobalShortcutsDeps) {
   const {
     isConnected,
+    tuneModified,
     setNewProjectDialogOpen,
     setLoadDialogOpen,
     setSaveDialogOpen,
@@ -43,7 +45,7 @@ export function useGlobalShortcuts(deps: UseGlobalShortcutsDeps) {
             break;
           case 'b':
             e.preventDefault();
-            if (isConnected) {
+            if (isConnected && tuneModified) {
               setBurnDialogOpen(true);
             }
             break;
@@ -53,5 +55,5 @@ export function useGlobalShortcuts(deps: UseGlobalShortcutsDeps) {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isConnected, setNewProjectDialogOpen, setLoadDialogOpen, setSaveDialogOpen, setBurnDialogOpen]);
+  }, [isConnected, tuneModified, setNewProjectDialogOpen, setLoadDialogOpen, setSaveDialogOpen, setBurnDialogOpen]);
 }

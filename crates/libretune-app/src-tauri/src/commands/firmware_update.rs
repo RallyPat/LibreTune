@@ -15,6 +15,7 @@ pub struct FirmwareFlasherInfo {
     pub stm32_programmer_cli: Option<String>,
     pub dfu_util: Option<String>,
     pub bootcommander: Option<String>,
+    pub objcopy: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -39,61 +40,326 @@ fn push_log(app: &AppHandle, log: &mut Vec<String>, line: impl Into<String>) {
     log.push(line);
 }
 
-fn find_on_path(name: &str) -> Option<PathBuf> {
-    let path_var = std::env::var_os("PATH")?;
-    std::env::split_paths(&path_var).find_map(|dir| {
-        let candidate = dir.join(name);
-        if candidate.is_file() {
-            Some(candidate)
-        } else {
-            None
-        }
-    })
+fn path_search_dirs() -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    if let Ok(path) = std::env::var("PATH") {
+        dirs.extend(std::env::split_paths(&path));
+    }
+    #[cfg(windows)]
+    if let Some(user_path) = windows_user_path_from_registry() {
+        dirs.extend(std::env::split_paths(&user_path));
+    }
+    dirs
 }
 
 #[cfg(windows)]
-fn find_stm32_programmer_cli() -> Option<PathBuf> {
-    if let Some(found) = find_on_path("STM32_Programmer_CLI.exe") {
-        return Some(found);
+fn windows_user_path_from_registry() -> Option<std::ffi::OsString> {
+    let output = Command::new("reg")
+        .args(["query", r"HKCU\Environment", "/v", "Path"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
     }
-    for base in ["C:\\Program Files", "C:\\Program Files (x86)"] {
-        let candidate = PathBuf::from(base)
-            .join("STMicroelectronics")
-            .join("STM32Cube")
-            .join("STM32CubeProgrammer")
-            .join("bin")
-            .join("STM32_Programmer_CLI.exe");
-        if candidate.is_file() {
-            return Some(candidate);
+    let text = String::from_utf8_lossy(&output.stdout);
+    for line in text.lines() {
+        let value = if let Some((_, rest)) = line.split_once("REG_EXPAND_SZ") {
+            expand_windows_env_path(rest.trim())
+        } else if let Some((_, rest)) = line.split_once("REG_SZ") {
+            rest.trim().to_string()
+        } else {
+            continue;
+        };
+        if !value.is_empty() {
+            return Some(std::ffi::OsString::from(value));
         }
     }
     None
 }
 
 #[cfg(not(windows))]
+fn windows_user_path_from_registry() -> Option<std::ffi::OsString> {
+    None
+}
+
+#[cfg(windows)]
+fn expand_windows_env_path(path: &str) -> String {
+    let mut out = path.to_string();
+    if let Ok(profile) = std::env::var("USERPROFILE") {
+        out = out.replace("%USERPROFILE%", &profile);
+    }
+    if let Ok(appdata) = std::env::var("LOCALAPPDATA") {
+        out = out.replace("%LOCALAPPDATA%", &appdata);
+    }
+    out
+}
+
+fn find_on_path(name: &str) -> Option<PathBuf> {
+    path_search_dirs().into_iter().find_map(|dir| {
+        let candidate = dir.join(name);
+        candidate.is_file().then_some(candidate)
+    })
+}
+
+#[cfg(windows)]
+fn find_via_where(name: &str) -> Option<PathBuf> {
+    let output = Command::new("where.exe")
+        .arg(name)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let line = stdout.lines().next()?.trim();
+    if line.is_empty() {
+        return None;
+    }
+    let path = PathBuf::from(line);
+    path.is_file().then_some(path)
+}
+
+#[cfg(not(windows))]
+fn find_via_where(_name: &str) -> Option<PathBuf> {
+    None
+}
+
+#[cfg(windows)]
+fn user_downloads_dir() -> Option<PathBuf> {
+    std::env::var_os("USERPROFILE").map(|home| PathBuf::from(home).join("Downloads"))
+}
+
+#[cfg(not(windows))]
+fn user_downloads_dir() -> Option<PathBuf> {
+    std::env::var_os("HOME").map(PathBuf::from)
+}
+
+fn collect_openblt_host_dirs() -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    #[cfg(windows)]
+    {
+        dirs.push(PathBuf::from(r"C:\OpenBLT\Host\Binaries"));
+        dirs.push(PathBuf::from(r"C:\OpenBLT\Host"));
+        dirs.push(PathBuf::from(r"C:\Program Files\OpenBLT\Host\Binaries"));
+        dirs.push(PathBuf::from(r"C:\Program Files\OpenBLT\Host"));
+    }
+    #[cfg(not(windows))]
+    {
+        dirs.push(PathBuf::from("/usr/local/bin"));
+        dirs.push(PathBuf::from("/opt/openblt/bin"));
+    }
+
+    if let Some(downloads) = user_downloads_dir() {
+        if let Ok(entries) = std::fs::read_dir(downloads) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if !path.is_dir() {
+                    continue;
+                }
+                let name = path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("")
+                    .to_ascii_lowercase();
+                if !name.contains("openblt") {
+                    continue;
+                }
+                dirs.push(path.join("Host"));
+                if let Ok(sub_entries) = std::fs::read_dir(&path) {
+                    for sub in sub_entries.flatten() {
+                        let sub_path = sub.path();
+                        if sub_path.is_dir() {
+                            dirs.push(sub_path.join("Host"));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    dirs
+}
+
+/// Resolve a flash tool: PATH first, then known install dirs, then `tools/` next to the app.
+fn resolve_tool(candidates: &[&str], extra_dirs: &[PathBuf]) -> Option<PathBuf> {
+    for name in candidates {
+        if let Some(found) = find_on_path(name) {
+            return Some(found);
+        }
+    }
+
+    for dir in extra_dirs {
+        for name in candidates {
+            let candidate = dir.join(name);
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+    }
+
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(exe_dir) = exe.parent() {
+            for sub in ["tools", "bin", "resources/tools"] {
+                let dir = exe_dir.join(sub);
+                for name in candidates {
+                    let candidate = dir.join(name);
+                    if candidate.is_file() {
+                        return Some(candidate);
+                    }
+                }
+            }
+        }
+    }
+
+    for name in candidates {
+        if let Some(found) = find_via_where(name) {
+            return Some(found);
+        }
+    }
+
+    None
+}
+
+#[cfg(windows)]
+fn stm32_programmer_search_dirs() -> Vec<PathBuf> {
+    let mut dirs = vec![
+        PathBuf::from(r"C:\Program Files\STMicroelectronics\STM32Cube\STM32CubeProgrammer\bin"),
+        PathBuf::from(
+            r"C:\Program Files (x86)\STMicroelectronics\STM32Cube\STM32CubeProgrammer\bin",
+        ),
+    ];
+    if let Some(local) = std::env::var_os("LOCALAPPDATA") {
+        dirs.push(
+            PathBuf::from(local)
+                .join("Programs")
+                .join("STMicroelectronics")
+                .join("STM32Cube")
+                .join("STM32CubeProgrammer")
+                .join("bin"),
+        );
+    }
+    dirs
+}
+
+#[cfg(not(windows))]
+fn stm32_programmer_search_dirs() -> Vec<PathBuf> {
+    vec![
+        PathBuf::from("/usr/local/STMicroelectronics/STM32Cube/STM32CubeProgrammer/bin"),
+        PathBuf::from("/opt/stm32cubeprog/bin"),
+    ]
+}
+
+#[cfg(windows)]
+fn dfu_util_search_dirs() -> Vec<PathBuf> {
+    vec![
+        PathBuf::from(r"C:\Program Files\dfu-util"),
+        PathBuf::from(r"C:\Program Files (x86)\dfu-util"),
+    ]
+}
+
+#[cfg(not(windows))]
+fn dfu_util_search_dirs() -> Vec<PathBuf> {
+    vec![
+        PathBuf::from("/usr/local/bin"),
+        PathBuf::from("/opt/homebrew/bin"),
+    ]
+}
+
+fn openblt_search_dirs() -> Vec<PathBuf> {
+    collect_openblt_host_dirs()
+}
+
+#[cfg(windows)]
 fn find_stm32_programmer_cli() -> Option<PathBuf> {
-    find_on_path("STM32_Programmer_CLI")
+    resolve_tool(
+        &["STM32_Programmer_CLI.exe", "STM32_Programmer_CLI"],
+        &stm32_programmer_search_dirs(),
+    )
+}
+
+#[cfg(not(windows))]
+fn find_stm32_programmer_cli() -> Option<PathBuf> {
+    resolve_tool(&["STM32_Programmer_CLI"], &stm32_programmer_search_dirs())
 }
 
 fn find_dfu_util() -> Option<PathBuf> {
     #[cfg(windows)]
     {
-        find_on_path("dfu-util.exe").or_else(|| find_on_path("dfu-util"))
+        resolve_tool(&["dfu-util.exe", "dfu-util"], &dfu_util_search_dirs())
     }
     #[cfg(not(windows))]
     {
-        find_on_path("dfu-util")
+        resolve_tool(&["dfu-util"], &dfu_util_search_dirs())
     }
 }
 
 fn find_bootcommander() -> Option<PathBuf> {
     #[cfg(windows)]
     {
-        find_on_path("BootCommander.exe").or_else(|| find_on_path("BootCommander"))
+        resolve_tool(
+            &["BootCommander.exe", "BootCommander"],
+            &openblt_search_dirs(),
+        )
     }
     #[cfg(not(windows))]
     {
-        find_on_path("BootCommander")
+        resolve_tool(&["BootCommander"], &openblt_search_dirs())
+    }
+}
+
+fn find_objcopy() -> Option<PathBuf> {
+    #[cfg(windows)]
+    {
+        resolve_tool(&["arm-none-eabi-objcopy.exe", "arm-none-eabi-objcopy"], &[])
+    }
+    #[cfg(not(windows))]
+    {
+        resolve_tool(&["arm-none-eabi-objcopy"], &[])
+    }
+}
+
+/// BootCommander expects S-records; convert a raw `.bin` (same as rusEFI Console uses).
+fn convert_bin_to_srec(bin_path: &Path, load_address: u32) -> Result<PathBuf, String> {
+    let objcopy = find_objcopy().ok_or(
+        "arm-none-eabi-objcopy not found on PATH. Install the ARM GCC toolchain (same as the \
+         rusEFI build) or use DFU mode with rusefi.hex instead.",
+    )?;
+    let temp_dir = std::env::temp_dir();
+    let stem = bin_path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("firmware");
+    let srec_path = temp_dir.join(format!("libretune_{}_{:x}.srec", stem, load_address));
+    let bin_str = bin_path
+        .to_str()
+        .ok_or_else(|| "Invalid firmware path".to_string())?;
+    let srec_str = srec_path
+        .to_str()
+        .ok_or_else(|| "Invalid temporary path".to_string())?;
+    let address = format!("0x{:08X}", load_address);
+    let (ok, output) = run_command_capture(
+        &objcopy,
+        &[
+            "-I",
+            "binary",
+            "-O",
+            "srec",
+            &format!("--change-addresses={}", address),
+            bin_str,
+            srec_str,
+        ],
+    )?;
+    if ok && srec_path.is_file() {
+        Ok(srec_path)
+    } else {
+        Err(format!(
+            "Failed to convert .bin to .srec for BootCommander:\n{}",
+            output
+        ))
     }
 }
 
@@ -104,6 +370,49 @@ pub async fn get_firmware_flasher_info() -> Result<FirmwareFlasherInfo, String> 
         stm32_programmer_cli: find_stm32_programmer_cli().map(|p| p.display().to_string()),
         dfu_util: find_dfu_util().map(|p| p.display().to_string()),
         bootcommander: find_bootcommander().map(|p| p.display().to_string()),
+        objcopy: find_objcopy().map(|p| p.display().to_string()),
+    })
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct FirmwareCompanionSuggestion {
+    pub companion_path: Option<String>,
+    pub companion_kind: String,
+    pub message: String,
+}
+
+/// Optional hint when the user picks a firmware file.
+#[tauri::command]
+pub async fn suggest_firmware_companion(
+    firmware_path: String,
+) -> Result<FirmwareCompanionSuggestion, String> {
+    let path = PathBuf::from(&firmware_path);
+    if !path.is_file() {
+        return Err("Firmware file not found".to_string());
+    }
+
+    let ext = firmware_extension(&path);
+    let message = match ext.as_str() {
+        "bin" => {
+            "rusefi.bin is the correct file for a normal serial update (same as rusEFI Console \
+             and epicEFI). LibreTune converts it automatically for BootCommander."
+                .into()
+        }
+        "hex" => {
+            "rusefi.hex includes flash addresses — best for DFU recovery with STM32CubeProgrammer. \
+             For a normal in-car update, prefer rusefi.bin with the serial (OpenBLT) method."
+                .into()
+        }
+        "dfu" => {
+            "Pre-packaged DFU image — use with DFU mode and STM32CubeProgrammer or dfu-util.".into()
+        }
+        _ => String::new(),
+    };
+
+    Ok(FirmwareCompanionSuggestion {
+        companion_path: None,
+        companion_kind: ext,
+        message,
     })
 }
 
@@ -306,6 +615,39 @@ fn flash_with_bootcommander(
     }
 }
 
+/// BootCommander can keep COM ports open after a failed serial flash attempt.
+fn kill_stale_bootcommander_processes() {
+    #[cfg(windows)]
+    {
+        let _ = Command::new("taskkill")
+            .args(["/IM", "BootCommander.exe", "/F"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
+}
+
+/// Free a blocked COM port after a failed firmware flash (e.g. stuck BootCommander).
+#[tauri::command]
+pub async fn release_serial_port_blockers(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    kill_stale_bootcommander_processes();
+    stop_metrics_task(state.clone()).await;
+    {
+        let mut task_guard = state.streaming_task.lock().await;
+        if let Some(handle) = task_guard.take() {
+            handle.abort();
+        }
+    }
+    {
+        let mut conn_guard = state.connection.lock().await;
+        if let Some(conn) = conn_guard.as_mut() {
+            conn.disconnect();
+        }
+        *conn_guard = None;
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct FirmwareUpdateGuidance {
     pub recommended_method: String,
@@ -351,64 +693,53 @@ fn classify_firmware_file(path: &Path, method: &str) -> FirmwareUpdateGuidance {
     let mut requires_risk_acknowledgement = false;
 
     match (method, file_kind) {
-        ("dfu", "raw_bin") => {
-            risk_level = "high";
-            requires_risk_acknowledgement = true;
+        ("openblt", "raw_bin") => {
+            risk_level = "low";
+        }
+        ("openblt", "hex") => {
+            risk_level = "medium";
             warnings.push(
-                "Raw .bin via DFU only writes the application region (typically 0x08008000)."
+                "For serial updates, rusefi.bin from firmware/build/ is preferred (same as rusEFI Console). \
+                 .hex can work if BootCommander accepts it."
                     .into(),
             );
+        }
+        ("openblt", "update_srec" | "srec") => {
+            risk_level = "low";
+        }
+        ("openblt", "dfu_package" | "unknown") => {
+            risk_level = "high";
+            requires_risk_acknowledgement = true;
+            warnings.push("Use firmware/build/rusefi.bin for serial updates.".into());
+        }
+        ("dfu", "hex") => {
+            risk_level = "low";
+        }
+        ("dfu", "dfu_package") => {
+            risk_level = "low";
+        }
+        ("dfu", "raw_bin") => {
+            risk_level = "medium";
             warnings.push(
-                "If OpenBLT at 0x08000000 is missing or corrupt, the ECU will not boot.".into(),
-            );
-            warnings.push(
-                "Prefer OpenBLT + *_update.srec, a deliver/ .dfu package, or DFU recovery mode."
+                "Raw .bin via DFU writes the application at 0x08008000. Prefer rusefi.hex — \
+                 STM32CubeProgrammer reads addresses from the file automatically."
                     .into(),
             );
         }
         ("dfu", "srec" | "update_srec") => {
             risk_level = "medium";
             warnings.push(
-                "DFU with .srec may not update the OpenBLT bootloader region correctly.".into(),
-            );
-            warnings.push("Use OpenBLT + *_update.srec for routine updates when available.".into());
-        }
-        ("dfu", "dfu_package") => {
-            risk_level = "low";
-        }
-        ("openblt", "update_srec") => {
-            risk_level = "low";
-        }
-        ("openblt", "srec") => {
-            risk_level = "medium";
-            warnings.push(
-                "This .srec may not be an OpenBLT update bundle. Prefer rusefi_*_update.srec from deliver/."
+                "DFU mode works best with rusefi.hex or a .dfu package. Use serial update for routine flashes."
                     .into(),
             );
-        }
-        ("openblt", "hex") => {
-            risk_level = "medium";
-            warnings.push("Verify this .hex is built for OpenBLT before flashing.".into());
-        }
-        ("openblt", "raw_bin" | "dfu_package" | "unknown") => {
-            risk_level = "high";
-            requires_risk_acknowledgement = true;
-            warnings.push("This file type is not recommended for OpenBLT updates.".into());
-            warnings.push("Use rusefi_*_update.srec from your firmware deliver/ folder.".into());
         }
         _ => {}
     }
 
-    if (file_name.contains("rusefi.bin") || file_name.ends_with(".bin") && method == "dfu")
-        && risk_level == "low"
-    {
-        risk_level = "medium";
-    }
-
     let suggested_file_hint = if method == "openblt" {
-        "deliver/rusefi_*_update.srec".into()
+        "firmware/build/rusefi.bin".into()
     } else {
-        "deliver/*.dfu (or use DFU recovery for OpenBLT + rusefi.bin)".into()
+        "firmware/build/rusefi.hex (or deliver/*.dfu)".into()
     };
 
     FirmwareUpdateGuidance {
@@ -450,9 +781,9 @@ pub async fn get_firmware_update_guidance(
             warnings: Vec::new(),
             requires_risk_acknowledgement: false,
             suggested_file_hint: if openblt_available {
-                "deliver/rusefi_*_update.srec".into()
+                "firmware/build/rusefi.bin".into()
             } else {
-                "deliver/*.dfu".into()
+                "firmware/build/rusefi.hex".into()
             },
             openblt_available,
             dfu_available,
@@ -469,11 +800,11 @@ pub async fn get_firmware_update_guidance(
 
     if method != guidance.recommended_method && guidance.risk_level == "low" {
         guidance.warnings.push(format!(
-            "This ECU supports {} — that is the recommended update method.",
+            "This ECU supports {} — recommended for routine updates.",
             if guidance.recommended_method == "openblt" {
-                "OpenBLT + *_update.srec"
+                "serial update (OpenBLT) with rusefi.bin"
             } else {
-                "DFU"
+                "DFU with rusefi.hex"
             }
         ));
         guidance.risk_level = "medium".into();
@@ -497,8 +828,11 @@ fn validate_firmware_file(path: &Path, method: &str) -> Result<(), String> {
                 "DFU update expects a .dfu, .hex, .bin, or .srec firmware file".to_string(),
             );
         }
-        "openblt" if !matches!(ext.as_str(), "srec" | "s19" | "hex") => {
-            return Err("OpenBLT update expects a .srec or .hex firmware file".to_string());
+        "openblt" if !matches!(ext.as_str(), "srec" | "s19" | "hex" | "bin") => {
+            return Err(
+                "Serial update expects firmware/build/rusefi.bin (or .hex / .srec if you have one)"
+                    .to_string(),
+            );
         }
         _ => {}
     }
@@ -515,6 +849,14 @@ pub async fn update_ecu_firmware(
     bin_flash_address: Option<String>,
     acknowledge_risk: bool,
 ) -> Result<FirmwareUpdateResult, String> {
+    if method == "openblt" {
+        return Err(
+            "Serial (OpenBLT) firmware update is disabled in LibreTune — it can brick your ECU. \
+             Use rusEFI Console with firmware/build/rusefi.bin for routine updates."
+                .to_string(),
+        );
+    }
+
     let path = PathBuf::from(&firmware_path);
     validate_firmware_file(&path, &method)?;
 
@@ -604,6 +946,22 @@ pub async fn update_ecu_firmware(
                 let baud = project.config.connection.baud_rate;
                 (port, baud)
             };
+
+            let flash_path = if ext == "bin" {
+                let address = resolved_bin_address.unwrap_or_else(default_bin_flash_address);
+                push_log(
+                    &app,
+                    &mut log,
+                    format!(
+                        "Converting rusefi.bin to .srec for BootCommander (load address 0x{:08X})…",
+                        address
+                    ),
+                );
+                convert_bin_to_srec(&path, address)?
+            } else {
+                path.clone()
+            };
+
             push_log(
                 &app,
                 &mut log,
@@ -614,7 +972,7 @@ pub async fn update_ecu_firmware(
                     baud_rate
                 ),
             );
-            flash_with_bootcommander(&tool, &path, &serial_port, baud_rate)?
+            flash_with_bootcommander(&tool, &flash_path, &serial_port, baud_rate)?
         }
         other => return Err(format!("Unknown firmware update method: {}", other)),
     };

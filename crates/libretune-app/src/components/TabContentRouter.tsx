@@ -136,10 +136,14 @@ export function TabContentRouter(props: TabContentRouterProps) {
           data={content.data as CurveData}
           embedded={false}
           simpleGaugeInfo={content.gauge}
-          onValuesChange={async (yBins) => {
+          onValuesChange={async (values) => {
             if (activeTabId) {
               const curveData = content.data as CurveData;
-              const updatedData = { ...curveData, y_bins: yBins };
+              const updatedData = {
+                ...curveData,
+                x_bins: values.xBins,
+                y_bins: values.yBins,
+              };
               setTabContents({
                 ...tabContents,
                 [activeTabId]: { type: "curve", data: updatedData, gauge: content.gauge },
@@ -147,7 +151,8 @@ export function TabContentRouter(props: TabContentRouterProps) {
               try {
                 await invoke("update_curve_data", {
                   curveName: curveData.name,
-                  yValues: yBins,
+                  xValues: values.xBins,
+                  yValues: values.yBins,
                 });
               } catch (err) {
                 console.error("Failed to save curve data:", err);

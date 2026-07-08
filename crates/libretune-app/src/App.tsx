@@ -34,6 +34,7 @@ import { useGlobalShortcuts } from "./hooks/useGlobalShortcuts";
 import { useEcuEventListeners } from "./hooks/useEcuEventListeners";
 import { useAutoConnect, type ConnectOptions } from "./hooks/useAutoConnect";
 import { useReconnectHandler } from "./hooks/useReconnectHandler";
+import { useTuneModified } from "./hooks/useTuneModified";
 import {
   resolvePreferredPort,
   type ConnectionPhase,
@@ -76,6 +77,7 @@ function AppContent() {
 
   // Project state
   const [currentProject, setCurrentProject] = useState<CurrentProject | null>(null);
+  const { tuneModified, refreshTuneModified } = useTuneModified(!!currentProject);
   const [availableProjects, setAvailableProjects] = useState<ProjectInfo[]>([]);
   const [repositoryInis, setRepositoryInis] = useState<IniEntry[]>([]);
   const [newProjectDialogOpen, setNewProjectDialogOpen] = useState(false);
@@ -569,6 +571,7 @@ function AppContent() {
   // Global keyboard shortcuts (extracted to hook).
   useGlobalShortcuts({
     isConnected: status.state === "Connected",
+    tuneModified,
     setNewProjectDialogOpen,
     setLoadDialogOpen,
     setSaveDialogOpen,
@@ -864,7 +867,21 @@ function AppContent() {
       // This ensures the UI shows the correct disconnected state
       await checkStatus();
       if (!options?.silent) {
-        showToast("Connection failed: " + e, "error");
+        const msg = String(e);
+        if (/access is denied|access denied/i.test(msg)) {
+          try {
+            await invoke("release_serial_port_blockers");
+          } catch {
+            // best-effort cleanup
+          }
+          showToast(
+            "COM port is blocked (often leftover BootCommander from a firmware update). " +
+              "Unplug the ECU USB cable, wait 5 seconds, plug back in, then connect again.",
+            "warning",
+          );
+        } else {
+          showToast("Connection failed: " + e, "error");
+        }
       } else {
         console.debug("Auto-connect attempt failed:", e);
       }
@@ -1236,7 +1253,7 @@ function AppContent() {
   });
 
   const menuItems: TunerMenuItem[] = useMemo(() => buildMenuItems({
-    t, currentProject, status, ecuType, iniCapabilities, backendMenus, theme,
+    t, currentProject, tuneModified, status, ecuType, iniCapabilities, backendMenus, theme,
     sidebarVisible, tabs, openTarget, handleStdTarget, openHelpTopic, showToast,
     closeProject, handleCreateRestorePoint,
     setNewProjectDialogOpen, setImportProjectOpen, setSaveDialogOpen, setLoadDialogOpen,
@@ -1245,14 +1262,14 @@ function AppContent() {
     setTuneFileDiffOpen, setDynoOverlayOpen, setPluginPanelOpen, setConnectionDialogOpen,
     setUserManualOpen, setUserManualSection, setAboutDialogOpen, setSidebarVisible,
     setTheme, setTabs, setTabContents, setActiveTabId,
-  }), [backendMenus, theme, sidebarVisible, status.state, ecuType, iniCapabilities, openTarget, handleStdTarget, openHelpTopic, currentProject, showToast, t, tabs]);
+  }), [backendMenus, theme, sidebarVisible, status.state, ecuType, iniCapabilities, openTarget, handleStdTarget, openHelpTopic, currentProject, tuneModified, showToast, t, tabs]);
 
   // Toolbar items
   const toolbarItems: ToolbarItem[] = useMemo(() => buildToolbarItems({
-    status, iniCapabilities, isLogging, connectionRuntimePacketMode, defaultRuntimePacketMode,
+    status, tuneModified, iniCapabilities, isLogging, connectionRuntimePacketMode, defaultRuntimePacketMode,
     setLoadDialogOpen, setSaveDialogOpen, setBurnDialogOpen, setConnectionDialogOpen,
     setSettingsDialogOpen, setActiveTabId, setIsLogging,
-  }), [status, isLogging, iniCapabilities, connectionRuntimePacketMode, defaultRuntimePacketMode]);
+  }), [status, tuneModified, isLogging, iniCapabilities, connectionRuntimePacketMode, defaultRuntimePacketMode]);
 
   const sidebarItems: SidebarNode[] = useMemo(() => {
     // Build menu-based sidebar items from INI menus
@@ -1434,6 +1451,7 @@ function AppContent() {
         setLoadDialogOpen={setLoadDialogOpen}
         burnDialogOpen={burnDialogOpen}
         setBurnDialogOpen={setBurnDialogOpen}
+        refreshTuneModified={refreshTuneModified}
         firmwareUpdateDialogOpen={firmwareUpdateDialogOpen}
         setFirmwareUpdateDialogOpen={setFirmwareUpdateDialogOpen}
         iniCapabilities={iniCapabilities}

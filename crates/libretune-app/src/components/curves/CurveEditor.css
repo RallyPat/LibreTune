@@ -288,6 +288,7 @@
   font-weight: 500;
 }
 
+.curve-data-table .x-cell input,
 .curve-data-table .y-cell input {
   width: 100%;
   padding: 2px 4px;

@@ -264,10 +264,14 @@ export default function PopOutWindow() {
     }).catch(console.error);
   }, [popOutData]);
 
-  const handleCurveChange = useCallback((yBins: number[]) => {
+  const handleCurveChange = useCallback((values: { xBins: number[]; yBins: number[] }) => {
     if (!popOutData || popOutData.type !== 'curve' || !popOutData.data) return;
     const curveData = popOutData.data as CurveData;
-    const updatedData = { ...curveData, y_bins: yBins };
+    const updatedData = {
+      ...curveData,
+      x_bins: values.xBins,
+      y_bins: values.yBins,
+    };
     setPopOutData(prev => prev ? { ...prev, data: updatedData } : null);
     emit('table:updated', {
       tabId: popOutData.tabId,
