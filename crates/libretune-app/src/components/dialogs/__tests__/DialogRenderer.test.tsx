@@ -2,7 +2,7 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import DialogRenderer, { DialogDefinition } from '../DialogRenderer';
 import { ToastProvider } from '../../../contexts/ToastContext';
 import { setupTauriMocks, tearDownTauriMocks } from '../../../test-utils/tauriMocks';
-import { vi } from 'vitest';
+import { invoke } from '@tauri-apps/api/core';
 
 describe('DialogRenderer CommandButton', () => {
   let tauriHandle: ReturnType<typeof setupTauriMocks> | null = null;
@@ -25,7 +25,7 @@ describe('DialogRenderer CommandButton', () => {
     }
   });
 
-  it('executes controller command and triggers ECU sync, showing a success toast', async () => {
+  it('executes controller command and shows a success toast without syncing tune', async () => {
     const def: DialogDefinition = {
       name: 'engineTypeDialog',
       title: 'Popular vehicles',
@@ -45,37 +45,16 @@ describe('DialogRenderer CommandButton', () => {
     );
 
     const btn = screen.getByText('Apply Base Map');
-
-    // Listen for reconnect event
-    let reconnectFired = false;
-    const handler = () => { reconnectFired = true; };
-    window.addEventListener('reconnect:request', handler as EventListener);
-
-    // Spy on console.debug for dev-only telemetry message
-    const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => {});
-    // Provide a mock telemetry sink on global window
-    const telemetryMock = { trackEvent: vi.fn() };
-    (window as any).__libretuneTelemetry = telemetryMock;
-
     fireEvent.click(btn);
 
-    // Wait for the toast showing sync success
-    await waitFor(() => expect(screen.getByText(/Sync complete:/)).toBeInTheDocument());
-    expect(screen.getByText(/Sync complete: 3 pages/)).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByText('Apply Base Map sent to ECU')).toBeInTheDocument()
+    );
 
-    // And wait for reconnect event to be dispatched
-    await waitFor(() => expect(reconnectFired).toBe(true));
-
-    // Expect debug telemetry called
-    expect(debugSpy).toHaveBeenCalledWith(expect.stringContaining('reconnect:request dispatched'), expect.any(Object));
-
-    // Telemetry sink should have been called
-    expect(telemetryMock.trackEvent).toHaveBeenCalledWith('reconnect_request', { source: 'controller-command' });
-
-    debugSpy.mockRestore();
-    delete (window as any).__libretuneTelemetry;
-
-    window.removeEventListener('reconnect:request', handler as EventListener);
+    expect(invoke).toHaveBeenCalledWith('execute_controller_command', {
+      commandName: 'cmd_set_engine_type_default',
+    });
+    expect(invoke).not.toHaveBeenCalledWith('sync_ecu_data', expect.anything());
   });
 });
 

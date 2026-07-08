@@ -3,8 +3,7 @@
 use crate::paths::get_dashboards_dir;
 use libretune_core::dash::{
     self, create_basic_dashboard, create_racing_dashboard, create_telemetry_compact_dashboard,
-    create_telemetry_live_dashboard,
-    create_tuning_dashboard,
+    create_telemetry_live_dashboard, create_tuning_dashboard,
 };
 use serde::Serialize;
 use std::path::Path;
@@ -286,20 +285,30 @@ pub async fn import_dash_file(
     })
 }
 
+/// Builder function for a built-in default dashboard template.
+type DefaultDashBuilder = fn() -> dash::DashFile;
+
 /// (file name, builder) pairs for every built-in default dashboard. Adding a
 /// new built-in template only requires appending a row here.
-fn default_dashboard_specs() -> Vec<(&'static str, fn() -> dash::DashFile)> {
+fn default_dashboard_specs() -> Vec<(&'static str, DefaultDashBuilder)> {
     vec![
         ("Basic.ltdash.xml", create_basic_dashboard),
         ("Tuning.ltdash.xml", create_tuning_dashboard),
         ("Racing.ltdash.xml", create_racing_dashboard),
         ("Telemetry Live.ltdash.xml", create_telemetry_live_dashboard),
-        ("Telemetry Compact.ltdash.xml", create_telemetry_compact_dashboard),
+        (
+            "Telemetry Compact.ltdash.xml",
+            create_telemetry_compact_dashboard,
+        ),
     ]
 }
 
 /// Write a single default dashboard file, overwriting any existing copy.
-fn write_default_dashboard(dir: &Path, file_name: &str, dash_file: &dash::DashFile) -> Result<(), String> {
+fn write_default_dashboard(
+    dir: &Path,
+    file_name: &str,
+    dash_file: &dash::DashFile,
+) -> Result<(), String> {
     let xml = dash::write_dash_file(dash_file)
         .map_err(|e| format!("Failed to serialize {}: {}", file_name, e))?;
     std::fs::write(dir.join(file_name), xml)
@@ -364,14 +373,16 @@ pub async fn get_dashboard_templates() -> Result<Vec<DashboardTemplateInfo>, Str
         DashboardTemplateInfo {
             id: "telemetry_live".to_string(),
             name: "Telemetry Live".to_string(),
-            description: "Dense Grafana-style live view: 22 stat tiles, 4 multi-series charts, 16 sparklines"
-                .to_string(),
+            description:
+                "Dense Grafana-style live view: 22 stat tiles, 4 multi-series charts, 16 sparklines"
+                    .to_string(),
         },
         DashboardTemplateInfo {
             id: "telemetry_compact".to_string(),
             name: "Telemetry Compact".to_string(),
-            description: "Laptop-friendly live view: key stats, 4 trend charts, 6 sparklines (scrollable)"
-                .to_string(),
+            description:
+                "Laptop-friendly live view: key stats, 4 trend charts, 6 sparklines (scrollable)"
+                    .to_string(),
         },
     ])
 }

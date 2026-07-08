@@ -34,9 +34,7 @@ fn push_log(app: &AppHandle, log: &mut Vec<String>, line: impl Into<String>) {
     let line = line.into();
     let _ = app.emit(
         "firmware-update:log",
-        FirmwareUpdateLogEvent {
-            line: line.clone(),
-        },
+        FirmwareUpdateLogEvent { line: line.clone() },
     );
     log.push(line);
 }
@@ -109,7 +107,10 @@ pub async fn get_firmware_flasher_info() -> Result<FirmwareFlasherInfo, String> 
     })
 }
 
-fn resolve_bootloader_command(def: &libretune_core::ini::EcuDefinition, method: &str) -> Result<String, String> {
+fn resolve_bootloader_command(
+    def: &libretune_core::ini::EcuDefinition,
+    method: &str,
+) -> Result<String, String> {
     match method {
         "dfu" => def
             .controller_commands
@@ -194,7 +195,10 @@ fn stm32_full_chip_erase(cli: &Path, port: &str) -> Result<String, String> {
     if ok {
         Ok(output)
     } else {
-        Err(format!("Full chip erase failed (port={}):\n{}", port, output))
+        Err(format!(
+            "Full chip erase failed (port={}):\n{}",
+            port, output
+        ))
     }
 }
 
@@ -355,8 +359,7 @@ fn classify_firmware_file(path: &Path, method: &str) -> FirmwareUpdateGuidance {
                     .into(),
             );
             warnings.push(
-                "If OpenBLT at 0x08000000 is missing or corrupt, the ECU will not boot."
-                    .into(),
+                "If OpenBLT at 0x08000000 is missing or corrupt, the ECU will not boot.".into(),
             );
             warnings.push(
                 "Prefer OpenBLT + *_update.srec, a deliver/ .dfu package, or DFU recovery mode."
@@ -366,12 +369,9 @@ fn classify_firmware_file(path: &Path, method: &str) -> FirmwareUpdateGuidance {
         ("dfu", "srec" | "update_srec") => {
             risk_level = "medium";
             warnings.push(
-                "DFU with .srec may not update the OpenBLT bootloader region correctly."
-                    .into(),
+                "DFU with .srec may not update the OpenBLT bootloader region correctly.".into(),
             );
-            warnings.push(
-                "Use OpenBLT + *_update.srec for routine updates when available.".into(),
-            );
+            warnings.push("Use OpenBLT + *_update.srec for routine updates when available.".into());
         }
         ("dfu", "dfu_package") => {
             risk_level = "low";
@@ -399,10 +399,10 @@ fn classify_firmware_file(path: &Path, method: &str) -> FirmwareUpdateGuidance {
         _ => {}
     }
 
-    if file_name.contains("rusefi.bin") || file_name.ends_with(".bin") && method == "dfu" {
-        if risk_level == "low" {
-            risk_level = "medium";
-        }
+    if (file_name.contains("rusefi.bin") || file_name.ends_with(".bin") && method == "dfu")
+        && risk_level == "low"
+    {
+        risk_level = "medium";
     }
 
     let suggested_file_hint = if method == "openblt" {
@@ -493,7 +493,9 @@ fn validate_firmware_file(path: &Path, method: &str) -> Result<(), String> {
         .to_ascii_lowercase();
     match method {
         "dfu" if !matches!(ext.as_str(), "dfu" | "hex" | "bin" | "s19" | "srec") => {
-            return Err("DFU update expects a .dfu, .hex, .bin, or .srec firmware file".to_string());
+            return Err(
+                "DFU update expects a .dfu, .hex, .bin, or .srec firmware file".to_string(),
+            );
         }
         "openblt" if !matches!(ext.as_str(), "srec" | "s19" | "hex") => {
             return Err("OpenBLT update expects a .srec or .hex firmware file".to_string());
@@ -543,11 +545,7 @@ pub async fn update_ecu_firmware(
     push_log(&app, &mut log, "Preparing firmware update…");
 
     let bytes = resolve_controller_command(&state, &command_name).await?;
-    push_log(
-        &app,
-        &mut log,
-        format!("Sending {} to ECU…", command_name),
-    );
+    push_log(&app, &mut log, format!("Sending {} to ECU…", command_name));
     send_controller_command_bytes(&state, &bytes).await?;
 
     stop_metrics_task(state.clone()).await;
@@ -555,7 +553,11 @@ pub async fn update_ecu_firmware(
         let mut conn_guard = state.connection.lock().await;
         *conn_guard = None;
     }
-    push_log(&app, &mut log, "Disconnected — waiting for bootloader USB device…");
+    push_log(
+        &app,
+        &mut log,
+        "Disconnected — waiting for bootloader USB device…",
+    );
     sleep(Duration::from_secs(3)).await;
 
     let flash_output = match method.as_str() {
@@ -572,19 +574,11 @@ pub async fn update_ecu_firmware(
                         ),
                     );
                 } else {
-                    push_log(
-                        &app,
-                        &mut log,
-                        format!("Flashing with {}…", cli.display()),
-                    );
+                    push_log(&app, &mut log, format!("Flashing with {}…", cli.display()));
                 }
                 flash_with_stm32_programmer(&cli, &path, resolved_bin_address)?
             } else if let Some(tool) = find_dfu_util() {
-                push_log(
-                    &app,
-                    &mut log,
-                    format!("Flashing with {}…", tool.display()),
-                );
+                push_log(&app, &mut log, format!("Flashing with {}…", tool.display()));
                 flash_with_dfu_util(&tool, &path, resolved_bin_address)?
             } else {
                 return Err(
@@ -625,7 +619,11 @@ pub async fn update_ecu_firmware(
         other => return Err(format!("Unknown firmware update method: {}", other)),
     };
 
-    for line in flash_output.lines().map(str::trim).filter(|l| !l.is_empty()) {
+    for line in flash_output
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+    {
         push_log(&app, &mut log, line);
     }
 
@@ -681,7 +679,10 @@ fn flash_recovery_with_stm32_programmer(
         args.extend(["-e", "all"]);
     }
 
-    match (firmware_extension(bootloader_path).as_str(), firmware_extension(app_path).as_str()) {
+    match (
+        firmware_extension(bootloader_path).as_str(),
+        firmware_extension(app_path).as_str(),
+    ) {
         ("bin", "bin") => {
             args.extend([
                 "-w",
@@ -750,9 +751,8 @@ pub async fn recover_ecu_firmware_dfu(
     let app_address = parse_flash_address(app_flash_address.as_deref())?
         .unwrap_or_else(default_bin_flash_address);
 
-    let cli = find_stm32_programmer_cli().ok_or(
-        "STM32CubeProgrammer (STM32_Programmer_CLI) is required for DFU recovery.",
-    )?;
+    let cli = find_stm32_programmer_cli()
+        .ok_or("STM32CubeProgrammer (STM32_Programmer_CLI) is required for DFU recovery.")?;
 
     let mut log = Vec::new();
     push_log(
@@ -772,7 +772,11 @@ pub async fn recover_ecu_firmware_dfu(
     push_log(
         &app,
         &mut log,
-        format!("Application: {} @ 0x{:08X}", app_firmware.display(), app_address),
+        format!(
+            "Application: {} @ 0x{:08X}",
+            app_firmware.display(),
+            app_address
+        ),
     );
 
     if full_erase {
@@ -783,19 +787,23 @@ pub async fn recover_ecu_firmware_dfu(
             "Performing full chip erase (required on STM32F7)…",
         );
         let erase_output = stm32_full_chip_erase(&cli, &port)?;
-        for line in erase_output.lines().map(str::trim).filter(|l| !l.is_empty()) {
+        for line in erase_output
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+        {
             push_log(&app, &mut log, line);
         }
     }
 
-    push_log(
-        &app,
-        &mut log,
-        format!("Flashing with {}…", cli.display()),
-    );
+    push_log(&app, &mut log, format!("Flashing with {}…", cli.display()));
     let flash_output =
         flash_recovery_with_stm32_programmer(&cli, &bootloader, &app_firmware, app_address, false)?;
-    for line in flash_output.lines().map(str::trim).filter(|l| !l.is_empty()) {
+    for line in flash_output
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+    {
         push_log(&app, &mut log, line);
     }
 

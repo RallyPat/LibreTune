@@ -145,8 +145,7 @@ impl DiscoveredEcu {
 }
 
 /// Channel-opener used by the probe. Allows tests to inject a mock channel.
-pub type OpenPort =
-    dyn FnMut(&str, u32) -> std::io::Result<Box<dyn CommunicationChannel>> + Send;
+pub type OpenPort = dyn FnMut(&str, u32) -> std::io::Result<Box<dyn CommunicationChannel>> + Send;
 
 /// Probe each port in `ports` against the baud × query matrix in `config`.
 ///
@@ -157,10 +156,7 @@ pub fn discover_ecu(
     config: &DiscoveryConfig,
     open: &mut OpenPort,
 ) -> Vec<DiscoveredEcu> {
-    ports
-        .iter()
-        .map(|p| probe_port(p, config, open))
-        .collect()
+    ports.iter().map(|p| probe_port(p, config, open)).collect()
 }
 
 fn probe_port(port: &str, config: &DiscoveryConfig, open: &mut OpenPort) -> DiscoveredEcu {
@@ -268,11 +264,7 @@ fn classify(baud: u32, query: u8, bytes: &[u8]) -> DiscoveryResult {
     }
 
     // MS bootloader: first 3 bytes match the well-known pattern (spec §15.4.2).
-    if bytes.len() >= 3
-        && bytes[0] & 0xE0 == 0xE0
-        && bytes[1] & 0xF0 == 0
-        && bytes[2] == b'>'
-    {
+    if bytes.len() >= 3 && bytes[0] & 0xE0 == 0xE0 && bytes[1] & 0xF0 == 0 && bytes[2] == b'>' {
         return DiscoveryResult::Bootloader { baud, query };
     }
 
@@ -470,9 +462,7 @@ mod tests {
 
     #[test]
     fn open_failure_recorded() {
-        let mut open: Box<OpenPort> = Box::new(|_p: &str, _b: u32| {
-            Err(io::Error::other("nope"))
-        });
+        let mut open: Box<OpenPort> = Box::new(|_p: &str, _b: u32| Err(io::Error::other("nope")));
         let cfg = fast_config();
         let out = discover_ecu(&["fake0".into()], &cfg, &mut *open);
         assert!(out[0]

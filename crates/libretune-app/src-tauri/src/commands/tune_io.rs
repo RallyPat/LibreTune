@@ -82,10 +82,7 @@ pub async fn resolve_controller_command(
 }
 
 /// Send pre-resolved controller command bytes to the connected ECU.
-pub async fn send_controller_command_bytes(
-    state: &AppState,
-    bytes: &[u8],
-) -> Result<(), String> {
+pub async fn send_controller_command_bytes(state: &AppState, bytes: &[u8]) -> Result<(), String> {
     let mut conn_guard = state.connection.lock().await;
     let conn = conn_guard.as_mut().ok_or("Not connected to ECU")?;
     conn.send_raw_bytes(bytes)

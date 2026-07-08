@@ -21,11 +21,11 @@ use state::{AppState, AutoTuneLoadSource, RpmState, RpmStateTracker, StreamStats
 pub(crate) use commands::app_settings::{
     get_commit_message_format, load_settings, save_settings, Settings,
 };
+#[cfg(test)]
+pub(crate) use commands::signature_helpers::compare_signatures;
 pub(crate) use commands::signature_helpers::{
     call_connection_factory_and_build_result, find_matching_inis_internal,
 };
-#[cfg(test)]
-pub(crate) use commands::signature_helpers::compare_signatures;
 pub(crate) use commands::table_internals::{
     get_table_data_internal, update_constant_array_internal, update_table_z_values_internal,
     TableData,
@@ -100,8 +100,7 @@ use commands::hotkeys::{
 };
 use commands::ini_dialogs::{
     evaluate_expression, get_dialog_definition, get_help_topic, get_indicator_panel,
-    get_readout_panel,
-    get_port_editor, get_port_editor_assignments, save_port_editor_assignments,
+    get_port_editor, get_port_editor_assignments, get_readout_panel, save_port_editor_assignments,
 };
 use commands::ini_meta::{
     get_curves, get_frontpage, get_gauge_config, get_gauge_configs, get_tables,

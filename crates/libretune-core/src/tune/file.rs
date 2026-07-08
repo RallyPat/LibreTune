@@ -826,7 +826,14 @@ impl TuneFile {
         // and `nPages` here for max interop. Falls back to `signature`
         // when no explicit firmware string is set.
         let fw_info = self.firmware_info.as_deref().unwrap_or(&self.signature);
-        let n_pages = self.pages.len().max(self.constant_pages.values().copied().max().map(|p| p as usize + 1).unwrap_or(0));
+        let n_pages = self.pages.len().max(
+            self.constant_pages
+                .values()
+                .copied()
+                .max()
+                .map(|p| p as usize + 1)
+                .unwrap_or(0),
+        );
         xml.push_str(&format!(
             "  <versionInfo signature=\"{}\" firmwareInfo=\"{}\" nPages=\"{}\"/>\n",
             self.signature, fw_info, n_pages

@@ -5,6 +5,7 @@
 use super::types::*;
 use quick_xml::events::{BytesStart, Event};
 use quick_xml::Reader;
+use quick_xml::XmlVersion;
 use std::io::BufRead;
 
 /// Errors that can occur during dashboard parsing.
@@ -63,7 +64,7 @@ pub fn parse_dash_file(xml: &str) -> Result<DashFile, DashParseError> {
                 handle_empty_element(&mut dash, &mut state, e)?;
             }
             Ok(Event::Text(ref e)) => {
-                text_buf = e.unescape().unwrap_or_default().to_string();
+                text_buf = e.decode().map(|c| c.into_owned()).unwrap_or_default();
             }
             Ok(Event::CData(ref e)) => {
                 text_buf = String::from_utf8_lossy(e.as_ref()).to_string();
@@ -168,7 +169,7 @@ pub fn parse_gauge_file(xml: &str) -> Result<GaugeFile, DashParseError> {
                 }
             }
             Ok(Event::Text(ref e)) => {
-                text_buf = e.unescape().unwrap_or_default().to_string();
+                text_buf = e.decode().map(|c| c.into_owned()).unwrap_or_default();
             }
             Ok(Event::CData(ref e)) => {
                 text_buf = String::from_utf8_lossy(e.as_ref()).to_string();
@@ -326,7 +327,7 @@ fn get_attribute(e: &BytesStart, name: &str) -> Option<String> {
             // values that contain expressions or user text round-trip
             // correctly through write → parse cycles.
             return Some(
-                attr.unescape_value()
+                attr.normalized_value(XmlVersion::Implicit1_0)
                     .map(|c| c.to_string())
                     .unwrap_or_else(|_| String::from_utf8_lossy(&attr.value).to_string()),
             );
@@ -454,7 +455,7 @@ fn capture_extra_attrs(
             continue;
         }
         let value = attr
-            .unescape_value()
+            .normalized_value(XmlVersion::Implicit1_0)
             .map(|c| c.to_string())
             .unwrap_or_else(|_| String::from_utf8_lossy(&attr.value).to_string());
         bag.insert(name, value);

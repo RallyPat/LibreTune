@@ -3,6 +3,7 @@
 use super::types::*;
 use quick_xml::events::{BytesStart, Event};
 use quick_xml::Reader;
+use quick_xml::XmlVersion;
 use std::collections::BTreeMap;
 
 /// Errors that can occur while parsing a `.tuneView` file.
@@ -96,7 +97,7 @@ pub fn parse_tune_view(xml: &str) -> Result<TuneView, TuneViewParseError> {
                 }
             }
             Ok(Event::Text(ref e)) => {
-                let raw = e.unescape().unwrap_or_default();
+                let raw = e.decode().map(|c| c.into_owned()).unwrap_or_default();
                 current_text.push_str(&raw);
             }
             Ok(Event::CData(ref e)) => {
@@ -169,17 +170,14 @@ fn collect_attrs(e: &BytesStart<'_>) -> BTreeMap<String, String> {
     let mut out = BTreeMap::new();
     for attr in e.attributes().flatten() {
         let key = local_name(attr.key.as_ref());
-        if let Ok(val) = attr.unescape_value() {
+        if let Ok(val) = attr.normalized_value(XmlVersion::Implicit1_0) {
             out.insert(key, val.into_owned());
         }
     }
     out
 }
 
-fn collect_attrs_excluding(
-    e: &BytesStart<'_>,
-    exclude: &[&str],
-) -> BTreeMap<String, String> {
+fn collect_attrs_excluding(e: &BytesStart<'_>, exclude: &[&str]) -> BTreeMap<String, String> {
     let mut out = collect_attrs(e);
     for k in exclude {
         out.remove(*k);
@@ -230,7 +228,10 @@ mod tests {
     #[test]
     fn parses_minimal_tune_view() {
         let tv = parse_tune_view(SAMPLE).expect("parse ok");
-        assert_eq!(tv.bibliography.get("author").map(String::as_str), Some("Test"));
+        assert_eq!(
+            tv.bibliography.get("author").map(String::as_str),
+            Some("Test")
+        );
         assert_eq!(
             tv.version_info.get("firmwareSignature").map(String::as_str),
             Some("MS3 Format 0545.02 ")
@@ -246,7 +247,11 @@ mod tests {
         assert_eq!(id.ts_type.as_deref(), Some("String"));
         assert!(id.text.is_empty());
 
-        let warn = comp0.properties.iter().find(|p| p.name == "WarnColor").unwrap();
+        let warn = comp0
+            .properties
+            .iter()
+            .find(|p| p.name == "WarnColor")
+            .unwrap();
         assert_eq!(warn.ts_type.as_deref(), Some("Color"));
         assert_eq!(warn.attrs.get("alpha").map(String::as_str), Some("255"));
         assert_eq!(warn.text, "-85552");

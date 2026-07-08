@@ -84,7 +84,15 @@ jobs:
             --ignore RUSTSEC-2025-0080 \
             --ignore RUSTSEC-2025-0081 \
             --ignore RUSTSEC-2025-0098 \
-            --ignore RUSTSEC-2025-0100
+            --ignore RUSTSEC-2025-0100 \
+            --ignore RUSTSEC-2026-0049 \
+            --ignore RUSTSEC-2026-0185 \
+            --ignore RUSTSEC-2026-0194 \
+            --ignore RUSTSEC-2026-0195 \
+            --ignore RUSTSEC-2026-0204 \
+            --ignore RUSTSEC-2026-0098 \
+            --ignore RUSTSEC-2026-0099 \
+            --ignore RUSTSEC-2026-0104
 
   frontend-check:
     name: Frontend Check

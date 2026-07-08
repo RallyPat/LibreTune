@@ -48,7 +48,7 @@ regex = "1.11"
 evalexpr = "11.3"
 
 # XML parsing for TunerStudio dashboard format
-quick-xml = { version = "0.37", features = ["serialize"] }
+quick-xml = { version = "0.41", features = ["serialize"] }
 base64 = "0.22"
 
 # Lua scripting engine (sandboxed)

@@ -453,10 +453,7 @@ dialog = userTable1left, ""
         } => {
             assert_eq!(label, "X Axis value");
             assert_eq!(name, "userTableXAxis1");
-            assert_eq!(
-                visibility_condition.as_deref(),
-                Some("userTable1Enabled")
-            );
+            assert_eq!(visibility_condition.as_deref(), Some("userTable1Enabled"));
         }
         other => panic!("expected RuntimeValue, got {other:?}"),
     }
@@ -484,7 +481,10 @@ readoutPanel = wmiReadoutPanel, 1
     std::fs::write(&temp_path, ini_content).expect("Failed to write temp file");
 
     let def = EcuDefinition::from_file(&temp_path).expect("Failed to parse INI");
-    let panel = def.readout_panels.get("wmiReadoutPanel").expect("panel missing");
+    let panel = def
+        .readout_panels
+        .get("wmiReadoutPanel")
+        .expect("panel missing");
     assert_eq!(panel.columns, 1);
     assert_eq!(panel.readouts.len(), 2);
     assert_eq!(panel.readouts[0].channel, "wmiState");
@@ -534,7 +534,6 @@ dialog = injTest_r, "Reference gauges", yAxis
     let _ = std::fs::remove_file(&temp_path);
 }
 
-
 #[test]
 fn test_parse_panel_dual_condition() {
     use libretune_core::ini::{DialogComponent, EcuDefinition};
@@ -576,7 +575,10 @@ dialog = userTable1TblSettings
             ..
         } => {
             assert_eq!(name, "WmiEgtStatusDialog");
-            assert!(enabled_condition.is_none(), "{{1}} is a no-op enable placeholder");
+            assert!(
+                enabled_condition.is_none(),
+                "{{1}} is a no-op enable placeholder"
+            );
             assert_eq!(
                 visibility_condition.as_deref(),
                 Some("isWmiEnableEgtFault"),
@@ -601,10 +603,7 @@ dialog = userTable1TblSettings
             assert_eq!(name, "userTable1Tbl");
             assert_eq!(position.as_deref(), Some("Center"));
             assert!(visibility_condition.is_none());
-            assert_eq!(
-                enabled_condition.as_deref(),
-                Some("userTable1Enabled")
-            );
+            assert_eq!(enabled_condition.as_deref(), Some("userTable1Enabled"));
         }
         other => panic!("expected Panel, got {:?}", other),
     }

@@ -14,7 +14,10 @@ use tauri::{Emitter, Manager};
 /// Canonical dashboard channel names → ECU-specific output channel names.
 /// Only inserts when the canonical name is absent from `data`.
 const REALTIME_CHANNEL_ALIASES: &[(&str, &[&str])] = &[
-    ("rpm", &["RPMValue", "rpm", "RPM", "engineSpeed", "rpmSensor"]),
+    (
+        "rpm",
+        &["RPMValue", "rpm", "RPM", "engineSpeed", "rpmSensor"],
+    ),
     ("afr", &["AFRValue", "RealAFRValue", "afr", "AFR", "afr1"]),
     (
         "coolant",
@@ -109,7 +112,10 @@ const REALTIME_CHANNEL_ALIASES: &[(&str, &[&str])] = &[
         ],
     ),
     ("baro", &["baroPressure", "baro", "BaroPressure"]),
-    ("afrTarget", &["targetAFR", "targetAfr", "afrTarget", "AFRTarget"]),
+    (
+        "afrTarget",
+        &["targetAFR", "targetAfr", "afrTarget", "AFRTarget"],
+    ),
     (
         "egt",
         &[
@@ -515,11 +521,9 @@ pub async fn start_realtime_stream(
 
                         let mut tracker = app_state.rpm_state_tracker.lock().await;
 
-                        if let Some(new_state) = tracker.update(
-                            rpm,
-                            rpm_key_on_threshold,
-                            rpm_key_off_timeout,
-                        ) {
+                        if let Some(new_state) =
+                            tracker.update(rpm, rpm_key_on_threshold, rpm_key_off_timeout)
+                        {
                             // Emit event when state changes
                             let state_str = match new_state {
                                 RpmState::On => "on",
@@ -706,11 +710,9 @@ pub async fn start_realtime_stream(
                                 .unwrap_or(0.0);
 
                             if let Ok(mut tracker) = app_state.rpm_state_tracker.try_lock() {
-                                if let Some(new_state) = tracker.update(
-                                    rpm,
-                                    rpm_key_on_threshold,
-                                    rpm_key_off_timeout,
-                                ) {
+                                if let Some(new_state) =
+                                    tracker.update(rpm, rpm_key_on_threshold, rpm_key_off_timeout)
+                                {
                                     let state_str = match new_state {
                                         RpmState::On => "on",
                                         RpmState::Off => "off",

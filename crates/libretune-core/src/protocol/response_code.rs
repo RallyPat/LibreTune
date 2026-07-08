@@ -172,9 +172,7 @@ impl ResponseCode {
             Self::Ok => "OK",
             Self::OkTable => "OK (table response)",
             Self::OkBurn => "Burn complete",
-            Self::SettingsError => {
-                "Controller refused settings (power cycle required to clear)"
-            }
+            Self::SettingsError => "Controller refused settings (power cycle required to clear)",
             Self::OkAux | Self::OkAux2 | Self::OkAux3 => "OK",
             Self::Underrun => "Controller Reported an Under-run",
             Self::Overrun => "Controller Reported an Over-run",

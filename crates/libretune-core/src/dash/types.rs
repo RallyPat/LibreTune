@@ -854,10 +854,7 @@ mod painter_registry_tests {
                 "com.efiAnalytics.tunerStudio.renderers.VerticalBarPainter",
                 GaugePainter::VerticalBarGauge,
             ),
-            (
-                "Vertical Dashed Bar Gauge",
-                GaugePainter::VerticalDashedBar,
-            ),
+            ("Vertical Dashed Bar Gauge", GaugePainter::VerticalDashedBar),
             (
                 "com.efiAnalytics.tunerStudio.renderers.VerticalDashedBarPainter",
                 GaugePainter::VerticalDashedBar,
