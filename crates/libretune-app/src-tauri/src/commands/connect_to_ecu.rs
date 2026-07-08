@@ -2,9 +2,8 @@
 
 use crate::commands::metrics::start_metrics_task;
 use crate::{
-    call_connection_factory_and_build_result, find_matching_inis_internal,
-    load_settings, parse_runtime_packet_mode, AppState, ConnectResult, SignatureMatchType,
-    SignatureMismatchInfo,
+    call_connection_factory_and_build_result, find_matching_inis_internal, load_settings,
+    parse_runtime_packet_mode, AppState, ConnectResult, SignatureMatchType, SignatureMismatchInfo,
 };
 use libretune_core::protocol::{Connection, ConnectionConfig};
 use tauri::Emitter;

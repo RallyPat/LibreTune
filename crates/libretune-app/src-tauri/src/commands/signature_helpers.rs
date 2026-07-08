@@ -164,7 +164,8 @@ pub(crate) async fn connect_to_ecu_simulated(state: &AppState, signature: &str) 
     };
 
     let mismatch_info = if let Some(ref expected) = expected_signature {
-        let match_type = compare_signatures_with_prefix(signature, expected, expected_prefix.as_deref());
+        let match_type =
+            compare_signatures_with_prefix(signature, expected, expected_prefix.as_deref());
         if match_type != SignatureMatchType::Exact {
             let matching_inis = find_matching_inis_from_state(state, signature).await;
             let current_ini_path = None; // In tests we don't need an app handle to load settings

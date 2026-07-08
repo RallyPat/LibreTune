@@ -16,9 +16,8 @@ use super::{
         DatalogView, DialogComponent, DialogDefinition, EcuType, FTPBrowserConfig, FilterOperator,
         FrontPageConfig, FrontPageIndicator, GammaEConfig, HelpTopic, IndicatorDefinition,
         IndicatorPanel, KeyAction, LoggerDefinition, MaintainConstantValue, Menu, MenuItem,
-        ReadoutDefinition, ReadoutPanel,
-        PortEditorConfig, ReferenceTable, SettingGroup, SettingOption, VeAnalyzeConfig,
-        WueAnalyzeConfig,
+        PortEditorConfig, ReadoutDefinition, ReadoutPanel, ReferenceTable, SettingGroup,
+        SettingOption, VeAnalyzeConfig, WueAnalyzeConfig,
     },
     EcuDefinition, IniError,
 };
@@ -287,7 +286,11 @@ fn parse_ini_internal(content: &str, ctx: &mut IncludeContext) -> Result<EcuDefi
                     (false, *c)
                 };
                 let defined = ctx.defined_symbols.contains(sym);
-                if negated { !defined } else { defined }
+                if negated {
+                    !defined
+                } else {
+                    defined
+                }
             });
 
             if !conditions.is_empty() && !conditions_pass {
@@ -2357,37 +2360,34 @@ fn parse_user_defined_entry(
                             }
                         })
                         .collect();
-                    let is_trivial_condition = |s: &str| {
-                        s.is_empty() || s == "0" || s == "1"
+                    let is_trivial_condition = |s: &str| s.is_empty() || s == "0" || s == "1";
+                    let (enabled_condition, visibility_condition) = if brace_parts.len() >= 2 {
+                        (
+                            if is_trivial_condition(&brace_parts[0]) {
+                                None
+                            } else {
+                                Some(brace_parts[0].clone())
+                            },
+                            if is_trivial_condition(&brace_parts[1]) {
+                                None
+                            } else {
+                                Some(brace_parts[1].clone())
+                            },
+                        )
+                    } else if brace_parts.len() == 1 {
+                        // Single brace on a panel is the enable expression in TunerStudio.
+                        // LibreTune hides the panel when this is false (collapsed module UX).
+                        (
+                            if is_trivial_condition(&brace_parts[0]) {
+                                None
+                            } else {
+                                Some(brace_parts[0].clone())
+                            },
+                            None,
+                        )
+                    } else {
+                        (None, None)
                     };
-                    let (enabled_condition, visibility_condition) =
-                        if brace_parts.len() >= 2 {
-                            (
-                                if is_trivial_condition(&brace_parts[0]) {
-                                    None
-                                } else {
-                                    Some(brace_parts[0].clone())
-                                },
-                                if is_trivial_condition(&brace_parts[1]) {
-                                    None
-                                } else {
-                                    Some(brace_parts[1].clone())
-                                },
-                            )
-                        } else if brace_parts.len() == 1 {
-                            // Single brace on a panel is the enable expression in TunerStudio.
-                            // LibreTune hides the panel when this is false (collapsed module UX).
-                            (
-                                if is_trivial_condition(&brace_parts[0]) {
-                                    None
-                                } else {
-                                    Some(brace_parts[0].clone())
-                                },
-                                None,
-                            )
-                        } else {
-                            (None, None)
-                        };
                     dialog.components.push(DialogComponent::Panel {
                         name: panel_name,
                         position,

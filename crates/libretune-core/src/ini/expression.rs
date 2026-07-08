@@ -1248,6 +1248,9 @@ mod tests {
         let expr = p.parse().expect("parse");
         let mut context = HashMap::new();
         context.insert("time".to_string(), 42.0);
-        assert_eq!(evaluate_simple(&expr, &context).unwrap(), Value::Number(0.0));
+        assert_eq!(
+            evaluate_simple(&expr, &context).unwrap(),
+            Value::Number(0.0)
+        );
     }
 }

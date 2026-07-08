@@ -176,10 +176,7 @@ fn collect_attrs(e: &BytesStart<'_>) -> BTreeMap<String, String> {
     out
 }
 
-fn collect_attrs_excluding(
-    e: &BytesStart<'_>,
-    exclude: &[&str],
-) -> BTreeMap<String, String> {
+fn collect_attrs_excluding(e: &BytesStart<'_>, exclude: &[&str]) -> BTreeMap<String, String> {
     let mut out = collect_attrs(e);
     for k in exclude {
         out.remove(*k);
@@ -230,7 +227,10 @@ mod tests {
     #[test]
     fn parses_minimal_tune_view() {
         let tv = parse_tune_view(SAMPLE).expect("parse ok");
-        assert_eq!(tv.bibliography.get("author").map(String::as_str), Some("Test"));
+        assert_eq!(
+            tv.bibliography.get("author").map(String::as_str),
+            Some("Test")
+        );
         assert_eq!(
             tv.version_info.get("firmwareSignature").map(String::as_str),
             Some("MS3 Format 0545.02 ")
@@ -246,7 +246,11 @@ mod tests {
         assert_eq!(id.ts_type.as_deref(), Some("String"));
         assert!(id.text.is_empty());
 
-        let warn = comp0.properties.iter().find(|p| p.name == "WarnColor").unwrap();
+        let warn = comp0
+            .properties
+            .iter()
+            .find(|p| p.name == "WarnColor")
+            .unwrap();
         assert_eq!(warn.ts_type.as_deref(), Some("Color"));
         assert_eq!(warn.attrs.get("alpha").map(String::as_str), Some("255"));
         assert_eq!(warn.text, "-85552");

@@ -2,8 +2,7 @@
 
 use crate::commands::tune_info::TuneInfo;
 use crate::{
-    find_matching_inis_internal, load_settings, AppState, SignatureMatchType,
-    SignatureMismatchInfo,
+    find_matching_inis_internal, load_settings, AppState, SignatureMatchType, SignatureMismatchInfo,
 };
 use libretune_core::tune::{PageState, TuneCache, TuneFile};
 use std::path::PathBuf;
