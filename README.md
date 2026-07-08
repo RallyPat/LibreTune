@@ -55,7 +55,7 @@ For full documentation, see the [User Manual](https://rallypat.github.io/LibreTu
 
 | Welcome Screen | Settings Dialog | Table Editor |
 |:--------------:|:---------------:|:------------:|
-| ![Welcome](docs/screenshots/welcome.png) | ![Settings](docs/screenshots/LibreTune_Config.png) | ![Table Editor](docs/screenshots/table-editor.png) |
+| ![Welcome](docs/screenshots/welcome.png) | ![Settings](docs/screenshots/LibreTune_Config.png) | ![Table Editor](docs/screenshots/LibreTune_table_editor.png) |
 
 ## Supported ECUs
 
