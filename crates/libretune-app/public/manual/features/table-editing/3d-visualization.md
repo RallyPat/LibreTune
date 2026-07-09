@@ -8,6 +8,10 @@ View tables in three dimensions for better understanding.
 2. Click the **3D** button in the toolbar
 3. The 3D view appears alongside or replaces the 2D grid
 
+> The 3D toggle is available on every table editor — standalone tables opened
+> in a tab as well as tables embedded inside dialogs (via the compact title-bar
+> button).
+
 ## Navigation
 
 ### Mouse Controls

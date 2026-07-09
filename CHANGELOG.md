@@ -13,6 +13,27 @@ relevant.
 
 ## [Unreleased]
 
+### Jul 8, 2026 — Table 3D toggle & curve drag editing
+
+#### Added
+- **3D view toggle on all table editors** — `TableEditor2D` (standalone header
+  + compact embedded title bar) and `tables/TableToolbar` (view controls) now
+  expose a 3D toggle (Box icon) that swaps the grid for the existing
+  react-three-fiber `TableEditor3D` (heatmap scheme, cell-selection sync,
+  back-to-2D button). Brings the standalone and dialog-embedded editors to
+  parity with the tab-based `tuner-ui/TableEditor`.
+- **Click-drag curve editing** — the curve editor now lets you click anywhere
+  in the plot area to grab the nearest point and drag it (direct point-grab
+  still works). Drag is tracked at the window level so it continues outside
+  the SVG bounds and always commits on release; crosshair/ns-resize cursor
+  feedback and undo/redo history are preserved.
+
+#### Fixed
+- **Curve editor crash** — guarded remaining `undefined` bin accesses in the
+  curve data points and table cells, eliminating the
+  "Cannot read properties of undefined (reading 'toFixed')" render error when
+  x/y bin arrays momentarily mismatch in length.
+
 ### Sprint 3 — Spec wrap-up (S-5..S-7)
 
 #### Added

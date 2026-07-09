@@ -5,6 +5,12 @@ All notable changes to LibreTune will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- **3D view on every table** — The 3D view toggle is now available on all table
+  editors, including tables embedded in dialogs. Click the 3D button to switch
+  between the 2D grid and an interactive 3D surface.
+- **Click-and-drag curve editing** — Edit 1D curves by clicking anywhere on the
+  chart to grab the nearest point and dragging it up or down. The drag keeps
+  tracking even if the cursor leaves the chart and commits when you release.
 - **Base Map Generator** — Create safe, driveable starting tunes from engine specifications (cylinder count, displacement, injector size, fuel type, aspiration, etc.). Generates VE, ignition, AFR tables plus enrichment curves. Accessible from Welcome View and Tools menu.
 - **File-centric workflow** — Projects are now created automatically when you open a tune file. The Welcome View shows three main actions: Open Tune File, Connect to ECU, and Import TS Project.
 - **Open Tune File dialog** — Browse for .msq/.xml files with automatic INI signature matching, preview panel, and one-click project creation.

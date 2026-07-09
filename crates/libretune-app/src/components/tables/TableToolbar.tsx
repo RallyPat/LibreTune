@@ -11,7 +11,8 @@ import {
   TrendingUp,
   Grid3X3,
   Crosshair,
-  Palette
+  Palette,
+  Box
 } from 'lucide-react';
 
 interface TableToolbarProps {
@@ -33,6 +34,8 @@ interface TableToolbarProps {
   onFollowModeToggle?: () => void;
   showColorShade?: boolean;
   onColorShadeToggle?: () => void;
+  show3D?: boolean;
+  onToggle3D?: () => void;
 }
 
 export default function TableToolbar({ 
@@ -54,6 +57,8 @@ export default function TableToolbar({
   onFollowModeToggle,
   showColorShade = false,
   onColorShadeToggle,
+  show3D = false,
+  onToggle3D,
 }: TableToolbarProps) {
   return (
     <div className="ts-toolbar">
@@ -182,6 +187,15 @@ export default function TableToolbar({
             onClick={onColorShadeToggle}
           >
             <Palette size={14} />
+          </button>
+        )}
+        {onToggle3D && (
+          <button 
+            className={`ts-toolbar-btn ${show3D ? 'ts-toolbar-btn-active' : ''}`}
+            title="Toggle 3D View"
+            onClick={onToggle3D}
+          >
+            <Box size={14} />
           </button>
         )}
       </div>

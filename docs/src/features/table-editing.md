@@ -100,6 +100,19 @@ Enable **Follow Mode** to automatically highlight the cell corresponding to curr
 2. Click the crosshair icon in the toolbar
 3. The current operating cell is highlighted
 
+## Editing Curves
+
+1D curves (for example, warmup enrichment or fan PWM vs. temperature) open in
+the curve editor, which shows the values as a draggable line chart alongside a
+data table.
+
+- **Drag to edit** — Click anywhere on the chart to grab the nearest point and
+  drag it up or down. You can also grab a point marker directly. The drag keeps
+  tracking even if the cursor leaves the chart area and commits when you release.
+- **Type exact values** — Double-click any cell in the data table to enter a
+  precise number.
+- **Undo/Redo** — `Ctrl+Z` / `Ctrl+Y` work the same as in table editing.
+
 ## Next Steps
 
 - [2D Tables](./table-editing/2d-tables.md) - Detailed 2D table editing

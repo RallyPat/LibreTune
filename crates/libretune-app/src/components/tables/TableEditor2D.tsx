@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { ArrowLeft, Save, Zap, ExternalLink, AlertTriangle, Palette, MapPin, Crosshair } from 'lucide-react';
+import { ArrowLeft, Save, Zap, ExternalLink, AlertTriangle, Palette, MapPin, Crosshair, Box } from 'lucide-react';
 import TableToolbar from './TableToolbar';
 import TableGrid, { SelectionRange } from './TableGrid';
+import TableEditor3D from './TableEditor3D';
 import TableContextMenu from './TableContextMenu';
 import RebinDialog from '../dialogs/RebinDialog';
 import CellEditDialog from '../dialogs/CellEditDialog';
@@ -151,6 +152,7 @@ export default function TableEditor2D({
   const [historyTrail, setHistoryTrail] = useState<[number, number][]>([]);
   const [showColorShade, setShowColorShade] = useState(true);
   const [showHistoryTrail, setShowHistoryTrail] = useState(false);
+  const [show3D, setShow3D] = useState(false);
   
   // History Stack
   type HistorySnapshot = {
@@ -1029,6 +1031,14 @@ export default function TableEditor2D({
           >
             <Palette size={14} />
           </button>
+          <button 
+            className={`embedded-toggle ${show3D ? 'active' : ''}`}
+            onClick={() => setShow3D(!show3D)}
+            title="Toggle 3D View"
+            aria-label="Toggle 3D View"
+          >
+            <Box size={14} />
+          </button>
           {onOpenInTab && (
             <button 
               className="pop-out-btn" 
@@ -1074,6 +1084,14 @@ export default function TableEditor2D({
             >
               <span className="action-icon"><Crosshair size={16} /></span>
             </button>
+            <button 
+              className={`action-btn ${show3D ? 'active' : ''}`}
+              onClick={() => setShow3D(!show3D)}
+              title="Toggle 3D View"
+              aria-label="Toggle 3D View"
+            >
+              <span className="action-icon"><Box size={16} /></span>
+            </button>
             <button className="action-btn" onClick={handleSave} title="Save (S)">
               <Save size={18} />
             </button>
@@ -1105,9 +1123,25 @@ export default function TableEditor2D({
           onFollowModeToggle={() => setFollowMode(!followMode)}
           showColorShade={showColorShade}
           onColorShadeToggle={() => setShowColorShade(!showColorShade)}
+          show3D={show3D}
+          onToggle3D={() => setShow3D(!show3D)}
         />
       )}
 
+      {show3D ? (
+        <TableEditor3D
+          title={title}
+          x_bins={localXBins}
+          y_bins={localYBins}
+          z_values={localZValues}
+          x_label={x_axis_name}
+          y_label={y_axis_name}
+          onBack={() => setShow3D(false)}
+          selectedCell={selectionRange ? { x: selectionRange.start[0], y: selectionRange.start[1] } : null}
+          onCellSelect={(x, y) => setSelectionRange({ start: [x, y], end: [x, y] })}
+          heatmapScheme={heatmapSettings.valueScheme}
+        />
+      ) : (
       <div 
         className={`editor-content${hasEmbeddedTableLiveReadout(table_name, x_output_channel, y_output_channel) ? ' editor-content--with-live' : ''}`}
         onContextMenu={e => {
@@ -1153,6 +1187,7 @@ export default function TableEditor2D({
           />
         )}
       </div>
+      )}
 
       <TableContextMenu
         visible={contextMenu.visible}
