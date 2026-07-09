@@ -459,23 +459,62 @@ export default function CurveEditor({
     setSelectedPoint(index);
   };
 
-  // Handle mouse move for dragging
-  const handleMouseMove = useCallback((e: React.MouseEvent) => {
-    if (!isDragging || dragPointIndex === null || !svgRef.current) return;
-    
+  /** Move the currently dragged point to the given clientY (shared by SVG + window listeners). */
+  const updateDragFromClientY = useCallback((clientY: number, pointIndex: number | null = dragPointIndex) => {
+    if (pointIndex === null || !svgRef.current) return;
+
     const rect = svgRef.current.getBoundingClientRect();
-    const screenY = e.clientY - rect.top;
+    const screenY = clientY - rect.top;
     let newY = unscaleY(screenY);
-    
+
     // Clamp to axis bounds
     newY = Math.max(yAxis.min, Math.min(yAxis.max, newY));
-    
-    const newYBins = [...localYBins];
-    newYBins[dragPointIndex] = newY;
-    setLocalYBins(newYBins);
-  }, [isDragging, dragPointIndex, unscaleY, yAxis, localYBins]);
 
-  // Handle mouse up to end dragging
+    setLocalYBins(prev => {
+      const next = [...prev];
+      next[pointIndex] = newY;
+      return next;
+    });
+  }, [dragPointIndex, unscaleY, yAxis]);
+
+  // Click anywhere on the chart to grab the nearest point and drag it
+  // (TS-style curve editing — no need to hit the small point circles).
+  const handleChartMouseDown = (e: React.MouseEvent) => {
+    if (e.button !== 0 || !svgRef.current || !hasValidData) return;
+
+    const rect = svgRef.current.getBoundingClientRect();
+    const sx = e.clientX - rect.left;
+    const sy = e.clientY - rect.top;
+
+    // Only react to clicks inside the plot area
+    if (
+      sx < padding.left || sx > chartWidth - padding.right ||
+      sy < padding.top || sy > chartHeight - padding.bottom
+    ) {
+      return;
+    }
+
+    // Find the nearest bin by screen X distance
+    let nearest = 0;
+    let bestDist = Infinity;
+    data.x_bins.forEach((x, i) => {
+      const d = Math.abs(scaleX(x) - sx);
+      if (d < bestDist) {
+        bestDist = d;
+        nearest = i;
+      }
+    });
+
+    e.preventDefault();
+    pushHistory();
+    setIsDragging(true);
+    setDragPointIndex(nearest);
+    setSelectedPoint(nearest);
+    // Immediately snap the grabbed point to the clicked Y
+    updateDragFromClientY(e.clientY, nearest);
+  };
+
+  // Handle mouse up to end dragging (drag itself is tracked at window level below)
   const handleMouseUp = useCallback(() => {
     if (isDragging && dragPointIndex !== null) {
       // Commit the change to backend
@@ -485,11 +524,25 @@ export default function CurveEditor({
     setDragPointIndex(null);
   }, [isDragging, dragPointIndex, localYBins, persistCurveValues]);
 
+  // While dragging, track the mouse at window level so the drag continues
+  // smoothly outside the SVG and always commits on release.
+  useEffect(() => {
+    if (!isDragging) return;
+    const onMove = (e: MouseEvent) => updateDragFromClientY(e.clientY);
+    const onUp = () => handleMouseUp();
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+  }, [isDragging, updateDragFromClientY, handleMouseUp]);
+
   // Handle table cell edit
   const handleCellDoubleClick = (index: number) => {
     pushHistory(); // Save state before editing
     setEditingCell(index);
-    setEditValue(localYBins[index].toFixed(2));
+    setEditValue((localYBins[index] ?? 0).toFixed(2));
   };
 
   const handleCellKeyDown = (e: React.KeyboardEvent, index: number) => {
@@ -713,9 +766,8 @@ Suggestion: {errorInfo.suggestion}
             width={chartWidth}
             height={chartHeight}
             className="curve-svg"
-            onMouseMove={handleMouseMove}
-            onMouseUp={handleMouseUp}
-            onMouseLeave={handleMouseUp}
+            style={{ cursor: isDragging ? 'ns-resize' : 'crosshair' }}
+            onMouseDown={handleChartMouseDown}
           >
             {/* Background */}
             <rect
@@ -804,8 +856,8 @@ Suggestion: {errorInfo.suggestion}
             {data.x_bins.map((x, i) => (
               <circle
                 key={i}
-                cx={scaleX(x)}
-                cy={scaleY(localYBins[i])}
+                cx={scaleX(x ?? 0)}
+                cy={scaleY(localYBins[i] ?? 0)}
                 r={selectedPoint === i ? 8 : 6}
                 fill={selectedPoint === i ? '#fff' : '#f5d742'}
                 stroke="#000"
@@ -855,8 +907,11 @@ Suggestion: {errorInfo.suggestion}
             </thead>
             <tbody>
               {data.x_bins.map((x, i) => {
-                const yValue = localYBins[i];
-                const xCellStyle = getHeatmapCellStyle(x, xAxis.min, xAxis.max);
+                // Guard: y_bins can momentarily be shorter than x_bins when
+                // switching curves (localYBins syncs via effect) or when the
+                // INI defines mismatched bin lengths.
+                const yValue = localYBins[i] ?? 0;
+                const xCellStyle = getHeatmapCellStyle(x ?? 0, xAxis.min, xAxis.max);
                 const yCellStyle = getHeatmapCellStyle(yValue, yAxis.min, yAxis.max);
                 
                 return (
@@ -865,7 +920,7 @@ Suggestion: {errorInfo.suggestion}
                     className={selectedPoint === i ? 'selected' : ''}
                     onClick={() => handleRowClick(i)}
                   >
-                    <td className="x-cell" style={xCellStyle}>{x.toFixed(2)}</td>
+                    <td className="x-cell" style={xCellStyle}>{(x ?? 0).toFixed(2)}</td>
                     <td
                       className="y-cell"
                       style={yCellStyle}
@@ -911,8 +966,10 @@ Suggestion: {errorInfo.suggestion}
               </thead>
               <tbody>
                 {data.x_bins.map((x, i) => {
-                  const yValue = localYBins[i];
-                  const xCellStyle = getHeatmapCellStyle(x, xAxis.min, xAxis.max);
+                  // Guard: see embedded table above — y_bins can be shorter
+                  // than x_bins during curve switches or with mismatched INIs.
+                  const yValue = localYBins[i] ?? 0;
+                  const xCellStyle = getHeatmapCellStyle(x ?? 0, xAxis.min, xAxis.max);
                   const yCellStyle = getHeatmapCellStyle(yValue, yAxis.min, yAxis.max);
                   
                   return (
@@ -921,7 +978,7 @@ Suggestion: {errorInfo.suggestion}
                       className={selectedPoint === i ? 'selected' : ''}
                       onClick={() => handleRowClick(i)}
                     >
-                      <td className="x-cell" style={xCellStyle}>{x.toFixed(2)}</td>
+                      <td className="x-cell" style={xCellStyle}>{(x ?? 0).toFixed(2)}</td>
                       <td
                         className="y-cell"
                         style={yCellStyle}
