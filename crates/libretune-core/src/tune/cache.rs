@@ -211,7 +211,7 @@ impl TuneCache {
 
     /// Mark burn as complete
     pub fn mark_burned(&mut self) {
-        for (_, state) in self.page_states.iter_mut() {
+        for state in self.page_states.values_mut() {
             if *state == PageState::Pending {
                 *state = PageState::Clean;
             }
@@ -222,7 +222,7 @@ impl TuneCache {
     /// Revert to clean state (discard changes)
     pub fn revert(&mut self) {
         self.shadow.clear();
-        for (_, state) in self.page_states.iter_mut() {
+        for state in self.page_states.values_mut() {
             if *state == PageState::Dirty {
                 *state = PageState::NotLoaded; // Will need to reload
             }
