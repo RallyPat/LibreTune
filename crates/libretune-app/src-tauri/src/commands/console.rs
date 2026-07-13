@@ -51,7 +51,7 @@ pub async fn send_console_command(
         .map_err(|e| format!("Console command failed: {}", e))?;
 
     let mut history = state.console_history.lock().await;
-    history.push(format!("{}: {}", command, &response));
+    history.push(format!("{}: {}", command, response));
     if history.len() > MAX_HISTORY {
         history.remove(0);
     }
