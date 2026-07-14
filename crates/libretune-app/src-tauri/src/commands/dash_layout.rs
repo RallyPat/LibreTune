@@ -319,10 +319,7 @@ pub(crate) fn create_default_dashboard_files(dir: &Path) -> Result<(), String> {
     Ok(())
 }
 
-const OBSOLETE_DEFAULT_DASHBOARDS: &[&str] = &[
-    "Telemetry Compact.ltdash.xml",
-    "Racing.ltdash.xml",
-];
+const OBSOLETE_DEFAULT_DASHBOARDS: &[&str] = &["Telemetry Compact.ltdash.xml", "Racing.ltdash.xml"];
 
 fn remove_obsolete_default_dashboards(dir: &Path) {
     for file_name in OBSOLETE_DEFAULT_DASHBOARDS {

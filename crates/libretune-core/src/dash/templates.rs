@@ -459,7 +459,6 @@ pub fn create_basic_dashboard() -> DashFile {
     dash
 }
 
-
 /// Create a tuning-focused dashboard
 /// Create a tuning-focused dashboard
 /// Professional layout optimized for live tuning sessions
