@@ -112,7 +112,7 @@ describe('ConnectionDialog', () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it('does not auto-close when still connecting', () => {
+  it('auto-closes as soon as connection succeeds, even while syncing', () => {
     const onClose = vi.fn();
     const { rerender } = render(
       <ConnectionDialog
@@ -133,7 +133,7 @@ describe('ConnectionDialog', () => {
       />
     );
 
-    // Simulate connecting state with connected=true (still syncing)
+    // Connected + still syncing (parent passes connecting || syncing)
     rerender(
       <ConnectionDialog
         isOpen={true}
@@ -153,7 +153,49 @@ describe('ConnectionDialog', () => {
       />
     );
 
-    // Should not auto-close while still connecting/syncing
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('stays open when connection does not succeed', () => {
+    const onClose = vi.fn();
+    const { rerender } = render(
+      <ConnectionDialog
+        isOpen={true}
+        onClose={onClose}
+        ports={['/dev/ttyUSB0']}
+        selectedPort={'/dev/ttyUSB0'}
+        baudRate={115200}
+        timeoutMs={2000}
+        connected={false}
+        connecting={false}
+        onPortChange={() => {}}
+        onBaudChange={() => {}}
+        onTimeoutChange={() => {}}
+        onConnect={() => {}}
+        onDisconnect={() => {}}
+        onRefreshPorts={() => {}}
+      />
+    );
+
+    rerender(
+      <ConnectionDialog
+        isOpen={true}
+        onClose={onClose}
+        ports={['/dev/ttyUSB0']}
+        selectedPort={'/dev/ttyUSB0'}
+        baudRate={115200}
+        timeoutMs={2000}
+        connected={false}
+        connecting={true}
+        onPortChange={() => {}}
+        onBaudChange={() => {}}
+        onTimeoutChange={() => {}}
+        onConnect={() => {}}
+        onDisconnect={() => {}}
+        onRefreshPorts={() => {}}
+      />
+    );
+
     expect(onClose).not.toHaveBeenCalled();
   });
 });

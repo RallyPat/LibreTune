@@ -2,8 +2,7 @@
 
 use crate::paths::get_dashboards_dir;
 use libretune_core::dash::{
-    self, create_basic_dashboard, create_racing_dashboard, create_telemetry_compact_dashboard,
-    create_telemetry_live_dashboard, create_tuning_dashboard,
+    self, create_basic_dashboard, create_telemetry_live_dashboard, create_tuning_dashboard,
 };
 use serde::Serialize;
 use std::path::Path;
@@ -65,10 +64,7 @@ pub async fn list_available_dashes(app: tauri::AppHandle) -> Result<Vec<DashFile
             .map_err(|e| format!("Failed to create dashboards directory: {}", e))?;
     }
 
-    // Ensure every current built-in default exists. On a fresh install this
-    // creates all of them; on an existing install (e.g. upgrading from a
-    // version with fewer built-in templates) it only adds the ones missing,
-    // leaving any user-customized copies of the others untouched.
+    remove_obsolete_default_dashboards(&dash_dir);
     ensure_missing_default_dashboards(&dash_dir)?;
 
     let mut dashes = Vec::new();
@@ -294,12 +290,7 @@ fn default_dashboard_specs() -> Vec<(&'static str, DefaultDashBuilder)> {
     vec![
         ("Basic.ltdash.xml", create_basic_dashboard),
         ("Tuning.ltdash.xml", create_tuning_dashboard),
-        ("Racing.ltdash.xml", create_racing_dashboard),
         ("Telemetry Live.ltdash.xml", create_telemetry_live_dashboard),
-        (
-            "Telemetry Compact.ltdash.xml",
-            create_telemetry_compact_dashboard,
-        ),
     ]
 }
 
@@ -326,6 +317,20 @@ pub(crate) fn create_default_dashboard_files(dir: &Path) -> Result<(), String> {
         default_dashboard_specs().len()
     );
     Ok(())
+}
+
+const OBSOLETE_DEFAULT_DASHBOARDS: &[&str] = &[
+    "Telemetry Compact.ltdash.xml",
+    "Racing.ltdash.xml",
+];
+
+fn remove_obsolete_default_dashboards(dir: &Path) {
+    for file_name in OBSOLETE_DEFAULT_DASHBOARDS {
+        let path = dir.join(file_name);
+        if path.exists() {
+            let _ = std::fs::remove_file(&path);
+        }
+    }
 }
 
 /// Additive, non-destructive version of [`create_default_dashboard_files`]:
@@ -361,11 +366,6 @@ pub async fn get_dashboard_templates() -> Result<Vec<DashboardTemplateInfo>, Str
             description: "Essential gauges: RPM, AFR, Coolant, Throttle".to_string(),
         },
         DashboardTemplateInfo {
-            id: "racing".to_string(),
-            name: "Racing Dashboard".to_string(),
-            description: "Large RPM with shift lights, oil pressure, water temp".to_string(),
-        },
-        DashboardTemplateInfo {
             id: "tuning".to_string(),
             name: "Tuning Dashboard".to_string(),
             description: "AFR, VE, Spark advance, and correction factors".to_string(),
@@ -375,13 +375,6 @@ pub async fn get_dashboard_templates() -> Result<Vec<DashboardTemplateInfo>, Str
             name: "Telemetry Live".to_string(),
             description:
                 "Dense Grafana-style live view: 22 stat tiles, 4 multi-series charts, 16 sparklines"
-                    .to_string(),
-        },
-        DashboardTemplateInfo {
-            id: "telemetry_compact".to_string(),
-            name: "Telemetry Compact".to_string(),
-            description:
-                "Laptop-friendly live view: key stats, 4 trend charts, 6 sparklines (scrollable)"
                     .to_string(),
         },
     ])

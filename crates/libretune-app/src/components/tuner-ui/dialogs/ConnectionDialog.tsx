@@ -77,18 +77,20 @@ export function ConnectionDialog({
   connectionPhase,
 }: ConnectionDialogProps) {
   // Track previous connected state to detect connection transitions
-  const prevConnectedRef = useRef<boolean>(false);
+  const prevConnectedRef = useRef<boolean>(connected);
 
-  // Auto-close dialog when connection succeeds
+  // Auto-close only after a successful connect while the dialog is open.
+  // Leave it open on failure so the user can retry / adjust settings.
   useEffect(() => {
-    // Check if we just transitioned from disconnected/connecting to connected
-    if (connected && !prevConnectedRef.current && !connecting) {
-      // Close the dialog after successful connection
+    if (!isOpen) {
+      prevConnectedRef.current = connected;
+      return;
+    }
+    if (connected && !prevConnectedRef.current) {
       onClose();
     }
-    // Update the previous state
     prevConnectedRef.current = connected;
-  }, [connected, connecting, onClose]);
+  }, [connected, isOpen, onClose]);
 
   return (
     <Dialog
