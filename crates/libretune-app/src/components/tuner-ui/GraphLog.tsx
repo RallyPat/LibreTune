@@ -9,8 +9,8 @@
  * after Stop, or a loaded log in playback. Before the first recording it
  * shows an empty grid with a hint.
  */
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Plus, X, Settings2 } from 'lucide-react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Plus, X, Settings2, ZoomIn, ZoomOut } from 'lucide-react';
 import { Dialog } from '../common';
 import {
   useGraphLogStore,
@@ -38,6 +38,19 @@ export interface GraphLogProps {
 
 const AXIS_TICKS = 5;
 const PANE_MIN_HEIGHT = 70;
+/** Horizontal padding reserved for the left/right axis labels */
+const PAD_L = 52;
+const PAD_R = 52;
+/** Zoom step per Q/A keypress or zoom button click */
+const ZOOM_FACTOR = 0.75;
+
+function formatWindow(sec: number): string {
+  if (sec < 10) return `${sec.toFixed(1)} s`;
+  if (sec < 60) return `${Math.round(sec)} s`;
+  const m = Math.floor(sec / 60);
+  const s = Math.round(sec % 60);
+  return s > 0 ? `${m}m ${s}s` : `${m} min`;
+}
 
 function formatTick(v: number): string {
   const abs = Math.abs(v);
@@ -93,6 +106,8 @@ interface PaneCanvasProps {
   width: number;
   height: number;
   cursorPosition?: number | null;
+  /** Hovered position 0..1 across the plot area, or null */
+  hoverFrac?: number | null;
   onOpenConfig: () => void;
 }
 
@@ -104,6 +119,7 @@ const PaneCanvas: React.FC<PaneCanvasProps> = ({
   width,
   height,
   cursorPosition,
+  hoverFrac = null,
   onOpenConfig,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -119,8 +135,8 @@ const PaneCanvas: React.FC<PaneCanvasProps> = ({
     canvas.height = height * dpr;
     ctx.scale(dpr, dpr);
 
-    const padL = 52;
-    const padR = 52;
+    const padL = PAD_L;
+    const padR = PAD_R;
     const padT = 6;
     const padB = 4;
     const plotW = Math.max(10, width - padL - padR);
@@ -217,7 +233,60 @@ const PaneCanvas: React.FC<PaneCanvasProps> = ({
       ctx.lineTo(x, padT + plotH);
       ctx.stroke();
     }
-  }, [pane, visible, windowMs, windowEnd, width, height, cursorPosition]);
+
+    // Hover cursor: vertical bar snapped to the nearest sample, with the
+    // value of each channel at that moment
+    if (hoverFrac !== null && visible.length > 0) {
+      const tHover = windowEnd - windowMs * (1 - hoverFrac);
+      let nearest = visible[0];
+      let bestDist = Math.abs(nearest.t - tHover);
+      for (const s of visible) {
+        const d = Math.abs(s.t - tHover);
+        if (d < bestDist) {
+          bestDist = d;
+          nearest = s;
+        }
+      }
+      const x = padL + plotW * (1 - (windowEnd - nearest.t) / windowMs);
+
+      ctx.strokeStyle = 'rgba(220,225,235,0.75)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(x, padT);
+      ctx.lineTo(x, padT + plotH);
+      ctx.stroke();
+
+      for (const side of sides) {
+        const slot = pane[side];
+        if (!slot.channel) continue;
+        const v = nearest.values[slot.channel];
+        if (v === undefined) continue;
+        const { min, max } = slotBounds(slot, visible);
+        const range = max - min || 1;
+        const y = padT + plotH * (1 - (v - min) / range);
+
+        // Marker dot on the line
+        ctx.fillStyle = slot.color;
+        ctx.beginPath();
+        ctx.arc(x, y, 3, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Value label beside the cursor, flipped near the right edge
+        const text = formatTick(v);
+        ctx.font = 'bold 10px monospace';
+        const tw = ctx.measureText(text).width;
+        const onLeft = x > padL + plotW - tw - 14;
+        const tx = onLeft ? x - 6 - tw : x + 6;
+        const ty = Math.min(Math.max(y - 6, padT + 2), padT + plotH - 12);
+        ctx.fillStyle = bg;
+        ctx.fillRect(tx - 2, ty - 1, tw + 4, 12);
+        ctx.fillStyle = slot.color;
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'top';
+        ctx.fillText(text, tx, ty);
+      }
+    }
+  }, [pane, visible, windowMs, windowEnd, width, height, cursorPosition, hoverFrac]);
 
   return (
     <div className="graphlog-pane" style={{ height }}>
@@ -312,7 +381,37 @@ export const GraphLog: React.FC<GraphLogProps> = ({
   const [renameValue, setRenameValue] = useState('');
   const [configPane, setConfigPane] = useState<number | null>(null);
   const [size, setSize] = useState({ width: 800, height: 480 });
+  const [hoverFrac, setHoverFrac] = useState<number | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+
+  const zoomIn = useCallback(() => {
+    setTimeWindow(useGraphLogStore.getState().timeWindowSec * ZOOM_FACTOR);
+  }, [setTimeWindow]);
+  const zoomOut = useCallback(() => {
+    setTimeWindow(useGraphLogStore.getState().timeWindowSec / ZOOM_FACTOR);
+  }, [setTimeWindow]);
+
+  // Q = zoom in, A = zoom out (ignored while typing in a form field)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement | null)?.tagName;
+      if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
+      if (e.ctrlKey || e.altKey || e.metaKey) return;
+      if (e.key === 'q' || e.key === 'Q') {
+        zoomIn();
+      } else if (e.key === 'a' || e.key === 'A') {
+        zoomOut();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [zoomIn, zoomOut]);
+
+  const handlePanesMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const frac = (e.clientX - rect.left - PAD_L) / Math.max(1, rect.width - PAD_L - PAD_R);
+    setHoverFrac(frac >= 0 && frac <= 1 ? frac : null);
+  }, []);
 
   // Track container size
   useEffect(() => {
@@ -406,23 +505,21 @@ export const GraphLog: React.FC<GraphLogProps> = ({
           <Plus size={13} />
         </button>
         <div className="graphlog-window-select">
-          <label>
-            Window
-            <select
-              value={timeWindowSec}
-              onChange={(e) => setTimeWindow(parseInt(e.target.value, 10))}
-            >
-              <option value={10}>10 s</option>
-              <option value={30}>30 s</option>
-              <option value={60}>1 min</option>
-              <option value={120}>2 min</option>
-              <option value={300}>5 min</option>
-            </select>
-          </label>
+          <button type="button" onClick={zoomIn} title="Zoom in (Q)">
+            <ZoomIn size={14} />
+          </button>
+          <span className="graphlog-window-label">{formatWindow(timeWindowSec)}</span>
+          <button type="button" onClick={zoomOut} title="Zoom out (A)">
+            <ZoomOut size={14} />
+          </button>
         </div>
       </div>
 
-      <div className="graphlog-panes">
+      <div
+        className="graphlog-panes"
+        onMouseMove={handlePanesMouseMove}
+        onMouseLeave={() => setHoverFrac(null)}
+      >
         {samples.length === 0 && (
           <div className="graphlog-empty-hint">Press Record to start logging</div>
         )}
@@ -438,6 +535,7 @@ export const GraphLog: React.FC<GraphLogProps> = ({
               width={size.width}
               height={paneHeight}
               cursorPosition={cursorPosition}
+              hoverFrac={hoverFrac}
               onOpenConfig={() => setConfigPane(paneIndex)}
             />
           );

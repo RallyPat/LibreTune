@@ -80,23 +80,34 @@
 
 .graphlog-window-select {
   margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
   font-size: 11px;
   color: var(--text-secondary, #9aa4b8);
 }
 
-.graphlog-window-select label {
+.graphlog-window-select button {
   display: flex;
   align-items: center;
-  gap: 6px;
-}
-
-.graphlog-window-select select {
-  background: var(--bg-primary, #0e121c);
-  color: var(--text-primary, #e6eaf2);
+  justify-content: center;
+  background: transparent;
   border: 1px solid var(--border-color, rgba(128, 140, 160, 0.25));
   border-radius: 4px;
-  font-size: 11px;
-  padding: 2px 4px;
+  color: var(--text-secondary, #9aa4b8);
+  cursor: pointer;
+  padding: 3px;
+}
+
+.graphlog-window-select button:hover {
+  color: var(--text-primary, #e6eaf2);
+  background: rgba(128, 140, 160, 0.2);
+}
+
+.graphlog-window-label {
+  min-width: 48px;
+  text-align: center;
+  font-family: monospace;
 }
 
 /* ---- Panes ---- */

@@ -77,15 +77,17 @@ let nextId = Date.now();
 const newTabId = () => `graphtab-${nextId++}`;
 
 /** Default pages mirroring the TunerStudio Fuel/Ignition presets.
- *  Channel names follow the rusEFI INI conventions; slots for channels a
- *  given INI doesn't define simply show no data until reassigned.
+ *  Channel names use the canonical lowercase alias names the realtime stream
+ *  and data logger add via apply_channel_aliases (rpm, map, lambda, …), which
+ *  work across rusEFI/Speeduino INIs. Slots for channels a given INI doesn't
+ *  provide simply show no data until reassigned.
  */
 const defaultTabs = (): GraphTab[] => [
   {
     id: newTabId(),
     name: 'Fuel',
     panes: [
-      makePane(0, makeSlot('left', 0, 'RPM', 0, 9000), makeSlot('right', 0, 'MAP', 0, 400)),
+      makePane(0, makeSlot('left', 0, 'rpm', 0, 9000), makeSlot('right', 0, 'map', 0, 400)),
       makePane(1, makeSlot('left', 1, 'lambda', 0.7, 1.3), makeSlot('right', 1, 'pulseWidth', 0, 25)),
       makePane(2, makeSlot('left', 2, 've', 0, 200), makeSlot('right', 2, 'tps', 0, 100)),
       makePane(3, makeSlot('left', 3, 'coolant', -40, 140), makeSlot('right', 3, 'iat', -40, 120)),
@@ -95,13 +97,21 @@ const defaultTabs = (): GraphTab[] => [
     id: newTabId(),
     name: 'Ignition',
     panes: [
-      makePane(0, makeSlot('left', 0, 'RPM', 0, 9000), makeSlot('right', 0, 'timing', -10, 60)),
-      makePane(1, makeSlot('left', 1, 'MAP', 0, 400), makeSlot('right', 1, 'tps', 0, 100)),
+      makePane(0, makeSlot('left', 0, 'rpm', 0, 9000), makeSlot('right', 0, 'advance', -10, 60)),
+      makePane(1, makeSlot('left', 1, 'map', 0, 400), makeSlot('right', 1, 'tps', 0, 100)),
       makePane(2),
       makePane(3),
     ],
   },
 ];
+
+/** Channel renames applied when migrating persisted state from v1 */
+const V1_CHANNEL_RENAMES: Record<string, string> = {
+  RPM: 'rpm',
+  MAP: 'map',
+  TPS: 'tps',
+  timing: 'advance',
+};
 
 interface GraphLogState {
   tabs: GraphTab[];
@@ -159,7 +169,7 @@ export const useGraphLogStore = create<GraphLogState>()(
       setActiveTab: (tabId) => set({ activeTabId: tabId }),
 
       setTimeWindow: (seconds) =>
-        set({ timeWindowSec: Math.min(300, Math.max(5, seconds)) }),
+        set({ timeWindowSec: Math.min(600, Math.max(2, seconds)) }),
 
       updateSlot: (tabId, paneIndex, side, patch) =>
         set((state) => ({
@@ -185,7 +195,25 @@ export const useGraphLogStore = create<GraphLogState>()(
     }),
     {
       name: 'libretune-graph-log',
-      version: 1,
+      version: 2,
+      migrate: (persisted, version) => {
+        const state = persisted as GraphLogState;
+        if (version < 2 && state?.tabs) {
+          // v1 defaults used uppercase channel names that don't exist in the
+          // recorded logs (canonical alias names are lowercase).
+          for (const tab of state.tabs) {
+            for (const pane of tab.panes) {
+              for (const side of ['left', 'right'] as const) {
+                const ch = pane[side].channel;
+                if (ch && V1_CHANNEL_RENAMES[ch]) {
+                  pane[side].channel = V1_CHANNEL_RENAMES[ch];
+                }
+              }
+            }
+          }
+        }
+        return state;
+      },
     },
   ),
 );

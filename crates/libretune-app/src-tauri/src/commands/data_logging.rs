@@ -125,20 +125,38 @@ pub async fn clear_log(state: tauri::State<'_, AppState>) -> Result<(), String> 
 #[tauri::command]
 pub async fn save_log(state: tauri::State<'_, AppState>, path: String) -> Result<(), String> {
     let logger = state.data_logger.lock().await;
+    let channels = logger.channels();
+
+    // Skip columns that are zero for the entire log: an INI defines far more
+    // output channels than the ECU (or demo simulator) actually streams, and
+    // those never-seen channels are logged as 0.0. Writing them out buries
+    // the real data in hundreds of dead columns.
+    let mut has_data = vec![false; channels.len()];
+    for entry in logger.entries() {
+        for (i, &val) in entry.values.iter().enumerate() {
+            if val != 0.0 {
+                has_data[i] = true;
+            }
+        }
+    }
 
     let mut csv = String::new();
     csv.push_str("Time (ms)");
-    for channel in logger.channels() {
-        csv.push(',');
-        csv.push_str(channel);
+    for (i, channel) in channels.iter().enumerate() {
+        if has_data[i] {
+            csv.push(',');
+            csv.push_str(channel);
+        }
     }
     csv.push('\n');
 
     for entry in logger.entries() {
         csv.push_str(&format!("{}", entry.timestamp.as_millis()));
-        for val in &entry.values {
-            csv.push(',');
-            csv.push_str(&format!("{:.4}", val));
+        for (i, val) in entry.values.iter().enumerate() {
+            if has_data[i] {
+                csv.push(',');
+                csv.push_str(&format!("{:.4}", val));
+            }
         }
         csv.push('\n');
     }

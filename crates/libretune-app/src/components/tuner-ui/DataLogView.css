@@ -233,6 +233,15 @@
   flex-shrink: 0;
 }
 
+/* App.css declares a global .status-indicator as an 8x8 dot; undo that here
+   where the class is a text label, otherwise the neighboring stats overlap it. */
+.log-status .status-indicator {
+  width: auto;
+  height: auto;
+  border-radius: 0;
+  background-color: transparent;
+}
+
 .status-indicator {
   font-weight: 600;
   font-size: 14px;
