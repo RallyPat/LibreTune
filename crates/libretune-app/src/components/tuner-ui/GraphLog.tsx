@@ -187,12 +187,14 @@ const PaneCanvas: React.FC<PaneCanvasProps> = ({
         }
       }
 
-      // Polyline
+      // Trace, drawn as raw sample-and-hold steps — this is measurement data,
+      // not a smoothed presentation graph.
       if (slot.channel && visible.length >= 2) {
         ctx.strokeStyle = slot.color;
-        ctx.lineWidth = 1.5;
+        ctx.lineWidth = 1;
         ctx.beginPath();
         let started = false;
+        let prevY = 0;
         for (const s of visible) {
           const v = s.values[slot.channel];
           if (v === undefined) {
@@ -205,10 +207,47 @@ const PaneCanvas: React.FC<PaneCanvasProps> = ({
             ctx.moveTo(x, y);
             started = true;
           } else {
+            ctx.lineTo(x, prevY);
             ctx.lineTo(x, y);
           }
+          prevY = y;
         }
         ctx.stroke();
+      }
+
+      // Peak marker: flag the highest value in the visible window so a pull's
+      // peak (e.g. 7500 rpm) is readable without hovering
+      if (slot.channel && visible.length >= 2) {
+        let peak: GraphSample | null = null;
+        let peakV = -Infinity;
+        for (const s of visible) {
+          const v = s.values[slot.channel];
+          if (v !== undefined && v > peakV) {
+            peakV = v;
+            peak = s;
+          }
+        }
+        if (peak && isFinite(peakV) && range > 0) {
+          const x = padL + plotW * (1 - (windowEnd - peak.t) / windowMs);
+          const y = padT + plotH * (1 - (peakV - min) / range);
+          ctx.fillStyle = slot.color;
+          ctx.globalAlpha = 0.75;
+          ctx.beginPath();
+          ctx.arc(x, y, 2.5, 0, Math.PI * 2);
+          ctx.fill();
+          const text = formatTick(peakV);
+          ctx.font = '11px monospace';
+          const tw = ctx.measureText(text).width;
+          const tx = Math.min(Math.max(x - tw / 2, padL + 2), padL + plotW - tw - 2);
+          const ty = y > padT + 16 ? y - 15 : y + 6;
+          ctx.fillStyle = bg;
+          ctx.fillRect(tx - 2, ty - 1, tw + 4, 13);
+          ctx.fillStyle = slot.color;
+          ctx.textAlign = 'left';
+          ctx.textBaseline = 'top';
+          ctx.fillText(text, tx, ty);
+          ctx.globalAlpha = 1;
+        }
       }
 
       // Channel label + latest value in the window
@@ -273,13 +312,13 @@ const PaneCanvas: React.FC<PaneCanvasProps> = ({
 
         // Value label beside the cursor, flipped near the right edge
         const text = formatTick(v);
-        ctx.font = 'bold 10px monospace';
+        ctx.font = 'bold 13px monospace';
         const tw = ctx.measureText(text).width;
         const onLeft = x > padL + plotW - tw - 14;
         const tx = onLeft ? x - 6 - tw : x + 6;
-        const ty = Math.min(Math.max(y - 6, padT + 2), padT + plotH - 12);
+        const ty = Math.min(Math.max(y - 8, padT + 2), padT + plotH - 16);
         ctx.fillStyle = bg;
-        ctx.fillRect(tx - 2, ty - 1, tw + 4, 12);
+        ctx.fillRect(tx - 2, ty - 1, tw + 4, 16);
         ctx.fillStyle = slot.color;
         ctx.textAlign = 'left';
         ctx.textBaseline = 'top';
@@ -382,14 +421,40 @@ export const GraphLog: React.FC<GraphLogProps> = ({
   const [configPane, setConfigPane] = useState<number | null>(null);
   const [size, setSize] = useState({ width: 800, height: 480 });
   const [hoverFrac, setHoverFrac] = useState<number | null>(null);
+  /** Right edge of the view in log time; null = follow the latest sample */
+  const [viewEnd, setViewEnd] = useState<number | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  const zoomIn = useCallback(() => {
-    setTimeWindow(useGraphLogStore.getState().timeWindowSec * ZOOM_FACTOR);
-  }, [setTimeWindow]);
-  const zoomOut = useCallback(() => {
-    setTimeWindow(useGraphLogStore.getState().timeWindowSec / ZOOM_FACTOR);
-  }, [setTimeWindow]);
+  // Refs so the zoom handlers (bound once for hotkeys) see current values
+  const hoverFracRef = useRef<number | null>(null);
+  const viewEndRef = useRef<number | null>(null);
+  const samplesRef = useRef<GraphSample[]>(samples);
+  hoverFracRef.current = hoverFrac;
+  viewEndRef.current = viewEnd;
+  samplesRef.current = samples;
+
+  /** Zoom keeping the time under the hover cursor fixed; anchors the right
+   *  edge when the mouse isn't over the graphs. */
+  const zoomBy = useCallback(
+    (factor: number) => {
+      const oldWin = useGraphLogStore.getState().timeWindowSec * 1000;
+      const newWin = Math.min(600, Math.max(2, (oldWin / 1000) * factor)) * 1000;
+      const data = samplesRef.current;
+      const frac = hoverFracRef.current;
+      if (data.length > 0 && frac !== null) {
+        const lastT = data[data.length - 1].t;
+        const curEnd = viewEndRef.current ?? lastT;
+        const tCursor = curEnd - oldWin * (1 - frac);
+        const newEnd = tCursor + (1 - frac) * newWin;
+        setViewEnd(newEnd >= lastT ? null : Math.max(newEnd, data[0].t));
+      }
+      setTimeWindow(newWin / 1000);
+    },
+    [setTimeWindow],
+  );
+
+  const zoomIn = useCallback(() => zoomBy(ZOOM_FACTOR), [zoomBy]);
+  const zoomOut = useCallback(() => zoomBy(1 / ZOOM_FACTOR), [zoomBy]);
 
   // Q = zoom in, A = zoom out (ignored while typing in a form field)
   useEffect(() => {
@@ -426,12 +491,17 @@ export const GraphLog: React.FC<GraphLogProps> = ({
   }, []);
 
   const windowMs = timeWindowSec * 1000;
-  const windowEnd = samples.length > 0 ? samples[samples.length - 1].t : 0;
+  const latestT = samples.length > 0 ? samples[samples.length - 1].t : 0;
+  const windowEnd = viewEnd !== null ? Math.min(viewEnd, latestT) : latestT;
   const windowStart = windowEnd - windowMs;
+  const isFollowing = viewEnd === null;
   const visible = useMemo(() => {
     const startIdx = samples.findIndex((s) => s.t >= windowStart);
-    return startIdx < 0 ? [] : samples.slice(startIdx);
-  }, [samples, windowStart]);
+    if (startIdx < 0) return [];
+    let endIdx = samples.length;
+    while (endIdx > startIdx && samples[endIdx - 1].t > windowEnd) endIdx--;
+    return samples.slice(startIdx, endIdx);
+  }, [samples, windowStart, windowEnd]);
 
   const visiblePanes = activeTab.panes.filter((p) => !p.hidden);
   const timeAxisHeight = 22;
@@ -505,6 +575,16 @@ export const GraphLog: React.FC<GraphLogProps> = ({
           <Plus size={13} />
         </button>
         <div className="graphlog-window-select">
+          {!isFollowing && (
+            <button
+              type="button"
+              className="graphlog-latest-btn"
+              onClick={() => setViewEnd(null)}
+              title="Jump back to the newest data"
+            >
+              Latest
+            </button>
+          )}
           <button type="button" onClick={zoomIn} title="Zoom in (Q)">
             <ZoomIn size={14} />
           </button>

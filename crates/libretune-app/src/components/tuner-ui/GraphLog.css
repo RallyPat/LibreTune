@@ -184,49 +184,72 @@
 }
 
 /* ---- Pane config dialog ---- */
+.graphlog-config-dialog .lt-dialog__body,
+.graphlog-config-dialog {
+  overflow-x: hidden;
+}
+
 .graphlog-slot-config {
+  box-sizing: border-box;
+  width: 100%;
   border: 1px solid var(--border-color, rgba(128, 140, 160, 0.25));
   border-radius: 6px;
-  padding: 8px 10px;
-  margin-bottom: 10px;
+  padding: 10px 12px;
+  margin: 0 0 12px 0;
   font-size: 12px;
   color: var(--text-secondary, #9aa4b8);
 }
 
 .graphlog-slot-config legend {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
-  padding: 0 4px;
+  padding: 0 6px;
 }
 
 .graphlog-slot-config label {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin: 6px 0;
+  gap: 10px;
+  margin: 8px 0;
+  min-width: 0;
 }
 
 .graphlog-slot-config select,
 .graphlog-slot-config input[type='number'] {
   flex: 1;
+  width: 100%;
   min-width: 0;
+  box-sizing: border-box;
   background: var(--bg-secondary, #1a2030);
   color: var(--text-primary, #e6eaf2);
   border: 1px solid var(--border-color, rgba(128, 140, 160, 0.25));
   border-radius: 4px;
   font-size: 12px;
-  padding: 3px 6px;
+  padding: 5px 8px;
 }
 
 .graphlog-slot-auto {
   user-select: none;
 }
 
+.graphlog-slot-auto input[type='checkbox'] {
+  flex: 0 0 auto;
+}
+
 .graphlog-slot-range {
   display: flex;
-  gap: 10px;
+  gap: 12px;
 }
 
 .graphlog-slot-range label {
   flex: 1;
+  min-width: 0;
+}
+
+.graphlog-latest-btn {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 8px !important;
+  color: var(--accent-color, #4f8fe8) !important;
+  border-color: var(--accent-color, #4f8fe8) !important;
 }
