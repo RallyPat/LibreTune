@@ -15,6 +15,15 @@ function LiveLambdaAfrGauges() {
   const lambda = values['lambda'];
   const afr = values['afr'];
 
+  // The ECU's effective stoich ratio is AFR/λ; the ethanol blend follows
+  // from where that sits between E0 (14.7:1) and E100 (9.0:1), linearly.
+  let fuelBlend: string = '—';
+  if (lambda !== undefined && afr !== undefined && lambda > 0.01) {
+    const stoich = afr / lambda;
+    const ethanol = ((14.7 - stoich) / (14.7 - 9.0)) * 100;
+    fuelBlend = `E${Math.round(Math.min(100, Math.max(0, ethanol)))}`;
+  }
+
   return (
     <div className="lambda-preview-gauges">
       <div className="lambda-preview-gauge">
@@ -28,6 +37,10 @@ function LiveLambdaAfrGauges() {
         <span className="lambda-preview-gauge-value">
           {afr !== undefined ? afr.toFixed(1) : '—'}
         </span>
+      </div>
+      <div className="lambda-preview-gauge" title="Ethanol blend derived from AFR ÷ λ (effective stoich ratio)">
+        <span className="lambda-preview-gauge-label">Fuel</span>
+        <span className="lambda-preview-gauge-value">{fuelBlend}</span>
       </div>
     </div>
   );

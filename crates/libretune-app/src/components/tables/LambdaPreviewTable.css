@@ -6,7 +6,10 @@
   border-radius: 6px;
   padding: 10px;
   background: var(--bg-secondary, #1a2030);
-  align-self: flex-start;
+  /* Stretch to the main table's height so both grids line up */
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
 }
 
 .lambda-preview-header {
@@ -37,6 +40,16 @@
   gap: 1px;
   font-family: monospace;
   font-size: 13px;
+  /* Fill the stretched panel, distributing rows to match the main table */
+  flex: 1;
+  grid-auto-rows: 1fr;
+  min-height: 0;
+}
+
+.lambda-preview-grid > div {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
 }
 
 .lambda-preview-corner {
