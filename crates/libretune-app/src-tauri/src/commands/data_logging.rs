@@ -31,7 +31,18 @@ pub async fn start_logging(
     let channels: Vec<String> = def.output_channels.keys().cloned().collect();
 
     let mut logger = state.data_logger.lock().await;
-    *logger = DataLogger::new(channels);
+
+    // Recording appends to the current session (one continuous log until the
+    // user clears it). Only build a fresh logger when there is no session yet
+    // or the channel set changed (e.g. a different INI was loaded).
+    let mut existing: Vec<&String> = logger.channels().iter().collect();
+    let mut incoming: Vec<&String> = channels.iter().collect();
+    existing.sort();
+    incoming.sort();
+    if existing != incoming {
+        *logger = DataLogger::new(channels);
+    }
+
     if let Some(rate) = sample_rate {
         logger.set_sample_rate(rate);
     }

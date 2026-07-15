@@ -49,12 +49,17 @@ impl DataLogger {
         self.sample_rate
     }
 
-    /// Start recording
+    /// Start (or resume) recording.
+    ///
+    /// Recording appends to the existing buffer: the timeline continues from
+    /// the last recorded entry, so stop/start cycles produce one continuous
+    /// log with no gaps. Use [`clear`](Self::clear) to begin a fresh log.
     pub fn start(&mut self) {
-        self.start_time = Some(Instant::now());
+        let now = Instant::now();
+        let elapsed = self.duration();
+        self.start_time = now.checked_sub(elapsed).or(Some(now));
         self.is_recording = true;
         self.last_sample = None;
-        self.buffer.clear();
     }
 
     /// Stop recording
@@ -150,5 +155,31 @@ mod tests {
 
         logger.stop();
         assert!(!logger.is_recording());
+    }
+
+    #[test]
+    fn test_restart_appends_with_continuous_timeline() {
+        let mut logger = DataLogger::new(vec!["rpm".into()]);
+        logger.set_sample_rate(200.0);
+
+        logger.start();
+        logger.record(vec![1000.0]);
+        logger.stop();
+        assert_eq!(logger.entry_count(), 1);
+        let first_ts = logger.duration();
+
+        // Restarting must keep the previous entries and continue the timeline
+        logger.start();
+        std::thread::sleep(Duration::from_millis(10));
+        logger.record(vec![2000.0]);
+        assert_eq!(logger.entry_count(), 2);
+        assert!(logger.duration() >= first_ts);
+
+        // Only clear() wipes the log
+        logger.clear();
+        assert_eq!(logger.entry_count(), 0);
+        logger.start();
+        logger.record(vec![3000.0]);
+        assert_eq!(logger.entry_count(), 1);
     }
 }

@@ -327,6 +327,8 @@ export const GraphLog: React.FC<GraphLogProps> = ({
 
   useEffect(() => {
     if (external) return;
+    // Fresh preview: drop any samples left over from a previous live session
+    liveBufferRef.current = [];
     const interval = window.setInterval(() => {
       const channels = useRealtimeStore.getState().channels;
       const values: Record<string, number> = {};

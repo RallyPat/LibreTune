@@ -227,33 +227,43 @@ export const DataLogView: React.FC = () => {
     return () => window.removeEventListener('resize', updateSize);
   }, []);
   
+  // Append newly recorded entries to the accumulated session log.
+  // The session is one continuous log across Record/Stop cycles; only
+  // Clear (or loading a file for playback) replaces it.
+  const mergeEntries = useCallback((entries: LogEntry[]) => {
+    setLogData(prev => {
+      const lastT = prev.length > 0 ? prev[prev.length - 1].x : -1;
+      const fresh = entries
+        .filter(e => e.timestamp_ms > lastT)
+        .map(e => ({ x: e.timestamp_ms, values: e.values }));
+      return fresh.length > 0 ? [...prev, ...fresh] : prev;
+    });
+  }, []);
+
+  const fetchLatestEntries = useCallback(async () => {
+    const newStatus = await invoke<LoggingStatus>('get_logging_status');
+    setStatus(newStatus);
+    const entries = await invoke<LogEntry[]>('get_log_entries', {
+      startIndex: Math.max(0, newStatus.entry_count - 500),
+      count: 500
+    });
+    mergeEntries(entries);
+  }, [mergeEntries]);
+
   // Poll status while recording
   useEffect(() => {
     if (!isRecording) return;
-    
+
     const interval = setInterval(async () => {
       try {
-        const newStatus = await invoke<LoggingStatus>('get_logging_status');
-        setStatus(newStatus);
-        
-        // Fetch latest entries for chart
-        const entries = await invoke<LogEntry[]>('get_log_entries', {
-          startIndex: Math.max(0, newStatus.entry_count - 500),
-          count: 500
-        });
-        
-        setLogData(entries.map(e => ({
-          x: e.timestamp_ms,
-          values: e.values
-        })));
-        
+        await fetchLatestEntries();
       } catch (err) {
         console.error('Failed to get logging status:', err);
       }
     }, 200);
-    
+
     return () => clearInterval(interval);
-  }, [isRecording]);
+  }, [isRecording, fetchLatestEntries]);
   
   // Seed channel list once when ECU data first arrives (avoid subscribing to all channels at 20Hz).
   useEffect(() => {
@@ -317,26 +327,25 @@ export const DataLogView: React.FC = () => {
   
   const handleStartLogging = useCallback(async () => {
     try {
+      // Recording appends to the current session log until Clear is pressed
       await invoke('start_logging', { sampleRate });
       setIsRecording(true);
-      setLogData([]);
     } catch (err) {
       console.error('Failed to start logging:', err);
     }
   }, [sampleRate]);
-  
+
   const handleStopLogging = useCallback(async () => {
     try {
       await invoke('stop_logging');
       setIsRecording(false);
-      
-      // Fetch final status
-      const finalStatus = await invoke<LoggingStatus>('get_logging_status');
-      setStatus(finalStatus);
+
+      // Fetch final status and any entries the last poll missed
+      await fetchLatestEntries();
     } catch (err) {
       console.error('Failed to stop logging:', err);
     }
-  }, []);
+  }, [fetchLatestEntries]);
   
   const handleClearLog = useCallback(async () => {
     try {
@@ -575,14 +584,16 @@ export const DataLogView: React.FC = () => {
   // Get display values - use playback or realtime based on mode
   const displayValues = viewMode === 'playback' ? getCurrentPlaybackValues() : liveValues;
 
-  // Samples for the Graph Log: recorded/playback data when present; undefined
-  // while idle-live so GraphLog samples the realtime store itself.
+  // Samples for the Graph Log: the session log whenever one exists — growing
+  // while recording, frozen after Stop, replaced by file data in playback.
+  // Only when no log exists yet (or after Clear) does GraphLog fall back to
+  // live-sampling the realtime store as a preview.
   const graphSamples = useMemo<GraphSample[] | undefined>(() => {
-    if ((viewMode === 'playback' || isRecording) && logData.length > 0) {
+    if (logData.length > 0) {
       return logData.map((d) => ({ t: d.x, values: d.values }));
     }
     return undefined;
-  }, [viewMode, isRecording, logData]);
+  }, [logData]);
   
   return (
     <div className="datalog-view">

@@ -162,6 +162,25 @@ pub(crate) fn apply_channel_aliases(data: &mut HashMap<String, f64>) {
     }
 }
 
+/// Feed the current realtime snapshot to the data logger when a recording is
+/// active. The logger applies its own sample-rate limiting in `record()`.
+pub(crate) async fn feed_data_logger(app_state: &AppState, data: &HashMap<String, f64>) {
+    // try_lock: never stall the stream tick on logger contention
+    let mut logger = match app_state.data_logger.try_lock() {
+        Ok(l) => l,
+        Err(_) => return,
+    };
+    if !logger.is_recording() {
+        return;
+    }
+    let values: Vec<f64> = logger
+        .channels()
+        .iter()
+        .map(|name| data.get(name).copied().unwrap_or(0.0))
+        .collect();
+    logger.record(values);
+}
+
 pub(crate) async fn feed_autotune_data(
     app_state: &AppState,
     data: &HashMap<String, f64>,
@@ -536,6 +555,9 @@ pub async fn start_realtime_stream(
                     // Feed data to AutoTune if running
                     feed_autotune_data(&app_state, &data, current_time_ms).await;
 
+                    // Feed data to the data logger if recording
+                    feed_data_logger(&app_state, &data).await;
+
                     local_ticks_success += 1;
                 }
             } else {
@@ -728,6 +750,9 @@ pub async fn start_realtime_stream(
                             stream_log(&format!("tick #{}: T6-autotune", tick_count));
                         }
                         feed_autotune_data(&app_state, &data, current_time_ms).await;
+
+                        // Feed data to the data logger if recording
+                        feed_data_logger(&app_state, &data).await;
 
                         local_ticks_success += 1;
                     }
