@@ -197,10 +197,6 @@
   gap: 0;
 }
 
-.chart-mode-toggle .log-button {
-  padding: 6px 12px;
-}
-
 .chart-mode-toggle .log-button:first-child {
   border-radius: 6px 0 0 6px;
 }
@@ -224,11 +220,17 @@
 .log-status {
   display: flex;
   align-items: center;
-  gap: 24px;
+  flex-wrap: wrap;
+  gap: 12px 24px;
   padding: 10px 16px;
   background: var(--bg-secondary);
   border-radius: 8px;
   border: 1px solid var(--border-color);
+}
+
+.log-status > * {
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .status-indicator {

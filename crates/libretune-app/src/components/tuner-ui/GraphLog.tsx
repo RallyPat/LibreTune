@@ -1,16 +1,17 @@
 /**
  * Graph Log — TunerStudio/ECUMaster-style stacked strip charts.
  *
- * Renders the active graph-log tab as PANES_PER_TAB stacked panes sharing a
- * time axis. Each pane plots one channel against the left axis and one against
- * the right, each with its own fixed or auto scale.
+ * Renders the active graph-log tab as stacked panes sharing a time axis.
+ * Each pane plots one channel against the left axis and one against the
+ * right, each with its own fixed or auto scale.
  *
- * Data source: when a `samples` array is supplied (recording or log playback)
- * it is drawn as-is; otherwise the component samples the realtime store itself
- * so the view scrolls live without requiring a recording.
+ * The graph only draws recorded data: the session log while recording or
+ * after Stop, or a loaded log in playback. Before the first recording it
+ * shows an empty grid with a hint.
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Plus, X, Settings2 } from 'lucide-react';
+import { Dialog } from '../common';
 import {
   useGraphLogStore,
   selectActiveTab,
@@ -18,7 +19,6 @@ import {
   GraphPane,
   AxisSide,
 } from '../../stores/graphLogStore';
-import { useRealtimeStore } from '../../stores/realtimeStore';
 import './GraphLog.css';
 
 export interface GraphSample {
@@ -28,18 +28,13 @@ export interface GraphSample {
 }
 
 export interface GraphLogProps {
-  /** Recorded/playback samples. When empty, the component live-samples the realtime store. */
-  samples?: GraphSample[];
+  /** Recorded session log or playback samples */
+  samples: GraphSample[];
   /** Channels the user may assign to slots */
   availableChannels: string[];
   /** Cursor position 0..1 across the visible window (playback), or null */
   cursorPosition?: number | null;
 }
-
-/** Live sampling rate for the self-fed buffer (ms) */
-const LIVE_SAMPLE_MS = 50;
-/** Maximum retained live history (ms) */
-const LIVE_RETENTION_MS = 5 * 60 * 1000;
 
 const AXIS_TICKS = 5;
 const PANE_MIN_HEIGHT = 70;
@@ -80,6 +75,16 @@ function slotBounds(slot: ChannelSlot, visible: GraphSample[]): { min: number; m
   return { min: min - pad, max: max + pad };
 }
 
+/** Last recorded value of a channel within the visible window */
+function lastValue(channel: string | null, visible: GraphSample[]): number | undefined {
+  if (!channel) return undefined;
+  for (let i = visible.length - 1; i >= 0; i--) {
+    const v = visible[i].values[channel];
+    if (v !== undefined) return v;
+  }
+  return undefined;
+}
+
 interface PaneCanvasProps {
   pane: GraphPane;
   visible: GraphSample[];
@@ -87,7 +92,6 @@ interface PaneCanvasProps {
   windowEnd: number;
   width: number;
   height: number;
-  liveValues: Record<string, number>;
   cursorPosition?: number | null;
   onOpenConfig: () => void;
 }
@@ -99,7 +103,6 @@ const PaneCanvas: React.FC<PaneCanvasProps> = ({
   windowEnd,
   width,
   height,
-  liveValues,
   cursorPosition,
   onOpenConfig,
 }) => {
@@ -192,9 +195,9 @@ const PaneCanvas: React.FC<PaneCanvasProps> = ({
         ctx.stroke();
       }
 
-      // Channel label + current value
+      // Channel label + latest value in the window
       if (slot.channel) {
-        const current = liveValues[slot.channel];
+        const current = lastValue(slot.channel, visible);
         const label = `${slot.channel}${current !== undefined ? `: ${formatTick(current)}` : ''}`;
         ctx.font = 'bold 11px sans-serif';
         ctx.textBaseline = 'top';
@@ -214,7 +217,7 @@ const PaneCanvas: React.FC<PaneCanvasProps> = ({
       ctx.lineTo(x, padT + plotH);
       ctx.stroke();
     }
-  }, [pane, visible, windowMs, windowEnd, width, height, liveValues, cursorPosition]);
+  }, [pane, visible, windowMs, windowEnd, width, height, cursorPosition]);
 
   return (
     <div className="graphlog-pane" style={{ height }}>
@@ -311,46 +314,6 @@ export const GraphLog: React.FC<GraphLogProps> = ({
   const [size, setSize] = useState({ width: 800, height: 480 });
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Live self-sampling buffer, used when no external samples are provided.
-  const liveBufferRef = useRef<GraphSample[]>([]);
-  const [liveTick, setLiveTick] = useState(0);
-  const external = samples !== undefined && samples.length > 0;
-
-  const neededChannels = useMemo(() => {
-    const set = new Set<string>();
-    for (const pane of activeTab.panes) {
-      if (pane.left.channel) set.add(pane.left.channel);
-      if (pane.right.channel) set.add(pane.right.channel);
-    }
-    return Array.from(set);
-  }, [activeTab]);
-
-  useEffect(() => {
-    if (external) return;
-    // Fresh preview: drop any samples left over from a previous live session
-    liveBufferRef.current = [];
-    const interval = window.setInterval(() => {
-      const channels = useRealtimeStore.getState().channels;
-      const values: Record<string, number> = {};
-      let any = false;
-      for (const name of neededChannels) {
-        const v = channels[name];
-        if (v !== undefined) {
-          values[name] = v;
-          any = true;
-        }
-      }
-      if (!any) return;
-      const buf = liveBufferRef.current;
-      const now = Date.now();
-      buf.push({ t: now, values });
-      const cutoff = now - LIVE_RETENTION_MS;
-      while (buf.length > 0 && buf[0].t < cutoff) buf.shift();
-      setLiveTick((n) => n + 1);
-    }, LIVE_SAMPLE_MS);
-    return () => window.clearInterval(interval);
-  }, [external, neededChannels]);
-
   // Track container size
   useEffect(() => {
     const el = containerRef.current;
@@ -363,17 +326,13 @@ export const GraphLog: React.FC<GraphLogProps> = ({
     return () => observer.disconnect();
   }, []);
 
-  const data: GraphSample[] = external ? samples! : liveBufferRef.current;
-
   const windowMs = timeWindowSec * 1000;
-  const windowEnd = data.length > 0 ? data[data.length - 1].t : Date.now();
+  const windowEnd = samples.length > 0 ? samples[samples.length - 1].t : 0;
   const windowStart = windowEnd - windowMs;
   const visible = useMemo(() => {
-    const startIdx = data.findIndex((s) => s.t >= windowStart);
-    return startIdx < 0 ? [] : data.slice(startIdx);
-  }, [data, windowStart, liveTick]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const liveValues = useRealtimeStore((s) => s.channels);
+    const startIdx = samples.findIndex((s) => s.t >= windowStart);
+    return startIdx < 0 ? [] : samples.slice(startIdx);
+  }, [samples, windowStart]);
 
   const visiblePanes = activeTab.panes.filter((p) => !p.hidden);
   const timeAxisHeight = 22;
@@ -387,18 +346,18 @@ export const GraphLog: React.FC<GraphLogProps> = ({
     setRenamingTabId(null);
   };
 
-  // Time axis labels (relative to window end)
+  // Time axis labels (relative to the start of the log)
   const timeLabels = useMemo(() => {
     const labels: Array<{ frac: number; text: string }> = [];
     const steps = 6;
-    const base = data.length > 0 ? data[0].t : windowStart;
+    const base = samples.length > 0 ? samples[0].t : windowStart;
     for (let i = 0; i <= steps; i++) {
       const frac = i / steps;
       const t = windowStart + windowMs * frac;
       labels.push({ frac, text: formatClock(t - base) });
     }
     return labels;
-  }, [windowStart, windowMs, data]);
+  }, [windowStart, windowMs, samples]);
 
   return (
     <div className="graphlog" ref={containerRef}>
@@ -464,6 +423,9 @@ export const GraphLog: React.FC<GraphLogProps> = ({
       </div>
 
       <div className="graphlog-panes">
+        {samples.length === 0 && (
+          <div className="graphlog-empty-hint">Press Record to start logging</div>
+        )}
         {visiblePanes.map((pane) => {
           const paneIndex = activeTab.panes.indexOf(pane);
           return (
@@ -475,7 +437,6 @@ export const GraphLog: React.FC<GraphLogProps> = ({
               windowEnd={windowEnd}
               width={size.width}
               height={paneHeight}
-              liveValues={liveValues}
               cursorPosition={cursorPosition}
               onOpenConfig={() => setConfigPane(paneIndex)}
             />
@@ -490,30 +451,32 @@ export const GraphLog: React.FC<GraphLogProps> = ({
         </div>
       </div>
 
-      {configPane !== null && (
-        <div className="graphlog-config-overlay" onClick={() => setConfigPane(null)}>
-          <div className="graphlog-config" onClick={(e) => e.stopPropagation()}>
-            <div className="graphlog-config-header">
-              <h3>Graph {configPane + 1} — channels &amp; scales</h3>
-              <button type="button" onClick={() => setConfigPane(null)} aria-label="Close">
-                <X size={14} />
-              </button>
-            </div>
-            <SlotConfig
-              label="Left axis"
-              slot={activeTab.panes[configPane].left}
-              availableChannels={availableChannels}
-              onChange={(patch) => updateSlot(activeTab.id, configPane, 'left', patch)}
-            />
-            <SlotConfig
-              label="Right axis"
-              slot={activeTab.panes[configPane].right}
-              availableChannels={availableChannels}
-              onChange={(patch) => updateSlot(activeTab.id, configPane, 'right', patch)}
-            />
-          </div>
-        </div>
-      )}
+      <Dialog
+        open={configPane !== null}
+        onClose={() => setConfigPane(null)}
+        title={`Graph ${configPane !== null ? configPane + 1 : ''} — channels & scales`}
+        size="sm"
+        className="graphlog-config-dialog"
+      >
+        <Dialog.Body>
+          {configPane !== null && (
+            <>
+              <SlotConfig
+                label="Left axis"
+                slot={activeTab.panes[configPane].left}
+                availableChannels={availableChannels}
+                onChange={(patch) => updateSlot(activeTab.id, configPane, 'left', patch)}
+              />
+              <SlotConfig
+                label="Right axis"
+                slot={activeTab.panes[configPane].right}
+                availableChannels={availableChannels}
+                onChange={(patch) => updateSlot(activeTab.id, configPane, 'right', patch)}
+              />
+            </>
+          )}
+        </Dialog.Body>
+      </Dialog>
     </div>
   );
 };

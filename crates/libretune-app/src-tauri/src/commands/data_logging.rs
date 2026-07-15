@@ -28,7 +28,18 @@ pub async fn start_logging(
     let def_guard = state.definition.lock().await;
     let def = def_guard.as_ref().ok_or("Definition not loaded")?;
 
-    let channels: Vec<String> = def.output_channels.keys().cloned().collect();
+    let mut channels: Vec<String> = def.output_channels.keys().cloned().collect();
+
+    // Also log the canonical alias names (RPM, MAP, TPS, …) that the realtime
+    // stream adds via apply_channel_aliases, so recorded logs and saved CSVs
+    // use the same channel names as the dashboards and graph pages.
+    let mut probe: HashMap<String, f64> = channels.iter().map(|c| (c.clone(), 0.0)).collect();
+    super::realtime_stream::apply_channel_aliases(&mut probe);
+    for name in probe.keys() {
+        if !channels.iter().any(|c| c == name) {
+            channels.push(name.clone());
+        }
+    }
 
     let mut logger = state.data_logger.lock().await;
 

@@ -584,16 +584,13 @@ export const DataLogView: React.FC = () => {
   // Get display values - use playback or realtime based on mode
   const displayValues = viewMode === 'playback' ? getCurrentPlaybackValues() : liveValues;
 
-  // Samples for the Graph Log: the session log whenever one exists — growing
-  // while recording, frozen after Stop, replaced by file data in playback.
-  // Only when no log exists yet (or after Clear) does GraphLog fall back to
-  // live-sampling the realtime store as a preview.
-  const graphSamples = useMemo<GraphSample[] | undefined>(() => {
-    if (logData.length > 0) {
-      return logData.map((d) => ({ t: d.x, values: d.values }));
-    }
-    return undefined;
-  }, [logData]);
+  // Samples for the Graph Log: the session log — growing while recording,
+  // frozen after Stop, replaced by file data in playback, empty until the
+  // first recording or after Clear.
+  const graphSamples = useMemo<GraphSample[]>(
+    () => logData.map((d) => ({ t: d.x, values: d.values })),
+    [logData],
+  );
   
   return (
     <div className="datalog-view">

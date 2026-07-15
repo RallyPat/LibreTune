@@ -159,48 +159,20 @@
   transform: translateX(-50%);
 }
 
-/* ---- Config popover ---- */
-.graphlog-config-overlay {
+/* ---- Empty state ---- */
+.graphlog-empty-hint {
   position: absolute;
   inset: 0;
-  background: rgba(0, 0, 0, 0.45);
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 30;
-}
-
-.graphlog-config {
-  background: var(--bg-primary, #10141f);
-  border: 1px solid var(--border-color, rgba(128, 140, 160, 0.3));
-  border-radius: 8px;
-  padding: 14px;
-  width: 340px;
-  max-width: 90%;
-  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
-}
-
-.graphlog-config-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 10px;
-}
-
-.graphlog-config-header h3 {
   font-size: 13px;
-  margin: 0;
-  color: var(--text-primary, #e6eaf2);
-}
-
-.graphlog-config-header button {
-  background: transparent;
-  border: none;
   color: var(--text-secondary, #9aa4b8);
-  cursor: pointer;
-  padding: 2px;
+  pointer-events: none;
+  z-index: 5;
 }
 
+/* ---- Pane config dialog ---- */
 .graphlog-slot-config {
   border: 1px solid var(--border-color, rgba(128, 140, 160, 0.25));
   border-radius: 6px;
