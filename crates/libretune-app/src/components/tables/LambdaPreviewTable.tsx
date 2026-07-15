@@ -4,8 +4,9 @@
  * Mirrors the AFR table's values converted to lambda for a selectable fuel
  * blend (E0…E100). Purely a viewing aid: no editing, no effect on the tune.
  */
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useChannels } from '../../stores/realtimeStore';
+import { useHeatmapSettings } from '../../utils/useHeatmapSettings';
 import './LambdaPreviewTable.css';
 
 /** Live λ and AFR readouts, isolated so realtime updates only re-render
@@ -97,6 +98,19 @@ export default function LambdaPreviewTable({
     return yAxisBottom ? order.reverse() : order;
   }, [zValues.length, yAxisBottom]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Muted heatmap: same scheme as the main table, blended into the dark
+  // background so the companion doesn't compete visually.
+  const { getColor: getHeatmapColor } = useHeatmapSettings();
+  const [minVal, maxVal] = useMemo(() => {
+    const flat = zValues.flat();
+    return flat.length > 0 ? [Math.min(...flat), Math.max(...flat)] : [0, 1];
+  }, [zValues]);
+  const cellStyle = (afr: number): CSSProperties => {
+    if (minVal === maxVal) return {};
+    const heat = getHeatmapColor(afr, minVal, maxVal, 'value');
+    return { background: `color-mix(in srgb, ${heat} 35%, var(--bg-primary, #10141f))` };
+  };
+
   const handleFuelChange = (id: string) => {
     setFuelId(id);
     try {
@@ -137,7 +151,7 @@ export default function LambdaPreviewTable({
           <Fragment key={`row-${y}`}>
             <div className="lambda-preview-axis">{yBins[y]}</div>
             {zValues[y]?.map((afr, x) => (
-              <div key={`${x}-${y}`} className="lambda-preview-cell">
+              <div key={`${x}-${y}`} className="lambda-preview-cell" style={cellStyle(afr)}>
                 {(afr / fuel.stoich).toFixed(2)}
               </div>
             ))}
