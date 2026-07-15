@@ -1,10 +1,11 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { BarChart3, Circle, FolderOpen, Key, Square, CircleDot, Trash2, Save, Pause, Play } from 'lucide-react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { BarChart3, Circle, FolderOpen, Key, Square, CircleDot, Trash2, Save, Pause, Play, LayoutList, LineChart as LineChartIcon } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { save, open } from '@tauri-apps/plugin-dialog';
 import { useChannels, useRealtimeStore } from '../../stores/realtimeStore';
 import LoggerStatsPanel from './LoggerStatsPanel';
+import GraphLog, { GraphSample } from './GraphLog';
 import './DataLogView.css';
 
 interface LoggingStatus {
@@ -205,6 +206,7 @@ export const DataLogView: React.FC = () => {
   const [playbackSpeed, setPlaybackSpeed] = useState<PlaybackSpeed>(1);
   const [loadedFileName, setLoadedFileName] = useState<string | null>(null);
   const [showStats, setShowStats] = useState(false);
+  const [chartMode, setChartMode] = useState<'graphlog' | 'overlay'>('graphlog');
   const [selectedStatsChannel, setSelectedStatsChannel] = useState<string | null>(null);
   const playbackIntervalRef = useRef<number | null>(null);
   
@@ -569,9 +571,18 @@ export const DataLogView: React.FC = () => {
   };
   
   const liveValues = useChannels(selectedChannels);
-  
+
   // Get display values - use playback or realtime based on mode
   const displayValues = viewMode === 'playback' ? getCurrentPlaybackValues() : liveValues;
+
+  // Samples for the Graph Log: recorded/playback data when present; undefined
+  // while idle-live so GraphLog samples the realtime store itself.
+  const graphSamples = useMemo<GraphSample[] | undefined>(() => {
+    if ((viewMode === 'playback' || isRecording) && logData.length > 0) {
+      return logData.map((d) => ({ t: d.x, values: d.values }));
+    }
+    return undefined;
+  }, [viewMode, isRecording, logData]);
   
   return (
     <div className="datalog-view">
@@ -589,6 +600,24 @@ export const DataLogView: React.FC = () => {
         </div>
         
         <div className="datalog-controls">
+          <div className="control-group chart-mode-toggle">
+            <button
+              type="button"
+              className={`log-button secondary ${chartMode === 'graphlog' ? 'active' : ''}`}
+              onClick={() => setChartMode('graphlog')}
+              title="Stacked graph pages (TunerStudio-style graph log)"
+            >
+              <LayoutList size={14} /> Graph Log
+            </button>
+            <button
+              type="button"
+              className={`log-button secondary ${chartMode === 'overlay' ? 'active' : ''}`}
+              onClick={() => setChartMode('overlay')}
+              title="Single chart with overlaid channels"
+            >
+              <LineChartIcon size={14} /> Overlay
+            </button>
+          </div>
           {viewMode === 'live' ? (
             <>
               <div className="control-group">
@@ -725,48 +754,58 @@ export const DataLogView: React.FC = () => {
       )}
       
       <div className="datalog-content">
-        <div className="channel-selector">
-          <h4>Channels</h4>
-          <div className="channel-list">
-            {availableChannels.map((channel) => (
-              <label 
-                key={channel} 
-                className={`channel-item ${selectedChannels.includes(channel) ? 'selected' : ''}`}
-              >
-                <input
-                  type="checkbox"
-                  checked={selectedChannels.includes(channel)}
-                  onChange={() => toggleChannel(channel)}
-                />
-                <span 
-                  className="channel-color"
-                  style={{ 
-                    background: selectedChannels.includes(channel) 
-                      ? ['#00ff88', '#00aaff', '#ff6644', '#ffcc00', '#ff44ff', '#44ffff'][
-                          selectedChannels.indexOf(channel) % 6
-                        ]
-                      : '#444'
-                  }}
-                />
-                <span className="channel-name">{channel}</span>
-                <span className="channel-value">
-                  {displayValues[channel]?.toFixed(2) ?? '-'}
-                </span>
-              </label>
-            ))}
+        {chartMode === 'overlay' && (
+          <div className="channel-selector">
+            <h4>Channels</h4>
+            <div className="channel-list">
+              {availableChannels.map((channel) => (
+                <label
+                  key={channel}
+                  className={`channel-item ${selectedChannels.includes(channel) ? 'selected' : ''}`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={selectedChannels.includes(channel)}
+                    onChange={() => toggleChannel(channel)}
+                  />
+                  <span
+                    className="channel-color"
+                    style={{
+                      background: selectedChannels.includes(channel)
+                        ? ['#00ff88', '#00aaff', '#ff6644', '#ffcc00', '#ff44ff', '#44ffff'][
+                            selectedChannels.indexOf(channel) % 6
+                          ]
+                        : '#444'
+                    }}
+                  />
+                  <span className="channel-name">{channel}</span>
+                  <span className="channel-value">
+                    {displayValues[channel]?.toFixed(2) ?? '-'}
+                  </span>
+                </label>
+              ))}
+            </div>
           </div>
-        </div>
-        
+        )}
+
         <div className="chart-container" ref={chartContainerRef}>
-          <LineChart
-            data={logData}
-            channels={availableChannels}
-            selectedChannels={selectedChannels}
-            width={chartSize.width}
-            height={chartSize.height}
-            cursorPosition={viewMode === 'playback' ? playbackPosition : undefined}
-            onSeek={viewMode === 'playback' ? handleSeek : undefined}
-          />
+          {chartMode === 'graphlog' ? (
+            <GraphLog
+              samples={graphSamples}
+              availableChannels={availableChannels}
+              cursorPosition={viewMode === 'playback' ? playbackPosition : null}
+            />
+          ) : (
+            <LineChart
+              data={logData}
+              channels={availableChannels}
+              selectedChannels={selectedChannels}
+              width={chartSize.width}
+              height={chartSize.height}
+              cursorPosition={viewMode === 'playback' ? playbackPosition : undefined}
+              onSeek={viewMode === 'playback' ? handleSeek : undefined}
+            />
+          )}
         </div>
 
         {showStats && (

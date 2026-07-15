@@ -192,6 +192,30 @@
   cursor: not-allowed;
 }
 
+.chart-mode-toggle {
+  display: flex;
+  gap: 0;
+}
+
+.chart-mode-toggle .log-button {
+  padding: 6px 12px;
+}
+
+.chart-mode-toggle .log-button:first-child {
+  border-radius: 6px 0 0 6px;
+}
+
+.chart-mode-toggle .log-button:last-child {
+  border-radius: 0 6px 6px 0;
+  border-left: none;
+}
+
+.chart-mode-toggle .log-button.active {
+  background: var(--accent-color, #4f8fe8);
+  color: white;
+  border-color: var(--accent-color, #4f8fe8);
+}
+
 @keyframes pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.8; }

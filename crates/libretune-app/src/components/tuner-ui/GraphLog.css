@@ -1,0 +1,249 @@
+.graphlog {
+  --graphlog-pane-bg: var(--bg-secondary, #141824);
+  --graphlog-grid: rgba(128, 140, 160, 0.15);
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  height: 100%;
+}
+
+/* ---- Tab bar ---- */
+.graphlog-tabbar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 6px 0 6px;
+  border-bottom: 1px solid var(--border-color, rgba(128, 140, 160, 0.25));
+  flex-shrink: 0;
+}
+
+.graphlog-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 6px 6px 0 0;
+  cursor: pointer;
+  user-select: none;
+  font-size: 12px;
+  color: var(--text-secondary, #9aa4b8);
+  background: transparent;
+  border: 1px solid transparent;
+  border-bottom: none;
+}
+
+.graphlog-tab:hover {
+  color: var(--text-primary, #e6eaf2);
+}
+
+.graphlog-tab.active {
+  color: var(--text-primary, #e6eaf2);
+  background: var(--bg-secondary, #1a2030);
+  border-color: var(--border-color, rgba(128, 140, 160, 0.25));
+}
+
+.graphlog-tab input {
+  width: 90px;
+  font-size: 12px;
+  background: var(--bg-primary, #0e121c);
+  color: var(--text-primary, #e6eaf2);
+  border: 1px solid var(--accent-color, #4f8fe8);
+  border-radius: 3px;
+  padding: 1px 4px;
+}
+
+.graphlog-tab-close,
+.graphlog-tab-add {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary, #9aa4b8);
+  cursor: pointer;
+  padding: 2px;
+  border-radius: 3px;
+}
+
+.graphlog-tab-close:hover,
+.graphlog-tab-add:hover {
+  color: var(--text-primary, #e6eaf2);
+  background: rgba(128, 140, 160, 0.2);
+}
+
+.graphlog-tab-add {
+  margin-left: 4px;
+  padding: 4px;
+}
+
+.graphlog-window-select {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--text-secondary, #9aa4b8);
+}
+
+.graphlog-window-select label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.graphlog-window-select select {
+  background: var(--bg-primary, #0e121c);
+  color: var(--text-primary, #e6eaf2);
+  border: 1px solid var(--border-color, rgba(128, 140, 160, 0.25));
+  border-radius: 4px;
+  font-size: 11px;
+  padding: 2px 4px;
+}
+
+/* ---- Panes ---- */
+.graphlog-panes {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+}
+
+.graphlog-pane {
+  position: relative;
+  border-bottom: 1px solid var(--border-color, rgba(128, 140, 160, 0.25));
+}
+
+.graphlog-pane canvas {
+  display: block;
+}
+
+.graphlog-pane-config {
+  position: absolute;
+  top: 4px;
+  right: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(20, 26, 40, 0.6);
+  border: 1px solid var(--border-color, rgba(128, 140, 160, 0.25));
+  border-radius: 4px;
+  color: var(--text-secondary, #9aa4b8);
+  cursor: pointer;
+  padding: 3px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.graphlog-pane:hover .graphlog-pane-config {
+  opacity: 1;
+}
+
+.graphlog-pane-config:hover {
+  color: var(--text-primary, #e6eaf2);
+}
+
+/* ---- Time axis ---- */
+.graphlog-timeaxis {
+  position: relative;
+  flex-shrink: 0;
+  font-size: 10px;
+  font-family: monospace;
+  color: var(--text-secondary, #9aa4b8);
+  background: var(--bg-secondary, #1a2030);
+}
+
+.graphlog-timeaxis span {
+  position: absolute;
+  top: 4px;
+  transform: translateX(-50%);
+}
+
+/* ---- Config popover ---- */
+.graphlog-config-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 30;
+}
+
+.graphlog-config {
+  background: var(--bg-primary, #10141f);
+  border: 1px solid var(--border-color, rgba(128, 140, 160, 0.3));
+  border-radius: 8px;
+  padding: 14px;
+  width: 340px;
+  max-width: 90%;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
+}
+
+.graphlog-config-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.graphlog-config-header h3 {
+  font-size: 13px;
+  margin: 0;
+  color: var(--text-primary, #e6eaf2);
+}
+
+.graphlog-config-header button {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary, #9aa4b8);
+  cursor: pointer;
+  padding: 2px;
+}
+
+.graphlog-slot-config {
+  border: 1px solid var(--border-color, rgba(128, 140, 160, 0.25));
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin-bottom: 10px;
+  font-size: 12px;
+  color: var(--text-secondary, #9aa4b8);
+}
+
+.graphlog-slot-config legend {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 0 4px;
+}
+
+.graphlog-slot-config label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0;
+}
+
+.graphlog-slot-config select,
+.graphlog-slot-config input[type='number'] {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg-secondary, #1a2030);
+  color: var(--text-primary, #e6eaf2);
+  border: 1px solid var(--border-color, rgba(128, 140, 160, 0.25));
+  border-radius: 4px;
+  font-size: 12px;
+  padding: 3px 6px;
+}
+
+.graphlog-slot-auto {
+  user-select: none;
+}
+
+.graphlog-slot-range {
+  display: flex;
+  gap: 10px;
+}
+
+.graphlog-slot-range label {
+  flex: 1;
+}
