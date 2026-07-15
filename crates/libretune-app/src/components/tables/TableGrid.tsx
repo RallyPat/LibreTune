@@ -244,9 +244,12 @@ export default function TableGrid({
     if (dragAnchor && gridRef.current) {
       const rect = gridRef.current.getBoundingClientRect();
       const x = Math.floor((e.clientX - rect.left) / (rect.width / x_size));
-      const y = Math.floor((e.clientY - rect.top) / (rect.height / y_size));
-      
-      if (x >= 0 && x < x_size && y >= 0 && y < y_size) {
+      const visualY = Math.floor((e.clientY - rect.top) / (rect.height / y_size));
+      // Pixel math yields the visual row; map back to the data row when the
+      // grid renders bottom-up.
+      const y = yAxisBottom ? y_size - 1 - visualY : visualY;
+
+      if (x >= 0 && x < x_size && visualY >= 0 && visualY < y_size) {
         onSelectionChange({ start: dragAnchor, end: [x, y] });
       }
     }
@@ -261,7 +264,8 @@ export default function TableGrid({
       if (lockedCells?.has(cellKey)) return null;
 
       const left = (x / x_size) * 100;
-      const top = (y / y_size) * 100;
+      const displayY = yAxisBottom ? y_size - 1 - y : y;
+      const top = (displayY / y_size) * 100;
 
       return `${left},${top}`;
     }).filter(Boolean) as string[];
@@ -271,7 +275,8 @@ export default function TableGrid({
       if (lockedCells?.has(cellKey)) return null;
 
       const left = (x / x_size) * 100;
-      const top = (y / y_size) * 100;
+      const displayY = yAxisBottom ? y_size - 1 - y : y;
+      const top = (displayY / y_size) * 100;
 
       return (
         <div
