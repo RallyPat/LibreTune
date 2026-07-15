@@ -7,6 +7,7 @@ import TableEditor3D from './TableEditor3D';
 import TableContextMenu from './TableContextMenu';
 import RebinDialog from '../dialogs/RebinDialog';
 import CellEditDialog from '../dialogs/CellEditDialog';
+import LambdaPreviewTable from './LambdaPreviewTable';
 import { useHeatmapSettings } from '../../utils/useHeatmapSettings';
 import { useTableYAxisBottom } from '../../utils/useTableOrientation';
 import { useChannels } from '../../stores/realtimeStore';
@@ -203,6 +204,10 @@ export default function TableEditor2D({
   // Get heatmap scheme from user settings
   const { settings: heatmapSettings } = useHeatmapSettings();
   const yAxisBottom = useTableYAxisBottom();
+
+  // Show the read-only lambda companion only for actual target-AFR tables
+  // (not blend/bias tables whose values aren't AFR).
+  const isAfrTargetTable = table_name.toLowerCase().startsWith('afrtable');
 
   const selectedCellsCoords = useMemo(() => {
     if (!selectionRange) return [];
@@ -1157,8 +1162,8 @@ export default function TableEditor2D({
           heatmapScheme={heatmapSettings.valueScheme}
         />
       ) : (
-      <div 
-        className={`editor-content${hasEmbeddedTableLiveReadout(table_name, x_output_channel, y_output_channel) ? ' editor-content--with-live' : ''}`}
+      <div
+        className={`editor-content${hasEmbeddedTableLiveReadout(table_name, x_output_channel, y_output_channel) ? ' editor-content--with-live' : ''}${isAfrTargetTable ? ' editor-content--with-lambda' : ''}`}
         onContextMenu={e => {
           const target = e.target as HTMLElement;
           if (target.classList.contains('table-cell')) {
@@ -1193,6 +1198,14 @@ export default function TableEditor2D({
           compact={embedded}
           yAxisBottom={yAxisBottom}
         />
+        {isAfrTargetTable && (
+          <LambdaPreviewTable
+            zValues={localZValues}
+            xBins={localXBins}
+            yBins={localYBins}
+            yAxisBottom={yAxisBottom}
+          />
+        )}
         {hasEmbeddedTableLiveReadout(table_name, x_output_channel, y_output_channel) && (
           <TableLiveReadout
             tableName={table_name}

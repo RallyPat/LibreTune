@@ -33,6 +33,15 @@
   align-items: flex-start;
 }
 
+/* Lambda companion sits to the right of the AFR grid */
+.editor-content.editor-content--with-lambda {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 12px;
+}
+
 .table-editor-2d.embedded .editor-content.editor-content--with-live {
   flex: 0 0 auto;
   flex-direction: row;
