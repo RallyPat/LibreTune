@@ -377,8 +377,8 @@ export default function TableEditor2D({
           'table.navigateLeft': ['ArrowLeft'],
           'table.navigateRight': ['ArrowRight'],
           'table.setEqual': ['='],
-          'table.increase': ['>', '.', 'q'],
-          'table.decrease': ['<', ',', '-', '_'],
+          'table.increase': ['>', '.', 'q', 'PageUp'],
+          'table.decrease': ['<', ',', '-', '_', 'PageDown'],
           'table.increaseMultiple': ['+'],
           'table.scale': ['*'],
           'table.interpolate': ['/'],
@@ -421,12 +421,12 @@ export default function TableEditor2D({
         handleSetEqual();
         return;
       }
-      if (matchesAction('table.increase') || ['>', '.', 'q'].includes(e.key)) {
+      if (matchesAction('table.increase') || ['>', '.', 'q', 'PageUp'].includes(e.key)) {
         e.preventDefault();
         handleIncrease(multiplier);
         return;
       }
-      if (matchesAction('table.decrease') || ['<', ',', '-', '_'].includes(e.key)) {
+      if (matchesAction('table.decrease') || ['<', ',', '-', '_', 'PageDown'].includes(e.key)) {
         e.preventDefault();
         handleDecrease(multiplier);
         return;

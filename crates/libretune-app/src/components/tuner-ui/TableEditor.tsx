@@ -608,11 +608,13 @@ export function TableEditor({
         break;
       case '>':
       case '.':
+      case 'PageUp':
         e.preventDefault();
         adjustValues(delta * multiplier);
         break;
       case '<':
       case ',':
+      case 'PageDown':
         e.preventDefault();
         adjustValues(-delta * multiplier);
         break;
