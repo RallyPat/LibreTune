@@ -4,9 +4,13 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { save, open } from '@tauri-apps/plugin-dialog';
 import { useChannels, useRealtimeStore } from '../../stores/realtimeStore';
+import { useGraphLogStore } from '../../stores/graphLogStore';
 import LoggerStatsPanel from './LoggerStatsPanel';
 import GraphLog, { GraphSample } from './GraphLog';
 import './DataLogView.css';
+
+/** Hard cap on samples kept in the frontend; the oldest are dropped beyond it. */
+const MAX_FRONTEND_SAMPLES = 100_000;
 
 interface LoggingStatus {
   is_recording: boolean;
@@ -227,6 +231,23 @@ export const DataLogView: React.FC = () => {
     return () => window.removeEventListener('resize', updateSize);
   }, []);
   
+  // Channels worth fetching from the recorded log: what the graph-log panes
+  // (across all tabs) and the overlay selection display. Fetching every INI
+  // channel per entry is megabytes per poll at high sample rates.
+  const graphTabs = useGraphLogStore((s) => s.tabs);
+  const neededChannels = React.useMemo(() => {
+    const set = new Set<string>(selectedChannels);
+    for (const tab of graphTabs) {
+      for (const pane of tab.panes) {
+        if (pane.left.channel) set.add(pane.left.channel);
+        if (pane.right.channel) set.add(pane.right.channel);
+      }
+    }
+    return Array.from(set);
+  }, [graphTabs, selectedChannels]);
+  const neededChannelsRef = useRef(neededChannels);
+  neededChannelsRef.current = neededChannels;
+
   // Append newly recorded entries to the accumulated session log.
   // The session is one continuous log across Record/Stop cycles; only
   // Clear (or loading a file for playback) replaces it.
@@ -236,7 +257,11 @@ export const DataLogView: React.FC = () => {
       const fresh = entries
         .filter(e => e.timestamp_ms > lastT)
         .map(e => ({ x: e.timestamp_ms, values: e.values }));
-      return fresh.length > 0 ? [...prev, ...fresh] : prev;
+      if (fresh.length === 0) return prev;
+      const merged = [...prev, ...fresh];
+      return merged.length > MAX_FRONTEND_SAMPLES
+        ? merged.slice(merged.length - MAX_FRONTEND_SAMPLES)
+        : merged;
     });
   }, []);
 
@@ -245,10 +270,35 @@ export const DataLogView: React.FC = () => {
     setStatus(newStatus);
     const entries = await invoke<LogEntry[]>('get_log_entries', {
       startIndex: Math.max(0, newStatus.entry_count - 500),
-      count: 500
+      count: 500,
+      channels: neededChannelsRef.current
     });
     mergeEntries(entries);
   }, [mergeEntries]);
+
+  // When a channel is newly assigned to a pane, past samples don't contain it
+  // (they were fetched filtered). Refetch the whole log with the new set.
+  const needKey = neededChannels.join('|');
+  const logDataRef = useRef(logData);
+  logDataRef.current = logData;
+  useEffect(() => {
+    if (logDataRef.current.length === 0 || viewMode === 'playback') return;
+    (async () => {
+      try {
+        const st = await invoke<LoggingStatus>('get_logging_status');
+        if (st.entry_count === 0) return;
+        const entries = await invoke<LogEntry[]>('get_log_entries', {
+          startIndex: 0,
+          count: st.entry_count,
+          channels: neededChannelsRef.current
+        });
+        setLogData(entries.map(e => ({ x: e.timestamp_ms, values: e.values })));
+      } catch (err) {
+        console.error('Failed to refetch log with new channels:', err);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [needKey]);
 
   // Poll status while recording
   useEffect(() => {

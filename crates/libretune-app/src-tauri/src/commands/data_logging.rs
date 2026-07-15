@@ -87,9 +87,26 @@ pub async fn get_log_entries(
     state: tauri::State<'_, AppState>,
     start_index: Option<usize>,
     count: Option<usize>,
+    channels: Option<Vec<String>>,
 ) -> Result<Vec<LogEntryData>, String> {
     let logger = state.data_logger.lock().await;
-    let channels = logger.channels();
+    let all_channels = logger.channels();
+
+    // Only serialize the requested channels: an INI defines 1000+ output
+    // channels and shipping all of them per entry over IPC at high sample
+    // rates (100 Hz) is several MB per poll — enough to OOM the webview.
+    let selected: Vec<(usize, &String)> = match &channels {
+        Some(filter) => {
+            let wanted: std::collections::HashSet<&str> =
+                filter.iter().map(|s| s.as_str()).collect();
+            all_channels
+                .iter()
+                .enumerate()
+                .filter(|(_, name)| wanted.contains(name.as_str()))
+                .collect()
+        }
+        None => all_channels.iter().enumerate().collect(),
+    };
 
     let start = start_index.unwrap_or(0);
     let max_count = count.unwrap_or(1000);
@@ -99,10 +116,10 @@ pub async fn get_log_entries(
         .skip(start)
         .take(max_count)
         .map(|entry| {
-            let mut values = HashMap::new();
-            for (i, channel) in channels.iter().enumerate() {
-                if let Some(&val) = entry.values.get(i) {
-                    values.insert(channel.clone(), val);
+            let mut values = HashMap::with_capacity(selected.len());
+            for (i, channel) in &selected {
+                if let Some(&val) = entry.values.get(*i) {
+                    values.insert((*channel).clone(), val);
                 }
             }
             LogEntryData {

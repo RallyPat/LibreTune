@@ -188,29 +188,64 @@ const PaneCanvas: React.FC<PaneCanvasProps> = ({
       }
 
       // Trace, drawn as raw sample-and-hold steps — this is measurement data,
-      // not a smoothed presentation graph.
+      // not a smoothed presentation graph. When there are more samples than
+      // pixels, collapse each pixel column to its min/max span (oscilloscope
+      // style) so dense logs stay fast and peaks stay visible.
       if (slot.channel && visible.length >= 2) {
         ctx.strokeStyle = slot.color;
         ctx.lineWidth = 1;
         ctx.beginPath();
-        let started = false;
-        let prevY = 0;
-        for (const s of visible) {
-          const v = s.values[slot.channel];
-          if (v === undefined) {
-            started = false;
-            continue;
+        if (visible.length > plotW * 2) {
+          const colMin = new Float64Array(Math.ceil(plotW)).fill(Infinity);
+          const colMax = new Float64Array(Math.ceil(plotW)).fill(-Infinity);
+          for (const s of visible) {
+            const v = s.values[slot.channel];
+            if (v === undefined) continue;
+            const col = Math.min(
+              Math.ceil(plotW) - 1,
+              Math.max(0, Math.floor(plotW * (1 - (windowEnd - s.t) / windowMs))),
+            );
+            if (v < colMin[col]) colMin[col] = v;
+            if (v > colMax[col]) colMax[col] = v;
           }
-          const x = padL + plotW * (1 - (windowEnd - s.t) / windowMs);
-          const y = padT + plotH * (1 - (v - min) / range);
-          if (!started) {
-            ctx.moveTo(x, y);
-            started = true;
-          } else {
-            ctx.lineTo(x, prevY);
-            ctx.lineTo(x, y);
+          let prevYMid: number | null = null;
+          for (let col = 0; col < colMin.length; col++) {
+            if (colMin[col] === Infinity) {
+              prevYMid = null;
+              continue;
+            }
+            const x = padL + col;
+            const yLo = padT + plotH * (1 - (colMin[col] - min) / range);
+            const yHi = padT + plotH * (1 - (colMax[col] - min) / range);
+            // connect columns so sparse spikes don't float detached
+            if (prevYMid !== null) {
+              ctx.moveTo(x - 1, prevYMid);
+              ctx.lineTo(x, yHi);
+            }
+            ctx.moveTo(x, yHi);
+            ctx.lineTo(x, yLo + 0.5);
+            prevYMid = (yLo + yHi) / 2;
           }
-          prevY = y;
+        } else {
+          let started = false;
+          let prevY = 0;
+          for (const s of visible) {
+            const v = s.values[slot.channel];
+            if (v === undefined) {
+              started = false;
+              continue;
+            }
+            const x = padL + plotW * (1 - (windowEnd - s.t) / windowMs);
+            const y = padT + plotH * (1 - (v - min) / range);
+            if (!started) {
+              ctx.moveTo(x, y);
+              started = true;
+            } else {
+              ctx.lineTo(x, prevY);
+              ctx.lineTo(x, y);
+            }
+            prevY = y;
+          }
         }
         ctx.stroke();
       }
