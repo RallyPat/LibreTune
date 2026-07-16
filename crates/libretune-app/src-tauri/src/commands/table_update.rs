@@ -70,6 +70,13 @@ pub async fn update_table_data(
                 if end <= page_data.len() {
                     page_data[start..end].copy_from_slice(&raw_data);
                 }
+
+                // Offline reads prefer the parsed msq constants over page data,
+                // so keep them in sync or edits revert on reload
+                tune.constants.insert(
+                    table.map.clone(),
+                    libretune_core::tune::TuneValue::Array(flat_values.clone()),
+                );
             }
 
             // Mark tune as modified
