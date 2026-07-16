@@ -903,8 +903,8 @@ export default function TableEditor2D({
         pushHistory(newValues, localXBins, localYBins);
         // Persist to backend without triggering n*m alerts
         invoke('update_table_data', {
-          table_name,
-          z_values: newValues
+          tableName: table_name,
+          zValues: newValues
         });
         
         // Update selection to cover pasted area
@@ -937,8 +937,8 @@ export default function TableEditor2D({
       
       // Update backend
       invoke('update_table_data', {
-        table_name,
-        z_values: snapshot.z,
+        tableName: table_name,
+        zValues: snapshot.z,
         // Backend update for axis not yet available via simple set command
         // but local state is reverted
       });
@@ -959,8 +959,8 @@ export default function TableEditor2D({
       onValuesChange?.(snapshot.z);
 
       invoke('update_table_data', {
-        table_name,
-        z_values: snapshot.z
+        tableName: table_name,
+        zValues: snapshot.z
       });
     }
   };
@@ -986,8 +986,8 @@ export default function TableEditor2D({
 
   const handleSave = () => {
     invoke('update_table_data', {
-      table_name,
-      z_values: localZValues
+      tableName: table_name,
+      zValues: localZValues
     }).then(() => {
     });
   };

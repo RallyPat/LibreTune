@@ -212,8 +212,8 @@ export const RecursivePanel = memo(function RecursivePanel({
         onValuesChange={(values) => {
           // Save changes to backend
           invoke('update_table_data', {
-            table_name: tableData.name,
-            z_values: values,
+            tableName: tableData.name,
+            zValues: values,
           }).then(() => {
             onUpdate?.();
           }).catch((err) => {
