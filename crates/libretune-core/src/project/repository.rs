@@ -174,35 +174,29 @@ impl IniRepository {
     fn extract_ini_info(content: &str) -> io::Result<(String, String)> {
         let mut name = String::new();
         let mut signature = String::new();
-        let mut in_megatune = false;
+        // Newer rusEFI INIs put the signature in [TunerStudio] instead of [MegaTune]
+        let mut in_section = false;
 
         for line in content.lines() {
             let line = line.trim();
 
             if line.starts_with('[') {
-                // Check for [MegaTune] section start (case-insensitive)
-                // Handle trailing comments: [MegaTune] ; comment
-                let header_part = line.split(';').next().unwrap_or("").trim();
-                in_megatune = header_part
-                    .trim_matches(|c| c == '[' || c == ']')
-                    .eq_ignore_ascii_case("MegaTune");
+                let header = line.split(';').next().unwrap_or("").trim();
+                let header = header.trim_matches(|c| c == '[' || c == ']');
+                in_section = header.eq_ignore_ascii_case("MegaTune")
+                    || header.eq_ignore_ascii_case("TunerStudio");
                 continue;
             }
 
-            if !in_megatune {
+            if !in_section {
                 continue;
             }
 
-            // Look for signature in [MegaTune] section
-            if line.to_lowercase().starts_with("signature") {
-                if let Some((_, val)) = line.split_once('=') {
+            if let Some((key, val)) = line.split_once('=') {
+                let key = key.trim();
+                if signature.is_empty() && key.eq_ignore_ascii_case("signature") {
                     signature = Self::extract_quoted_value(val);
-                }
-            }
-
-            // Look for nEmu in [MegaTune] section for display name
-            if line.to_lowercase().starts_with("nemu") {
-                if let Some((_, val)) = line.split_once('=') {
+                } else if name.is_empty() && key.eq_ignore_ascii_case("nEmu") {
                     name = Self::extract_quoted_value(val);
                 }
             }
@@ -211,7 +205,7 @@ impl IniRepository {
         if signature.is_empty() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
-                "Could not find signature in [MegaTune] section of INI file",
+                "Could not find signature in [MegaTune] or [TunerStudio] section of INI file",
             ));
         }
 
@@ -298,6 +292,14 @@ impl IniRepository {
 mod tests {
     use super::*;
     use std::env::temp_dir;
+
+    #[test]
+    fn extract_ini_info_accepts_signature_in_tunerstudio_section() {
+        let ini = "[MegaTune]\n  MTversion = 2.25\n[TunerStudio]\n  queryCommand = \"S\"\n  signature= \"rusEFI master.2026.02.20.uaefi.4211171972\" ; comment\n";
+        let (name, sig) = IniRepository::extract_ini_info(ini).unwrap();
+        assert_eq!(sig, "rusEFI master.2026.02.20.uaefi.4211171972");
+        assert_eq!(name, sig);
+    }
 
     #[test]
     fn test_ini_repository() {
