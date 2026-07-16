@@ -51,6 +51,7 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
   const [localUnits, setLocalUnits] = useState('metric');
   const [autoBurnOnClose, setAutoBurnOnClose] = useState(false);
   const [demoMode, setDemoMode] = useState(false);
+  const [tableYAxisBottom, setTableYAxisBottom] = useState(false);
   const [demoLoading, setDemoLoading] = useState(false);
   const [indicatorColumnCount, setIndicatorColumnCount] = useState('auto');
   const [indicatorFillEmpty, setIndicatorFillEmpty] = useState(false);
@@ -125,6 +126,7 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
           }
         }
         if (settings.auto_burn_on_close !== undefined) setAutoBurnOnClose(!!settings.auto_burn_on_close);
+        if (settings.table_y_axis_bottom !== undefined) setTableYAxisBottom(!!settings.table_y_axis_bottom);
         if (settings.indicator_column_count !== undefined) setIndicatorColumnCount(settings.indicator_column_count);
         if (settings.indicator_fill_empty !== undefined) setIndicatorFillEmpty(!!settings.indicator_fill_empty);
         if (settings.indicator_text_fit !== undefined) setIndicatorTextFit(settings.indicator_text_fit);
@@ -549,6 +551,23 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
               Demo Mode (simulate ECU)
             </label>
             <span className="dialog-form-note">Simulate ECU data for testing (runtime-only)</span>
+          </div>
+
+          <div className="dialog-form-group">
+            <label>
+              <input
+                type="checkbox"
+                checked={tableYAxisBottom}
+                onChange={(e) => {
+                  const enabled = e.target.checked;
+                  setTableYAxisBottom(enabled);
+                  invoke('update_setting', { key: 'table_y_axis_bottom', value: String(enabled) })
+                    .catch((err) => console.error('Failed to save table Y axis setting:', err));
+                }}
+              />
+              Table Y axis zero at bottom
+            </label>
+            <span className="dialog-form-note">Show the lowest load row at the bottom of tables</span>
           </div>
 
           <FormField

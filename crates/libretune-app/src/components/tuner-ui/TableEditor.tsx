@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef, useEffect, KeyboardEvent, useMemo } from 'react';
 import { useChannels } from '../../stores/realtimeStore';
 import { useHeatmapSettings } from '../../utils/useHeatmapSettings';
+import { useTableYAxisBottom } from '../../utils/useTableOrientation';
 import './TableEditor.css';
 import TableEditor3D from '../tables/TableEditor3D';
 import TableToolbar from './table-editor/TableToolbar';
@@ -110,6 +111,9 @@ export function TableEditor({
 
   // Heatmap settings from user preferences
   const { settings: heatmapSettings, getColor: getHeatmapColor } = useHeatmapSettings();
+
+  // Y-axis origin at bottom-left — display-only flip
+  const yAxisBottom = useTableYAxisBottom();
 
   const heatmapScheme = useMemo(() => {
     if (heatmapSettings.valueScheme === 'custom' && heatmapSettings.customValueStops?.length) {
@@ -572,21 +576,28 @@ export function TableEditor({
     const multiplier = e.ctrlKey ? 5 : 1;
     const delta = e.shiftKey ? 1 : 0.1;
 
+    // With the bottom-left origin, visually "up" is the next data row
+    const upDelta = yAxisBottom ? 1 : -1;
+
     switch (e.key) {
-      case 'ArrowUp':
+      case 'ArrowUp': {
         e.preventDefault();
-        if (row > 0) {
-          const newPos = { row: row - 1, col };
+        const upRow = row + upDelta;
+        if (upRow >= 0 && upRow < data.zValues.length) {
+          const newPos = { row: upRow, col };
           setSelection({ start: e.shiftKey ? selection.start : newPos, end: newPos });
         }
         break;
-      case 'ArrowDown':
+      }
+      case 'ArrowDown': {
         e.preventDefault();
-        if (row < data.zValues.length - 1) {
-          const newPos = { row: row + 1, col };
+        const downRow = row - upDelta;
+        if (downRow >= 0 && downRow < data.zValues.length) {
+          const newPos = { row: downRow, col };
           setSelection({ start: e.shiftKey ? selection.start : newPos, end: newPos });
         }
         break;
+      }
       case 'ArrowLeft':
         e.preventDefault();
         if (col > 0) {
@@ -615,6 +626,15 @@ export function TableEditor({
       case ',':
         e.preventDefault();
         adjustValues(-delta * multiplier);
+        break;
+      // Page keys use fixed steps: 0.1 plain, 1 with Shift, 0.05 with Ctrl
+      case 'PageUp':
+        e.preventDefault();
+        adjustValues(e.shiftKey ? 1 : e.ctrlKey ? 0.05 : 0.1);
+        break;
+      case 'PageDown':
+        e.preventDefault();
+        adjustValues(e.shiftKey ? -1 : e.ctrlKey ? -0.05 : -0.1);
         break;
       case '+':
         e.preventDefault();
@@ -697,7 +717,7 @@ export function TableEditor({
     selection, editingCell, data, finishEdit, getSelectedCells, setEqual,
     adjustValues, scaleValues, interpolate, interpolateHorizontal, interpolateVertical,
     smooth, copySelection, pasteSelection, selectAll, resetToOriginal, floodFill,
-    undo, redo, handleCellDoubleClick, followMode, setFollowMode
+    undo, redo, handleCellDoubleClick, followMode, setFollowMode, yAxisBottom
   ]);
 
   // Focus input when editing
@@ -885,9 +905,10 @@ export function TableEditor({
             </tr>
           </thead>
           <tbody>
-            {data.yAxis.map((y, rowIndex) => (
+            {/* Display order only — rowIndex stays in data space */}
+            {(yAxisBottom ? [...data.yAxis.keys()].reverse() : [...data.yAxis.keys()]).map((rowIndex) => (
               <tr key={rowIndex}>
-                <th className="table-y-header">{y}</th>
+                <th className="table-y-header">{data.yAxis[rowIndex]}</th>
                 {data.xAxis.map((_, colIndex) => {
                   const value = data.zValues[rowIndex][colIndex];
                   const isSelected = isCellSelected(rowIndex, colIndex);

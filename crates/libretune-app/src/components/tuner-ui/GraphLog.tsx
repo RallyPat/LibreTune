@@ -1,5 +1,5 @@
 /**
- * Graph Log — TunerStudio/ECUMaster-style stacked strip charts.
+ * Graph Log — stacked strip charts for viewing recorded channels.
  *
  * Renders the active graph-log tab as stacked panes sharing a time axis.
  * Each pane plots one channel against the left axis and one against the

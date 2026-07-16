@@ -8,6 +8,7 @@ import TableContextMenu from './TableContextMenu';
 import RebinDialog from '../dialogs/RebinDialog';
 import CellEditDialog from '../dialogs/CellEditDialog';
 import { useHeatmapSettings } from '../../utils/useHeatmapSettings';
+import { useTableYAxisBottom } from '../../utils/useTableOrientation';
 import { useChannels } from '../../stores/realtimeStore';
 import { useToast } from '../../contexts/ToastContext';
 import { getHotkeyManager } from '../../services/hotkeyService';
@@ -201,6 +202,7 @@ export default function TableEditor2D({
   
   // Get heatmap scheme from user settings
   const { settings: heatmapSettings } = useHeatmapSettings();
+  const yAxisBottom = useTableYAxisBottom();
 
   const selectedCellsCoords = useMemo(() => {
     if (!selectionRange) return [];
@@ -421,6 +423,14 @@ export default function TableEditor2D({
         handleSetEqual();
         return;
       }
+      // Page keys adjust by an absolute step (0.1 plain, 1 with Shift,
+      // 0.05 with Ctrl), unlike '>'/'<' which scale by a percentage.
+      if (e.key === 'PageUp' || e.key === 'PageDown') {
+        e.preventDefault();
+        const magnitude = isShift ? 1 : isCtrl ? 0.05 : 0.1;
+        handleAdjustBy(magnitude * (e.key === 'PageUp' ? 1 : -1));
+        return;
+      }
       if (matchesAction('table.increase') || ['>', '.', 'q'].includes(e.key)) {
         e.preventDefault();
         handleIncrease(multiplier);
@@ -520,12 +530,15 @@ export default function TableEditor2D({
     let newX = currentX;
     let newY = currentY;
 
+    // With the bottom-left origin, visually "up" is the next data row
+    const upDelta = yAxisBottom ? 1 : -1;
+
     switch (key) {
       case 'ArrowUp':
-        newY = Math.max(0, currentY - 1);
+        newY = Math.min(y_bins.length - 1, Math.max(0, currentY + upDelta));
         break;
       case 'ArrowDown':
-        newY = Math.min(y_bins.length - 1, currentY + 1);
+        newY = Math.min(y_bins.length - 1, Math.max(0, currentY - upDelta));
         break;
       case 'ArrowLeft':
         newX = Math.max(0, currentX - 1);
@@ -628,25 +641,27 @@ export default function TableEditor2D({
     handleScale(factor);
   };
 
-  const handleIncrease = (amount: number) => {
-    const values = selectedCellsCoords.map(([x, y]) => {
-      return { x, y, value: localZValues[y][x] };
+  /** Apply a transform to every selected cell in ONE state update.
+   *  Going through handleCellChange per cell loses all but the last cell
+   *  (each call clones the same stale localZValues) and collapses the
+   *  selection to a single cell. */
+  const applyToSelection = (fn: (value: number) => number) => {
+    if (selectedCellsCoords.length === 0) return;
+    const newValues = localZValues.map(row => [...row]);
+    selectedCellsCoords.forEach(([x, y]) => {
+      newValues[y][x] = fn(newValues[y][x]);
     });
-    
-    values.forEach(({ x, y, value }) => {
-      handleCellChange(x, y, value * (1 + amount), { suppressAlert: true });
-    });
+    setLocalZValues(newValues);
+    pushHistory(newValues, localXBins, localYBins);
+    onValuesChange?.(newValues);
   };
 
-  const handleDecrease = (amount: number) => {
-    const values = selectedCellsCoords.map(([x, y]) => {
-      return { x, y, value: localZValues[y][x] };
-    });
-    
-    values.forEach(({ x, y, value }) => {
-      handleCellChange(x, y, value * (1 - amount), { suppressAlert: true });
-    });
-  };
+  /** Add a fixed amount to every selected cell (Page Up/Down) */
+  const handleAdjustBy = (amount: number) => applyToSelection((v) => v + amount);
+
+  const handleIncrease = (amount: number) => applyToSelection((v) => v * (1 + amount));
+
+  const handleDecrease = (amount: number) => applyToSelection((v) => v * (1 - amount));
 
   const handleScale = async (factor: number) => {
     const previousValues = localZValues.map((row) => [...row]);
@@ -1176,6 +1191,7 @@ export default function TableEditor2D({
           showColorShade={showColorShade}
           heatmapScheme={heatmapSettings.valueScheme}
           compact={embedded}
+          yAxisBottom={yAxisBottom}
         />
         {hasEmbeddedTableLiveReadout(table_name, x_output_channel, y_output_channel) && (
           <TableLiveReadout

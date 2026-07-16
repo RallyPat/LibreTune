@@ -24,6 +24,8 @@ interface TableGridProps {
   liveCursorX?: number; // Current X-axis value (e.g., RPM)
   liveCursorY?: number; // Current Y-axis value (e.g., MAP/TPS)
   showLiveCursor?: boolean;
+  /** Render rows bottom-up so the origin is at the bottom-left (display only) */
+  yAxisBottom?: boolean;
   // Heatmap color props
   showColorShade?: boolean; // Whether to show heatmap colors
   heatmapScheme?: HeatmapScheme | string[]; // Scheme name or custom color stops
@@ -50,6 +52,7 @@ export default function TableGrid({
   showColorShade = true,
   heatmapScheme = 'tunerstudio',
   compact = false,
+  yAxisBottom = false,
 }: TableGridProps) {
   const gridRef = useRef<HTMLDivElement>(null);
   const [editingCell, setEditingCell] = useState<[number, number] | null>(null);
@@ -241,9 +244,12 @@ export default function TableGrid({
     if (dragAnchor && gridRef.current) {
       const rect = gridRef.current.getBoundingClientRect();
       const x = Math.floor((e.clientX - rect.left) / (rect.width / x_size));
-      const y = Math.floor((e.clientY - rect.top) / (rect.height / y_size));
-      
-      if (x >= 0 && x < x_size && y >= 0 && y < y_size) {
+      const visualY = Math.floor((e.clientY - rect.top) / (rect.height / y_size));
+      // Pixel math yields the visual row; map back to the data row when the
+      // grid renders bottom-up.
+      const y = yAxisBottom ? y_size - 1 - visualY : visualY;
+
+      if (x >= 0 && x < x_size && visualY >= 0 && visualY < y_size) {
         onSelectionChange({ start: dragAnchor, end: [x, y] });
       }
     }
@@ -258,7 +264,8 @@ export default function TableGrid({
       if (lockedCells?.has(cellKey)) return null;
 
       const left = (x / x_size) * 100;
-      const top = (y / y_size) * 100;
+      const displayY = yAxisBottom ? y_size - 1 - y : y;
+      const top = (displayY / y_size) * 100;
 
       return `${left},${top}`;
     }).filter(Boolean) as string[];
@@ -268,7 +275,8 @@ export default function TableGrid({
       if (lockedCells?.has(cellKey)) return null;
 
       const left = (x / x_size) * 100;
-      const top = (y / y_size) * 100;
+      const displayY = yAxisBottom ? y_size - 1 - y : y;
+      const top = (displayY / y_size) * 100;
 
       return (
         <div
@@ -347,8 +355,10 @@ export default function TableGrid({
         );
       })}
 
-      {/* Data rows: each row = y-axis label + data cells */}
-      {z_values.map((row, y) => {
+      {/* Data rows: each row = y-axis label + data cells.
+          Display order only — all coordinates stay in data space. */}
+      {(yAxisBottom ? [...z_values.keys()].reverse() : [...z_values.keys()]).map((y) => {
+        const row = z_values[y];
         const isEditingYAxis = editingAxis?.axis === 'y' && editingAxis.index === y;
         const isYHeaderSelected = selectionRange && 
           y >= Math.min(selectionRange.start[1], selectionRange.end[1]) && 
@@ -444,7 +454,7 @@ export default function TableGrid({
           className="live-cursor-overlay"
           style={{
             '--cursor-x': liveCursorPosition.x,
-            '--cursor-y': liveCursorPosition.y,
+            '--cursor-y': yAxisBottom ? y_size - 1 - liveCursorPosition.y : liveCursorPosition.y,
             '--cols': x_size,
             '--rows': y_size,
           } as React.CSSProperties}
