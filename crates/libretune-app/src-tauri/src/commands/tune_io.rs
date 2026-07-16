@@ -24,9 +24,20 @@ pub async fn list_tune_files() -> Result<Vec<String>, String> {
         .map_err(|e| format!("Failed to read projects directory: {}", e))?;
 
     for entry in entries.flatten() {
-        if let Some(name) = entry.file_name().to_str() {
+        let path = entry.path();
+        if path.is_dir() {
+            // Tunes live inside project folders (e.g. <project>/CurrentTune.msq)
+            if let Ok(sub) = std::fs::read_dir(&path) {
+                for sub_entry in sub.flatten() {
+                    let sub_path = sub_entry.path();
+                    if sub_path.extension().is_some_and(|e| e == "msq") {
+                        tunes.push(sub_path.to_string_lossy().to_string());
+                    }
+                }
+            }
+        } else if let Some(name) = entry.file_name().to_str() {
             if name.ends_with(".msq") || name.ends_with(".json") {
-                tunes.push(entry.path().to_string_lossy().to_string());
+                tunes.push(path.to_string_lossy().to_string());
             }
         }
     }
