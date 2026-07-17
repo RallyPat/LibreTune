@@ -153,7 +153,7 @@ export default function TableEditor2D({
   const [lockedCells, setLockedCells] = useState<Set<string>>(new Set());
   const [historyTrail, setHistoryTrail] = useState<[number, number][]>([]);
   const [showColorShade, setShowColorShade] = useState(true);
-  const [showHistoryTrail, setShowHistoryTrail] = useState(false);
+  const [showHistoryTrail, setShowHistoryTrail] = useState(true);
   const [show3D, setShow3D] = useState(false);
   
   // History Stack

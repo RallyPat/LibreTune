@@ -1,4 +1,4 @@
-import { Fragment, useState, useRef, useMemo, useCallback } from 'react';
+import { Fragment, useState, useRef, useMemo, useCallback, useLayoutEffect } from 'react';
 import { valueToHeatmapColor, HeatmapScheme } from '../../utils/heatmapColors';
 
 export interface SelectionRange {
@@ -256,49 +256,55 @@ export default function TableGrid({
   };
 
 
+  // Pixel metrics of the data-cell area (the CSS-var percent math was offset
+  // by the axis label column/header row and missed cell centering)
+  const [cellMetrics, setCellMetrics] = useState<{ l: number; t: number; w: number; h: number } | null>(null);
+  useLayoutEffect(() => {
+    const grid = gridRef.current;
+    if (!grid) return;
+    const measure = () => {
+      const cell = grid.querySelector('.table-cell') as HTMLElement | null;
+      if (cell) {
+        setCellMetrics({ l: cell.offsetLeft, t: cell.offsetTop, w: cell.offsetWidth, h: cell.offsetHeight });
+      }
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(grid);
+    return () => observer.disconnect();
+  }, [x_size, y_size, compact]);
+
+  const cellCenter = (x: number, y: number) => {
+    if (!cellMetrics) return null;
+    const displayY = yAxisBottom ? y_size - 1 - y : y;
+    return {
+      cx: cellMetrics.l + (x + 0.5) * cellMetrics.w,
+      cy: cellMetrics.t + (displayY + 0.5) * cellMetrics.h,
+    };
+  };
+
   const renderHistoryTrail = () => {
-    if (!historyTrail || historyTrail.length === 0) return null;
+    if (!historyTrail || historyTrail.length === 0 || !cellMetrics) return null;
 
-    const points = historyTrail.map(([x, y]) => {
-      const cellKey = `${x},${y}`;
-      if (lockedCells?.has(cellKey)) return null;
+    const centers = historyTrail
+      .filter(([x, y]) => !lockedCells?.has(`${x},${y}`))
+      .map(([x, y]) => cellCenter(x, y))
+      .filter((c): c is { cx: number; cy: number } => c !== null);
 
-      const left = (x / x_size) * 100;
-      const displayY = yAxisBottom ? y_size - 1 - y : y;
-      const top = (displayY / y_size) * 100;
-
-      return `${left},${top}`;
-    }).filter(Boolean) as string[];
-
-    const pointElements = historyTrail.map(([x, y], i) => {
-      const cellKey = `${x},${y}`;
-      if (lockedCells?.has(cellKey)) return null;
-
-      const left = (x / x_size) * 100;
-      const displayY = yAxisBottom ? y_size - 1 - y : y;
-      const top = (displayY / y_size) * 100;
-
-      return (
-        <div
-          key={`trail-${i}`}
-          className="history-trail-point"
-          style={{ left: `${left}%`, top: `${top}%` }}
-        />
-      );
-    }).filter(Boolean);
-
-    if (points.length === 0) return null;
+    if (centers.length === 0) return null;
 
     return (
       <svg className="history-trail-svg">
         <polyline
-          points={points.join(' ')}
+          points={centers.map((c) => `${c.cx},${c.cy}`).join(' ')}
           fill="none"
           stroke="#4A90E2"
           strokeWidth="2"
           strokeOpacity="0.7"
         />
-        {pointElements}
+        {centers.map((c, i) => (
+          <circle key={i} cx={c.cx} cy={c.cy} r="3" fill="#4A90E2" fillOpacity="0.8" />
+        ))}
       </svg>
     );
   };
@@ -449,19 +455,14 @@ export default function TableGrid({
       {renderHistoryTrail()}
       
       {/* Live Cursor Overlay - shows current ECU operating point */}
-      {liveCursorPosition && (
-        <div 
-          className="live-cursor-overlay"
-          style={{
-            '--cursor-x': liveCursorPosition.x,
-            '--cursor-y': yAxisBottom ? y_size - 1 - liveCursorPosition.y : liveCursorPosition.y,
-            '--cols': x_size,
-            '--rows': y_size,
-          } as React.CSSProperties}
-        >
-          <div className="live-cursor-marker" />
-        </div>
-      )}
+      {liveCursorPosition && cellMetrics && (() => {
+        const c = cellCenter(liveCursorPosition.x, liveCursorPosition.y);
+        return c && (
+          <div className="live-cursor-overlay">
+            <div className="live-cursor-marker" style={{ left: c.cx, top: c.cy }} />
+          </div>
+        );
+      })()}
     </div>
   );
 }
