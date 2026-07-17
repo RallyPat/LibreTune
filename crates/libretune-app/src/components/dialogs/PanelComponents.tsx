@@ -10,6 +10,7 @@ import { listen } from '@tauri-apps/api/event';
 import { Activity, Grid3X3, AlertTriangle } from 'lucide-react';
 import CurveEditor, { SimpleGaugeInfo } from '../curves/CurveEditor';
 import TableEditor2D from '../tables/TableEditor2D';
+import WidebandLiveStatus from '../hardware/WidebandLiveStatus';
 import {
   type DialogComponent,
   type DialogDefinition,
@@ -307,7 +308,7 @@ export const RecursivePanel = memo(function RecursivePanel({
     const multiColumn = fieldCount >= 8;
     const commandGrid = isCommandButtonPanel(definition.components);
     const testOtherPanel = /^testother$/i.test(name);
-    return (
+    const dialogPanel = (
       <div
         className={`nested-panel${multiColumn ? ' nested-panel--multi' : ''}${commandGrid ? ' nested-panel--compact-commands' : ''}${testOtherPanel ? ' nested-panel--test-other' : ''}`}
         data-panel={name}
@@ -322,6 +323,17 @@ export const RecursivePanel = memo(function RecursivePanel({
         </div>
       </div>
     );
+
+    // rusEFI wideband tools: attach live WBO readouts beside the controls
+    if (/^canReWidebandNewTools$/i.test(name)) {
+      return (
+        <div className="wbo-tools-row">
+          {dialogPanel}
+          <WidebandLiveStatus />
+        </div>
+      );
+    }
+    return dialogPanel;
   }
 
   // Render as portEditor - placeholder for programmable outputs configuration
