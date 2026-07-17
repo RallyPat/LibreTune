@@ -402,7 +402,34 @@ interface SlotConfigProps {
   onChange: (patch: Partial<ChannelSlot>) => void;
 }
 
-const SlotConfig: React.FC<SlotConfigProps> = ({ label, slot, availableChannels, onChange }) => (
+/** Name-pattern channel groups so the picker isn't one 1000-entry list.
+ *  First matching group wins; unmatched channels land in Other. */
+const CHANNEL_GROUPS: Array<[string, RegExp]> = [
+  ['Common', /^(rpm|map|tps|lambda|afr|coolant|iat|advance|pulseWidth|ve|boost|baro|battery|vBatt|afrTarget|targetLambda|vehicleSpeed|dwell|fuelLoad|ignitionLoad)$/i],
+  ['Fueling', /fuel|inj|pulse|lambda|afr|^ve|enrich|wall|charge|stoich|flex/i],
+  ['Ignition', /ign|spark|dwell|advance|timing|knock|coil/i],
+  ['Boost / VVT', /boost|wastegate|ewg|vvt|turbo/i],
+  ['Launch / ALS', /als|launch|antilag|shift|traction|torque/i],
+  ['Wideband', /^wb\d|wideband|ego/i],
+  ['Sensors', /temp|sens|clt|iat|baro|press|volt|batt|egt|oil|level|speed|gear/i],
+];
+
+function groupChannels(channels: string[]): Array<{ label: string; channels: string[] }> {
+  const buckets = new Map<string, string[]>(CHANNEL_GROUPS.map(([l]) => [l, []]));
+  buckets.set('Other', []);
+  for (const c of channels) {
+    const group = CHANNEL_GROUPS.find(([, re]) => re.test(c))?.[0] ?? 'Other';
+    buckets.get(group)!.push(c);
+  }
+  const sort = (a: string, b: string) => a.toLowerCase().localeCompare(b.toLowerCase());
+  return [...buckets.entries()]
+    .filter(([, list]) => list.length > 0)
+    .map(([label, list]) => ({ label, channels: list.sort(sort) }));
+}
+
+const SlotConfig: React.FC<SlotConfigProps> = ({ label, slot, availableChannels, onChange }) => {
+  const groups = useMemo(() => groupChannels(availableChannels), [availableChannels]);
+  return (
   <fieldset className="graphlog-slot-config">
     <legend style={{ color: slot.color }}>{label}</legend>
     <label>
@@ -412,10 +439,14 @@ const SlotConfig: React.FC<SlotConfigProps> = ({ label, slot, availableChannels,
         onChange={(e) => onChange({ channel: e.target.value || null })}
       >
         <option value="">— none —</option>
-        {availableChannels.map((c) => (
-          <option key={c} value={c}>
-            {c}
-          </option>
+        {groups.map((g) => (
+          <optgroup key={g.label} label={g.label}>
+            {g.channels.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </optgroup>
         ))}
       </select>
     </label>
@@ -456,7 +487,8 @@ const SlotConfig: React.FC<SlotConfigProps> = ({ label, slot, availableChannels,
       </label>
     </div>
   </fieldset>
-);
+  );
+};
 
 export const GraphLog: React.FC<GraphLogProps> = ({
   samples,
