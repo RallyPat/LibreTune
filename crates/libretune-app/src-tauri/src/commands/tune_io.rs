@@ -161,6 +161,27 @@ fn parse_command_string(
     let mut result = Vec::new();
     let mut chars = s.chars().peekable();
 
+    // Consume a variable name and push its current value.
+    // Lookup chain matches what the UI shows: edited value, INI default, legacy map.
+    let substitute_var = |chars: &mut std::iter::Peekable<std::str::Chars>,
+                          result: &mut Vec<u8>| {
+        let mut var_name = String::new();
+        while let Some(&c) = chars.peek() {
+            if c.is_alphanumeric() || c == '_' {
+                var_name.push(chars.next().unwrap());
+            } else {
+                break;
+            }
+        }
+        let value = current_values
+            .get(&var_name)
+            .copied()
+            .or_else(|| def.default_values.get(&var_name).map(|v| *v as u8))
+            .or_else(|| def.pc_variables.get(&var_name).copied())
+            .unwrap_or(0);
+        result.push(value);
+    };
+
     while let Some(ch) = chars.next() {
         if ch == '\\' {
             // Escape sequence
@@ -185,28 +206,13 @@ fn parse_command_string(
                 Some('r') => result.push(b'\r'),
                 Some('t') => result.push(b'\t'),
                 Some('\\') => result.push(b'\\'),
+                // TS marks variables in controller commands as \$name
+                Some('$') => substitute_var(&mut chars, &mut result),
                 Some(c) => result.push(c as u8),
                 None => {}
             }
         } else if ch == '$' {
-            // Variable substitution
-            let mut var_name = String::new();
-            while let Some(&c) = chars.peek() {
-                if c.is_alphanumeric() || c == '_' {
-                    var_name.push(chars.next().unwrap());
-                } else {
-                    break;
-                }
-            }
-
-            // Same lookup chain the UI uses: edited value, INI default, legacy map
-            let value = current_values
-                .get(&var_name)
-                .copied()
-                .or_else(|| def.default_values.get(&var_name).map(|v| *v as u8))
-                .or_else(|| def.pc_variables.get(&var_name).copied())
-                .unwrap_or(0);
-            result.push(value);
+            substitute_var(&mut chars, &mut result);
         } else {
             result.push(ch as u8);
         }
