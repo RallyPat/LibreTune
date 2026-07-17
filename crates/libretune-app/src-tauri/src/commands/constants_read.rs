@@ -62,6 +62,7 @@ pub async fn get_constant(
         bit_options: constant.bit_options.clone(),
         help: constant.help.clone(),
         visibility_condition: constant.visibility_condition.clone(),
+        is_pc_variable: constant.is_pc_variable,
     })
 }
 

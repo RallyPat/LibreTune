@@ -47,7 +47,21 @@ export default function DialogField({
         invoke<number>('get_constant_value', { name })
           .then((v) => {
             console.log(`[DialogField] Got value for '${name}':`, v);
-            setSelectedBit(Math.round(v));
+            let bit = Math.round(v);
+            // PcVariables stuck on an INVALID option display as the first
+            // valid option; write that value back so controller commands
+            // send what the dropdown shows.
+            const opts = c.bit_options || [];
+            if (c.is_pc_variable && opts[bit]?.trim().toUpperCase() === 'INVALID') {
+              const firstValid = opts.findIndex(
+                (o) => o?.trim().toUpperCase() !== 'INVALID',
+              );
+              if (firstValid >= 0) {
+                bit = firstValid;
+                invoke('update_constant', { name, value: firstValid }).catch(() => {});
+              }
+            }
+            setSelectedBit(bit);
           })
           .catch((e) => {
             console.error(`[DialogField] Failed to get value for '${name}':`, e);
