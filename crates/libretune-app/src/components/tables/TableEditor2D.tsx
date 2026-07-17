@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { ArrowLeft, Save, Zap, ExternalLink, AlertTriangle, Palette, MapPin, Crosshair, Box } from 'lucide-react';
 import TableToolbar from './TableToolbar';
@@ -337,15 +337,40 @@ export default function TableEditor2D({
     setHistoryIndex(prev => Math.min(prev + 1, 49));
   }, [historyIndex]);
 
+  // Trail of recent live operating points (trace)
+  const realtimeRef = useRef(realtimeData);
+  realtimeRef.current = realtimeData;
   useEffect(() => {
+    if (!followMode) {
+      setHistoryTrail([]);
+      return;
+    }
+    const nearest = (value: number, bins: number[]) => {
+      let best = 0;
+      let diff = Infinity;
+      bins.forEach((b, i) => {
+        const d = Math.abs(b - value);
+        if (d < diff) {
+          diff = d;
+          best = i;
+        }
+      });
+      return best;
+    };
     const interval = setInterval(() => {
-      if (followMode && activeCell) {
-        const trail = [...historyTrail.slice(-50), activeCell];
-        setHistoryTrail(trail);
-      }
-    }, 500);
+      const data = realtimeRef.current;
+      const xv = x_output_channel ? data?.[x_output_channel] : data?.rpm;
+      const yv = y_output_channel ? data?.[y_output_channel] : data?.map;
+      if (xv === undefined || yv === undefined) return;
+      const cell: [number, number] = [nearest(xv, localXBins), nearest(yv, localYBins)];
+      setHistoryTrail((prev) => {
+        const last = prev[prev.length - 1];
+        if (last && last[0] === cell[0] && last[1] === cell[1]) return prev;
+        return [...prev.slice(-49), cell];
+      });
+    }, 250);
     return () => clearInterval(interval);
-  }, [followMode, activeCell]);
+  }, [followMode, x_output_channel, y_output_channel, localXBins, localYBins]);
 
   // Keyboard event handling for TS-style hotkeys
   useEffect(() => {
