@@ -1057,15 +1057,18 @@ body {
   bottom: 0;
   pointer-events: none;
   z-index: 100;
+  transition: opacity 0.8s ease-out;
+}
+
+.live-cursor-overlay--faded {
+  opacity: 0;
 }
 
 .live-cursor-marker {
   position: absolute;
   width: 48px;
   height: 48px;
-  /* Position calculated from CSS variables */
-  left: calc((var(--cursor-x) / var(--cols)) * 100%);
-  top: calc((var(--cursor-y) / var(--rows)) * 100%);
+  /* left/top set inline from measured cell metrics */
   transform: translate(-50%, -50%);
   
   /* TS-style yellow/green crosshair */

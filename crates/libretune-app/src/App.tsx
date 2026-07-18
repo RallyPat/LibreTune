@@ -32,6 +32,7 @@ import { useIniDefaultsLoader } from "./hooks/useIniDefaultsLoader";
 import { useTableCurveRefresh } from "./hooks/useTableCurveRefresh";
 import { useGlobalShortcuts } from "./hooks/useGlobalShortcuts";
 import { useEcuEventListeners } from "./hooks/useEcuEventListeners";
+import { useTableAccentColorVars } from "./utils/useTableOrientation";
 import { useAutoConnect, type ConnectOptions } from "./hooks/useAutoConnect";
 import { useReconnectHandler } from "./hooks/useReconnectHandler";
 import { useTuneModified } from "./hooks/useTuneModified";
@@ -577,6 +578,9 @@ function AppContent() {
     setSaveDialogOpen,
     setBurnDialogOpen,
   });
+
+  // User-configured cursor/trail colors → root CSS vars
+  useTableAccentColorVars();
 
   // App-level event listeners: window title, active-tab persistence,
   // reconnect:request, ini:changed, demo:changed (extracted to hook).

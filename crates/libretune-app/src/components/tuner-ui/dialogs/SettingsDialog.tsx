@@ -52,6 +52,9 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
   const [autoBurnOnClose, setAutoBurnOnClose] = useState(false);
   const [demoMode, setDemoMode] = useState(false);
   const [tableYAxisBottom, setTableYAxisBottom] = useState(false);
+  const [tableCursorColor, setTableCursorColor] = useState('');
+  const [tableTrailColor, setTableTrailColor] = useState('');
+  const [tableTrailFadeSec, setTableTrailFadeSec] = useState(8);
   const [demoLoading, setDemoLoading] = useState(false);
   const [indicatorColumnCount, setIndicatorColumnCount] = useState('auto');
   const [indicatorFillEmpty, setIndicatorFillEmpty] = useState(false);
@@ -96,7 +99,7 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
   const [autoConnect, setAutoConnect] = useState(false);
   
   // Settings dialog tabs
-  const [currentTab, setCurrentTab] = useState<'general' | 'definitions' | 'hotkeys'>('general');
+  const [currentTab, setCurrentTab] = useState<'general' | 'appearance' | 'definitions' | 'hotkeys'>('general');
 
   // ECU Definitions tab state
   const [iniList, setIniList] = useState<{id: string; name: string; signature: string; path: string; imported: boolean; source: string}[]>([]);
@@ -127,6 +130,9 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
         }
         if (settings.auto_burn_on_close !== undefined) setAutoBurnOnClose(!!settings.auto_burn_on_close);
         if (settings.table_y_axis_bottom !== undefined) setTableYAxisBottom(!!settings.table_y_axis_bottom);
+        if (settings.table_cursor_color) setTableCursorColor(settings.table_cursor_color);
+        if (settings.table_trail_color) setTableTrailColor(settings.table_trail_color);
+        if (settings.table_trail_fade_sec !== undefined) setTableTrailFadeSec(settings.table_trail_fade_sec);
         if (settings.indicator_column_count !== undefined) setIndicatorColumnCount(settings.indicator_column_count);
         if (settings.indicator_fill_empty !== undefined) setIndicatorFillEmpty(!!settings.indicator_fill_empty);
         if (settings.indicator_text_fit !== undefined) setIndicatorTextFit(settings.indicator_text_fit);
@@ -370,6 +376,16 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
           >
             General
           </button>
+          <button
+            className={`dialog-tab ${currentTab === 'appearance' ? 'active' : ''}`}
+            onClick={() => setCurrentTab('appearance')}
+            role="tab"
+            id="appearance-tab"
+            aria-selected={currentTab === 'appearance'}
+            aria-controls="appearance-panel"
+          >
+            Appearance
+          </button>
           <button 
             className={`dialog-tab ${currentTab === 'definitions' ? 'active' : ''}`}
             onClick={() => {
@@ -399,15 +415,6 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
         <div className="dialog-content">
           {currentTab === 'general' && (
             <div className="dialog-tab-content" id="general-panel" role="tabpanel" aria-labelledby="general-tab">
-              <FormField label="Theme">
-                {() => (
-                  <ThemePicker 
-                    selectedTheme={localTheme as ThemeName} 
-                    onChange={(theme) => setLocalTheme(theme)}
-                  />
-                )}
-              </FormField>
-
               <FormField label="Language">
                 {(id) => (
                   <select
@@ -553,23 +560,6 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
             <span className="dialog-form-note">Simulate ECU data for testing (runtime-only)</span>
           </div>
 
-          <div className="dialog-form-group">
-            <label>
-              <input
-                type="checkbox"
-                checked={tableYAxisBottom}
-                onChange={(e) => {
-                  const enabled = e.target.checked;
-                  setTableYAxisBottom(enabled);
-                  invoke('update_setting', { key: 'table_y_axis_bottom', value: String(enabled) })
-                    .catch((err) => console.error('Failed to save table Y axis setting:', err));
-                }}
-              />
-              Table Y axis zero at bottom
-            </label>
-            <span className="dialog-form-note">Show the lowest load row at the bottom of tables</span>
-          </div>
-
           <FormField
             label="Default Runtime Packet Mode"
             help={<>
@@ -676,56 +666,6 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
               </div>
             </>
           )}
-
-          <h3 style={{ marginTop: '1.5rem', marginBottom: '0.5rem' }}>Heatmap Colors</h3>
-          
-          <FormField label="Value Tables (VE, Timing)">
-            {(id) => (
-              <select
-                id={id}
-                value={heatmapValueScheme}
-                onChange={(e) => setHeatmapValueScheme(e.target.value as HeatmapScheme)}
-              >
-                {availableSchemes.filter(s => s.id !== 'custom').map(scheme => (
-                  <option key={scheme.id} value={scheme.id}>
-                    {scheme.name} {scheme.colorblindSafe && '(colorblind-safe)'}
-                  </option>
-                ))}
-              </select>
-            )}
-          </FormField>
-
-          <FormField label="Change Display (AFR Correction)">
-            {(id) => (
-              <select
-                id={id}
-                value={heatmapChangeScheme}
-                onChange={(e) => setHeatmapChangeScheme(e.target.value as HeatmapScheme)}
-              >
-                {availableSchemes.filter(s => s.id !== 'custom').map(scheme => (
-                  <option key={scheme.id} value={scheme.id}>
-                    {scheme.name} {scheme.colorblindSafe && '(colorblind-safe)'}
-                  </option>
-                ))}
-              </select>
-            )}
-          </FormField>
-
-          <FormField label="Coverage Display (Hit Weighting)">
-            {(id) => (
-              <select
-                id={id}
-                value={heatmapCoverageScheme}
-                onChange={(e) => setHeatmapCoverageScheme(e.target.value as HeatmapScheme)}
-              >
-                {availableSchemes.filter(s => s.id !== 'custom').map(scheme => (
-                  <option key={scheme.id} value={scheme.id}>
-                    {scheme.name} {scheme.colorblindSafe && '(colorblind-safe)'}
-                  </option>
-                ))}
-              </select>
-            )}
-          </FormField>
 
           <h3 style={{ marginTop: '1.5rem', marginBottom: '0.5rem' }}>Dashboard</h3>
           
@@ -952,6 +892,131 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
               />
             )}
           </FormField>
+            </div>
+          )}
+
+          {currentTab === 'appearance' && (
+            <div className="dialog-tab-content" id="appearance-panel" role="tabpanel" aria-labelledby="appearance-tab">
+              <FormField label="Theme">
+                {() => (
+                  <ThemePicker
+                    selectedTheme={localTheme as ThemeName}
+                    onChange={(theme) => setLocalTheme(theme)}
+                  />
+                )}
+              </FormField>
+
+              <h3 style={{ marginTop: '1.5rem', marginBottom: '0.5rem' }}>Heatmap Colors</h3>
+
+              <FormField label="Value Tables (VE, Timing)">
+                {(id) => (
+                  <select
+                    id={id}
+                    value={heatmapValueScheme}
+                    onChange={(e) => setHeatmapValueScheme(e.target.value as HeatmapScheme)}
+                  >
+                    {availableSchemes.filter(s => s.id !== 'custom').map(scheme => (
+                      <option key={scheme.id} value={scheme.id}>
+                        {scheme.name} {scheme.colorblindSafe && '(colorblind-safe)'}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </FormField>
+
+              <FormField label="Change Display (AFR Correction)">
+                {(id) => (
+                  <select
+                    id={id}
+                    value={heatmapChangeScheme}
+                    onChange={(e) => setHeatmapChangeScheme(e.target.value as HeatmapScheme)}
+                  >
+                    {availableSchemes.filter(s => s.id !== 'custom').map(scheme => (
+                      <option key={scheme.id} value={scheme.id}>
+                        {scheme.name} {scheme.colorblindSafe && '(colorblind-safe)'}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </FormField>
+
+              <FormField label="Coverage Display (Hit Weighting)">
+                {(id) => (
+                  <select
+                    id={id}
+                    value={heatmapCoverageScheme}
+                    onChange={(e) => setHeatmapCoverageScheme(e.target.value as HeatmapScheme)}
+                  >
+                    {availableSchemes.filter(s => s.id !== 'custom').map(scheme => (
+                      <option key={scheme.id} value={scheme.id}>
+                        {scheme.name} {scheme.colorblindSafe && '(colorblind-safe)'}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </FormField>
+
+              <h3 style={{ marginTop: '1.5rem', marginBottom: '0.5rem' }}>Table Display</h3>
+
+              <div className="dialog-form-group">
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={tableYAxisBottom}
+                    onChange={(e) => {
+                      const enabled = e.target.checked;
+                      setTableYAxisBottom(enabled);
+                      invoke('update_setting', { key: 'table_y_axis_bottom', value: String(enabled) }).catch(() => {});
+                    }}
+                  />
+                  Table Y axis zero at bottom
+                </label>
+                <span className="dialog-form-note">Show the lowest load row at the bottom of tables</span>
+              </div>
+
+              <div className="dialog-form-group">
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <input
+                    type="color"
+                    value={tableCursorColor || '#00ff00'}
+                    onChange={(e) => {
+                      setTableCursorColor(e.target.value);
+                      invoke('update_setting', { key: 'table_cursor_color', value: e.target.value }).catch(() => {});
+                    }}
+                  />
+                  Live cursor color
+                  <input
+                    type="color"
+                    value={tableTrailColor || '#4A90E2'}
+                    onChange={(e) => {
+                      setTableTrailColor(e.target.value);
+                      invoke('update_setting', { key: 'table_trail_color', value: e.target.value }).catch(() => {});
+                    }}
+                    style={{ marginLeft: 16 }}
+                  />
+                  Trail color
+                </label>
+                <span className="dialog-form-note">Colors of the operating-point marker and its trace on tables</span>
+              </div>
+
+              <div className="dialog-form-group">
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <input
+                    type="number"
+                    min={0}
+                    step={1}
+                    value={tableTrailFadeSec}
+                    onChange={(e) => {
+                      const v = Math.max(0, parseFloat(e.target.value) || 0);
+                      setTableTrailFadeSec(v);
+                      invoke('update_setting', { key: 'table_trail_fade_sec', value: String(v) }).catch(() => {});
+                    }}
+                    style={{ width: 70 }}
+                  />
+                  Trail fade time (seconds)
+                </label>
+                <span className="dialog-form-note">How long trace points stay on the table; 0 keeps them forever</span>
+              </div>
             </div>
           )}
 

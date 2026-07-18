@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { ArrowLeft, Save, Zap, ExternalLink, AlertTriangle, Palette, MapPin, Crosshair, Box } from 'lucide-react';
 import TableToolbar from './TableToolbar';
@@ -9,7 +9,7 @@ import RebinDialog from '../dialogs/RebinDialog';
 import CellEditDialog from '../dialogs/CellEditDialog';
 import LambdaPreviewTable from './LambdaPreviewTable';
 import { useHeatmapSettings } from '../../utils/useHeatmapSettings';
-import { useTableYAxisBottom } from '../../utils/useTableOrientation';
+import { useTableYAxisBottom, useTrailFadeSec } from '../../utils/useTableOrientation';
 import { useChannels } from '../../stores/realtimeStore';
 import { useToast } from '../../contexts/ToastContext';
 import { getHotkeyManager } from '../../services/hotkeyService';
@@ -151,9 +151,9 @@ export default function TableEditor2D({
   
   const [selectionRange, setSelectionRange] = useState<SelectionRange | null>(null);
   const [lockedCells, setLockedCells] = useState<Set<string>>(new Set());
-  const [historyTrail, setHistoryTrail] = useState<[number, number][]>([]);
+  const [historyTrail, setHistoryTrail] = useState<[number, number, number][]>([]);
   const [showColorShade, setShowColorShade] = useState(true);
-  const [showHistoryTrail, setShowHistoryTrail] = useState(false);
+  const [showHistoryTrail, setShowHistoryTrail] = useState(true);
   const [show3D, setShow3D] = useState(false);
   
   // History Stack
@@ -192,7 +192,7 @@ export default function TableEditor2D({
     value: 0,
   });
 
-  const [followMode, setFollowMode] = useState(false);
+  const [followMode, setFollowMode] = useState(true);
   const [activeCell, setActiveCell] = useState<[number, number] | null>(null);
 
   const { showToast } = useToast();
@@ -204,6 +204,7 @@ export default function TableEditor2D({
   // Get heatmap scheme from user settings
   const { settings: heatmapSettings } = useHeatmapSettings();
   const yAxisBottom = useTableYAxisBottom();
+  const trailFadeSec = useTrailFadeSec();
 
   // Show the read-only lambda companion only for actual target-AFR tables
   // (not blend/bias tables whose values aren't AFR).
@@ -337,15 +338,45 @@ export default function TableEditor2D({
     setHistoryIndex(prev => Math.min(prev + 1, 49));
   }, [historyIndex]);
 
+  // Trail of recent live operating points (trace)
+  const realtimeRef = useRef(realtimeData);
+  realtimeRef.current = realtimeData;
   useEffect(() => {
+    if (!followMode) {
+      setHistoryTrail([]);
+      return;
+    }
+    const nearest = (value: number, bins: number[]) => {
+      let best = 0;
+      let diff = Infinity;
+      bins.forEach((b, i) => {
+        const d = Math.abs(b - value);
+        if (d < diff) {
+          diff = d;
+          best = i;
+        }
+      });
+      return best;
+    };
+    const ttlMs = trailFadeSec > 0 ? trailFadeSec * 1000 : Infinity;
     const interval = setInterval(() => {
-      if (followMode && activeCell) {
-        const trail = [...historyTrail.slice(-50), activeCell];
-        setHistoryTrail(trail);
-      }
-    }, 500);
+      const data = realtimeRef.current;
+      const xv = x_output_channel ? data?.[x_output_channel] : data?.rpm;
+      const yv = y_output_channel ? data?.[y_output_channel] : data?.map;
+      if (xv === undefined || yv === undefined) return;
+      const now = Date.now();
+      const cell: [number, number] = [nearest(xv, localXBins), nearest(yv, localYBins)];
+      setHistoryTrail((prev) => {
+        const kept = prev.filter(([, , t]) => now - t < ttlMs);
+        const last = kept[kept.length - 1];
+        if (last && last[0] === cell[0] && last[1] === cell[1]) {
+          return kept.length === prev.length ? prev : kept;
+        }
+        return [...kept.slice(-49), [cell[0], cell[1], now]];
+      });
+    }, 250);
     return () => clearInterval(interval);
-  }, [followMode, activeCell]);
+  }, [followMode, x_output_channel, y_output_channel, localXBins, localYBins, trailFadeSec]);
 
   // Keyboard event handling for TS-style hotkeys
   useEffect(() => {
@@ -1185,7 +1216,7 @@ export default function TableEditor2D({
           selectionRange={selectionRange}
           onSelectionChange={handleSelectionChange}
           onCellDoubleClick={handleCellDoubleClick}
-          historyTrail={showHistoryTrail ? historyTrail : []}
+          historyTrail={showHistoryTrail ? historyTrail.map(([x, y]) => [x, y] as [number, number]) : []}
           lockedCells={lockedCells}
           onCellLock={handleCellLock}
           // Live cursor - maps realtime values to table position

@@ -12,6 +12,7 @@
 /** Available heatmap color scheme presets */
 export type HeatmapScheme =
   | 'tunerstudio'  // Classic: Blue → Cyan → Green → Yellow → Orange → Red
+  | 'pastel'       // Soft: Green → Yellow → Orange → Red, low saturation
   | 'thermal'      // Black → Purple → Red → Orange → Yellow → White
   | 'viridis'      // Colorblind-safe: Purple → Blue → Teal → Green → Yellow
   | 'plasma'       // Colorblind-safe: Purple → Pink → Orange → Yellow
@@ -55,6 +56,18 @@ export const HEATMAP_SCHEMES: Record<Exclude<HeatmapScheme, 'custom'>, HeatmapSc
       '#FFFF00', // Yellow
       '#FF8000', // Orange
       '#FF0000', // Red (hot/high)
+    ],
+  },
+  pastel: {
+    name: 'Pastel',
+    description: 'Soft green-to-red gradient, easy on the eyes',
+    colorblindSafe: false,
+    stops: [
+      '#66c96d', // soft green (low)
+      '#a9d94f',
+      '#e8e14b', // soft yellow
+      '#f0a944', // soft orange
+      '#e96c6c', // soft red (high)
     ],
   },
   thermal: {
@@ -231,6 +244,28 @@ export function getGradientColor(stops: string[], position: number): RGBColor {
  * @param scheme - Color scheme to use (or custom stops array)
  * @returns CSS color string
  */
+/** Black or white text depending on background luminance. Accepts #rrggbb or
+ *  rgb(...) strings; returns undefined for anything else (CSS default wins). */
+export function contrastTextColor(background: string): string | undefined {
+  let r: number, g: number, b: number;
+  const hex = /^#([0-9a-f]{6})$/i.exec(background.trim());
+  const rgb = /^rgba?\((\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i.exec(background.trim());
+  if (hex) {
+    const n = parseInt(hex[1], 16);
+    r = (n >> 16) & 255;
+    g = (n >> 8) & 255;
+    b = n & 255;
+  } else if (rgb) {
+    r = +rgb[1];
+    g = +rgb[2];
+    b = +rgb[3];
+  } else {
+    return undefined;
+  }
+  const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return lum > 0.55 ? '#111418' : '#ffffff';
+}
+
 export function valueToHeatmapColor(
   value: number,
   min: number,
@@ -294,6 +329,7 @@ export function getSchemeDefinition(scheme: HeatmapScheme): HeatmapSchemeDefinit
 export function getAvailableSchemes(): Array<{ id: HeatmapScheme; name: string; colorblindSafe: boolean }> {
   return [
     { id: 'tunerstudio', name: 'TunerStudio Classic', colorblindSafe: false },
+    { id: 'pastel', name: 'Pastel', colorblindSafe: false },
     { id: 'thermal', name: 'Thermal', colorblindSafe: false },
     { id: 'viridis', name: 'Viridis', colorblindSafe: true },
     { id: 'plasma', name: 'Plasma', colorblindSafe: true },
