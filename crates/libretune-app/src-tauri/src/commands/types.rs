@@ -89,6 +89,7 @@ pub(crate) struct ConstantInfo {
     pub bit_options: Vec<String>,
     pub help: Option<String>,
     pub visibility_condition: Option<String>, // Expression for when field should be visible
+    pub is_pc_variable: bool,
 }
 /// Sync response with progress information
 #[derive(Serialize)]

@@ -89,9 +89,23 @@ pub async fn resolve_controller_command(
     state: &AppState,
     command_name: &str,
 ) -> Result<Vec<u8>, String> {
+    // Current PcVariable values (dialog dropdowns) live in the tune cache,
+    // not in the definition's parse-time defaults
+    let mut current = std::collections::HashMap::new();
+    if let Some(cache) = state.tune_cache.lock().await.as_ref() {
+        for (name, value) in &cache.local_values {
+            current.insert(name.clone(), *value as u8);
+        }
+    }
+
     let def_guard = state.definition.lock().await;
     let def = def_guard.as_ref().ok_or("No INI definition loaded")?;
-    resolve_command_bytes(def, command_name, &mut std::collections::HashSet::new())
+    resolve_command_bytes(
+        def,
+        command_name,
+        &current,
+        &mut std::collections::HashSet::new(),
+    )
 }
 
 /// Send pre-resolved controller command bytes to the connected ECU.
@@ -106,6 +120,7 @@ pub async fn send_controller_command_bytes(state: &AppState, bytes: &[u8]) -> Re
 fn resolve_command_bytes(
     def: &EcuDefinition,
     command_name: &str,
+    current_values: &std::collections::HashMap<String, u8>,
     visited: &mut std::collections::HashSet<String>,
 ) -> Result<Vec<u8>, String> {
     // Prevent infinite recursion
@@ -128,12 +143,12 @@ fn resolve_command_bytes(
         match part {
             CommandPart::Raw(raw_str) => {
                 // Parse hex escapes and variable substitution
-                let bytes = parse_command_string(def, raw_str)?;
+                let bytes = parse_command_string(def, raw_str, current_values)?;
                 result.extend(bytes);
             }
             CommandPart::Reference(ref_name) => {
                 // Recursively resolve referenced command
-                let ref_bytes = resolve_command_bytes(def, ref_name, visited)?;
+                let ref_bytes = resolve_command_bytes(def, ref_name, current_values, visited)?;
                 result.extend(ref_bytes);
             }
         }
@@ -143,9 +158,38 @@ fn resolve_command_bytes(
 }
 
 /// Parse a command string with hex escapes (\x00) and variable substitution ($tsCanId)
-fn parse_command_string(def: &EcuDefinition, s: &str) -> Result<Vec<u8>, String> {
+fn parse_command_string(
+    def: &EcuDefinition,
+    s: &str,
+    current_values: &std::collections::HashMap<String, u8>,
+) -> Result<Vec<u8>, String> {
     let mut result = Vec::new();
     let mut chars = s.chars().peekable();
+
+    // Consume a variable name and push its current value.
+    // Lookup chain matches what the UI shows: edited value, INI default, legacy map.
+    let substitute_var = |chars: &mut std::iter::Peekable<std::str::Chars>,
+                          result: &mut Vec<u8>| {
+        let mut var_name = String::new();
+        while let Some(&c) = chars.peek() {
+            if c.is_alphanumeric() || c == '_' {
+                var_name.push(chars.next().unwrap());
+            } else {
+                break;
+            }
+        }
+        // Same chain the UI displays: edited value, INI default, constant min.
+        // The legacy pc_variables map is parse-time zeros — only use it for
+        // names that aren't real constants.
+        let value = current_values
+            .get(&var_name)
+            .copied()
+            .or_else(|| def.default_values.get(&var_name).map(|v| *v as u8))
+            .or_else(|| def.constants.get(&var_name).map(|c| c.min as u8))
+            .or_else(|| def.pc_variables.get(&var_name).copied())
+            .unwrap_or(0);
+        result.push(value);
+    };
 
     while let Some(ch) = chars.next() {
         if ch == '\\' {
@@ -171,27 +215,13 @@ fn parse_command_string(def: &EcuDefinition, s: &str) -> Result<Vec<u8>, String>
                 Some('r') => result.push(b'\r'),
                 Some('t') => result.push(b'\t'),
                 Some('\\') => result.push(b'\\'),
+                // TS marks variables in controller commands as \$name
+                Some('$') => substitute_var(&mut chars, &mut result),
                 Some(c) => result.push(c as u8),
                 None => {}
             }
         } else if ch == '$' {
-            // Variable substitution
-            let mut var_name = String::new();
-            while let Some(&c) = chars.peek() {
-                if c.is_alphanumeric() || c == '_' {
-                    var_name.push(chars.next().unwrap());
-                } else {
-                    break;
-                }
-            }
-
-            // Look up variable value
-            if let Some(&value) = def.pc_variables.get(&var_name) {
-                result.push(value);
-            } else {
-                // Variable not found - push 0 as default
-                result.push(0);
-            }
+            substitute_var(&mut chars, &mut result);
         } else {
             result.push(ch as u8);
         }
