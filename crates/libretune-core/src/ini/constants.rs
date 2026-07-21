@@ -383,11 +383,7 @@ fn parse_bit_range_spec(spec: &str) -> Option<(u8, u8, i8)> {
         (end_part.parse().ok()?, 0)
     };
 
-    let size = if end >= start {
-        end - start + 1
-    } else {
-        1
-    };
+    let size = if end >= start { end - start + 1 } else { 1 };
     Some((start, size, display_offset))
 }
 
