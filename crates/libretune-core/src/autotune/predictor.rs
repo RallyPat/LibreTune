@@ -571,6 +571,7 @@ impl VePredictor {
     /// that peaks near the configured torque-peak RPM, and (b) supports
     /// forced-induction engines via a configurable upper clamp (default 200,
     /// i.e. VE > 100%).
+    #[allow(clippy::too_many_arguments)]
     fn try_physics_model(
         &self,
         row: usize,

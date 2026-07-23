@@ -158,6 +158,7 @@ impl AnomalyDetector {
     /// fits a local plane `z = a·rpm + b·load + c` over the neighbors and
     /// flags the cell when its residual from the plane exceeds
     /// `outlier_sigma` times the residual standard deviation.
+    #[allow(clippy::needless_range_loop)]
     fn detect_statistical_outliers(
         &self,
         table: &[Vec<f64>],
@@ -241,8 +242,7 @@ impl AnomalyDetector {
                     const CLEAN_PLANE_RESIDUAL_THRESHOLD: f64 = 5.0;
                     if residual > CLEAN_PLANE_RESIDUAL_THRESHOLD {
                         let z_score = residual / 0.01; // residual_std was ~0 → very high
-                        let severity =
-                            (((z_score - self.config.outlier_sigma) / 3.0).max(0.0)).min(1.0);
+                        let severity = ((z_score - self.config.outlier_sigma) / 3.0).clamp(0.0, 1.0);
                         anomalies.push(TuneAnomaly {
                             row: r,
                             col: c,
