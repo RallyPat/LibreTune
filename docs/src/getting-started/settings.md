@@ -231,27 +231,54 @@ Default values for AutoTune parameters.
 
 ### Authority Limits
 
-**Default Max Increase:** 10% (range: 1-50%)
-**Default Max Decrease:** 10% (range: 1-50%)
-**Default Absolute Max:** 25% (range: 5-100%)
+**Default Max Cell % Change:** 20% (range: 1-50%)
+**Default Max Cell Value Change:** 10.0 VE units (range: 0.1-50.0)
 
-These are starting values; adjustable per session.
+These limits are enforced together — the smaller effective change wins. They
+are starting values and can be adjusted per session.
+
+### Target AFR
+
+**Default Fixed Target AFR:** 14.7
+
+If the ECU definition contains an AFR target table, LibreTune auto-discovers
+and uses per-cell targets; the fixed value is used only as a fallback.
 
 ### Filters
 
 **Default RPM Range:**
-- Min: 800 (idle)
-- Max: 6500 (below redline)
+- Min: 1000
+- Max: 7000
+
+**Default Load (Y-Axis) Bounds:**
+- Min: none
+- Max: none
 
 **Default Temperature Filter:**
 - Min CLT: 160°F / 70°C
-- Min IAT: 40°F / 5°C
 
 **Default Throttle:**
 - Min TPS: 1% (above closed throttle)
 - Max TPS Rate: 10%/sec
 
-**Default Update Rate:** 100ms
+**Accel Enrichment Filter:**
+- Exclude accel enrichment: true
+
+**Custom Filter:**
+- Optional `evalexpr` expression; no default.
+
+### Lambda Delay
+
+**Strict Lambda Match:** enabled (drop samples that cannot be correlated)
+
+**Default delay mode:** RPM-based curve (200 ms at 800 RPM to 50 ms at 6000 RPM)
+
+If the ECU definition provides a per-cell lambda delay table, it is used
+automatically.
+
+### Update Rate
+
+**Default realtime feed interval:** 100 ms
 
 ---
 

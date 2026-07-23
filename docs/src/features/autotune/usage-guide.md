@@ -46,11 +46,15 @@ Or keyboard: Ctrl+Shift+A
 
 **Step 3: Configure Basic Settings**
 ```
-Target AFR: 14.7 (gasoline stoich)
-          14.0 (E85)
-          13.0 (high boost, rich)
+Target AFR Fallback: 14.7 (gasoline stoich)
+                   14.0 (E85)
+                   13.0 (high boost, rich)
 Algorithm: Simple (recommended for beginners)
 ```
+
+LibreTune will try to auto-discover the ECU's AFR target table. If found, the
+per-cell target is used and the fallback value only applies to cells without a
+valid target.
 
 **Load Source (MAP vs MAF)**
 - **MAP (Speed Density)**: Default for VE tables
@@ -72,7 +76,13 @@ These are conservative. You can increase them later.
 Default filters work for most cases. Only adjust if:
 - Your car idles rough: Raise Min RPM to 1200
 - You're tuning a diesel: Adjust temp filters significantly
+- You want to ignore boost/spool: Set Max Y Axis load bound
 - You do a track day: Lower Min TPS to 0 for coast-down testing
+
+**Strict Lambda Match** is enabled by default. This drops samples that cannot
+be correlated back to a historical VE cell through the lambda delay buffer. It
+keeps recommendations accurate during transients. Only disable it if you need
+more samples and can accept some mis-attribution.
 
 **Step 6: Click Start**
 - AutoTune begins listening to wideband sensor
@@ -366,11 +376,29 @@ Compare before/after values
 - Exhaust takes 50-200ms to reach sensor
 - AutoTune correlates AFR to the VE cell from that time ago
 - Slight mismatch normal
+- Strict lambda match drops samples that cannot be correlated
 
 **Solution**
 - Trust the algorithm - it's designed for this
 - More data samples improve correlation
+- Verify the per-cell lambda delay table, if your ECU provides one
 - Second tuning session often improves results
+
+### Using Health, Anomalies, and Predictions
+
+AutoTune includes analysis tools to validate the quality of your tune:
+
+- **Tune Health Score** — grades coverage, smoothness, and monotonicity by
+  operating region (Idle, Cruise, Part Throttle, WOT). Use it to spot untuned
+  or rough areas before applying changes.
+- **Anomaly Detection** — flags statistical outliers, monotonicity violations,
+  gradient discontinuities, physically unreasonable values, and flat/un-tuned
+  blocks. Investigate flagged cells before trusting nearby recommendations.
+- **Predicted Cells** — estimates VE values for cells with no data using nearby
+  known cells or a physics model. These are suggestions only; review them
+  carefully before using them to fill gaps.
+
+See [Health, Anomalies & Predictions](./health-anomaly-predictor.md) for details.
 
 ---
 

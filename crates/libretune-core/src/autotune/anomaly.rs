@@ -177,14 +177,14 @@ impl AnomalyDetector {
                 let r_end = (r + 2).min(rows);
                 let c_start = c.saturating_sub(1);
                 let c_end = (c + 2).min(cols);
-                for nr in r_start..r_end {
-                    for nc in c_start..c_end {
+                for (nr, row_vals) in table.iter().enumerate().take(r_end).skip(r_start) {
+                    for (nc, &neighbor_val) in row_vals.iter().enumerate().take(c_end).skip(c_start) {
                         if nr == r && nc == c {
                             continue;
                         }
                         let x = x_bins.get(nc).copied().unwrap_or(nc as f64);
                         let y = y_bins.get(nr).copied().unwrap_or(nr as f64);
-                        pts.push((x, y, table[nr][nc]));
+                        pts.push((x, y, neighbor_val));
                     }
                 }
 
@@ -238,8 +238,7 @@ impl AnomalyDetector {
                     const CLEAN_PLANE_RESIDUAL_THRESHOLD: f64 = 5.0;
                     if residual > CLEAN_PLANE_RESIDUAL_THRESHOLD {
                         let z_score = residual / 0.01; // residual_std was ~0 → very high
-                        let severity = (((z_score - self.config.outlier_sigma) / 3.0).max(0.0))
-                            .min(1.0);
+                        let severity = ((z_score - self.config.outlier_sigma) / 3.0).clamp(0.0, 1.0);
                         anomalies.push(TuneAnomaly {
                             row: r,
                             col: c,

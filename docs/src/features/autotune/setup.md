@@ -37,15 +37,16 @@ Choose which table to tune:
 
 ### Target AFR Source
 
-**From AFR Target Table** (Recommended)
-- Uses your ECU's configured AFR targets
-- Automatically adapts to different conditions
-- Supports different targets for WOT vs cruise
+**Auto-Discovered AFR Target Table** (Recommended)
+- LibreTune reads the ECU's AFR target table and uses a per-cell target for
+  each VE cell.
+- Automatically adapts to different conditions (cruise vs. WOT, etc.).
+- If a cell has no valid target, the fixed fallback value is used.
 
 **Fixed Target**
-- Uses a constant target value
-- Simpler but less flexible
-- Good for initial testing
+- Uses a constant target value for the whole table.
+- Simpler but less flexible; good for initial testing or ECUs without a target
+  AFR table.
 
 ### Update Mode
 
@@ -62,11 +63,18 @@ Choose which table to tune:
 ## Filter Configuration
 
 ### RPM Filter
-- **Min RPM**: Ignore idle data (usually 800-1000)
-- **Max RPM**: Ignore over-rev data (near redline)
+- **Min RPM**: Ignore idle data (default 1000)
+- **Max RPM**: Ignore over-rev data (near redline, default 7000)
+
+### Load (Y-Axis) Filter
+- **Min Y Axis**: Ignore cells below this load (e.g., very low MAP)
+- **Max Y Axis**: Ignore cells above this load (e.g., boost if not tuning boost)
+
+Useful when you want to restrict tuning to a specific load range without
+changing the table itself.
 
 ### Temperature Filter
-- **Min CLT**: Ignore cold engine data (160°F+)
+- **Min CLT**: Ignore cold engine data (160°F / 70°C+)
 - Ensures consistent fuel behavior
 
 ### Throttle Filter
@@ -77,6 +85,14 @@ Choose which table to tune:
 - **Max TPS Rate**: Ignore rapid throttle (10%/sec)
 - Filters out transient conditions
 - Prevents accel enrichment interference
+
+### Custom Expression Filter
+An optional `evalexpr` expression that must evaluate to true for a sample to be
+accepted. Available variables:
+
+`rpm`, `map`, `maf`, `load`, `afr`, `ve`, `clt`, `tps`, `tps_rate`, `accel_enrich`
+
+Example: `rpm > 1200 && tps_rate < 5 && clt > 80`
 
 ## Authority Limits
 
@@ -89,11 +105,16 @@ Choose which table to tune:
 - Prevents runaway corrections
 
 ### Starting Values
-| Experience | Max Change | Absolute Max |
-|------------|------------|--------------|
-| Beginner | 5% | 15% |
-| Intermediate | 10% | 25% |
-| Expert | 15% | 40% |
+
+LibreTune enforces two authority limits together:
+
+| Experience | Max % Change | Max VE Change |
+|------------|--------------|---------------|
+| Beginner | 5% | 5 VE |
+| Intermediate | 10% | 10 VE |
+| Expert | 15% | 15 VE |
+
+The effective change is the more restrictive of the two limits.
 
 ## Lambda Delay Compensation
 
@@ -102,6 +123,16 @@ Engine exhaust takes time to reach the O2 sensor. AutoTune compensates:
 - **At idle**: ~200ms delay (long runner path)
 - **At redline**: ~50ms delay (fast exhaust flow)
 - LibreTune interpolates between these values
+- If your ECU provides a per-cell lambda delay table, LibreTune uses it
+  automatically; otherwise the RPM-based curve is used.
+
+### Strict Lambda Match
+
+By default, samples with no historical match inside the delay window are
+dropped. This prevents mis-attributing an AFR reading to the wrong VE cell.
+
+Disable strict match only if you are willing to accept some inaccuracy during
+transients to get more samples.
 
 ## Best Practices
 

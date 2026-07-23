@@ -19,12 +19,24 @@ Filters ensure only valid data affects recommendations.
 
 | Setting | Description | Default |
 |---------|-------------|---------|
-| Min RPM | Ignore below this | 800 |
-| Max RPM | Ignore above this | 6500 |
+| Min RPM | Ignore below this | 1000 |
+| Max RPM | Ignore above this | 7000 |
 
 **When to adjust**:
 - Raise min if idle is unstable
 - Lower max if you don't rev that high
+
+### Load (Y-Axis) Filter
+**Purpose**: Restrict tuning to a specific load range
+
+| Setting | Description | Default |
+|---------|-------------|---------|
+| Min Y Axis | Ignore cells below this load | None |
+| Max Y Axis | Ignore cells above this load | None |
+
+**When to adjust**:
+- Set a max to avoid tuning boost/spool regions until you are ready
+- Set a min to ignore very low-load decel/idle data
 
 ### Coolant Temperature Filter
 **Purpose**: Ignore cold engine data
@@ -57,6 +69,21 @@ Filters ensure only valid data affects recommendations.
 | Exclude AE | Ignore when AE active | Yes |
 
 Most ECUs flag when acceleration enrichment is active. This filter excludes that data.
+
+### Custom Expression Filter
+**Purpose**: Advanced, user-defined acceptance rule
+
+An `evalexpr` expression that must evaluate to true for a sample to be accepted.
+
+Available variables:
+`rpm`, `map`, `maf`, `load`, `afr`, `ve`, `clt`, `tps`, `tps_rate`, `accel_enrich`
+
+Example:
+```
+rpm > 1200 && tps_rate < 5 && clt > 80
+```
+
+Use this when the built-in filters are not specific enough.
 
 ## Authority Limits
 

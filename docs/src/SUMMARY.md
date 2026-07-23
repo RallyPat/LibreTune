@@ -20,6 +20,7 @@
   - [Setting Up AutoTune](./features/autotune/setup.md)
   - [Understanding Recommendations](./features/autotune/recommendations.md)
   - [Filters and Authority](./features/autotune/filters.md)
+  - [Health, Anomalies & Predictions](./features/autotune/health-anomaly-predictor.md)
 - [Dashboards](./features/dashboards.md)
   - [Using Dashboards](./features/dashboards/using.md)
   - [Customizing Gauges](./features/dashboards/customizing.md)

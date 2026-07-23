@@ -1,16 +1,19 @@
 # AutoTune Algorithm
 
-AutoTune is LibreTune's adaptive fuel table correction system. It analyzes real-world driving data (RPM, MAP, AFR) and generates recommendations to bring the actual AFR closer to the target AFR by adjusting VE table values.
+AutoTune is LibreTune's adaptive fuel-table correction system. It analyzes
+real-world driving data and generates recommendations to bring the actual AFR
+closer to the target AFR by adjusting VE table values.
 
 ## Overview
 
-The AutoTune algorithm addresses three fundamental challenges in ECU tuning:
+The algorithm addresses four fundamental challenges in ECU tuning:
 
-1. **Lambda Delay** - AFR sensors report the combustion result 50-500ms after the fuel was injected
-2. **Transient Filtering** - Throttle changes cause enrichment that shouldn't be tuned out
-3. **Data Quality** - Not all data points are equally valuable for tuning
+1. **Correct reference** — each cell may have its own Target AFR and lambda delay.
+2. **Lambda delay** — AFR sensors report combustion results 50–500 ms after fuel injection.
+3. **Transient filtering** — throttle changes cause enrichment that should not be tuned out.
+4. **Data quality** — not all data points are equally valuable.
 
-## Core Algorithm
+## Core Pipeline
 
 ### 1. Data Point Collection
 
@@ -18,243 +21,281 @@ Each realtime data sample becomes a `VEDataPoint`:
 
 ```rust
 pub struct VEDataPoint {
-    pub rpm: f64,              // Engine speed (RPM)
-    pub map: f64,              // Manifold pressure (kPa)
+    pub rpm: f64,
+    pub map: f64,
+    pub maf: f64,
+    pub load: f64,             // Generic load (MAP or MAF, depending on table)
     pub afr: f64,              // Measured air-fuel ratio
-    pub target_afr: f64,       // Target AFR from tune
-    pub tps: f64,              // Throttle position (0-100%)
+    pub ve: f64,               // Current VE estimate from ECU
+    pub clt: f64,              // Coolant temperature
+    pub tps: f64,              // Throttle position (%)
     pub tps_rate: f64,         // TPS change rate (%/sec)
-    pub accel_enrich_active: Option<bool>,  // ECU acceleration enrichment flag
-    pub timestamp_ms: u64,     // Timestamp for correlation
+    pub accel_enrich_active: Option<bool>,
+    pub timestamp_ms: u64,
 }
 ```
 
-**Data Collection Rate**: 100ms (10 Hz) from realtime stream
+The frontend feeds samples as fast as the realtime stream provides them
+(typically ~100 ms).
 
-### 2. Lambda Delay Compensation
+### 2. Reference Tables
 
-The AFR sensor reading at time T corresponds to fuel injected at time T-Δ, where Δ is the lambda delay.
+Before starting, AutoTune can be configured with `AutoTuneReferenceTables`:
 
-**Delay Calculation** (RPM-dependent):
+```rust
+pub struct AutoTuneReferenceTables {
+    pub lambda_delay_table: Vec<Vec<f64>>, // per-cell delay in ms
+    pub target_afr_table: Vec<Vec<f64>>,   // per-cell Target AFR
+}
 ```
-delay_ms = 200 - (150 * (rpm - 800) / (6000 - 800))
+
+- The **Target AFR table** is usually auto-discovered from the ECU definition.
+  If a cell has a positive value, it is used; otherwise the session's fixed
+  `target_afr` is used as fallback.
+- The **lambda delay table** overrides the RPM-based transport-delay curve on
+  a per-cell basis when present.
+
+### 3. Lambda Delay Compensation
+
+The AFR reading at time *T* corresponds to fuel injected at time *T − Δ*, where
+Δ is the lambda delay.
+
+**Default RPM-based delay curve**:
+```
+delay_ms = 200 - (150 × (rpm - 800) / (6000 - 800))
 ```
 
 | RPM | Delay |
 |-----|-------|
-| 800 (idle) | 200ms |
-| 3400 (cruise) | 125ms |
-| 6000 (redline) | 50ms |
+| 800 (idle) | 200 ms |
+| 3400 (cruise) | 125 ms |
+| 6000 (redline) | 50 ms |
 
-**Implementation**:
+**Correlation**:
+1. The current sample is appended to a 500 ms rolling buffer.
+2. A historical point is searched for `timestamp ≈ now - delay_ms` (within 50 ms).
+3. In **strict lambda match** mode (default), the sample is dropped if no close
+   historical match is found. This prevents attributing the AFR reading to the
+   wrong VE cell during transients.
+4. The historical RPM/load determine which VE cell receives the correction.
+
+### 4. Filtering
+
+A sample passes only if it satisfies every active filter:
+
+- `min_rpm ≤ rpm ≤ max_rpm`
+- `min_y_axis ≤ load ≤ max_y_axis` (when configured)
+- `clt ≥ min_clt`
+- `tps_rate ≤ max_tps_rate`
+- `accel_enrich_active != true` (when `exclude_accel_enrich` is set)
+- `custom_filter` expression evaluates to true (when configured)
+
+The `custom_filter` is an `evalexpr` expression with variables: `rpm`, `map`,
+`maf`, `load`, `afr`, `ve`, `clt`, `tps`, `tps_rate`, `accel_enrich`.
+
+### 5. Target AFR Resolution
+
+For the matched cell `(cell_x, cell_y)`:
+
 ```rust
-fn get_lambda_delay_ms(rpm: f64) -> u64 {
-    let rpm_clamped = rpm.clamp(800.0, 6000.0);
-    let delay = 200.0 - (150.0 * (rpm_clamped - 800.0) / (6000.0 - 800.0));
-    delay as u64
-}
+target_afr = reference_tables.target_afr_table[cell_y][cell_x]
+               .or_else(settings.target_afr)
 ```
 
-**Data Point Correlation**:
-1. Current AFR reading is buffered
-2. Historical data point is found: `timestamp_now - delay_ms`
-3. Historical RPM/MAP determines which VE cell to update
-4. Current AFR is used for correction calculation
+### 6. Required VE Calculation
 
-### 3. Transient Filtering
-
-Data points are rejected during throttle transients to avoid tuning out acceleration enrichment:
-
-**Filter Conditions** (all must pass):
-- `tps_rate < max_tps_rate` (default: 10%/sec)
-- `accel_enrich_active == false` (if ECU provides this signal)
-- RPM and MAP within table bounds
-
-**TPS Rate Calculation**:
 ```rust
-tps_rate = (tps_current - tps_previous) / time_delta_sec
+required_ve = current_ve * (actual_afr / target_afr)
 ```
 
-**Why This Matters**: During rapid throttle opening, the ECU adds extra fuel (acceleration enrichment) to compensate for wall wetting. This is intentional and should not be "tuned out" by reducing VE values.
+This formula directly follows from the definition of AFR: if the engine is
+running lean, VE must increase to add fuel; if rich, VE must decrease.
 
-### 4. Cell Hit Weighting
+### 7. Cumulative Moving Average (CMA)
 
-Not all data points are equal. LibreTune uses weighted averaging based on:
+Each cell maintains `raw_required_cma`. On every accepted sample:
 
-**Weighting Factors**:
-1. **RPM Stability** - More weight for stable RPM
-   ```
-   w_rpm = 1.0 / (1.0 + abs(rpm_current - rpm_previous))
-   ```
-
-2. **MAP Stability** - More weight for stable MAP
-   ```
-   w_map = 1.0 / (1.0 + abs(map_current - map_previous))
-   ```
-
-3. **AFR Error** - More weight for small errors (reduces oscillation)
-   ```
-   error_ratio = abs(afr - target_afr) / target_afr
-   w_error = exp(-error_ratio * 2.0)
-   ```
-
-4. **Combined Weight**:
-   ```
-   weight = w_rpm * w_map * w_error
-   ```
-
-### 5. Recommendation Calculation
-
-For each VE table cell (RPM, MAP):
-
-**Accumulation**:
 ```rust
-pub struct CellRecommendation {
-    pub sum_corrections: f64,  // Σ(weight * correction)
-    pub sum_weights: f64,      // Σ(weight)
-    pub hit_count: u32,        // Number of data points
-}
+hit_count += 1
+raw_required_cma += (required_ve - raw_required_cma) / hit_count
 ```
 
-**AFR Correction Factor**:
-```
-correction = target_afr / measured_afr
-```
+Authority limits are applied to the CMA to produce the displayed/applied value:
 
-- If AFR = 14.7 and Target = 13.5: correction = 0.918 (need more fuel, increase VE)
-- If AFR = 12.8 and Target = 13.5: correction = 1.055 (too rich, decrease VE)
-
-**Weighted Recommendation**:
-```
-recommendation = (sum_corrections / sum_weights)
+```rust
+recommended_value = apply_authority_limits(
+    beginning_value,
+    raw_required_cma,
+    authority,
+)
 ```
 
-**Apply to VE Table**:
-```
-new_ve = old_ve * recommendation
-```
+Because clamping is applied *after* the average, a clamped outlier cannot bias
+the long-term average.
 
-### 6. Authority Limits
+### 8. Authority Limits
 
-Recommendations are clamped to prevent dangerous changes:
+Two limits are enforced together:
 
-**Absolute Limit** (default: ±20%):
-```
-change = new_ve - old_ve
-if abs(change) > max_absolute_change:
-    new_ve = old_ve + sign(change) * max_absolute_change
-```
-
-**Percentage Limit** (default: ±20%):
-```
-ratio = new_ve / old_ve
-if ratio > (1.0 + max_percent / 100.0):
-    new_ve = old_ve * (1.0 + max_percent / 100.0)
-elif ratio < (1.0 - max_percent / 100.0):
-    new_ve = old_ve * (1.0 - max_percent / 100.0)
+```rust
+delta = raw_required_cma - beginning_value
+clamped_delta = clamp(delta,
+                      -max_cell_value_change,
+                      +max_cell_value_change)
+max_pct_delta = beginning_value * max_cell_percentage_change / 100.0
+final_delta = clamp(clamped_delta, -max_pct_delta, +max_pct_delta)
+final_ve = beginning_value + final_delta
 ```
 
-**Why Both Limits?**:
-- Absolute prevents large swings in low VE areas (idle)
-- Percentage prevents small absolute changes in high VE areas (WOT)
+Defaults:
+- `max_cell_value_change` = ±10.0 VE units
+- `max_cell_percentage_change` = ±20%
 
-### 7. Cell Locking
+### 9. Hit Percentage
 
-Users can lock specific cells to prevent AutoTune from modifying them:
+```rust
+hit_percentage = (cell_hit_count / total_accepted_samples) * 100.0
+```
 
-**Use Cases**:
-- Cells with known-good values from dyno tuning
-- Edge regions with insufficient data
-- Cells requiring manual tuning (boost control zones)
+`total_accepted_samples` counts every sample that passed filters, making the
+percentage a realistic measure of dwell time per cell.
 
-**Implementation**: Locked cells are skipped during recommendation application.
+## Analysis Subsystems
+
+### Predictive Cell Filling (`autotune/predictor.rs`)
+
+For cells with too few hits to trust, the predictor estimates a VE value from
+neighboring known cells. Methods (tried in order):
+
+1. **Bilinear Interpolation** — four surrounding known cells in all quadrants.
+2. **Neighbor-Weighted Average** — distance-weighted average of nearby known
+   cells. Distance is normalized by the physical RPM/load axis ranges, so a
+   large physical gap reduces weight even if it is only one index away.
+3. **One-Dimensional Interpolation** — when the target lies between two known
+   points on the same row or column (high confidence, ≥ 0.70).
+4. **Linear Extrapolation** — when the target lies outside the known range on a
+   row or column (lower confidence, ≤ 0.40).
+5. **Physics Model** — last-resort estimate using an RPM efficiency curve and
+   configurable VE clamps (supports forced-induction VE > 100%).
+
+### Tune Health Scoring (`autotune/health.rs`)
+
+Divides the table into operating regions and scores each:
+
+- **Idle** — low RPM, low load
+- **Cruise** — mid RPM, mid load
+- **WOT** — high load (absolute MAP ≥ 90 kPa by default)
+- **Part Throttle** — transition load bands not covered by the above
+
+Region boundaries use `>=` comparisons so bins exactly on a threshold belong to
+the higher region. Part Throttle regions are split to avoid overlapping the
+Cruise rectangle.
+
+Per-region scores:
+- **Coverage** — percent of cells with hits
+- **Smoothness** — discrete Laplacian curvature (planar ramps score ~100)
+- **Monotonicity** — VE generally increasing with load, with configurable load
+  and RPM floors to ignore idle/decel areas
+
+### Anomaly Detection (`autotune/anomaly.rs`)
+
+Flags suspect cells:
+
+- **Statistical Outlier** — cell residual from a local plane fit exceeds
+  `outlier_sigma` standard deviations. This avoids false positives on smooth
+  ramped surfaces that previously triggered scalar-mean comparison.
+- **Monotonicity Violation** — VE drops sharply with increasing load (above the
+  configured floor).
+- **Gradient Discontinuity** — sharp jump vs. the average local gradient.
+- **Physically Unreasonable** — VE outside `[min_reasonable_ve, max_reasonable_ve]`.
+- **Flat Region** — adjacent cells with values within `flat_tolerance` of each
+  other, suggesting an untuned copy/paste block.
+
+Anomalies are sorted by severity and deduplicated per cell `(row, col)`, keeping
+the single highest-severity issue for each cell.
 
 ## Data Structures
 
 ### AutoTuneState
 ```rust
 pub struct AutoTuneState {
-    pub running: bool,
-    pub table_name: String,
-    pub x_bins: Vec<f64>,          // RPM axis
-    pub y_bins: Vec<f64>,          // MAP axis
-    pub recommendations: HashMap<(usize, usize), CellRecommendation>,
-    pub locked_cells: HashSet<(usize, usize)>,
-    pub data_buffer: VecDeque<VEDataPoint>,
-    pub buffer_max_age_ms: u64,    // Prune data older than this
-    pub filters: AutoTuneFilters,
-    pub authority: AutoTuneAuthority,
+    pub is_running: bool,
+    pub locked_cells: Vec<(usize, usize)>,
+    pub recommendations: HashMap<(usize, usize), AutoTuneRecommendation>,
+    data_buffer: VecDeque<VEDataPoint>,
+    buffer_max_age_ms: u64,
+    reference_tables: AutoTuneReferenceTables,
+    strict_lambda_match: bool,
+    total_samples: u64,
 }
 ```
 
 ### AutoTuneFilters
 ```rust
 pub struct AutoTuneFilters {
-    pub min_rpm: f64,              // Minimum RPM (default: 800)
-    pub max_rpm: f64,              // Maximum RPM (default: 6000)
-    pub min_map: f64,              // Minimum MAP (default: 20 kPa)
-    pub max_map: f64,              // Maximum MAP (default: 150 kPa)
-    pub max_tps_rate: f64,         // Max TPS %/sec (default: 10)
-    pub exclude_accel_enrich: bool, // Reject accel enrichment (default: true)
+    pub min_rpm: f64,                 // default: 1000
+    pub max_rpm: f64,                 // default: 7000
+    pub min_y_axis: Option<String>,   // optional load lower bound
+    pub max_y_axis: Option<String>,   // optional load upper bound
+    pub min_clt: f64,                 // default: 160
+    pub custom_filter: Option<String>,// optional evalexpr expression
+    pub max_tps_rate: f64,            // default: 10 %/sec
+    pub exclude_accel_enrich: bool,   // default: true
 }
 ```
 
-### AutoTuneAuthority
+### AutoTuneAuthorityLimits
 ```rust
-pub struct AutoTuneAuthority {
-    pub max_absolute_change: f64,  // Max ± absolute change (default: 20.0)
-    pub max_percent_change: f64,   // Max ± percentage change (default: 20.0)
+pub struct AutoTuneAuthorityLimits {
+    pub max_cell_value_change: f64,       // default: 10.0
+    pub max_cell_percentage_change: f64,  // default: 20.0
+}
+```
+
+### AutoTuneRecommendation
+```rust
+pub struct AutoTuneRecommendation {
+    pub cell_x: usize,
+    pub cell_y: usize,
+    pub beginning_value: f64,
+    pub recommended_value: f64,
+    pub hit_count: u64,
+    pub hit_weighting: f64,
+    pub target_afr: f64,
+    pub hit_percentage: f64,
+    pub raw_required_cma: f64,
 }
 ```
 
 ## Performance Characteristics
 
-- **Memory**: O(n*m + k) where n×m = table dimensions, k = buffer size
+- **Memory**: O(n×m + k) where n×m = table dimensions, k = buffer size
 - **CPU per sample**: O(log k) for buffer insertion + O(1) for cell lookup
-- **Buffer pruning**: O(k) every 1 second (removes data older than 500ms)
-
-Typical memory usage: ~10 KB for 16×16 table with 100-point buffer
-
-## Convergence Behavior
-
-AutoTune typically converges to within 5% of optimal VE values after:
-
-- **Light load (cruise)**: 5-10 minutes of driving
-- **Medium load (acceleration)**: 10-20 minutes
-- **Full load (WOT)**: Requires multiple WOT pulls (3-5 runs)
-
-**Factors affecting convergence**:
-1. Data coverage (drive through all RPM/MAP regions)
-2. AFR sensor accuracy (narrowband vs wideband)
-3. Authority limits (lower limits = slower but safer)
-4. Engine stability (misfires cause AFR noise)
+- **Health/Anomaly/Predictor**: O(n×m) when explicitly invoked, not per-sample
 
 ## Limitations
 
-1. **Sensor Accuracy**: Garbage in, garbage out. Bad O2 sensor = bad tune
-2. **Single-Fuel Assumption**: Algorithm assumes consistent fuel octane/quality
-3. **Steady-State Bias**: Works best at stable RPM/MAP, less effective for transients
-4. **No Knock Detection**: Cannot detect detonation (requires separate knock sensor analysis)
-5. **VE-Only Tuning**: Does not adjust ignition timing, boost control, or other parameters
-
-## Comparison to Other Algorithms
-
-| Algorithm | Lambda Delay | Transient Filter | Hit Weighting | Authority Limits |
-|-----------|--------------|------------------|---------------|------------------|
-| LibreTune AutoTune | ✅ RPM-based | ✅ TPS rate + accel flag | ✅ Stability-weighted | ✅ Absolute + percentage |
-| MegaLogViewer VE Analyze | ❌ Manual offset | ✅ TPS filter | ❌ Equal weight | ⚠️ Percentage only |
-| TunerStudio AutoTune | ✅ Fixed delay | ✅ TPS + RPM filters | ✅ Hit count weighted | ✅ Configurable |
-| MLV Pro | ✅ Configurable | ✅ Multi-condition | ✅ Advanced weighting | ✅ Multi-level |
+1. **Sensor Accuracy**: Garbage in, garbage out. A bad O2 sensor produces bad recommendations.
+2. **Single-Fuel Assumption**: Assumes consistent fuel octane/quality during a session.
+3. **Steady-State Bias**: Most accurate at stable RPM/load; transients are filtered.
+4. **No Knock Detection**: Does not adjust ignition timing or detect detonation.
+5. **VE-Only Tuning**: Does not directly tune ignition, boost, or other tables.
 
 ## Source Code Reference
 
-- Implementation: `crates/libretune-core/src/autotune.rs`
-- Tauri integration: `crates/libretune-app/src-tauri/src/lib.rs` (feed_autotune_data)
-- UI component: `crates/libretune-app/src/components/tuner-ui/AutoTune.tsx`
+- Core: `crates/libretune-core/src/autotune/mod.rs`
+- Predictor: `crates/libretune-core/src/autotune/predictor.rs`
+- Health: `crates/libretune-core/src/autotune/health.rs`
+- Anomaly: `crates/libretune-core/src/autotune/anomaly.rs`
+- Tauri commands: `crates/libretune-app/src-tauri/src/commands/autotune_*.rs`
+- UI: `crates/libretune-app/src/components/tuner-ui/AutoTune.tsx`
 - Tests: `crates/libretune-core/tests/autotune_heatmap.rs`
 
 ## See Also
 
-- [AutoTune Usage Guide](../features/autotune/usage-guide.md) - Step-by-step tuning workflow
-- [Filters and Authority](../features/autotune/filters.md) - Configuring AutoTune settings
-- [Understanding Recommendations](../features/autotune/recommendations.md) - Interpreting heatmaps
+- [AutoTune Overview](../features/autotune.md)
+- [Usage Guide](../features/autotune/usage-guide.md)
+- [Setting Up AutoTune](../features/autotune/setup.md)
+- [Understanding Recommendations](../features/autotune/recommendations.md)
+- [Filters and Authority](../features/autotune/filters.md)
+- [Health, Anomalies & Predictions](../features/autotune/health-anomaly-predictor.md)

@@ -1,133 +1,82 @@
 # AutoTune
 
-AutoTune automatically generates tuning recommendations based on wideband O2 sensor feedback.
+AutoTune is LibreTune's adaptive VE-table correction system. It compares the
+wideband AFR your engine is actually running against the AFR target you want,
+then recommends changes to the VE table so the ECU delivers the right amount
+of fuel.
 
-## Overview
+## What AutoTune Does
 
-AutoTune monitors your engine in real-time and suggests VE table corrections to achieve target AFR values. It's the fastest way to get a basic tune dialed in.
+1. **Collects** real-time engine data (RPM, load, AFR, coolant temp, TPS, etc.).
+2. **Correlates** each AFR reading back to the exact VE cell that produced it,
+   compensating for lambda-sensor transport delay.
+3. **Calculates** a required VE correction for that cell.
+4. **Averages** many samples so noise and transients cancel out.
+5. **Displays** recommendations as a heat map you can review before applying.
+6. **Applies** changes to the ECU when you click **Send**.
 
-## Prerequisites
+## When to Use AutoTune
 
-- Wideband O2 sensor connected to ECU
-- AFR target table configured in ECU
-- Engine running and at operating temperature
+AutoTune works best for steady-state correction of a VE table that is already
+close enough to run the engine safely. It is not a substitute for:
 
-## Starting AutoTune
+- A safe base tune
+- A working wideband O2 sensor
+- Common-sense validation of mechanical issues (fuel pressure, injector scaling,
+  sensor calibration, etc.)
 
-1. Connect to your ECU
-2. Go to **Tools → AutoTune** or press `Ctrl+Shift+A`
-3. Select the table to tune (usually VE Table 1)
-4. Configure settings
-5. Click **Start**
+## Key Concepts
 
-## Getting Started
+### Target AFR
 
-New to AutoTune? Start with the [Usage Guide](./autotune/usage-guide.md) for step-by-step instructions covering:
-- Before you start (prerequisites and safety)
-- Complete session workflow (from setup to applying changes)
-- Real-world examples (NA, turbocharged, E85 engines)
-- Troubleshooting common issues
+The air-fuel ratio you want the engine to run. AutoTune can use either:
 
-## AutoTune Interface
+- **Per-cell Target AFR table** — recommended. LibreTune auto-discovers the ECU's
+  AFR target table and reads a target value for each VE cell. If a cell has no
+  target, the session's fixed target AFR is used as a fallback.
+- **Fixed Target AFR** — a single global value such as 14.7 for gasoline stoich.
 
-| Section | Description |
-|---------|-------------|
-| **Current Table** | Your existing VE values |
-| **Recommendations** | Suggested corrections |
-| **Heat Map** | Tuning coverage visualization |
-| **Statistics** | Hit counts and data quality |
+### Lambda Delay
 
-## Settings
+The AFR sensor does not see the result of combustion instantly. Exhaust gasses
+take roughly 50–500 ms to travel from the cylinder to the sensor. AutoTune keeps
+a short history buffer and attributes each AFR reading to the RPM/load cell the
+engine was in when that exhaust charge was produced.
 
-### Target AFR Source
-- **From Table**: Use ECU's AFR target table
-- **Fixed Value**: Use a constant target (e.g., 14.7:1)
+By default, **strict lambda matching** is enabled: if a historical match cannot
+be found within a small time window, the sample is dropped rather than being
+mis-attributed to the current cell. You can relax this behavior, but it reduces
+accuracy during transients.
 
-### Update Controller
-When enabled, recommendations are automatically sent to the ECU.
+### Cumulative Moving Average (CMA)
+
+AutoTune does not apply each sample directly. It maintains a running average of
+the *raw* required VE for each cell. Authority limits are applied only to the
+*displayed/applied* recommendation, so clamping cannot bias the underlying
+average.
 
 ### Authority Limits
 
-| Setting | Description |
-|---------|-------------|
-| **Max Increase** | Maximum % to increase any cell |
-| **Max Decrease** | Maximum % to decrease any cell |
-| **Absolute Max** | Maximum absolute change per update |
+Safety clamps that prevent large, sudden changes. Two limits are enforced
+together:
 
-## Filters
+- **Max cell value change** — absolute VE units per update (default ±10).
+- **Max cell percentage change** — percent of the original VE (default ±20%).
 
-Filters prevent bad data from affecting recommendations:
+If a recommendation is clamped, the cell shows a warning icon.
 
-| Filter | Description | Default |
-|--------|-------------|---------|
-| **Min RPM** | Ignore data below this RPM | 800 |
-| **Max RPM** | Ignore data above this RPM | 6500 |
-| **Min CLT** | Ignore when engine is cold | 160°F |
-| **Min TPS** | Ignore at closed throttle | 1% |
-| **Max TPS Rate** | Ignore rapid throttle changes | 10%/sec |
-| **Exclude Accel Enrich** | Ignore during acceleration enrichment | Yes |
+## Documentation Sections
 
-## Understanding Recommendations
+- [Usage Guide](./autotune/usage-guide.md) — step-by-step tuning workflow
+- [Setting Up AutoTune](./autotune/setup.md) — configuration options
+- [Understanding Recommendations](./autotune/recommendations.md) — how recommendations are calculated
+- [Filters and Authority](./autotune/filters.md) — filter and limit reference
+- [Health, Anomalies & Predictions](./autotune/health-anomaly-predictor.md) — analysis features
+- [AutoTune Algorithm (Technical)](../../technical/autotune-algorithm.md) — implementation details
 
-### Color Coding
-- 🔵 **Blue**: Recommendation to add fuel (running lean)
-- 🔴 **Red**: Recommendation to remove fuel (running rich)
-- ⚪ **Gray**: Insufficient data
+## Safety First
 
-### Heat Map Views
-
-#### Cell Weighting
-Shows how much data has been collected per cell:
-- Bright = lots of data (high confidence)
-- Dim = little data (low confidence)
-
-#### Cell Change
-Shows the magnitude of recommended changes:
-- Bright = large correction needed
-- Dim = minimal correction
-
-## Workflow
-
-1. **Warm up** the engine to operating temperature
-2. **Start AutoTune** with conservative authority limits
-3. **Drive normally** covering various RPM/load points
-4. **Monitor** the heat map for coverage
-5. **Apply** recommendations when confident
-6. **Iterate** with higher authority as the tune improves
-
-## Tips
-
-### Get Good Coverage
-- Drive at steady state in each cell for several seconds
-- Cover all RPM/load combinations you'll use
-- Include both acceleration and cruise conditions
-
-### Start Conservative
-- Begin with low authority limits (5-10%)
-- Increase as the base tune improves
-- Large corrections suggest the base tune needs work
-
-### Watch for Outliers
-- Occasional spikes are filtered automatically
-- Consistent lean/rich readings indicate real issues
-- Check for vacuum leaks if all cells read lean
-
-## Applying Changes
-
-1. Review recommendations in the grid
-2. Click **Send to ECU** to apply without saving
-3. Or click **Apply & Save** to update the tune file
-4. **Burn** to make changes permanent in ECU flash
-
-## Cell Locking
-
-Lock cells you don't want AutoTune to modify:
-1. Select cells in the Recommendations grid
-2. Right-click → **Lock Selected Cells**
-3. Locked cells show a 🔒 icon
-
-## Next Steps
-
-- [Setting Up AutoTune](./autotune/setup.md) - Detailed configuration
-- [Understanding Recommendations](./autotune/recommendations.md) - How corrections are calculated
-- [Filters and Authority](./autotune/filters.md) - Tuning data quality
+- Start with conservative authority limits.
+- Verify wideband calibration and fuel-system health before trusting recommendations.
+- Review the heat map for coverage and consistency before applying changes.
+- Save the tune and create a restore point before sending large corrections.

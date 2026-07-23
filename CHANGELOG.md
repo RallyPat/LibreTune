@@ -13,6 +13,20 @@ relevant.
 
 ## [Unreleased]
 
+### AutoTune safety and algorithm improvements — PR #67
+
+#### Added
+- Correct required VE formula: `required_ve = current_ve × (actual_afr / target_afr)`.
+- Cumulative moving average of raw required VE so authority clamps do not bias recommendations.
+- Per-cell Target AFR resolution with fixed-target fallback.
+- RPM-based lambda delay with optional per-cell lambda delay table and strict lambda matching.
+- Custom `evalexpr` filter and Y-axis load bounds.
+- Realistic `hit_percentage` per cell.
+- Predictor with bilinear interpolation, neighbor-weighted average, 1D interpolation/extrapolation, and physics model fallback.
+- Health scoring with Idle/Cruise/Part Throttle/WOT regions, Laplacian smoothness, and load/RPM floor monotonicity.
+- Anomaly detection with plane-fit statistical outliers, monotonicity, gradient discontinuity, physical bounds, and flat-region checks; deduplicated per cell.
+- Updated user manual and technical algorithm documentation.
+
 ### 2026-07-23 — Safe project→ECU tune apply (no reconnect brick)
 
 #### Fixed
