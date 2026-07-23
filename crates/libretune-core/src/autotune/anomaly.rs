@@ -242,7 +242,8 @@ impl AnomalyDetector {
                     const CLEAN_PLANE_RESIDUAL_THRESHOLD: f64 = 5.0;
                     if residual > CLEAN_PLANE_RESIDUAL_THRESHOLD {
                         let z_score = residual / 0.01; // residual_std was ~0 → very high
-                        let severity = ((z_score - self.config.outlier_sigma) / 3.0).clamp(0.0, 1.0);
+                        let severity =
+                            ((z_score - self.config.outlier_sigma) / 3.0).clamp(0.0, 1.0);
                         anomalies.push(TuneAnomaly {
                             row: r,
                             col: c,
