@@ -209,6 +209,8 @@ export default function TableEditor2D({
   // Show the read-only lambda companion only for actual target-AFR tables
   // (not blend/bias tables whose values aren't AFR).
   const isAfrTargetTable = table_name.toLowerCase().startsWith('afrtable');
+  // VE tables only (veTableTbl / veTable1Tbl…veTable4Tbl) — not MAF, blend, or other maps.
+  const fitVeViewport = /^vetable(\d+)?tbl$/i.test(table_name);
 
   const selectedCellsCoords = useMemo(() => {
     if (!selectionRange) return [];
@@ -1069,7 +1071,9 @@ export default function TableEditor2D({
   }
 
   return (
-    <div className={`table-editor-2d ${embedded ? 'embedded' : 'standalone'}`}>
+    <div
+      className={`table-editor-2d ${embedded ? 'embedded' : 'standalone'}${fitVeViewport ? ' table-editor-2d--ve-fit' : ''}`}
+    >
       {/* Embedded mode: compact title bar with pop-out button */}
       {embedded && (
         <div className="embedded-header">
@@ -1228,6 +1232,7 @@ export default function TableEditor2D({
           heatmapScheme={heatmapSettings.valueScheme}
           compact={embedded}
           yAxisBottom={yAxisBottom}
+          fitViewport={fitVeViewport}
         />
         {isAfrTargetTable && (
           <LambdaPreviewTable
