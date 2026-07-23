@@ -1,4 +1,12 @@
-import { Fragment, useState, useRef, useMemo, useCallback, useLayoutEffect } from 'react';
+import {
+  Fragment,
+  useState,
+  useRef,
+  useMemo,
+  useCallback,
+  useLayoutEffect,
+  type CSSProperties,
+} from 'react';
 import { valueToHeatmapColor, contrastTextColor, HeatmapScheme } from '../../utils/heatmapColors';
 
 export interface SelectionRange {
@@ -31,6 +39,11 @@ interface TableGridProps {
   heatmapScheme?: HeatmapScheme | string[]; // Scheme name or custom color stops
   /** Embedded/dialog tables: fixed compact layout (GP#1–4, etc.) */
   compact?: boolean;
+  /**
+   * VE main table only: shrink cell geometry to fit the parent viewport.
+   * Other tables must keep fixed rem sizing.
+   */
+  fitViewport?: boolean;
 }
 
 export default function TableGrid({
@@ -53,8 +66,11 @@ export default function TableGrid({
   heatmapScheme = 'tunerstudio',
   compact = false,
   yAxisBottom = false,
+  fitViewport = false,
 }: TableGridProps) {
+  const hostRef = useRef<HTMLDivElement>(null);
   const gridRef = useRef<HTMLDivElement>(null);
+  const [fitPx, setFitPx] = useState<{ axis: number; col: number; row: number } | null>(null);
   const [editingCell, setEditingCell] = useState<[number, number] | null>(null);
   const [editValue, setEditValue] = useState<string>('');
   // cellDrag stores the anchor point of the selection
@@ -309,18 +325,71 @@ export default function TableGrid({
     );
   };
 
-  // Fixed column widths — tuning tables must not stretch with the panel
-  const axisCol = compact ? '3.25rem' : '2.75rem';
-  const dataCol = compact ? '3.5rem' : '3rem';
-  const gridTemplateColumns = `${axisCol} repeat(${x_size}, ${dataCol})`;
+  // Fixed column widths — tuning tables must not stretch with the panel.
+  // Exception: fitViewport (veTableTbl only) sizes cells from the parent box.
+  useLayoutEffect(() => {
+    if (!fitViewport) {
+      setFitPx(null);
+      return;
+    }
+    const host = hostRef.current;
+    if (!host) return;
 
-  return (
-    <div 
+    const measure = () => {
+      const availW = host.clientWidth;
+      const availH = host.clientHeight;
+      if (availW < 32 || availH < 32 || x_size < 1 || y_size < 1) return;
+
+      const minCol = 22;
+      const minRow = 16;
+      const minAxis = 28;
+      const preferredCol = compact ? 56 : 48;
+      const preferredRow = 32;
+      const preferredAxis = compact ? 52 : 44;
+
+      let col = Math.floor((availW - minAxis) / x_size);
+      col = Math.max(minCol, Math.min(preferredCol, col));
+      let axis = Math.floor(availW - col * x_size);
+      axis = Math.max(minAxis, Math.min(preferredAxis, axis));
+      if (axis + col * x_size > availW) {
+        col = Math.max(minCol, Math.floor((availW - minAxis) / x_size));
+        axis = Math.max(minAxis, availW - col * x_size);
+      }
+
+      let row = Math.floor(availH / (y_size + 1));
+      row = Math.max(minRow, Math.min(preferredRow, row));
+
+      setFitPx((prev) =>
+        prev && prev.axis === axis && prev.col === col && prev.row === row
+          ? prev
+          : { axis, col, row },
+      );
+    };
+
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(host);
+    return () => ro.disconnect();
+  }, [fitViewport, x_size, y_size, compact]);
+
+  const axisCol = fitPx ? `${fitPx.axis}px` : compact ? '3.25rem' : '2.75rem';
+  const dataCol = fitPx ? `${fitPx.col}px` : compact ? '3.5rem' : '3rem';
+  const gridTemplateColumns = `${axisCol} repeat(${x_size}, ${dataCol})`;
+  const gridStyle: CSSProperties = fitPx
+    ? {
+        gridTemplateColumns,
+        ['--table-row-h' as string]: `${fitPx.row}px`,
+        fontSize: `${Math.max(9, Math.min(13, Math.floor(fitPx.col * 0.32)))}px`,
+      }
+    : { gridTemplateColumns };
+
+  const grid = (
+    <div
       ref={gridRef}
-      className={`table-grid-container${compact ? ' table-grid-container--compact' : ''}`}
+      className={`table-grid-container${compact ? ' table-grid-container--compact' : ''}${fitViewport ? ' table-grid-container--fit-ve' : ''}`}
       onMouseUp={handleMouseUp}
       onMouseMove={handleCellMouseMove}
-      style={{ gridTemplateColumns }}
+      style={gridStyle}
     >
       {/* Corner cell (row 0, col 0) */}
       <div className="axis-corner" />
@@ -463,6 +532,16 @@ export default function TableGrid({
           </div>
         );
       })()}
+    </div>
+  );
+
+  if (!fitViewport) {
+    return grid;
+  }
+
+  return (
+    <div ref={hostRef} className="table-grid-fit-host">
+      {grid}
     </div>
   );
 }
