@@ -156,6 +156,8 @@ pub struct AppState {
     pub ini_repository: Mutex<Option<IniRepository>>,
     pub online_ini_repository: Mutex<OnlineIniRepository>,
     pub tune_cache: Mutex<Option<TuneCache>>,
+    /// Snapshot of project vs ECU pages while a tune-mismatch dialog is open.
+    pub tune_mismatch_snapshot: Mutex<Option<TuneMismatchSnapshot>>,
     pub demo_mode: Mutex<bool>,
     pub wasm_plugin_manager: Mutex<Option<WasmPluginManager>>,
     pub migration_report: Mutex<Option<MigrationReport>>,
@@ -165,4 +167,10 @@ pub struct AppState {
     pub rpm_state_tracker: Mutex<RpmStateTracker>,
     pub math_channels: Mutex<Vec<UserMathChannel>>,
     pub stream_stats: Mutex<StreamStats>,
+}
+
+#[derive(Clone, Debug)]
+pub struct TuneMismatchSnapshot {
+    /// ECU page images captured at mismatch time (base for safe project merge).
+    pub ecu_pages: HashMap<u8, Vec<u8>>,
 }

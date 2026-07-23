@@ -13,6 +13,15 @@ relevant.
 
 ## [Unreleased]
 
+### 2026-07-23 — Safe project→ECU tune apply (no reconnect brick)
+
+#### Fixed
+- **Use LibreTune Settings could corrupt/brick the ECU** — project pages are now
+  materialized as ECU base + MSQ overlays (never zero-padded Load Tune pages),
+  written with chunked page writes + a single burn, and complete MSQ `<pageData>`
+  is treated as authoritative so stale named constants are not re-applied on the
+  next connect (which previously caused a fake mismatch and a destructive rewrite).
+
 ### Jul 8, 2026 — Table 3D toggle & curve drag editing
 
 #### Added

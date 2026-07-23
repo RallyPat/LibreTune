@@ -21,8 +21,6 @@ use state::{AppState, AutoTuneLoadSource, RpmState, RpmStateTracker, StreamStats
 pub(crate) use commands::app_settings::{
     get_commit_message_format, load_settings, save_settings, Settings,
 };
-#[cfg(test)]
-pub(crate) use commands::signature_helpers::compare_signatures;
 pub(crate) use commands::signature_helpers::{
     call_connection_factory_and_build_result, find_matching_inis_internal,
 };
@@ -189,6 +187,7 @@ pub fn run() {
             ini_repository: Mutex::new(None),
             online_ini_repository: Mutex::new(OnlineIniRepository::new()),
             tune_cache: Mutex::new(None),
+            tune_mismatch_snapshot: Mutex::new(None),
             demo_mode: Mutex::new(false),
             console_history: Mutex::new(Vec::new()),
             rpm_state_tracker: Mutex::new(RpmStateTracker::new()),

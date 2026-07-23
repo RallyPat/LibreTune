@@ -1397,6 +1397,78 @@ impl Connection {
         Ok(data)
     }
 
+    /// Temporarily disable auto-burn-on-page-change (for bulk multi-page writes).
+    pub fn set_auto_burn_on_page_change(&mut self, enabled: bool) {
+        self.config.auto_burn_on_page_change = enabled;
+    }
+
+    /// Drop any unread RX bytes so the next framed command starts clean.
+    pub fn clear_rx_buffer(&mut self) {
+        if let Some(channel) = self.channel.as_mut() {
+            let _ = channel.clear_input_buffer();
+        }
+    }
+
+    /// Write a full page to ECU, respecting blocking factor (same chunking as `read_page`).
+    pub fn write_page(&mut self, page: u8, data: &[u8]) -> Result<(), ProtocolError> {
+        let blocking_factor = self
+            .protocol_settings
+            .as_ref()
+            .map(|p| p.blocking_factor)
+            .unwrap_or(256)
+            .max(1);
+        let inter_chunk_ms = self.get_effective_min_wait().max(5);
+
+        let mut offset = 0usize;
+        while offset < data.len() {
+            let end = (offset + blocking_factor as usize).min(data.len());
+            let chunk = &data[offset..end];
+            let params = WriteMemoryParams {
+                page,
+                offset: offset as u16,
+                data: chunk.to_vec(),
+                can_id: 0,
+            };
+
+            // Retry transient Windows USB/serial timeouts (e.g. os error 121).
+            let mut last_err = None;
+            for attempt in 0..3 {
+                match self.write_memory(params.clone()) {
+                    Ok(()) => {
+                        last_err = None;
+                        break;
+                    }
+                    Err(e) => {
+                        let msg = e.to_string();
+                        let transient = msg.contains("121")
+                            || msg.to_ascii_lowercase().contains("timeout")
+                            || msg.to_ascii_lowercase().contains("semaphore");
+                        if !transient || attempt == 2 {
+                            return Err(e);
+                        }
+                        eprintln!(
+                            "[WARN] write_page: transient error on page {} offset {} (attempt {}): {}",
+                            page, offset, attempt + 1, msg
+                        );
+                        self.clear_rx_buffer();
+                        std::thread::sleep(Duration::from_millis(50 * (attempt as u64 + 1)));
+                        last_err = Some(e);
+                    }
+                }
+            }
+            if let Some(e) = last_err {
+                return Err(e);
+            }
+
+            offset = end;
+            if offset < data.len() {
+                std::thread::sleep(Duration::from_millis(inter_chunk_ms));
+            }
+        }
+
+        Ok(())
+    }
+
     /// Write memory to ECU using INI-defined command format
     pub fn write_memory(&mut self, params: WriteMemoryParams) -> Result<(), ProtocolError> {
         // Auto-burn safety policy (spec §6.2): if the previous write targeted a different

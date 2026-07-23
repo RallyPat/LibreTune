@@ -208,6 +208,7 @@ mod demo_mode_tests {
             ini_repository: Mutex::new(None),
             online_ini_repository: Mutex::new(OnlineIniRepository::new()),
             tune_cache: Mutex::new(None),
+            tune_mismatch_snapshot: Mutex::new(None),
             demo_mode: Mutex::new(false),
             console_history: Mutex::new(Vec::new()),
             rpm_state_tracker: Mutex::new(RpmStateTracker::new()),

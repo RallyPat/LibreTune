@@ -1,5 +1,7 @@
 //! sync_ecu_data command (extracted from lib.rs).
 
+use crate::commands::tune_apply::materialize_project_pages;
+use crate::state::TuneMismatchSnapshot;
 use crate::{set_conn_lock_holder, AppState, SyncProgress, SyncResult};
 use libretune_core::tune::TuneFile;
 use std::collections::HashMap;
@@ -86,36 +88,6 @@ pub async fn sync_ecu_data(
     drop(def_guard);
 
     let was_modified = *state.tune_modified.lock().await;
-    let cache_fully_loaded = {
-        let cache_guard = state.tune_cache.lock().await;
-        cache_guard
-            .as_ref()
-            .is_some_and(|cache| cache.is_fully_loaded())
-    };
-
-    // Reconnect with no local edits: keep the in-memory tune instead of re-reading ECU pages
-    // (avoids false drift from partial/unstable reads after a quick disconnect/reconnect).
-    if !was_modified && cache_fully_loaded {
-        eprintln!(
-            "[INFO] sync_ecu_data: skipping ECU re-read — in-memory tune unchanged since last sync"
-        );
-        let progress = SyncProgress {
-            current_page: n_pages,
-            total_pages: n_pages,
-            bytes_read: total_bytes,
-            total_bytes,
-            complete: true,
-            failed_page: None,
-        };
-        let _ = app.emit("sync:progress", &progress);
-        return Ok(SyncResult {
-            success: true,
-            pages_synced: n_pages,
-            pages_failed: 0,
-            total_pages: n_pages,
-            errors: vec![],
-        });
-    }
 
     // Compare against the in-memory tune cache (authoritative editing state),
     // not the raw TuneFile which may have empty pages for MSQ-based projects.
@@ -226,26 +198,66 @@ pub async fn sync_ecu_data(
     };
     let _ = app.emit("sync:progress", &progress);
 
-    // Compare baseline (pre-sync cache) with ECU read — only prompt when bytes differ.
-    let diff_pages = pages_with_differences(&baseline_pages, &ecu_tune.pages, n_pages, &page_sizes);
-    let should_emit_mismatch = was_modified && pages_failed == 0 && !diff_pages.is_empty();
+    // Project side for compare/write must be ECU base + MSQ constants — never the
+    // zero-padded cache from Load Tune (that would look like hundreds of fake diffs
+    // and corrupt the ECU if written).
+    let project_msq = {
+        let project_guard = state.current_project.lock().await;
+        project_guard.as_ref().and_then(|project| {
+            let path = project.current_tune_path();
+            if path.exists() {
+                TuneFile::load(&path).ok()
+            } else {
+                None
+            }
+        })
+    };
+
+    let project_pages = {
+        let def_guard = state.definition.lock().await;
+        if let (Some(def), Some(msq)) = (def_guard.as_ref(), project_msq.as_ref()) {
+            materialize_project_pages(def, msq, &ecu_tune.pages)
+        } else {
+            baseline_pages.clone()
+        }
+    };
+
+    let diff_pages = pages_with_differences(&project_pages, &ecu_tune.pages, n_pages, &page_sizes);
+    let should_emit_mismatch = pages_failed == 0 && !diff_pages.is_empty();
 
     if should_emit_mismatch {
-        let baseline_page_nums: Vec<u8> = baseline_pages.keys().copied().collect();
+        let project_page_nums: Vec<u8> = project_pages.keys().copied().collect();
         let ecu_page_nums: Vec<u8> = ecu_tune.pages.keys().copied().collect();
+        {
+            let mut snapshot_guard = state.tune_mismatch_snapshot.lock().await;
+            *snapshot_guard = Some(TuneMismatchSnapshot {
+                ecu_pages: ecu_tune.pages.clone(),
+            });
+        }
         let _ = app.emit(
             "tune:mismatch",
             &serde_json::json!({
                 "ecu_pages": ecu_page_nums,
-                "project_pages": baseline_page_nums,
+                "project_pages": project_page_nums,
                 "diff_pages": diff_pages,
             }),
         );
     } else if pages_failed > 0 && !was_modified {
         // Partial read with no local edits — restore pre-sync cache instead of leaving drift.
         restore_baseline_pages(state.inner(), &baseline_pages).await;
+        *state.tune_mismatch_snapshot.lock().await = None;
     } else if pages_failed == 0 {
         *state.tune_modified.lock().await = false;
+        *state.tune_mismatch_snapshot.lock().await = None;
+        // Keep cache as ECU pages (authoritative after a clean match).
+        {
+            let mut cache_guard = state.tune_cache.lock().await;
+            if let Some(cache) = cache_guard.as_mut() {
+                for (page_num, page_data) in &ecu_tune.pages {
+                    cache.load_page(*page_num, page_data.clone());
+                }
+            }
+        }
     }
 
     // Log detailed errors for debugging

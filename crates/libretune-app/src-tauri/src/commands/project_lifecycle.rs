@@ -305,6 +305,9 @@ pub async fn open_project(
             // Apply constants from tune file to cache (same logic as load_tune)
             use libretune_core::tune::TuneValue;
 
+            let complete_pages =
+                crate::commands::tune_apply::pages_with_complete_page_data(&def_clone, &tune);
+
             // Debug: Check if VE table constants are in the tune
             let ve_table_in_tune = tune.constants.contains_key("veTable");
             let ve_rpm_bins_in_tune = tune.constants.contains_key("veRpmBins");
@@ -349,6 +352,11 @@ pub async fn open_project(
                     if is_ve_related {
                         eprintln!("[DEBUG] open_project: Found constant '{}' in definition (page={}, offset={}, size={})", 
                             name, constant.page, constant.offset, constant.size_bytes());
+                    }
+
+                    if !constant.is_pc_variable && complete_pages.contains(&constant.page) {
+                        skipped_count += 1;
+                        continue;
                     }
 
                     // PC variables are stored locally

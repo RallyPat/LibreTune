@@ -24,6 +24,7 @@ async fn test_no_deadlock_between_def_then_conn_and_snapshot_then_conn() {
         ini_repository: Mutex::new(None),
         online_ini_repository: Mutex::new(OnlineIniRepository::new()),
         tune_cache: Mutex::new(None),
+        tune_mismatch_snapshot: Mutex::new(None),
         demo_mode: Mutex::new(false),
         plugin_manager: Mutex::new(None),
         controller_bridge: Mutex::new(None),

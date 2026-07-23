@@ -65,6 +65,7 @@ pub mod table_internals;
 pub mod table_ops;
 pub mod table_update;
 pub mod ts_import;
+pub mod tune_apply;
 pub mod tune_compare;
 pub mod tune_health;
 pub mod tune_info;
