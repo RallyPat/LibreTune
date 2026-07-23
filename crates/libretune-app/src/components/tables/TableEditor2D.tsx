@@ -209,8 +209,8 @@ export default function TableEditor2D({
   // Show the read-only lambda companion only for actual target-AFR tables
   // (not blend/bias tables whose values aren't AFR).
   const isAfrTargetTable = table_name.toLowerCase().startsWith('afrtable');
-  // Primary VE table only (32x32 on many firmwares) — do not change other tables.
-  const fitVeViewport = table_name.toLowerCase() === 'vetabletbl';
+  // VE tables only (veTableTbl / veTable1Tbl…veTable4Tbl) — not MAF, blend, or other maps.
+  const fitVeViewport = /^vetable(\d+)?tbl$/i.test(table_name);
 
   const selectedCellsCoords = useMemo(() => {
     if (!selectionRange) return [];
