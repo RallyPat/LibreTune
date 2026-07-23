@@ -2,6 +2,7 @@
 
 use crate::state::AppState;
 use libretune_core::tune::TuneFile;
+use tokio::time::{sleep, Duration};
 
 #[tauri::command]
 pub async fn mark_tune_modified(state: tauri::State<'_, AppState>) -> Result<(), String> {
@@ -79,6 +80,18 @@ pub async fn compare_project_and_ecu_tunes(
     Ok(false)
 }
 
+/// Pause realtime streaming so bulk page writes don't race the OCH poller.
+/// The stream treats write responses as bad realtime frames and disconnects after 3 errors.
+async fn pause_realtime_stream(state: &tauri::State<'_, AppState>) {
+    let mut task_guard = state.streaming_task.lock().await;
+    if let Some(handle) = task_guard.take() {
+        handle.abort();
+    }
+    drop(task_guard);
+    // Let the aborted task release the connection lock.
+    sleep(Duration::from_millis(80)).await;
+}
+
 /// Write the project tune to ECU
 /// Loads the tune from the project's CurrentTune.msq and writes all pages to ECU
 #[tauri::command]
@@ -100,23 +113,31 @@ pub async fn write_project_tune_to_ecu(
     drop(project_guard);
     drop(def_guard);
 
-    // Write all pages to ECU
-    let mut conn_guard = state.connection.lock().await;
-    let conn = conn_guard.as_mut().ok_or("Not connected to ECU")?;
+    pause_realtime_stream(&state).await;
 
-    // Sort pages for consistent writing
-    let mut pages: Vec<(u8, &Vec<u8>)> = tune.pages.iter().map(|(k, v)| (*k, v)).collect();
+    let mut pages: Vec<(u8, Vec<u8>)> = tune.pages.iter().map(|(k, v)| (*k, v.clone())).collect();
     pages.sort_by_key(|(p, _)| *p);
 
-    for (page_num, page_data) in pages {
-        let params = libretune_core::protocol::commands::WriteMemoryParams {
-            can_id: 0,
-            page: page_num,
-            offset: 0,
-            data: page_data.clone(),
-        };
-        conn.write_memory(params)
-            .map_err(|e| format!("Failed to write page {}: {}", page_num, e))?;
+    {
+        let mut conn_guard = state.connection.lock().await;
+        let conn = conn_guard.as_mut().ok_or("Not connected to ECU")?;
+
+        // Bulk write must not auto-burn between pages (2s sleep per page change freezes the link).
+        // Caller burns once after all pages are in RAM.
+        conn.set_auto_burn_on_page_change(false);
+        conn.clear_rx_buffer();
+
+        let write_result = (|| {
+            for (page_num, page_data) in &pages {
+                conn.write_page(*page_num, page_data)
+                    .map_err(|e| format!("Failed to write page {}: {}", page_num, e))?;
+            }
+            Ok::<(), String>(())
+        })();
+
+        conn.clear_rx_buffer();
+        conn.set_auto_burn_on_page_change(true);
+        write_result?;
     }
 
     // Update cache and current_tune with project tune
@@ -145,24 +166,39 @@ pub async fn write_project_tune_to_ecu(
 #[tauri::command]
 pub async fn save_tune_to_project(state: tauri::State<'_, AppState>) -> Result<(), String> {
     let project_guard = state.current_project.lock().await;
-    let tune_guard = state.current_tune.lock().await;
-
     let project = project_guard.as_ref().ok_or("No project open")?;
-    let tune = tune_guard.as_ref().ok_or("No tune loaded")?.clone();
-
     let tune_path = project.current_tune_path();
-
     drop(project_guard);
-    drop(tune_guard);
 
-    // Save tune to project path
+    let ini_signature = {
+        let def_guard = state.definition.lock().await;
+        def_guard.as_ref().map(|d| d.signature.clone())
+    };
+
+    // Sync cache pages into the in-memory tune before writing disk.
+    let mut tune = {
+        let tune_guard = state.current_tune.lock().await;
+        tune_guard.as_ref().ok_or("No tune loaded")?.clone()
+    };
+    {
+        let cache_guard = state.tune_cache.lock().await;
+        if let Some(cache) = cache_guard.as_ref() {
+            for page_num in 0..cache.page_count() {
+                if let Some(page_data) = cache.get_page(page_num) {
+                    tune.pages.insert(page_num, page_data.to_vec());
+                }
+            }
+        }
+    }
+    if let Some(sig) = ini_signature {
+        tune.signature = sig;
+    }
+
     tune.save(&tune_path)
         .map_err(|e| format!("Failed to save tune to project: {}", e))?;
 
-    // Update path
+    *state.current_tune.lock().await = Some(tune);
     *state.current_tune_path.lock().await = Some(tune_path);
-
-    // Mark as not modified
     *state.tune_modified.lock().await = false;
 
     Ok(())

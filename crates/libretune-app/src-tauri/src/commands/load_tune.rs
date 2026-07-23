@@ -159,25 +159,14 @@ pub async fn load_tune(
         let def = def_guard.as_ref();
         let mut cache_guard = state.tune_cache.lock().await;
 
-        // Initialize cache if it doesn't exist, or reinitialize if it was reset
-        if cache_guard.is_none() {
-            if let Some(def) = def {
-                eprintln!("[DEBUG] load_tune: Initializing cache from definition");
-                *cache_guard = Some(TuneCache::from_definition(def));
-            } else {
-                eprintln!("[WARN] load_tune: No definition loaded, cannot initialize cache");
-                return Err("No ECU definition loaded. Please open a project first.".to_string());
-            }
-        }
-
-        // Ensure cache is initialized even if it exists but is empty
-        if let Some(cache) = cache_guard.as_mut() {
-            if cache.page_count() == 0 {
-                if let Some(def) = def {
-                    eprintln!("[DEBUG] load_tune: Cache exists but is empty, reinitializing from definition");
-                    *cache_guard = Some(TuneCache::from_definition(def));
-                }
-            }
+        // Always reset the cache. Overlaying an MSQ onto a previous ECU sync leaves
+        // stale bytes that later look like a "project tune" and can corrupt the ECU.
+        if let Some(def) = def {
+            eprintln!("[DEBUG] load_tune: Initializing cache from definition");
+            *cache_guard = Some(TuneCache::from_definition(def));
+        } else {
+            eprintln!("[WARN] load_tune: No definition loaded, cannot initialize cache");
+            return Err("No ECU definition loaded. Please open a project first.".to_string());
         }
 
         if let Some(cache) = cache_guard.as_mut() {
@@ -193,9 +182,14 @@ pub async fn load_tune(
 
             // Then, apply constants from tune file to cache
             if let Some(def) = def {
+                // Complete <pageData> is authoritative — do not re-apply stale
+                // named constants over those pages (can flip packed bits / brick).
+                let complete_pages =
+                    crate::commands::tune_apply::pages_with_complete_page_data(def, &tune);
                 eprintln!(
-                    "[DEBUG] load_tune: Definition loaded - {} constants in definition",
-                    def.constants.len()
+                    "[DEBUG] load_tune: Definition loaded - {} constants in definition, {} pages with complete pageData",
+                    def.constants.len(),
+                    complete_pages.len()
                 );
 
                 // Debug: Check if VE table constants are in the definition
@@ -231,6 +225,10 @@ pub async fn load_tune(
 
                     // Look up constant in definition
                     if let Some(constant) = def.constants.get(name) {
+                        if !constant.is_pc_variable && complete_pages.contains(&constant.page) {
+                            skipped_count += 1;
+                            continue;
+                        }
                         // PC variables are stored locally, not in page data
                         if constant.is_pc_variable {
                             match tune_value {
