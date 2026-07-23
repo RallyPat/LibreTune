@@ -33,8 +33,10 @@ pub enum PredictionMethod {
     BilinearInterpolation,
     /// Distance-weighted average from nearby known cells
     NeighborWeighted,
-    /// Linear extrapolation from edge cells
+    /// Linear extrapolation from edge cells (true extrapolation, lower confidence)
     LinearExtrapolation,
+    /// 1D interpolation between two bracketing known cells (higher confidence)
+    OneDInterpolation,
     /// Physics-based estimate (VE generally increases with load)
     PhysicsModel,
 }
@@ -50,6 +52,14 @@ pub struct PredictorConfig {
     pub min_hit_count: u32,
     /// Weight decay factor for neighbor distance (higher = faster decay)
     pub distance_decay: f64,
+    /// RPM at which volumetric efficiency peaks (torque peak). Used by the
+    /// physics-model fallback. Bug #4.
+    pub physics_peak_torque_rpm: f64,
+    /// Lower clamp for physics-model VE estimates. Bug #4.
+    pub physics_min_ve: f64,
+    /// Upper clamp for physics-model VE estimates. Extended to support forced
+    /// induction (VE > 100%). Bug #4.
+    pub physics_max_ve: f64,
 }
 
 impl Default for PredictorConfig {
@@ -59,6 +69,9 @@ impl Default for PredictorConfig {
             max_search_radius: 5,
             min_hit_count: 3,
             distance_decay: 2.0,
+            physics_peak_torque_rpm: 4500.0,
+            physics_min_ve: 10.0,
+            physics_max_ve: 200.0,
         }
     }
 }
@@ -71,6 +84,40 @@ pub struct VePredictor {
 impl VePredictor {
     pub fn new(config: PredictorConfig) -> Self {
         Self { config }
+    }
+
+    /// Span of an axis (max − min), floored at a tiny epsilon to avoid
+    /// division by zero. Used to normalize physical distances (bug #7).
+    fn axis_range(bins: &[f64]) -> f64 {
+        let max = bins.last().copied().unwrap_or(100.0);
+        let min = bins.first().copied().unwrap_or(0.0);
+        (max - min).max(1e-6)
+    }
+
+    /// Normalized physical distance between two cells using the supplied axis
+    /// bins. Falls back to unit grid steps when a bin lookup fails.
+    #[allow(clippy::too_many_arguments)]
+    fn physical_distance(
+        row: usize,
+        col: usize,
+        other_row: usize,
+        other_col: usize,
+        x_bins: &[f64],
+        y_bins: &[f64],
+    ) -> f64 {
+        let rpm_range = Self::axis_range(x_bins);
+        let load_range = Self::axis_range(y_bins);
+        let dx = x_bins
+            .get(col)
+            .zip(x_bins.get(other_col))
+            .map(|(a, b)| (a - b).abs() / rpm_range)
+            .unwrap_or((col as f64 - other_col as f64).abs());
+        let dy = y_bins
+            .get(row)
+            .zip(y_bins.get(other_row))
+            .map(|(a, b)| (a - b).abs() / load_range)
+            .unwrap_or((row as f64 - other_row as f64).abs());
+        (dx * dx + dy * dy).sqrt().max(0.001)
     }
 
     /// Generate predictions for all zero-hit cells in the VE table.
@@ -140,9 +187,16 @@ impl VePredictor {
                     }
                 }
 
-                if let Some(pred) =
-                    self.try_neighbor_weighted(r, c, rows, cols, &known, table_values)
-                {
+                if let Some(pred) = self.try_neighbor_weighted(
+                    r,
+                    c,
+                    rows,
+                    cols,
+                    &known,
+                    table_values,
+                    x_bins,
+                    y_bins,
+                ) {
                     if pred.confidence >= self.config.min_confidence {
                         predictions.push(pred);
                         continue;
@@ -159,7 +213,9 @@ impl VePredictor {
                 }
 
                 // Physics model as last resort
-                if let Some(pred) = self.try_physics_model(r, c, rows, cols, table_values, y_bins) {
+                if let Some(pred) =
+                    self.try_physics_model(r, c, rows, cols, table_values, x_bins, y_bins)
+                {
                     if pred.confidence >= self.config.min_confidence {
                         predictions.push(pred);
                     }
@@ -206,10 +262,25 @@ impl VePredictor {
         let mut weight_sum = 0.0;
         let mut max_dist = 0.0f64;
 
+        // Bug #7: normalize distance by physical axis ranges (RPM and Load)
+        // rather than raw grid-step indices, so two cells one index apart but
+        // spanning a large physical gap weigh less than an equal-physical-gap
+        // pair.
+        let rpm_range = Self::axis_range(x_bins);
+        let load_range = Self::axis_range(y_bins);
+
         for (cr, cc) in &corners {
-            let dr_f = (row as f64 - *cr as f64).abs();
-            let dc_f = (col as f64 - *cc as f64).abs();
-            let dist = (dr_f * dr_f + dc_f * dc_f).sqrt().max(0.001);
+            let dr_phys = x_bins
+                .get(*cc)
+                .zip(x_bins.get(col))
+                .map(|(a, b)| (a - b).abs() / rpm_range)
+                .unwrap_or((col as f64 - *cc as f64).abs());
+            let dc_phys = y_bins
+                .get(*cr)
+                .zip(y_bins.get(row))
+                .map(|(a, b)| (a - b).abs() / load_range)
+                .unwrap_or((row as f64 - *cr as f64).abs());
+            let dist = (dr_phys * dr_phys + dc_phys * dc_phys).sqrt().max(0.001);
             max_dist = max_dist.max(dist);
             let weight = 1.0 / dist.powf(self.config.distance_decay);
             weighted_sum += known[&(*cr, *cc)].0 * weight;
@@ -243,7 +314,14 @@ impl VePredictor {
         })
     }
 
-    /// Find nearest known cell in a given direction
+    /// Find nearest known cell in a given direction (quadrant).
+    ///
+    /// Bug #6: the previous implementation stepped strictly along the 45°
+    /// diagonal (row ± d, col ± d), so it could not find an orthogonal
+    /// neighbor sitting directly above/below/left/right of the target. This
+    /// version expands a 2D quadrant ring by ring (Chebyshev distance),
+    /// scanning every cell in the quadrant at that radius in ascending
+    /// Euclidean-distance order, returning the first known cell encountered.
     #[allow(clippy::too_many_arguments)]
     fn find_nearest_known(
         &self,
@@ -257,24 +335,55 @@ impl VePredictor {
     ) -> Option<(usize, usize)> {
         let max_r = self.config.max_search_radius;
 
-        for dist in 1..=max_r {
-            let r = row as i32 + row_dir * dist as i32;
-            let c = col as i32 + col_dir * dist as i32;
-
-            if r < 0 || r >= rows as i32 || c < 0 || c >= cols as i32 {
-                break;
+        for ring in 1..=max_r {
+            // Collect candidate (dr, dc) offsets in this quadrant at Chebyshev
+            // distance exactly `ring`, then sort by Euclidean distance so the
+            // nearest known cell wins.
+            let mut candidates: Vec<(i32, i32, f64)> = Vec::new();
+            for dr in 0..=ring {
+                for dc in 0..=ring {
+                    if dr == 0 && dc == 0 {
+                        continue;
+                    }
+                    // Only the outer ring of the expanding square.
+                    if dr != ring && dc != ring {
+                        continue;
+                    }
+                    // Respect zero directions: a 0 axis means "same line".
+                    if (row_dir == 0 && dr != 0) || (col_dir == 0 && dc != 0) {
+                        continue;
+                    }
+                    let (dr_i, dc_i) = (dr as i32, dc as i32);
+                    let euclid = ((dr_i * dr_i + dc_i * dc_i) as f64).sqrt();
+                    candidates.push((dr_i, dc_i, euclid));
+                }
             }
+            candidates.sort_by(|a, b| {
+                a.2.partial_cmp(&b.2)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
 
-            let ru = r as usize;
-            let cu = c as usize;
-            if known.contains_key(&(ru, cu)) {
-                return Some((ru, cu));
+            for (dr, dc, _) in candidates {
+                // dr, dc are non-negative magnitudes; row_dir/col_dir give the
+                // sign. (The 0-axis case was filtered above, so a non-zero
+                // magnitude always pairs with a ±1 direction.)
+                let r = row as i32 + dr * row_dir;
+                let c = col as i32 + dc * col_dir;
+                if r < 0 || r >= rows as i32 || c < 0 || c >= cols as i32 {
+                    continue;
+                }
+                let ru = r as usize;
+                let cu = c as usize;
+                if known.contains_key(&(ru, cu)) {
+                    return Some((ru, cu));
+                }
             }
         }
         None
     }
 
     /// Distance-weighted average from all nearby known cells
+    #[allow(clippy::too_many_arguments)]
     fn try_neighbor_weighted(
         &self,
         row: usize,
@@ -283,6 +392,8 @@ impl VePredictor {
         cols: usize,
         known: &HashMap<(usize, usize), (f64, u32)>,
         table_values: &[Vec<f64>],
+        x_bins: &[f64],
+        y_bins: &[f64],
     ) -> Option<PredictedCell> {
         let radius = self.config.max_search_radius;
         let mut weighted_sum = 0.0;
@@ -300,9 +411,8 @@ impl VePredictor {
                     continue;
                 }
                 if let Some((val, hits)) = known.get(&(r, c)) {
-                    let dr = (row as f64 - r as f64).abs();
-                    let dc = (col as f64 - c as f64).abs();
-                    let dist = (dr * dr + dc * dc).sqrt().max(0.001);
+                    // Bug #7: physical (axis-normalized) distance, not grid steps.
+                    let dist = Self::physical_distance(row, col, r, c, x_bins, y_bins);
 
                     // Weight by inverse distance and hit count
                     let dist_weight = 1.0 / dist.powf(self.config.distance_decay);
@@ -337,7 +447,13 @@ impl VePredictor {
         })
     }
 
-    /// Linear extrapolation from edge cells
+    /// Linear extrapolation / 1D interpolation from edge cells.
+    ///
+    /// Bug #17: the old code tagged every 1D estimate as `LinearExtrapolation`
+    /// even when the target was bracketed by two known points (safe
+    /// interpolation). Interpolated targets now use `OneDInterpolation` with
+    /// higher confidence; true out-of-range extrapolation keeps the lower
+    /// confidence `LinearExtrapolation` tag.
     fn try_linear_extrapolation(
         &self,
         row: usize,
@@ -362,35 +478,45 @@ impl VePredictor {
             }
         }
 
-        // Try row-wise extrapolation
+        // Try row-wise first
         if row_known.len() >= 2 {
             row_known.sort_by_key(|(c, _)| *c);
-            if let Some(val) = self.extrapolate_1d(col, &row_known) {
+            if let Some((val, is_interpolation)) = self.extrapolate_1d(col, &row_known) {
                 let clamped = val.clamp(1.0, 200.0);
+                let (confidence, method) = if is_interpolation {
+                    (0.75, PredictionMethod::OneDInterpolation)
+                } else {
+                    (0.4, PredictionMethod::LinearExtrapolation)
+                };
                 return Some(PredictedCell {
                     row,
                     col,
                     predicted_value: clamped,
                     current_value: table_values[row][col],
-                    confidence: 0.4, // Extrapolation is less reliable
-                    method: PredictionMethod::LinearExtrapolation,
+                    confidence,
+                    method,
                     neighbor_count: row_known.len(),
                 });
             }
         }
 
-        // Try column-wise extrapolation
+        // Try column-wise
         if col_known.len() >= 2 {
             col_known.sort_by_key(|(r, _)| *r);
-            if let Some(val) = self.extrapolate_1d(row, &col_known) {
+            if let Some((val, is_interpolation)) = self.extrapolate_1d(row, &col_known) {
                 let clamped = val.clamp(1.0, 200.0);
+                let (confidence, method) = if is_interpolation {
+                    (0.75, PredictionMethod::OneDInterpolation)
+                } else {
+                    (0.35, PredictionMethod::LinearExtrapolation)
+                };
                 return Some(PredictedCell {
                     row,
                     col,
                     predicted_value: clamped,
                     current_value: table_values[row][col],
-                    confidence: 0.35,
-                    method: PredictionMethod::LinearExtrapolation,
+                    confidence,
+                    method,
                     neighbor_count: col_known.len(),
                 });
             }
@@ -399,13 +525,19 @@ impl VePredictor {
         None
     }
 
-    /// Extrapolate from known 1D data points to target index
-    fn extrapolate_1d(&self, target: usize, known_points: &[(usize, f64)]) -> Option<f64> {
+    /// Extrapolate/interpolate from known 1D data points to target index.
+    /// Returns the predicted value and a bool that is `true` when the target
+    /// is bracketed by two known points (interpolation) and `false` when it
+    /// lies outside the known range (true extrapolation).
+    fn extrapolate_1d(
+        &self,
+        target: usize,
+        known_points: &[(usize, f64)],
+    ) -> Option<(f64, bool)> {
         if known_points.len() < 2 {
             return None;
         }
 
-        // Find two closest points on the same side, or bracketing
         let target_f = target as f64;
 
         // Check if target is bracketed (interpolation case)
@@ -414,34 +546,38 @@ impl VePredictor {
             let (i1, v1) = window[1];
             if i0 <= target && target <= i1 && i0 != i1 {
                 let t = (target_f - i0 as f64) / (i1 as f64 - i0 as f64);
-                return Some(v0 + t * (v1 - v0));
+                return Some((v0 + t * (v1 - v0), true));
             }
         }
 
         // Extrapolation from nearest two points
         if target < known_points[0].0 {
-            // Below range — extrapolate from first two
             let (i0, v0) = known_points[0];
             let (i1, v1) = known_points[1];
             if i0 != i1 {
                 let slope = (v1 - v0) / (i1 as f64 - i0 as f64);
-                return Some(v0 + slope * (target_f - i0 as f64));
+                return Some((v0 + slope * (target_f - i0 as f64), false));
             }
         } else if target > known_points.last().unwrap().0 {
-            // Above range — extrapolate from last two
             let n = known_points.len();
             let (i0, v0) = known_points[n - 2];
             let (i1, v1) = known_points[n - 1];
             if i0 != i1 {
                 let slope = (v1 - v0) / (i1 as f64 - i0 as f64);
-                return Some(v1 + slope * (target_f - i1 as f64));
+                return Some((v1 + slope * (target_f - i1 as f64), false));
             }
         }
 
         None
     }
 
-    /// Physics-based VE estimate: VE generally increases with load
+    /// Physics-based VE estimate.
+    ///
+    /// Bug #4: the previous model clamped VE to a fixed 30–100 range and
+    /// ignored RPM entirely. It now (a) scales with an RPM efficiency curve
+    /// that peaks near the configured torque-peak RPM, and (b) supports
+    /// forced-induction engines via a configurable upper clamp (default 200,
+    /// i.e. VE > 100%).
     fn try_physics_model(
         &self,
         row: usize,
@@ -449,23 +585,41 @@ impl VePredictor {
         _rows: usize,
         _cols: usize,
         table_values: &[Vec<f64>],
+        x_bins: &[f64],
         y_bins: &[f64],
     ) -> Option<PredictedCell> {
         if y_bins.is_empty() {
             return None;
         }
 
-        // Simple physics model: VE scales roughly linearly with MAP/load
-        // at mid RPM range, with falloff at very high RPM
+        // Load term: VE scales roughly linearly with MAP/load.
         let max_load = y_bins.last().copied().unwrap_or(100.0);
         let min_load = y_bins.first().copied().unwrap_or(0.0);
         let load_range = (max_load - min_load).max(1.0);
-
         let current_load = y_bins.get(row).copied().unwrap_or(50.0);
-        let load_fraction = (current_load - min_load) / load_range;
+        let load_fraction = ((current_load - min_load) / load_range).clamp(0.0, 1.0);
 
-        // Estimate based on load fraction: VE typically 30-100
-        let estimated_ve = 30.0 + load_fraction * 70.0;
+        // RPM term: a simple tent function peaking (1.0) at torque-peak RPM and
+        // tapering to ~0.6 at the idle/redline extremes. This shapes the load-
+        // driven estimate so it doesn't suggest identical VE across the rev
+        // range.
+        let peak = self.config.physics_peak_torque_rpm.max(1.0);
+        let rpm = x_bins.get(col).copied().unwrap_or(peak);
+        let rpm_factor = if rpm <= peak {
+            // 0.6 at rpm=0 → 1.0 at peak
+            0.6 + 0.4 * (rpm / peak).clamp(0.0, 1.0)
+        } else {
+            // 1.0 at peak, decaying toward 0.6 as rpm → 2*peak
+            let over = ((rpm - peak) / peak).clamp(0.0, 1.0);
+            1.0 - 0.4 * over
+        };
+
+        // Base VE spans the configurable min..max; load supplies the primary
+        // spread and the RPM factor scales the result.
+        let ve_span = (self.config.physics_max_ve - self.config.physics_min_ve).max(1.0);
+        let estimated_ve =
+            (self.config.physics_min_ve + load_fraction * ve_span) * rpm_factor;
+        let estimated_ve = estimated_ve.clamp(self.config.physics_min_ve, self.config.physics_max_ve);
 
         Some(PredictedCell {
             row,
@@ -596,6 +750,79 @@ mod tests {
     }
 
     #[test]
+    fn test_quadrant_search_finds_orthogonal_neighbors() {
+        // Bug #6: the old diagonal-only ray missed neighbors directly above,
+        // below, left, or right of the target cell.
+        let config = PredictorConfig::default();
+        let predictor = VePredictor::new(config);
+
+        let mut table = make_table(5, 5, 50.0);
+        let mut hits = make_hits(5, 5, 0);
+
+        // Known cells directly above (row 1) and left (col 1) of the target
+        // at (row 2, col 2), but no diagonal cells.
+        hits[1][2] = 10;
+        table[1][2] = 55.0;
+        hits[2][1] = 10;
+        table[2][1] = 53.0;
+
+        let x_bins = vec![1000.0, 2000.0, 3000.0, 4000.0, 5000.0];
+        let y_bins = vec![20.0, 40.0, 60.0, 80.0, 100.0];
+
+        let predictions = predictor.predict_cells(&table, &hits, &x_bins, &y_bins);
+        assert!(
+            predictions.iter().any(|p| p.row == 2 && p.col == 2),
+            "target (2,2) should be predicted from orthogonal neighbors"
+        );
+    }
+
+    #[test]
+    fn test_physical_distance_weighting() {
+        // Bug #7: distance should be normalized by physical axis ranges. Two
+        // cells one index apart but spanning a huge physical RPM gap should
+        // weight less than an equal-physical-gap pair.
+        //
+        // Setup: target at (row 0, col 0). Two known cells in the first column
+        // but far apart in physical RPM. The top-left (row 0, col 1) is only
+        // 100 RPM away in x but same row; the bottom-left (row 1, col 0) is
+        // 1000 RPM away but same col. Physical-distance weighting should rank
+        // the 100 RPM neighbor higher.
+        let config = PredictorConfig {
+            min_confidence: 0.0, // accept everything for comparison
+            max_search_radius: 3,
+            min_hit_count: 1,
+            distance_decay: 1.0, // linear inverse to make comparisons easy
+            ..PredictorConfig::default()
+        };
+        let predictor = VePredictor::new(config);
+
+        let mut table = make_table(3, 3, 50.0);
+        let mut hits = make_hits(3, 3, 0);
+        hits[0][1] = 10;
+        table[0][1] = 60.0; // same row, x_gap = 100 RPM
+        hits[1][0] = 10;
+        table[1][0] = 70.0; // same col, y_gap = 1000 "load" units
+
+        // Very compressed x axis: 0,100,200; very stretched y axis: 0,1000,2000
+        let x_bins = vec![0.0, 100.0, 200.0];
+        let y_bins = vec![0.0, 1000.0, 2000.0];
+
+        let predictions = predictor.predict_cells(&table, &hits, &x_bins, &y_bins);
+        let pred_0_0 = predictions
+            .iter()
+            .find(|p| p.row == 0 && p.col == 0)
+            .expect("(0,0) should be predicted");
+
+        // The 60.0 (100 RPM away) should dominate over the 70.0 (1000 load
+        // units away), so the predicted value should be closer to 60 than 70.
+        assert!(
+            pred_0_0.predicted_value < 65.0,
+            "closer physical neighbor should dominate; got {}",
+            pred_0_0.predicted_value
+        );
+    }
+
+    #[test]
     fn test_extrapolation_1d() {
         let config = PredictorConfig::default();
         let predictor = VePredictor::new(config);
@@ -603,19 +830,78 @@ mod tests {
         let known = vec![(2, 40.0), (4, 60.0)];
 
         // Interpolation
-        let val = predictor.extrapolate_1d(3, &known);
-        assert!(val.is_some());
-        assert!((val.unwrap() - 50.0).abs() < 0.01);
+        let (val, is_interp) = predictor.extrapolate_1d(3, &known).unwrap();
+        assert!(is_interp, "bracketed target should be interpolation");
+        assert!((val - 50.0).abs() < 0.01);
 
         // Extrapolation below
-        let val = predictor.extrapolate_1d(0, &known);
-        assert!(val.is_some());
-        assert!((val.unwrap() - 20.0).abs() < 0.01);
+        let (val, is_interp) = predictor.extrapolate_1d(0, &known).unwrap();
+        assert!(!is_interp, "out-of-range target should be extrapolation");
+        assert!((val - 20.0).abs() < 0.01);
 
         // Extrapolation above
-        let val = predictor.extrapolate_1d(6, &known);
-        assert!(val.is_some());
-        assert!((val.unwrap() - 80.0).abs() < 0.01);
+        let (val, is_interp) = predictor.extrapolate_1d(6, &known).unwrap();
+        assert!(!is_interp, "out-of-range target should be extrapolation");
+        assert!((val - 80.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_interpolation_vs_extrapolation_tagging() {
+        // Bug #17: a bracketed 1D estimate should be tagged OneDInterpolation
+        // with high confidence; an out-of-range estimate should be tagged
+        // LinearExtrapolation with low confidence. We shrink the search radius
+        // and use a single-row table so bilinear / neighbor-weighted fall
+        // through to the 1D path.
+        let config = PredictorConfig {
+            min_hit_count: 1,
+            min_confidence: 0.0,
+            max_search_radius: 1,
+            ..Default::default()
+        };
+        let predictor = VePredictor::new(config);
+
+        // 1 row, 7 columns. Known at col 0 and col 4.
+        let mut table = vec![vec![50.0; 7]];
+        let mut hits = vec![vec![0u32; 7]];
+        hits[0][0] = 5;
+        table[0][0] = 40.0;
+        hits[0][4] = 5;
+        table[0][4] = 60.0;
+
+        let x_bins = vec![1000.0, 2000.0, 3000.0, 4000.0, 5000.0, 6000.0, 7000.0];
+        let y_bins = vec![20.0];
+
+        let predictions = predictor.predict_cells(&table, &hits, &x_bins, &y_bins);
+
+        let interp = predictions
+            .iter()
+            .find(|p| p.row == 0 && p.col == 2)
+            .expect("col 2 should be predicted by interpolation between col 0 and col 4");
+        assert_eq!(
+            interp.method,
+            PredictionMethod::OneDInterpolation,
+            "bracketed cell should be OneDInterpolation"
+        );
+        assert!(
+            interp.confidence >= 0.70,
+            "interpolation confidence should be high, got {}",
+            interp.confidence
+        );
+
+        let extrap = predictions
+            .iter()
+            .find(|p| p.row == 0 && p.col == 6)
+            .expect("col 6 should be predicted by extrapolation from col 0/4");
+        assert_eq!(
+            extrap.method,
+            PredictionMethod::LinearExtrapolation,
+            "out-of-range cell should be LinearExtrapolation"
+        );
+        assert!(
+            extrap.confidence <= 0.40,
+            "extrapolation confidence should be low, got {}",
+            extrap.confidence
+        );
     }
 
     #[test]
@@ -624,5 +910,66 @@ mod tests {
         let predictor = VePredictor::new(config);
         let predictions = predictor.predict_cells(&[], &[], &[], &[]);
         assert!(predictions.is_empty());
+    }
+
+    #[test]
+    fn test_physics_model_scales_with_rpm_and_supports_fi() {
+        // Bug #4: the physics-model fallback must (a) factor in RPM (peak near
+        // torque-peak) and (b) be able to exceed 100% VE for forced induction.
+        // Provide one known cell far from the query cell so the data-driven
+        // methods (bilinear/neighbor/extrapolation) don't reach it, forcing the
+        // physics model to fire.
+        let config = PredictorConfig {
+            min_confidence: 0.1,
+            max_search_radius: 1, // keep neighbor/bilinear from reaching the target
+            physics_peak_torque_rpm: 4000.0,
+            physics_min_ve: 10.0,
+            physics_max_ve: 200.0,
+            ..PredictorConfig::default()
+        };
+        let predictor = VePredictor::new(config);
+
+        let rows = 3;
+        let cols = 3;
+        let mut table = make_table(rows, cols, 50.0);
+        let mut hits = make_hits(rows, cols, 0);
+        // One known cell at the opposite corner (row 0, col 0) so `known` is
+        // non-empty but far from (row 2, col 1) under max_search_radius=1.
+        table[0][0] = 55.0;
+        hits[0][0] = 5;
+
+        let x_bins = vec![1000.0, 4000.0, 8000.0];
+        // High load (boosted): y up to 250 kPa
+        let y_bins = vec![40.0, 150.0, 250.0];
+
+        let predictions = predictor.predict_cells(&table, &hits, &x_bins, &y_bins);
+
+        // Find the prediction at peak-torque RPM (col 1) and max load (row 2).
+        let peak_pred = predictions
+            .iter()
+            .find(|p| p.row == 2 && p.col == 1)
+            .expect("physics prediction at (row=2,col=1) should exist");
+
+        // At peak RPM with max load, the estimate should be able to exceed
+        // 100% VE (the old hard ceiling). rpm_factor at peak = 1.0,
+        // load_fraction = 1.0 → min + full span.
+        assert!(
+            peak_pred.predicted_value > 100.0,
+            "forced-induction VE should exceed 100 at peak RPM / max load, got {}",
+            peak_pred.predicted_value
+        );
+
+        // RPM scaling: same load (row 2), but off-peak RPM (col 0, 1000 rpm)
+        // must yield a lower estimate than peak RPM.
+        let low_rpm_pred = predictions
+            .iter()
+            .find(|p| p.row == 2 && p.col == 0)
+            .expect("prediction at (row=2,col=0) should exist");
+        assert!(
+            low_rpm_pred.predicted_value < peak_pred.predicted_value,
+            "off-peak RPM (got {}) should predict lower VE than peak RPM (got {})",
+            low_rpm_pred.predicted_value,
+            peak_pred.predicted_value
+        );
     }
 }

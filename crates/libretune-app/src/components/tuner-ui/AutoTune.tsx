@@ -213,6 +213,14 @@ export function AutoTune({ tableName: initialTableName = '', onClose }: AutoTune
     max_value: 200,
   });
 
+  // Reference-table / lambda-match configuration (bug #2, #14).
+  // Leaving the AFR table blank uses auto-discovery from the INI, falling back
+  // to settings.target_afr. Strict lambda matching (default on) drops samples
+  // with no delayed-buffer match rather than mis-attributing them.
+  const [targetAfrTable, setTargetAfrTable] = useState<string>('');
+  const [lambdaDelayTable, setLambdaDelayTable] = useState<string>('');
+  const [strictLambdaMatch, setStrictLambdaMatch] = useState(true);
+
   const isMafChannelName = useCallback((name?: string | null) => {
     if (!name) return false;
     const lower = name.toLowerCase();
@@ -463,13 +471,16 @@ export function AutoTune({ tableName: initialTableName = '', onClose }: AutoTune
         settings,
         filters,
         authorityLimits: authority,
+        targetAfrTableName: targetAfrTable.trim() || null,
+        lambdaDelayTableName: lambdaDelayTable.trim() || null,
+        strictLambdaMatch,
       });
       setIsRunning(true);
       setError(null);
     } catch (e) {
       setError(`Failed to start AutoTune: ${e}`);
     }
-  }, [selectedTable, secondaryTableEnabled, secondaryTable, loadSource, settings, filters, authority]);
+  }, [selectedTable, secondaryTableEnabled, secondaryTable, loadSource, settings, filters, authority, targetAfrTable, lambdaDelayTable, strictLambdaMatch]);
 
   const stopAutoTune = useCallback(async () => {
     try {
@@ -935,6 +946,44 @@ export function AutoTune({ tableName: initialTableName = '', onClose }: AutoTune
                 onChange={(e) => setAuthority({ ...authority, max_total_change: parseFloat(e.target.value) })}
               />
             </div>
+          </div>
+
+          <div className="autotune-settings-section">
+            <h3>Reference Tables &amp; Lambda Delay</h3>
+            <div className="setting-row">
+              <label>Target AFR Table:</label>
+              <input
+                type="text"
+                placeholder="Auto-discover (blank = use Target AFR setting)"
+                value={targetAfrTable}
+                onChange={(e) => setTargetAfrTable(e.target.value)}
+              />
+            </div>
+            <div className="setting-row">
+              <label>Lambda Delay Table:</label>
+              <input
+                type="text"
+                placeholder="Optional (blank = RPM-based curve)"
+                value={lambdaDelayTable}
+                onChange={(e) => setLambdaDelayTable(e.target.value)}
+              />
+            </div>
+            <label className="autotune-checkbox-row">
+              <input
+                type="checkbox"
+                checked={strictLambdaMatch}
+                onChange={(e) => setStrictLambdaMatch(e.target.checked)}
+              />
+              Strict lambda-delay match (drop unmatched samples — recommended)
+            </label>
+            {!strictLambdaMatch && (
+              <div className="autotune-warning-banner" role="alert">
+                ⚠️ Strict matching is OFF. Samples with no delayed-buffer match
+                will be attributed to the current cell, which can inject AFR
+                readings into the wrong load cell during throttle transients.
+                Leave ON for safest tuning.
+              </div>
+            )}
           </div>
         </div>
       </div>
