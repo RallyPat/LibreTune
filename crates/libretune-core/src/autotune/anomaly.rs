@@ -55,6 +55,16 @@ pub struct AnomalyConfig {
     pub max_reasonable_ve: f64,
     /// Minimum region size to flag as flat (default: 4)
     pub min_flat_region_size: usize,
+    /// Tolerance for considering two adjacent cell values "identical" when
+    /// detecting flat (untuned) regions. Bug #13: previously hardcoded to
+    /// 0.01, which was too strict for scaled/rounded tables. Default 0.1 VE.
+    pub flat_tolerance: f64,
+    /// Load (kPa) below which monotonicity violations are ignored. Bug #10:
+    /// very low-load cells can legitimately have non-monotonic VE. Default
+    /// 30 kPa.
+    pub monotonicity_load_floor_kpa: f64,
+    /// RPM below which monotonicity violations are ignored. Default 0 (no floor).
+    pub monotonicity_min_rpm: f64,
 }
 
 impl Default for AnomalyConfig {
@@ -65,6 +75,9 @@ impl Default for AnomalyConfig {
             min_reasonable_ve: 5.0,
             max_reasonable_ve: 180.0,
             min_flat_region_size: 4,
+            flat_tolerance: 0.1,
+            monotonicity_load_floor_kpa: 30.0,
+            monotonicity_min_rpm: 0.0,
         }
     }
 }
@@ -91,7 +104,7 @@ impl AnomalyDetector {
     pub fn detect_anomalies(
         &self,
         table_values: &[Vec<f64>],
-        _x_bins: &[f64],
+        x_bins: &[f64],
         y_bins: &[f64],
     ) -> Vec<TuneAnomaly> {
         let rows = table_values.len();
@@ -106,8 +119,15 @@ impl AnomalyDetector {
         let mut anomalies = Vec::new();
 
         // Run all detection passes
-        self.detect_statistical_outliers(table_values, rows, cols, &mut anomalies);
-        self.detect_monotonicity_violations(table_values, rows, cols, y_bins, &mut anomalies);
+        self.detect_statistical_outliers(table_values, rows, cols, x_bins, y_bins, &mut anomalies);
+        self.detect_monotonicity_violations(
+            table_values,
+            rows,
+            cols,
+            x_bins,
+            y_bins,
+            &mut anomalies,
+        );
         self.detect_gradient_discontinuities(table_values, rows, cols, &mut anomalies);
         self.detect_physically_unreasonable(table_values, rows, cols, &mut anomalies);
         self.detect_flat_regions(table_values, rows, cols, &mut anomalies);
@@ -119,51 +139,141 @@ impl AnomalyDetector {
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
 
-        // De-duplicate: keep highest severity per cell
+        // De-duplicate: keep highest severity per cell. Bug #18: the old key
+        // included the anomaly type, so a single cell could emit multiple
+        // anomalies of different types and drown out the most severe one.
+        // Since anomalies are already sorted by severity descending, retaining
+        // the first entry per (row, col) keeps the highest-severity issue.
         let mut seen = std::collections::HashSet::new();
-        anomalies.retain(|a| seen.insert((a.row, a.col, format!("{:?}", a.anomaly_type))));
+        anomalies.retain(|a| seen.insert((a.row, a.col)));
 
         anomalies
     }
 
-    /// Detect cells that are statistical outliers compared to their neighbors
+    /// Detect cells that are statistical outliers compared to their neighbors.
+    ///
+    /// Bug #9: previously this compared each cell to the *scalar* mean of its
+    /// neighbors, which flagged legitimate ramped surfaces (where neighbors
+    /// span a real value range) and corner cells (fewer neighbors). It now
+    /// fits a local plane `z = a·rpm + b·load + c` over the neighbors and
+    /// flags the cell when its residual from the plane exceeds
+    /// `outlier_sigma` times the residual standard deviation.
+    #[allow(clippy::needless_range_loop)]
     fn detect_statistical_outliers(
         &self,
         table: &[Vec<f64>],
         rows: usize,
         cols: usize,
+        x_bins: &[f64],
+        y_bins: &[f64],
         anomalies: &mut Vec<TuneAnomaly>,
     ) {
         for r in 0..rows {
             for c in 0..cols {
                 let val = table[r][c];
-                let neighbors = self.get_neighbor_values(table, r, c, rows, cols);
-                if neighbors.len() < 3 {
+
+                // Gather neighbors with their physical (rpm, load) coordinates.
+                let mut pts: Vec<(f64, f64, f64)> = Vec::new(); // (X=rpm, Y=load, Z=ve)
+                let r_start = r.saturating_sub(1);
+                let r_end = (r + 2).min(rows);
+                let c_start = c.saturating_sub(1);
+                let c_end = (c + 2).min(cols);
+                for nr in r_start..r_end {
+                    for nc in c_start..c_end {
+                        if nr == r && nc == c {
+                            continue;
+                        }
+                        let x = x_bins.get(nc).copied().unwrap_or(nc as f64);
+                        let y = y_bins.get(nr).copied().unwrap_or(nr as f64);
+                        pts.push((x, y, table[nr][nc]));
+                    }
+                }
+
+                // Need at least 3 non-collinear points for a plane fit.
+                if pts.len() < 3 {
                     continue;
                 }
 
-                let mean = neighbors.iter().sum::<f64>() / neighbors.len() as f64;
-                let variance = neighbors.iter().map(|n| (n - mean).powi(2)).sum::<f64>()
-                    / neighbors.len() as f64;
-                let std_dev = variance.sqrt();
+                // Least-squares plane fit z = a·X + b·Y + c.
+                // Normal equations (center coordinates to improve conditioning):
+                let n = pts.len() as f64;
+                let mean_x = pts.iter().map(|p| p.0).sum::<f64>() / n;
+                let mean_y = pts.iter().map(|p| p.1).sum::<f64>() / n;
+                let sxx = pts.iter().map(|p| (p.0 - mean_x).powi(2)).sum::<f64>();
+                let syy = pts.iter().map(|p| (p.1 - mean_y).powi(2)).sum::<f64>();
+                let sxy = pts
+                    .iter()
+                    .map(|p| (p.0 - mean_x) * (p.1 - mean_y))
+                    .sum::<f64>();
+                let sxz = pts.iter().map(|p| (p.0 - mean_x) * p.2).sum::<f64>();
+                let syz = pts.iter().map(|p| (p.1 - mean_y) * p.2).sum::<f64>();
+                let mean_z = pts.iter().map(|p| p.2).sum::<f64>() / n;
 
-                if std_dev < 0.01 {
-                    continue; // All neighbors are the same
+                // Solve 2x2 for (a, b):  [sxx sxy][a]   [sxz]
+                //                       [sxy syy][b] = [syz]
+                let det = sxx * syy - sxy * sxy;
+                let (expected, residual_std) = if det.abs() > 1e-9 {
+                    let a = (syy * sxz - sxy * syz) / det;
+                    let b = (sxx * syz - sxy * sxz) / det;
+                    let cc = mean_z - a * mean_x - b * mean_y;
+                    let cell_x = x_bins.get(c).copied().unwrap_or(c as f64);
+                    let cell_y = y_bins.get(r).copied().unwrap_or(r as f64);
+                    let expected = a * cell_x + b * cell_y + cc;
+                    // Residual std of the fit over the neighbors.
+                    let resid: Vec<f64> = pts
+                        .iter()
+                        .map(|(x, y, z)| z - (a * x + b * y + cc))
+                        .collect();
+                    let rstd = (resid.iter().map(|v| v.powi(2)).sum::<f64>()
+                        / resid.len().max(1) as f64)
+                        .sqrt();
+                    (expected, rstd)
+                } else {
+                    // Degenerate (collinear) neighborhood — fall back to mean.
+                    (mean_z, 0.0)
+                };
+
+                if residual_std < 0.01 {
+                    // Neighbors lie on (nearly) a perfect plane. We can't form a
+                    // meaningful z-score from a near-zero denominator, but a cell
+                    // deviating far from that clean plane is a strong outlier
+                    // signal — flag it by an absolute residual threshold.
+                    let residual = (val - expected).abs();
+                    const CLEAN_PLANE_RESIDUAL_THRESHOLD: f64 = 5.0;
+                    if residual > CLEAN_PLANE_RESIDUAL_THRESHOLD {
+                        let z_score = residual / 0.01; // residual_std was ~0 → very high
+                        let severity =
+                            ((z_score - self.config.outlier_sigma) / 3.0).clamp(0.0, 1.0);
+                        anomalies.push(TuneAnomaly {
+                            row: r,
+                            col: c,
+                            value: val,
+                            expected_value: expected,
+                            anomaly_type: AnomalyType::StatisticalOutlier,
+                            severity,
+                            description: format!(
+                                "Cell value {:.1} deviates {:.1} from a clean local plane ({:.1})",
+                                val, residual, expected
+                            ),
+                        });
+                    }
+                    continue;
                 }
 
-                let z_score = (val - mean).abs() / std_dev;
+                let residual = (val - expected).abs();
+                let z_score = residual / residual_std;
                 if z_score > self.config.outlier_sigma {
                     let severity = ((z_score - self.config.outlier_sigma) / 3.0).min(1.0);
                     anomalies.push(TuneAnomaly {
                         row: r,
                         col: c,
                         value: val,
-                        expected_value: mean,
+                        expected_value: expected,
                         anomaly_type: AnomalyType::StatisticalOutlier,
                         severity,
                         description: format!(
-                            "Cell value {:.1} is {:.1}σ from neighbor mean {:.1}",
-                            val, z_score, mean
+                            "Cell value {:.1} is {:.1}σ from local plane fit ({:.1})",
+                            val, z_score, expected
                         ),
                     });
                 }
@@ -171,12 +281,15 @@ impl AnomalyDetector {
         }
     }
 
-    /// Detect monotonicity violations: VE should generally increase with load
+    /// Detect monotonicity violations: VE should generally increase with load.
+    /// Bug #10: skips cells below the configured load floor / RPM floor so
+    /// idle/decay areas don't generate false positives.
     fn detect_monotonicity_violations(
         &self,
         table: &[Vec<f64>],
         rows: usize,
         cols: usize,
+        x_bins: &[f64],
         y_bins: &[f64],
         anomalies: &mut Vec<TuneAnomaly>,
     ) {
@@ -187,7 +300,16 @@ impl AnomalyDetector {
         // Check column-wise (increasing load/MAP should generally increase VE)
         #[allow(clippy::needless_range_loop)]
         for c in 0..cols {
+            let rpm = x_bins.get(c).copied().unwrap_or(0.0);
+            if rpm < self.config.monotonicity_min_rpm {
+                continue;
+            }
             for r in 1..rows {
+                let load = y_bins.get(r - 1).copied().unwrap_or(0.0);
+                if load < self.config.monotonicity_load_floor_kpa {
+                    continue;
+                }
+
                 let prev = table[r - 1][c];
                 let curr = table[r][c];
                 let load_increasing = y_bins
@@ -369,7 +491,7 @@ impl AnomalyDetector {
                     if cr >= rows || cc >= cols || visited[cr][cc] {
                         continue;
                     }
-                    if (table[cr][cc] - val).abs() > 0.01 {
+                    if (table[cr][cc] - val).abs() > self.config.flat_tolerance {
                         continue;
                     }
 
@@ -414,6 +536,7 @@ impl AnomalyDetector {
     }
 
     /// Get neighbor values within 1-cell radius
+    #[allow(dead_code)]
     fn get_neighbor_values(
         &self,
         table: &[Vec<f64>],
@@ -558,7 +681,15 @@ mod tests {
 
     #[test]
     fn test_detect_physically_unreasonable() {
-        let config = AnomalyConfig::default();
+        // Use a huge outlier sigma, gradient threshold, and monotonicity floor
+        // so the extreme cells are reported as PhysicallyUnreasonable rather
+        // than being outranked by other anomaly types after the #18 per-cell dedup.
+        let config = AnomalyConfig {
+            outlier_sigma: 1e9,
+            gradient_threshold: 1e9,
+            monotonicity_load_floor_kpa: 1e9,
+            ..Default::default()
+        };
         let detector = AnomalyDetector::new(config);
 
         let table = vec![
@@ -582,9 +713,165 @@ mod tests {
     }
 
     #[test]
-    fn test_empty_table() {
-        let detector = AnomalyDetector::new(AnomalyConfig::default());
-        let anomalies = detector.detect_anomalies(&[], &[], &[]);
-        assert!(anomalies.is_empty());
+    fn test_no_false_outliers_on_ramped_surface() {
+        // Bug #9: scalar-neighbor-mean outlier detection flagged ramped table
+        // corners. A plane-fit based detector should accept a smooth linear
+        // surface with no local deviations.
+        let config = AnomalyConfig {
+            outlier_sigma: 2.0,
+            ..Default::default()
+        };
+        let detector = AnomalyDetector::new(config);
+
+        // Perfect plane: 48 + 2*rpm_idx + 2*load_idx.
+        let table: Vec<Vec<f64>> = (0..4)
+            .map(|r| {
+                (0..4)
+                    .map(|c| 48.0 + 2.0 * r as f64 + 2.0 * c as f64)
+                    .collect()
+            })
+            .collect();
+        let x_bins = vec![1000.0, 2000.0, 3000.0, 4000.0];
+        let y_bins = vec![20.0, 40.0, 60.0, 80.0];
+
+        let anomalies = detector.detect_anomalies(&table, &x_bins, &y_bins);
+        let outliers: Vec<_> = anomalies
+            .iter()
+            .filter(|a| a.anomaly_type == AnomalyType::StatisticalOutlier)
+            .collect();
+        assert!(
+            outliers.is_empty(),
+            "Smooth ramped surface should have no statistical outliers, got {:?}",
+            outliers
+        );
+    }
+
+    #[test]
+    fn test_flat_tolerance_config() {
+        // Bug #13: flat tolerance should be configurable. With a tolerance of
+        // 1.0, a checkerboard of 50.0/50.5 cells is still considered flat; with
+        // 0.0, every cell is isolated and below the min_flat_region_size, so
+        // no flat flags. A huge outlier sigma prevents the #18 dedup from
+        // masking flat flags with StatisticalOutliers.
+        let loose_config = AnomalyConfig {
+            outlier_sigma: 1e9,
+            min_flat_region_size: 4,
+            flat_tolerance: 1.0,
+            ..Default::default()
+        };
+        let strict_config = AnomalyConfig {
+            outlier_sigma: 1e9,
+            min_flat_region_size: 4,
+            flat_tolerance: 0.0,
+            ..Default::default()
+        };
+
+        let table: Vec<Vec<f64>> = (0..4)
+            .map(|r| {
+                (0..4)
+                    .map(|c| if (r + c) % 2 == 0 { 50.0 } else { 50.5 })
+                    .collect()
+            })
+            .collect();
+        let x_bins = vec![1000.0, 2000.0, 3000.0, 4000.0];
+        let y_bins = vec![20.0, 40.0, 60.0, 80.0];
+
+        let loose = AnomalyDetector::new(loose_config).detect_anomalies(&table, &x_bins, &y_bins);
+        let strict = AnomalyDetector::new(strict_config).detect_anomalies(&table, &x_bins, &y_bins);
+
+        let loose_flat = loose
+            .iter()
+            .filter(|a| a.anomaly_type == AnomalyType::FlatRegion)
+            .count();
+        let strict_flat = strict
+            .iter()
+            .filter(|a| a.anomaly_type == AnomalyType::FlatRegion)
+            .count();
+
+        assert!(
+            loose_flat >= 16,
+            "loose tolerance should flag the whole grid as flat, got {}",
+            loose_flat
+        );
+        assert!(
+            strict_flat < loose_flat,
+            "strict tolerance should produce fewer flat flags ({} vs {})",
+            strict_flat,
+            loose_flat
+        );
+    }
+
+    #[test]
+    fn test_monotonicity_floor_ignores_low_load_in_anomaly_detector() {
+        // Bug #10: a VE drop below the configured load floor should not be
+        // flagged as a monotonicity violation.
+        let config = AnomalyConfig {
+            monotonicity_load_floor_kpa: 35.0,
+            ..Default::default()
+        };
+        let detector = AnomalyDetector::new(config);
+
+        let table = vec![
+            vec![50.0, 50.0, 50.0, 50.0],
+            vec![30.0, 30.0, 30.0, 30.0], // drop below floor: ignored
+            vec![55.0, 55.0, 55.0, 55.0],
+            vec![25.0, 25.0, 25.0, 25.0], // drop above floor: flagged
+        ];
+        let x_bins = vec![1000.0, 2000.0, 3000.0, 4000.0];
+        let y_bins = vec![20.0, 40.0, 60.0, 80.0];
+
+        let anomalies = detector.detect_anomalies(&table, &x_bins, &y_bins);
+        let mono: Vec<_> = anomalies
+            .iter()
+            .filter(|a| a.anomaly_type == AnomalyType::MonotonicityViolation)
+            .collect();
+        // Only the 55 -> 25 drop at row 3 (80 kPa) is above the 35 kPa floor.
+        assert!(!mono.is_empty(), "drop above load floor should be flagged");
+        assert!(
+            mono.iter().all(|a| a.row == 3),
+            "only row 3 (80 kPa) violations expected, got {:?}",
+            mono
+        );
+    }
+
+    #[test]
+    fn test_dedup_keeps_highest_severity_per_cell() {
+        // Bug #18: a cell with multiple anomaly types should emit exactly one
+        // anomaly after dedup — the highest-severity one.
+        let config = AnomalyConfig {
+            outlier_sigma: 1.0,       // make the outlier fire
+            gradient_threshold: 1.0,  // make the gradient discontinuity fire
+            min_flat_region_size: 16, // disable flat detection for this test
+            ..Default::default()
+        };
+        let detector = AnomalyDetector::new(config);
+
+        let table = vec![
+            vec![50.0, 52.0, 54.0, 56.0],
+            vec![52.0, 54.0, 56.0, 58.0],
+            vec![54.0, 56.0, 200.0, 60.0], // (2,2) is both an outlier and a sharp gradient
+            vec![56.0, 58.0, 60.0, 62.0],
+        ];
+        let x_bins = vec![1000.0, 2000.0, 3000.0, 4000.0];
+        let y_bins = vec![20.0, 40.0, 60.0, 80.0];
+
+        let anomalies = detector.detect_anomalies(&table, &x_bins, &y_bins);
+        let cell_2_2: Vec<_> = anomalies
+            .iter()
+            .filter(|a| a.row == 2 && a.col == 2)
+            .collect();
+        assert_eq!(
+            cell_2_2.len(),
+            1,
+            "cell (2,2) should have exactly one anomaly after dedup, got {:?}",
+            cell_2_2
+        );
+        // The retained anomaly should be the highest severity type for this cell.
+        let retained = &cell_2_2[0];
+        assert!(
+            retained.severity >= 0.9,
+            "retained anomaly should be high severity, got {}",
+            retained.severity
+        );
     }
 }

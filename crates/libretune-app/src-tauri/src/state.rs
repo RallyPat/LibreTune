@@ -6,7 +6,8 @@
 //! lock them directly.
 
 use libretune_core::autotune::{
-    AutoTuneAuthorityLimits, AutoTuneFilters, AutoTuneSettings, AutoTuneState,
+    AutoTuneAuthorityLimits, AutoTuneFilters, AutoTuneReferenceTables, AutoTuneSettings,
+    AutoTuneState,
 };
 use libretune_core::datalog::DataLogger;
 use libretune_core::ini::{EcuDefinition, Endianness, OutputChannel, ProtocolSettings};
@@ -135,6 +136,18 @@ pub struct AutoTuneConfig {
     pub secondary_y_bins: Option<Vec<f64>>,
     pub last_tps: Option<f64>,
     pub last_timestamp_ms: Option<u64>,
+    /// Per-cell Target AFR / lambda delay reference tables for the session.
+    /// Empty by default → AutoTune falls back to settings.target_afr and the
+    /// RPM-based delay curve. See bug #14.
+    ///
+    /// Retained on the config for inspection; the live copy lives on
+    /// `AutoTuneState` (set via `set_reference_tables` at start).
+    #[allow(dead_code)]
+    pub reference_tables: AutoTuneReferenceTables,
+    /// When true (default), samples with no delayed-buffer match are dropped
+    /// instead of being attributed to the current cell. See bug #2.
+    #[allow(dead_code)]
+    pub strict_lambda_match: bool,
 }
 
 pub struct AppState {

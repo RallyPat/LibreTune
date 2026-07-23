@@ -76,7 +76,8 @@ pub struct HealthConfig {
     pub idle_rpm_max: f64,
     /// RPM boundary between cruise and WOT (default: 4500)
     pub wot_rpm_min: f64,
-    /// Load boundary between part-throttle and WOT (default: 80% of max)
+    /// Load boundary between part-throttle and WOT (default: 80% of max).
+    /// Used only when `use_absolute_map_wot` is false (legacy fraction mode).
     pub wot_load_fraction: f64,
     /// Load boundary between idle and part-throttle (default: 30% of max)
     pub idle_load_fraction: f64,
@@ -86,6 +87,22 @@ pub struct HealthConfig {
     pub smoothness_weight: f64,
     /// Weight for monotonicity in final score
     pub monotonicity_weight: f64,
+    /// Load (kPa) below which monotonicity checks are skipped. Bug #10: very
+    /// low-load cells (idle/decay) can legitimately have non-monotonic VE, so
+    /// enforcing “VE must increase with load” down to 0 kPa produces false
+    /// warnings. Default 30 kPa.
+    pub monotonicity_load_floor_kpa: f64,
+    /// RPM below which monotonicity checks are skipped. Default 0 (no floor).
+    pub monotonicity_min_rpm: f64,
+    /// When true (default), WOT is detected via absolute MAP threshold
+    /// (`wot_map_kpa`) instead of a percentage of the table's max load. Bug
+    /// #3: the fraction-based threshold misclassifies boosted engines (e.g.
+    /// 20–250 kPa MAP) by putting WOT at ~204 kPa, ignoring all atmospheric
+    /// WOT cells (100–200 kPa).
+    pub use_absolute_map_wot: bool,
+    /// Absolute MAP (kPa) at/above which a cell counts as WOT (default 90).
+    /// Only consulted when `use_absolute_map_wot` is true.
+    pub wot_map_kpa: f64,
 }
 
 impl Default for HealthConfig {
@@ -98,6 +115,10 @@ impl Default for HealthConfig {
             coverage_weight: 0.4,
             smoothness_weight: 0.35,
             monotonicity_weight: 0.25,
+            monotonicity_load_floor_kpa: 30.0,
+            monotonicity_min_rpm: 0.0,
+            use_absolute_map_wot: true,
+            wot_map_kpa: 90.0,
         }
     }
 }
@@ -146,7 +167,14 @@ impl HealthScorer {
         // Score each region
         let mut regions: Vec<RegionHealth> = Vec::new();
         for (name, region_type, row_range, col_range) in &regions_def {
-            let score = self.score_region(table_values, hit_counts, *row_range, *col_range);
+            let score = self.score_region(
+                table_values,
+                hit_counts,
+                x_bins,
+                y_bins,
+                *row_range,
+                *col_range,
+            );
             regions.push(RegionHealth {
                 name: name.clone(),
                 region_type: region_type.clone(),
@@ -237,13 +265,14 @@ impl HealthScorer {
     ) -> Vec<RegionDef> {
         let mut regions = Vec::new();
 
-        // Find RPM boundary indices
+        // Find RPM boundary indices. Bug #11: use >= for all boundaries so a
+        // bin exactly on the threshold belongs to the higher region.
         let idle_col_end = x_bins
             .iter()
-            .position(|&x| x > self.config.idle_rpm_max)
+            .position(|&x| x >= self.config.idle_rpm_max)
             .unwrap_or(1)
             .max(1)
-            - 1;
+            .saturating_sub(1);
         let wot_col_start = x_bins
             .iter()
             .position(|&x| x >= self.config.wot_rpm_min)
@@ -255,21 +284,34 @@ impl HealthScorer {
         let load_range = max_load - min_load;
 
         let idle_load_threshold = min_load + load_range * self.config.idle_load_fraction;
-        let wot_load_threshold = min_load + load_range * self.config.wot_load_fraction;
+
+        // Bug #3: detect WOT by absolute MAP threshold rather than a fraction
+        // of the table's max load. The fraction-based threshold misclassifies
+        // boosted engines (e.g. 20–250 kPa MAP) by placing WOT at ~204 kPa,
+        // ignoring every atmospheric WOT cell (100–200 kPa). When the absolute
+        // mode is disabled we fall back to the legacy fraction behaviour.
+        let wot_row_start = if self.config.use_absolute_map_wot {
+            y_bins
+                .iter()
+                .position(|&y| y >= self.config.wot_map_kpa)
+                .unwrap_or(rows.saturating_sub(1))
+        } else {
+            let wot_load_threshold = min_load + load_range * self.config.wot_load_fraction;
+            y_bins
+                .iter()
+                .position(|&y| y >= wot_load_threshold)
+                .unwrap_or(rows.saturating_sub(1))
+        };
 
         let idle_row_end = y_bins
             .iter()
-            .position(|&y| y > idle_load_threshold)
+            .position(|&y| y >= idle_load_threshold)
             .unwrap_or(1)
             .max(1)
-            - 1;
-        let wot_row_start = y_bins
-            .iter()
-            .position(|&y| y >= wot_load_threshold)
-            .unwrap_or(rows.saturating_sub(1));
+            .saturating_sub(1);
 
         // Idle: low RPM, low load
-        if idle_col_end > 0 && idle_row_end > 0 {
+        if idle_col_end < cols && idle_row_end < rows {
             regions.push((
                 "Idle".to_string(),
                 RegionType::Idle,
@@ -284,7 +326,7 @@ impl HealthScorer {
         let cruise_row_start = (idle_row_end + 1).min(rows - 1);
         let cruise_row_end = wot_row_start.saturating_sub(1).max(cruise_row_start);
 
-        if cruise_col_end > cruise_col_start && cruise_row_end > cruise_row_start {
+        if cruise_col_end >= cruise_col_start && cruise_row_end >= cruise_row_start {
             regions.push((
                 "Cruise".to_string(),
                 RegionType::Cruise,
@@ -303,16 +345,29 @@ impl HealthScorer {
             ));
         }
 
-        // Part Throttle: everything not covered
+        // Part Throttle: the transition load band between idle and WOT, but
+        // Bug #12: split into the RPM columns NOT already covered by Idle,
+        // Cruise, or WOT rectangles so regions don't double-score the same
+        // cells. Left slice = low-RPM/high-load, right slice = high-RPM/mid-load.
         let pt_row_start = (idle_row_end + 1).min(rows - 1);
         let pt_row_end = wot_row_start.saturating_sub(1).max(pt_row_start);
-        if pt_row_end > pt_row_start {
-            regions.push((
-                "Part Throttle".to_string(),
-                RegionType::PartThrottle,
-                (pt_row_start, pt_row_end),
-                (0, cols - 1),
-            ));
+        if pt_row_end >= pt_row_start {
+            if idle_col_end > 0 {
+                regions.push((
+                    "Part Throttle".to_string(),
+                    RegionType::PartThrottle,
+                    (pt_row_start, pt_row_end),
+                    (0, idle_col_end),
+                ));
+            }
+            if wot_col_start < cols {
+                regions.push((
+                    "Part Throttle".to_string(),
+                    RegionType::PartThrottle,
+                    (pt_row_start, pt_row_end),
+                    (wot_col_start, cols - 1),
+                ));
+            }
         }
 
         // Ensure at least one region exists
@@ -333,12 +388,15 @@ impl HealthScorer {
         &self,
         table_values: &[Vec<f64>],
         hit_counts: &[Vec<u32>],
+        x_bins: &[f64],
+        y_bins: &[f64],
         row_range: (usize, usize),
         col_range: (usize, usize),
     ) -> (u32, u32, u32, u32) {
         let coverage = self.calc_coverage(hit_counts, row_range, col_range);
         let smoothness = self.calc_smoothness(table_values, row_range, col_range);
-        let monotonicity = self.calc_monotonicity(table_values, row_range, col_range);
+        let monotonicity =
+            self.calc_monotonicity(table_values, x_bins, y_bins, row_range, col_range);
 
         let overall = (coverage as f64 * self.config.coverage_weight
             + smoothness as f64 * self.config.smoothness_weight
@@ -378,66 +436,89 @@ impl HealthScorer {
         ((with_data as f64 / total as f64) * 100.0) as u32
     }
 
-    /// Calculate smoothness score for a region (0–100)
-    /// Higher = smoother VE transitions
+    /// Calculate smoothness score for a region (0–100). Higher = smoother.
+    ///
+    /// Bug #8: previously this measured the standard deviation of first-order
+    /// gradients, which penalized smooth 3D VE surfaces that legitimately have
+    /// different RPM vs. Load slopes. It now measures second-order spatial
+    /// derivatives (discrete Laplacian curvature), which is zero for any
+    /// planar surface regardless of its tilt:
+    ///
+    ///   ∇²V = V[r-1] + V[r+1] + V[c-1] + V[c+1] − 4·V[r,c]
+    ///
+    /// Lower mean |Laplacian| → higher (smoother) score.
     fn calc_smoothness(
         &self,
         table_values: &[Vec<f64>],
         row_range: (usize, usize),
         col_range: (usize, usize),
     ) -> u32 {
-        let mut gradients = Vec::new();
+        // Need at least a 3x3 interior to compute curvature meaningfully.
+        let interior_rows = row_range.1.saturating_sub(row_range.0 + 1);
+        let interior_cols = col_range.1.saturating_sub(col_range.0 + 1);
+        if interior_rows == 0 || interior_cols == 0 {
+            return 100; // Single row/col region — nothing to curve.
+        }
 
-        for r in row_range.0..=row_range.1 {
-            for c in col_range.0..=col_range.1 {
-                let val = table_values
+        let mut sum_abs_laplacian = 0.0;
+        let mut count = 0u32;
+
+        for r in (row_range.0 + 1)..row_range.1 {
+            for c in (col_range.0 + 1)..col_range.1 {
+                let v = table_values
                     .get(r)
                     .and_then(|row| row.get(c))
                     .copied()
                     .unwrap_or(0.0);
+                let up = table_values
+                    .get(r - 1)
+                    .and_then(|row| row.get(c))
+                    .copied()
+                    .unwrap_or(v);
+                let down = table_values
+                    .get(r + 1)
+                    .and_then(|row| row.get(c))
+                    .copied()
+                    .unwrap_or(v);
+                let left = table_values
+                    .get(r)
+                    .and_then(|row| row.get(c - 1))
+                    .copied()
+                    .unwrap_or(v);
+                let right = table_values
+                    .get(r)
+                    .and_then(|row| row.get(c + 1))
+                    .copied()
+                    .unwrap_or(v);
 
-                // Horizontal gradient
-                if c < col_range.1 {
-                    let next = table_values
-                        .get(r)
-                        .and_then(|row| row.get(c + 1))
-                        .copied()
-                        .unwrap_or(val);
-                    gradients.push((next - val).abs());
-                }
-                // Vertical gradient
-                if r < row_range.1 {
-                    let next = table_values
-                        .get(r + 1)
-                        .and_then(|row| row.get(c))
-                        .copied()
-                        .unwrap_or(val);
-                    gradients.push((next - val).abs());
-                }
+                let laplacian = up + down + left + right - 4.0 * v;
+                sum_abs_laplacian += laplacian.abs();
+                count += 1;
             }
         }
 
-        if gradients.is_empty() {
+        if count == 0 {
             return 100;
         }
 
-        let mean = gradients.iter().sum::<f64>() / gradients.len() as f64;
-        let variance =
-            gradients.iter().map(|g| (g - mean).powi(2)).sum::<f64>() / gradients.len() as f64;
-        let std_dev = variance.sqrt();
+        let mean_abs_laplacian = sum_abs_laplacian / count as f64;
 
-        // CV (coefficient of variation) — lower is smoother
-        let cv = if mean > 0.01 { std_dev / mean } else { 0.0 };
-
-        // Score: CV of 0 = 100, CV of 2+ = 0
-        ((1.0 - cv / 2.0).clamp(0.0, 1.0) * 100.0) as u32
+        // Score mapping: 0 curvature → 100; a mean |Laplacian| of
+        // SMOOTHNESS_LAPLACIAN_FLOOR VE units or more → 0. A planar ramp scores
+        // ~100; a wavy table scores low.
+        const SMOOTHNESS_LAPLACIAN_FLOOR: f64 = 10.0;
+        let score = 1.0 - (mean_abs_laplacian / SMOOTHNESS_LAPLACIAN_FLOOR);
+        (score.clamp(0.0, 1.0) * 100.0) as u32
     }
 
     /// Calculate monotonicity score (0–100)
-    /// Checks if VE increases with load (row-wise)
+    /// Checks if VE increases with load (row-wise), skipping very low load or
+    /// very low RPM cells where monotonicity is not physically required.
     fn calc_monotonicity(
         &self,
         table_values: &[Vec<f64>],
+        x_bins: &[f64],
+        y_bins: &[f64],
         row_range: (usize, usize),
         col_range: (usize, usize),
     ) -> u32 {
@@ -446,7 +527,16 @@ impl HealthScorer {
 
         // Check each column: VE should increase with row (increasing load)
         for c in col_range.0..=col_range.1 {
+            let rpm = x_bins.get(c).copied().unwrap_or(0.0);
+            if rpm < self.config.monotonicity_min_rpm {
+                continue;
+            }
             for r in row_range.0..row_range.1 {
+                let load = y_bins.get(r).copied().unwrap_or(0.0);
+                if load < self.config.monotonicity_load_floor_kpa {
+                    continue;
+                }
+
                 let curr = table_values
                     .get(r)
                     .and_then(|row| row.get(c))
@@ -585,5 +675,228 @@ mod tests {
             .any(|r| r.contains("decrease") || r.contains("monoton"));
         // Score should reflect the monotonicity issue
         assert!(report.overall_score < 95);
+    }
+
+    #[test]
+    fn test_wot_uses_absolute_map_on_boosted_engine() {
+        // Bug #3: on a boosted engine (20–250 kPa MAP) the legacy fraction-
+        // based WOT threshold (~80% of range = 204 kPa) ignored every
+        // atmospheric WOT cell. Absolute-MAP mode (default) must start WOT at
+        // the first y_bin ≥ 90 kPa.
+        let scorer = HealthScorer::new(HealthConfig::default());
+
+        // 6 load rows: 20, 60, 100, 140, 180, 220 kPa
+        let y_bins = vec![20.0, 60.0, 100.0, 140.0, 180.0, 220.0];
+        let x_bins = vec![1000.0, 2000.0, 3000.0, 4000.0, 5000.0];
+        let rows = y_bins.len();
+        let cols = x_bins.len();
+        let table = make_table(rows, cols, 60.0);
+        let hits = make_hits(rows, cols, 5);
+
+        let report = scorer.score_table(&table, &hits, &x_bins, &y_bins);
+
+        let wot = report
+            .regions
+            .iter()
+            .find(|r| r.region_type == RegionType::WOT)
+            .expect("WOT region should exist");
+
+        // WOT must begin at the 100 kPa row (index 2), NOT at ~204 kPa (index 4).
+        assert_eq!(
+            wot.row_range.0, 2,
+            "WOT should start at the first row >= 90 kPa (index 2), got row {}",
+            wot.row_range.0
+        );
+    }
+
+    #[test]
+    fn test_laplacian_smoothness_perfect_ramp() {
+        // Bug #8: a perfectly smooth planar ramp should score ~100 for
+        // smoothness regardless of how different the RPM vs. Load slopes are.
+        let scorer = HealthScorer::new(HealthConfig::default());
+
+        // Planar ramp with different RPM and load slopes.
+        let table: Vec<Vec<f64>> = (0..8)
+            .map(|r| {
+                (0..8)
+                    .map(|c| 30.0 + 2.0 * r as f64 + 3.0 * c as f64)
+                    .collect()
+            })
+            .collect();
+        let hits = make_hits(8, 8, 10);
+        let x_bins = vec![
+            800.0, 1200.0, 1800.0, 2500.0, 3500.0, 4500.0, 5500.0, 6500.0,
+        ];
+        let y_bins = vec![20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 100.0];
+
+        let report = scorer.score_table(&table, &hits, &x_bins, &y_bins);
+        let smooth_region = report
+            .regions
+            .iter()
+            .max_by_key(|r| r.cell_count)
+            .expect("at least one region");
+        assert!(
+            smooth_region.smoothness_score >= 95,
+            "planar ramp should be very smooth, got {}",
+            smooth_region.smoothness_score
+        );
+    }
+
+    #[test]
+    fn test_laplacian_smoothness_penalizes_waviness() {
+        // A wavy table should score much lower on smoothness than a planar one.
+        let scorer = HealthScorer::new(HealthConfig::default());
+
+        let mut table: Vec<Vec<f64>> = (0..8)
+            .map(|r| {
+                (0..8)
+                    .map(|c| 30.0 + 2.0 * r as f64 + 3.0 * c as f64)
+                    .collect()
+            })
+            .collect();
+        // Inject a checkerboard wave (+/-5) on top of the planar ramp.
+        for r in 0..8 {
+            for c in 0..8 {
+                table[r][c] += if (r + c) % 2 == 0 { 5.0 } else { -5.0 };
+            }
+        }
+
+        let hits = make_hits(8, 8, 10);
+        let x_bins = vec![
+            800.0, 1200.0, 1800.0, 2500.0, 3500.0, 4500.0, 5500.0, 6500.0,
+        ];
+        let y_bins = vec![20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 100.0];
+
+        let report = scorer.score_table(&table, &hits, &x_bins, &y_bins);
+        let smooth_region = report
+            .regions
+            .iter()
+            .max_by_key(|r| r.cell_count)
+            .expect("at least one region");
+        assert!(
+            smooth_region.smoothness_score < 75,
+            "wavy table should have reduced smoothness, got {}",
+            smooth_region.smoothness_score
+        );
+    }
+
+    #[test]
+    fn test_monotonicity_floor_ignores_low_load() {
+        // Bug #10: a VE drop below the configured load floor should not tank
+        // the monotonicity score, but a drop above the floor should.
+        let mut config = HealthConfig::default();
+        config.monotonicity_load_floor_kpa = 35.0;
+        let scorer = HealthScorer::new(config);
+
+        // 8 load rows: 20..100 kPa. Cruise region covers rows with load >= 35.
+        // Drop at row 5 (load 70 kPa, above floor); small drop at row 1 (load
+        // 30 kPa, below floor) should be ignored.
+        let table: Vec<Vec<f64>> = (0..8)
+            .map(|r| match r {
+                0 => vec![50.0; 8],
+                1 => vec![30.0; 8], // below floor: ignored
+                2 => vec![55.0; 8],
+                3 => vec![58.0; 8],
+                4 => vec![60.0; 8],
+                5 => vec![25.0; 8], // above floor: should hurt monotonicity
+                6 => vec![62.0; 8],
+                7 => vec![65.0; 8],
+                _ => unreachable!(),
+            })
+            .collect();
+        let hits = make_hits(8, 8, 10);
+        let x_bins = vec![
+            800.0, 1200.0, 1800.0, 2500.0, 3500.0, 4500.0, 5500.0, 6500.0,
+        ];
+        let y_bins = vec![20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 100.0];
+
+        let report = scorer.score_table(&table, &hits, &x_bins, &y_bins);
+        let cruise = report
+            .regions
+            .iter()
+            .find(|r| r.region_type == RegionType::Cruise)
+            .expect("cruise region");
+        assert!(
+            cruise.monotonicity_score < 90,
+            "drop above load floor should lower cruise monotonicity, got {}",
+            cruise.monotonicity_score
+        );
+    }
+
+    #[test]
+    fn test_region_boundaries_use_greater_than_or_equal() {
+        // Bug #11: a bin exactly equal to a threshold should belong to the
+        // higher region, not the lower one.
+        let scorer = HealthScorer::new(HealthConfig::default());
+
+        // idle_rpm_max = 1500, so 1500 RPM belongs to Cruise, not Idle.
+        // wot_map_kpa = 90, so 90 kPa belongs to WOT.
+        let x_bins = vec![1000.0, 1500.0, 2000.0, 4000.0, 5000.0];
+        let y_bins = vec![20.0, 60.0, 90.0, 140.0, 200.0];
+        let table = make_table(5, 5, 60.0);
+        let hits = make_hits(5, 5, 5);
+
+        let report = scorer.score_table(&table, &hits, &x_bins, &y_bins);
+        let idle = report
+            .regions
+            .iter()
+            .find(|r| r.region_type == RegionType::Idle)
+            .expect("idle region");
+        let wot = report
+            .regions
+            .iter()
+            .find(|r| r.region_type == RegionType::WOT)
+            .expect("wot region");
+
+        // Idle should end at column index 0 (1000 RPM); 1500 RPM is Cruise.
+        assert_eq!(
+            idle.col_range.1, 0,
+            "idle should end before the 1500 RPM boundary column"
+        );
+        // WOT should start at row index 2 (90 kPa).
+        assert_eq!(wot.row_range.0, 2, "WOT should start at the 90 kPa row");
+    }
+
+    #[test]
+    fn test_part_throttle_does_not_overlap_cruise() {
+        // Bug #12: Part Throttle and Cruise must not contain the same cells.
+        let scorer = HealthScorer::new(HealthConfig::default());
+
+        let x_bins = vec![800.0, 1200.0, 2500.0, 3500.0, 5500.0];
+        let y_bins = vec![20.0, 40.0, 80.0, 120.0, 180.0];
+        let table = make_table(5, 5, 60.0);
+        let hits = make_hits(5, 5, 5);
+
+        let report = scorer.score_table(&table, &hits, &x_bins, &y_bins);
+        let pt_regions: Vec<_> = report
+            .regions
+            .iter()
+            .filter(|r| r.region_type == RegionType::PartThrottle)
+            .collect();
+        let cruise = report
+            .regions
+            .iter()
+            .find(|r| r.region_type == RegionType::Cruise)
+            .expect("cruise region");
+
+        assert!(
+            !pt_regions.is_empty(),
+            "Part Throttle region(s) should exist"
+        );
+
+        for pt in &pt_regions {
+            // A PT region overlaps Cruise only if both row and column ranges
+            // intersect. Since PT is split into columns outside Cruise, at
+            // least one of the ranges must be disjoint.
+            assert!(
+                pt.row_range.1 < cruise.row_range.0
+                    || pt.row_range.0 > cruise.row_range.1
+                    || pt.col_range.1 < cruise.col_range.0
+                    || pt.col_range.0 > cruise.col_range.1,
+                "Part Throttle {:?} overlaps Cruise {:?}",
+                pt.row_range,
+                cruise.row_range
+            );
+        }
     }
 }
