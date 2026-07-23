@@ -167,7 +167,14 @@ impl HealthScorer {
         // Score each region
         let mut regions: Vec<RegionHealth> = Vec::new();
         for (name, region_type, row_range, col_range) in &regions_def {
-            let score = self.score_region(table_values, hit_counts, x_bins, y_bins, *row_range, *col_range);
+            let score = self.score_region(
+                table_values,
+                hit_counts,
+                x_bins,
+                y_bins,
+                *row_range,
+                *col_range,
+            );
             regions.push(RegionHealth {
                 name: name.clone(),
                 region_type: region_type.clone(),
@@ -710,7 +717,11 @@ mod tests {
 
         // Planar ramp with different RPM and load slopes.
         let table: Vec<Vec<f64>> = (0..8)
-            .map(|r| (0..8).map(|c| 30.0 + 2.0 * r as f64 + 3.0 * c as f64).collect())
+            .map(|r| {
+                (0..8)
+                    .map(|c| 30.0 + 2.0 * r as f64 + 3.0 * c as f64)
+                    .collect()
+            })
             .collect();
         let hits = make_hits(8, 8, 10);
         let x_bins = vec![
@@ -737,7 +748,11 @@ mod tests {
         let scorer = HealthScorer::new(HealthConfig::default());
 
         let mut table: Vec<Vec<f64>> = (0..8)
-            .map(|r| (0..8).map(|c| 30.0 + 2.0 * r as f64 + 3.0 * c as f64).collect())
+            .map(|r| {
+                (0..8)
+                    .map(|c| 30.0 + 2.0 * r as f64 + 3.0 * c as f64)
+                    .collect()
+            })
             .collect();
         // Inject a checkerboard wave (+/-5) on top of the planar ramp.
         for r in 0..8 {

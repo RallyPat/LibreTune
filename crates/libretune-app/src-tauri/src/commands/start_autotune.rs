@@ -248,22 +248,29 @@ fn resolve_reference_tables(
     target_afr_table_name: Option<&str>,
     lambda_delay_table_name: Option<&str>,
 ) -> AutoTuneReferenceTables {
-    let target_afr_table = resolve_named_table(def, cache, target_afr_table_name, &[
-        "afrTable",
-        "afr_target",
-        "afrTarget",
-        "targetAfr",
-        "afrTable1",
-        "lambdaTable",
-    ])
+    let target_afr_table = resolve_named_table(
+        def,
+        cache,
+        target_afr_table_name,
+        &[
+            "afrTable",
+            "afr_target",
+            "afrTarget",
+            "targetAfr",
+            "afrTable1",
+            "lambdaTable",
+        ],
+    )
     .unwrap_or_default();
 
     // Lambda-delay tables are uncommon; only attempt when named explicitly or
     // via the most common Speeduino/rusEFI identifier.
-    let lambda_delay_table = resolve_named_table(def, cache, lambda_delay_table_name, &[
-        "lambdaDelay",
-        "egoDelay",
-    ])
+    let lambda_delay_table = resolve_named_table(
+        def,
+        cache,
+        lambda_delay_table_name,
+        &["lambdaDelay", "egoDelay"],
+    )
     .unwrap_or_default();
 
     // Suppress unused warning for the VE table name; it's available for future
@@ -295,7 +302,9 @@ fn resolve_named_table(
 
     for name in names {
         if let Some(table) = def.get_table_by_name_or_map(name) {
-            if let Some(rows) = read_table_z_values(def, cache, table.map.as_str(), table.x_size, table.y_size) {
+            if let Some(rows) =
+                read_table_z_values(def, cache, table.map.as_str(), table.x_size, table.y_size)
+            {
                 return Some(rows);
             }
         }

@@ -229,12 +229,7 @@ impl AutoTuneState {
     ///
     /// Note: recommendations use (cell_x, cell_y) = (col, row), while the
     /// reference table is laid out `[row][col]`, so we index as `[y][x]`.
-    fn resolve_target_afr(
-        &self,
-        cell_x: usize,
-        cell_y: usize,
-        fallback: f64,
-    ) -> f64 {
+    fn resolve_target_afr(&self, cell_x: usize, cell_y: usize, fallback: f64) -> f64 {
         match self
             .reference_tables
             .target_afr_table

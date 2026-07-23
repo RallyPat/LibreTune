@@ -48,9 +48,15 @@ fn heatmap_entries_accumulate_hits_and_compute_change() {
     let mut ts = 0u64;
 
     // Same cell, AFRs that are richer than the target (14.7) → VE should drop.
-    feed(&mut state, 1000.0, 10.0, 14.7, 50.0, &mut ts, &table_x, &table_y);
-    feed(&mut state, 1000.0, 10.0, 13.0, 50.0, &mut ts, &table_x, &table_y);
-    feed(&mut state, 1000.0, 10.0, 12.0, 50.0, &mut ts, &table_x, &table_y);
+    feed(
+        &mut state, 1000.0, 10.0, 14.7, 50.0, &mut ts, &table_x, &table_y,
+    );
+    feed(
+        &mut state, 1000.0, 10.0, 13.0, 50.0, &mut ts, &table_x, &table_y,
+    );
+    feed(
+        &mut state, 1000.0, 10.0, 12.0, 50.0, &mut ts, &table_x, &table_y,
+    );
 
     let recs = state.get_recommendations();
     assert!(!recs.is_empty(), "Expect at least one recommendation");
@@ -81,7 +87,11 @@ fn target_afr_reference_table_is_used() {
     let mut state = AutoTuneState::new();
     // 3x3 target AFR table: cell (0,0) targets 12.5
     state.set_reference_tables(AutoTuneReferenceTables {
-        target_afr_table: vec![vec![12.5, 13.0, 13.5], vec![13.0, 13.5, 14.0], vec![14.0, 14.5, 15.0]],
+        target_afr_table: vec![
+            vec![12.5, 13.0, 13.5],
+            vec![13.0, 13.5, 14.0],
+            vec![14.0, 14.5, 15.0],
+        ],
         ..Default::default()
     });
     state.start();
@@ -91,8 +101,12 @@ fn target_afr_reference_table_is_used() {
     let mut ts = 0u64;
 
     // Measured AFR == target (12.5) → required VE == current VE (no change).
-    feed(&mut state, 1000.0, 10.0, 12.5, 60.0, &mut ts, &table_x, &table_y);
-    feed(&mut state, 1000.0, 10.0, 12.5, 60.0, &mut ts, &table_x, &table_y);
+    feed(
+        &mut state, 1000.0, 10.0, 12.5, 60.0, &mut ts, &table_x, &table_y,
+    );
+    feed(
+        &mut state, 1000.0, 10.0, 12.5, 60.0, &mut ts, &table_x, &table_y,
+    );
 
     let r = state.get_recommendations()[0].clone();
     assert!(
@@ -180,7 +194,9 @@ fn cma_averages_required_ve() {
     // a pure last-value implementation would oscillate between the two.
     for i in 0..12 {
         let afr = if i % 2 == 0 { 15.0 } else { 16.0 };
-        feed(&mut state, 1000.0, 10.0, afr, 50.0, &mut ts, &table_x, &table_y);
+        feed(
+            &mut state, 1000.0, 10.0, afr, 50.0, &mut ts, &table_x, &table_y,
+        );
     }
 
     let r = state.get_recommendations()[0].clone();

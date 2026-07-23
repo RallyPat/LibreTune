@@ -358,10 +358,7 @@ impl VePredictor {
                     candidates.push((dr_i, dc_i, euclid));
                 }
             }
-            candidates.sort_by(|a, b| {
-                a.2.partial_cmp(&b.2)
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            });
+            candidates.sort_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal));
 
             for (dr, dc, _) in candidates {
                 // dr, dc are non-negative magnitudes; row_dir/col_dir give the
@@ -529,11 +526,7 @@ impl VePredictor {
     /// Returns the predicted value and a bool that is `true` when the target
     /// is bracketed by two known points (interpolation) and `false` when it
     /// lies outside the known range (true extrapolation).
-    fn extrapolate_1d(
-        &self,
-        target: usize,
-        known_points: &[(usize, f64)],
-    ) -> Option<(f64, bool)> {
+    fn extrapolate_1d(&self, target: usize, known_points: &[(usize, f64)]) -> Option<(f64, bool)> {
         if known_points.len() < 2 {
             return None;
         }
@@ -617,9 +610,9 @@ impl VePredictor {
         // Base VE spans the configurable min..max; load supplies the primary
         // spread and the RPM factor scales the result.
         let ve_span = (self.config.physics_max_ve - self.config.physics_min_ve).max(1.0);
+        let estimated_ve = (self.config.physics_min_ve + load_fraction * ve_span) * rpm_factor;
         let estimated_ve =
-            (self.config.physics_min_ve + load_fraction * ve_span) * rpm_factor;
-        let estimated_ve = estimated_ve.clamp(self.config.physics_min_ve, self.config.physics_max_ve);
+            estimated_ve.clamp(self.config.physics_min_ve, self.config.physics_max_ve);
 
         Some(PredictedCell {
             row,

@@ -119,7 +119,8 @@ impl AnomalyDetector {
         let mut anomalies = Vec::new();
 
         // Run all detection passes
-        self.detect_statistical_outliers(
+        self.detect_statistical_outliers(table_values, rows, cols, x_bins, y_bins, &mut anomalies);
+        self.detect_monotonicity_violations(
             table_values,
             rows,
             cols,
@@ -127,7 +128,6 @@ impl AnomalyDetector {
             y_bins,
             &mut anomalies,
         );
-        self.detect_monotonicity_violations(table_values, rows, cols, x_bins, y_bins, &mut anomalies);
         self.detect_gradient_discontinuities(table_values, rows, cols, &mut anomalies);
         self.detect_physically_unreasonable(table_values, rows, cols, &mut anomalies);
         self.detect_flat_regions(table_values, rows, cols, &mut anomalies);
@@ -200,7 +200,10 @@ impl AnomalyDetector {
                 let mean_y = pts.iter().map(|p| p.1).sum::<f64>() / n;
                 let sxx = pts.iter().map(|p| (p.0 - mean_x).powi(2)).sum::<f64>();
                 let syy = pts.iter().map(|p| (p.1 - mean_y).powi(2)).sum::<f64>();
-                let sxy = pts.iter().map(|p| (p.0 - mean_x) * (p.1 - mean_y)).sum::<f64>();
+                let sxy = pts
+                    .iter()
+                    .map(|p| (p.0 - mean_x) * (p.1 - mean_y))
+                    .sum::<f64>();
                 let sxz = pts.iter().map(|p| (p.0 - mean_x) * p.2).sum::<f64>();
                 let syz = pts.iter().map(|p| (p.1 - mean_y) * p.2).sum::<f64>();
                 let mean_z = pts.iter().map(|p| p.2).sum::<f64>() / n;
@@ -238,8 +241,8 @@ impl AnomalyDetector {
                     const CLEAN_PLANE_RESIDUAL_THRESHOLD: f64 = 5.0;
                     if residual > CLEAN_PLANE_RESIDUAL_THRESHOLD {
                         let z_score = residual / 0.01; // residual_std was ~0 → very high
-                        let severity = (((z_score - self.config.outlier_sigma) / 3.0).max(0.0))
-                            .min(1.0);
+                        let severity =
+                            (((z_score - self.config.outlier_sigma) / 3.0).max(0.0)).min(1.0);
                         anomalies.push(TuneAnomaly {
                             row: r,
                             col: c,
@@ -721,7 +724,11 @@ mod tests {
 
         // Perfect plane: 48 + 2*rpm_idx + 2*load_idx.
         let table: Vec<Vec<f64>> = (0..4)
-            .map(|r| (0..4).map(|c| 48.0 + 2.0 * r as f64 + 2.0 * c as f64).collect())
+            .map(|r| {
+                (0..4)
+                    .map(|c| 48.0 + 2.0 * r as f64 + 2.0 * c as f64)
+                    .collect()
+            })
             .collect();
         let x_bins = vec![1000.0, 2000.0, 3000.0, 4000.0];
         let y_bins = vec![20.0, 40.0, 60.0, 80.0];
@@ -759,18 +766,26 @@ mod tests {
         };
 
         let table: Vec<Vec<f64>> = (0..4)
-            .map(|r| (0..4).map(|c| if (r + c) % 2 == 0 { 50.0 } else { 50.5 }).collect())
+            .map(|r| {
+                (0..4)
+                    .map(|c| if (r + c) % 2 == 0 { 50.0 } else { 50.5 })
+                    .collect()
+            })
             .collect();
         let x_bins = vec![1000.0, 2000.0, 3000.0, 4000.0];
         let y_bins = vec![20.0, 40.0, 60.0, 80.0];
 
-        let loose = AnomalyDetector::new(loose_config)
-            .detect_anomalies(&table, &x_bins, &y_bins);
-        let strict = AnomalyDetector::new(strict_config)
-            .detect_anomalies(&table, &x_bins, &y_bins);
+        let loose = AnomalyDetector::new(loose_config).detect_anomalies(&table, &x_bins, &y_bins);
+        let strict = AnomalyDetector::new(strict_config).detect_anomalies(&table, &x_bins, &y_bins);
 
-        let loose_flat = loose.iter().filter(|a| a.anomaly_type == AnomalyType::FlatRegion).count();
-        let strict_flat = strict.iter().filter(|a| a.anomaly_type == AnomalyType::FlatRegion).count();
+        let loose_flat = loose
+            .iter()
+            .filter(|a| a.anomaly_type == AnomalyType::FlatRegion)
+            .count();
+        let strict_flat = strict
+            .iter()
+            .filter(|a| a.anomaly_type == AnomalyType::FlatRegion)
+            .count();
 
         assert!(
             loose_flat >= 16,
