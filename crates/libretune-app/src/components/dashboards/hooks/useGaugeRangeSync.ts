@@ -75,6 +75,16 @@ export function useGaugeRangeSync(
     }
   }, [dashFile, setDashFile]);
 
+  // Keep a ref to the latest sync fn / flags so the INI-change effect below can
+  // call them WITHOUT listing them as deps. Listing `dashFile`/`syncGaugeRanges`
+  // as deps there creates an infinite loop: syncing creates a new `dashFile`
+  // object → recreates `syncGaugeRanges` → retriggers the effect → re-sync...
+  // (the trigger should be `syncToken` ONLY).
+  const syncStateRef = useRef({ syncGaugeRanges, autoSyncEnabled, dashFile });
+  useEffect(() => {
+    syncStateRef.current = { syncGaugeRanges, autoSyncEnabled, dashFile };
+  });
+
   // Auto-sync once on initial dashboard load
   useEffect(() => {
     if (!dashFile) return;
@@ -84,13 +94,16 @@ export function useGaugeRangeSync(
     syncGaugeRanges();
   }, [dashFile, syncGaugeRanges, autoSyncEnabled]);
 
-  // Auto-sync on INI/definition changes
+  // Auto-sync on INI/definition changes. Depends on `syncToken` ONLY (the event
+  // counter); reads the latest sync fn/flags/dashFile from the ref so it doesn't
+  // re-run every time syncing mutates `dashFile`.
   useEffect(() => {
-    if (!dashFile) return;
-    if (!autoSyncEnabled) return;
     if (syncToken === 0) return;
-    syncGaugeRanges();
-  }, [syncToken, dashFile, syncGaugeRanges, autoSyncEnabled]);
+    const { syncGaugeRanges: doSync, autoSyncEnabled: enabled, dashFile: file } = syncStateRef.current;
+    if (!file) return;
+    if (!enabled) return;
+    doSync();
+  }, [syncToken]);
 
   // Load auto-sync preference once
   useEffect(() => {
