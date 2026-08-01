@@ -204,15 +204,18 @@ fn default_authority() -> AutoTuneAuthorityLimits {
 #[tauri::command]
 pub async fn agent_status(app: tauri::AppHandle) -> Result<AgentStatus, String> {
     let s = crate::load_settings(&app);
+    // Treat an empty provider as the default ("openai") so the configured-flag
+    // isn't falsely false for setups that only set a base URL + key + model.
+    let provider = if s.ai_provider.is_empty() { "openai".to_string() } else { s.ai_provider.clone() };
     Ok(AgentStatus {
         enabled: s.ai_assistant_enabled,
         risk_acknowledged: s.ai_risk_acknowledged,
-        provider: s.ai_provider.clone(),
+        provider: provider.clone(),
         model: s.ai_model.clone(),
         capability_tier: s.ai_capability_tier.clone(),
         // Configured if both provider and model are non-empty (key is optional
         // for local providers, so we don't require it).
-        configured: !s.ai_provider.is_empty() && !s.ai_model.is_empty(),
+        configured: !provider.is_empty() && !s.ai_model.is_empty(),
     })
 }
 

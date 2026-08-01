@@ -13,6 +13,44 @@ relevant.
 
 ## [Unreleased]
 
+### 2026-07-31 — Dashboard validation loop + Settings save performance/reliability
+
+Fixes a runaway backend loop that starved the UI, plus several Settings-save
+correctness and performance issues that surfaced once the loop was resolved.
+
+#### Fixed
+- **Infinite `validate_dashboard` loop** — `useGaugeRangeSync`'s INI/definition
+  change effect listed `dashFile` and `syncGaugeRanges` (both derived from
+  `dashFile`) as deps alongside `syncToken`. Syncing creates a new `dashFile`
+  object → recreates `syncGaugeRanges` → retriggers the effect (syncToken stays
+  > 0 after a `definition:loaded`/`ini:changed` event) → re-sync → infinite loop.
+  The runaway `validate_dashboard` calls saturated the Tauri IPC, so Settings
+  Apply's `await invoke('update_setting')` calls never resolved, leaving
+  Apply/OK permanently disabled. Fix: the INI-change effect now depends on
+  `syncToken` ONLY, reading the latest sync fn/flags/dashFile from a ref.
+- **"Some settings failed to save" error** — the backend `update_setting` match
+  was missing arms for `auto_commit_on_save`, `commit_message_format`,
+  `fome_fast_comms_enabled`, `auto_record_enabled`, `key_on_threshold_rpm`, and
+  `key_off_timeout_sec`; each hit the `_ => Err("Unknown setting")` catch-all.
+  Added all six arms (and extracted the match into a shared `apply_setting`
+  helper used by both the single and batch commands, so this can't regress).
+- **AI assistant reported "not configured"** — `ai_provider` was saving empty.
+  Leftover from the earlier `Settings::default()` corruption bug, the stored
+  `""` made the Provider dropdown render blank (no matching option), so the user
+  never selected one. `configured` requires a non-empty provider + model, so it
+  falsely reported unconfigured. Frontend now coerces empty `ai_provider` to
+  `'openai'` on load; `agent_status` treats empty provider as `'openai'`
+  defensively.
+
+#### Changed
+- **Batched Settings save (performance)** — the Settings dialog previously made
+  ~30 sequential `update_setting` calls on Apply/OK, each doing a full disk
+  read + write cycle (~60 file operations, several seconds on Windows). Added a
+  new `update_settings` (plural) command that loads settings once, applies all
+  key/value pairs to one in-memory struct, and saves once — reducing I/O to a
+  single read + write. `saveSettings` now sends all settings in one batched
+  invoke. Save is now near-instant.
+
 ### 2026-07-31 — Menu i18n fix, menu-bar grouping, settings search
 
 Closes [#72 ([BUG] Languages)](https://github.com/RallyPat/LibreTune/issues/72)

@@ -57,15 +57,22 @@ describe('SettingsDialog', () => {
     const applyBtn = screen.getByText('Apply');
     await userEvent.click(applyBtn);
 
-    // Ensure update_setting called with runtime_packet_mode and that it matches the select's value
+    // Settings are now saved in a single batched `update_settings` call
+    // (one disk read + write on the backend) rather than ~30 sequential
+    // `update_setting` calls. Assert the batch includes the expected pairs.
     const expectedMode = runtimeSelect.value;
     await waitFor(() => {
-      expect(invoke).toHaveBeenCalledWith('update_setting', { key: 'runtime_packet_mode', value: expectedMode });
+      const calls = (invoke as unknown as any).mock.calls.filter((c: any[]) => c[0] === 'update_settings');
+      expect(calls.length).toBeGreaterThan(0);
+      const updates = calls[calls.length - 1][1].updates as [string, string][];
+      expect(updates).toContainEqual(['runtime_packet_mode', expectedMode]);
     });
 
-    // Also ensure auto_reconnect setting is saved
+    // Also ensure auto_reconnect setting is in the batch
     await waitFor(() => {
-      expect(invoke).toHaveBeenCalledWith('update_setting', { key: 'auto_reconnect_after_controller_command', value: 'false' });
+      const calls = (invoke as unknown as any).mock.calls.filter((c: any[]) => c[0] === 'update_settings');
+      const updates = calls[calls.length - 1][1].updates as [string, string][];
+      expect(updates).toContainEqual(['auto_reconnect_after_controller_command', 'false']);
     });
 
     // Flush once more so any state update Apply triggers after its last

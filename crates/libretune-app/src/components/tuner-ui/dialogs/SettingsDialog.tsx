@@ -183,7 +183,12 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
         // AI assistant settings
         if (settings.ai_assistant_enabled !== undefined) setAiEnabled(settings.ai_assistant_enabled);
         if (settings.ai_risk_acknowledged !== undefined) setAiRiskAcked(settings.ai_risk_acknowledged);
-        if (settings.ai_provider !== undefined) setAiProvider(settings.ai_provider);
+        if (settings.ai_provider !== undefined) {
+          // Coerce empty/blank provider to the default so the dropdown always
+          // shows a valid selection (older settings files could store "").
+          const p = settings.ai_provider as string;
+          setAiProvider(p && p.trim() ? p : 'openai');
+        }
         if (settings.ai_base_url !== undefined) setAiBaseUrl(settings.ai_base_url);
         if (settings.ai_api_key !== undefined) setAiApiKey(settings.ai_api_key);
         if (settings.ai_model !== undefined) setAiModel(settings.ai_model);
@@ -418,24 +423,15 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
     }
   }, [currentProject]);
 
-  // Persist all settings to the backend WITHOUT closing the dialog. Each
-  // setting is saved independently so one failure cannot silently abort the
-  // rest (this was the root cause of the GLM/z.ai info not saving — a thrown
-  // invoke aborted the whole sequence). Returns the list of per-setting
-  // errors (empty on full success).
+  // Persist all settings to the backend WITHOUT closing the dialog. Sends all
+  // settings in a SINGLE batched `update_settings` call (one disk read + one
+  // disk write on the backend) instead of ~30 sequential `update_setting`
+  // calls (which each did a full read+write cycle and took several seconds).
+  // Returns the list of per-setting errors (empty on full success).
   const saveSettings = useCallback(async (): Promise<string[]> => {
     setSaveStatus('saving');
     setSaveError(null);
     const errors: string[] = [];
-    // Helper: invoke update_setting, capturing any error instead of letting
-    // it abort the whole save.
-    const set = async (key: string, value: string) => {
-      try {
-        await invoke('update_setting', { key, value });
-      } catch (e) {
-        errors.push(`${key}: ${String(e)}`);
-      }
-    };
 
     // Wrap the whole save body so saveStatus can NEVER get stuck at 'saving'
     // (which would leave Apply/OK permanently disabled). Any unexpected throw
@@ -456,66 +452,70 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
       try {
         localStorage.setItem(LANGUAGE_STORAGE_KEY, localLanguage);
       } catch { /* ignore */ }
-      await set('language', localLanguage);
-      // Update units setting
+
+      // Build the batch of [key, value] pairs. Order matters for the AI
+      // assistant settings: provider/key are listed before risk-ack/enable so
+      // the backend's enable-guard (which requires risk-ack) sees the ack
+      // applied in the same in-memory cycle. Provider/key changes reset the
+      // ack on the backend side; the ack/enable pairs after them re-set it.
+      const updates: [string, string][] = [
+        ['language', localLanguage],
+        // Update units setting (normalize invalid to metric)
+        ['units_system', (localUnits !== 'metric' && localUnits !== 'imperial') ? 'metric' : localUnits],
+        ['auto_burn_on_close', autoBurnOnClose.toString()],
+        ['status_bar_channels', JSON.stringify(statusBarChannels)],
+        ['indicator_column_count', indicatorColumnCount],
+        ['indicator_fill_empty', indicatorFillEmpty.toString()],
+        ['indicator_text_fit', indicatorTextFit],
+        ['heatmap_value_scheme', heatmapValueScheme],
+        ['heatmap_change_scheme', heatmapChangeScheme],
+        ['heatmap_coverage_scheme', heatmapCoverageScheme],
+        ['gauge_snap_to_grid', gaugeSnapToGrid.toString()],
+        ['gauge_free_move', gaugeFreeMove.toString()],
+        ['gauge_lock', gaugeLock.toString()],
+        ['auto_sync_gauge_ranges', autoSyncGaugeRanges.toString()],
+        ['auto_commit_on_save', autoCommitOnSave],
+        ['commit_message_format', commitMessageFormat],
+        ['runtime_packet_mode', runtimePacketMode],
+        ['ai_provider', aiProvider],
+        ['ai_base_url', aiBaseUrl],
+        ['ai_api_key', aiApiKey],
+        ['ai_model', aiModel],
+        ['ai_capability_tier', aiCapabilityTier],
+        ['ai_risk_acknowledged', aiRiskAcked.toString()],
+        ['ai_assistant_enabled', aiEnabled.toString()],
+        ['auto_reconnect_after_controller_command', autoReconnectAfterControllerCommand.toString()],
+        ['auto_reconnect_after_firmware', autoReconnectAfterFirmware.toString()],
+        ['auto_record_enabled', autoRecordEnabled.toString()],
+        ['key_on_threshold_rpm', keyOnThresholdRpm.toString()],
+        ['key_off_timeout_sec', keyOffTimeoutSec.toString()],
+        ['alert_large_change_enabled', alertLargeChangeEnabled.toString()],
+        ['alert_large_change_abs', alertLargeChangeAbs.toString()],
+        ['alert_large_change_percent', alertLargeChangePercent.toString()],
+      ];
+
+      // Send the entire batch in one call (1 load + 1 save on the backend).
+      try {
+        await invoke('update_settings', { updates });
+      } catch (e) {
+        // The backend returns a newline-joined list of "key: error" for any
+        // individual failures. Split them back into the errors array.
+        errors.push(...String(e).split('\n').filter(Boolean));
+      }
+
+      // Normalize units state if it was coerced
       if (localUnits !== 'metric' && localUnits !== 'imperial') {
         setLocalUnits('metric');
-        await set('units_system', 'metric');
-      } else {
-        await set('units_system', localUnits);
       }
-      // Update auto-burn setting
-      await set('auto_burn_on_close', autoBurnOnClose.toString());
-      // Update status bar channels
-      await set('status_bar_channels', JSON.stringify(statusBarChannels));
-      // Update indicator panel settings
-      await set('indicator_column_count', indicatorColumnCount);
-      await set('indicator_fill_empty', indicatorFillEmpty.toString());
-      await set('indicator_text_fit', indicatorTextFit);
-      // Update heatmap settings
-      await set('heatmap_value_scheme', heatmapValueScheme);
-      await set('heatmap_change_scheme', heatmapChangeScheme);
-      await set('heatmap_coverage_scheme', heatmapCoverageScheme);
-      // Update gauge settings
-      await set('gauge_snap_to_grid', gaugeSnapToGrid.toString());
-      await set('gauge_free_move', gaugeFreeMove.toString());
-      await set('gauge_lock', gaugeLock.toString());
-      await set('auto_sync_gauge_ranges', autoSyncGaugeRanges.toString());
-      // Update version control settings
-      await set('auto_commit_on_save', autoCommitOnSave);
-      await set('commit_message_format', commitMessageFormat);
-      // Update runtime packet mode
-      await set('runtime_packet_mode', runtimePacketMode);
-      // Update AI assistant settings. Order matters: provider/key first, then
-      // capability tier, then ack, then enable — so the backend's enable-guard
-      // (which requires risk-ack) sees the ack we just sent. Provider/key
-      // changes reset the ack on the backend side; we re-send it afterwards.
-      await set('ai_provider', aiProvider);
-      await set('ai_base_url', aiBaseUrl);
-      await set('ai_api_key', aiApiKey);
-      await set('ai_model', aiModel);
-      await set('ai_capability_tier', aiCapabilityTier);
-      await set('ai_risk_acknowledged', aiRiskAcked.toString());
-      await set('ai_assistant_enabled', aiEnabled.toString());
-      await set('auto_reconnect_after_controller_command', autoReconnectAfterControllerCommand.toString());
-      await set('auto_reconnect_after_firmware', autoReconnectAfterFirmware.toString());
-      // Update auto-record settings
-      await set('auto_record_enabled', autoRecordEnabled.toString());
-      await set('key_on_threshold_rpm', keyOnThresholdRpm.toString());
-      await set('key_off_timeout_sec', keyOffTimeoutSec.toString());
-      // Update alert rules settings
-      await set('alert_large_change_enabled', alertLargeChangeEnabled.toString());
-      await set('alert_large_change_abs', alertLargeChangeAbs.toString());
-      await set('alert_large_change_percent', alertLargeChangePercent.toString());
 
-      // Update hotkey bindings
+      // Hotkey bindings (separate command, not part of the settings struct)
       try {
         await invoke('save_hotkey_bindings', { bindings: hotkeyBindings });
       } catch (e) {
         errors.push(`hotkey_bindings: ${String(e)}`);
       }
 
-      // Update project-specific settings
+      // Project-specific settings
       if (currentProject) {
         try {
           await invoke('update_project_auto_connect', { autoConnect });
