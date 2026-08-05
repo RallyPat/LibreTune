@@ -71,6 +71,18 @@ pub struct TableDefinition {
     /// `Other`; populated by `EcuDefinition::infer_table_roles()`.
     #[serde(default)]
     pub role: TableRole,
+
+    /// Row-count scalar for TunerStudio dynamically sized tables.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rows_size_const: Option<String>,
+
+    /// Column-count scalar for TunerStudio dynamically sized tables.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cols_size_const: Option<String>,
+
+    /// Cell budget (`maximumElements`) when the table is resizable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_elements: Option<usize>,
 }
 
 /// Type of table
@@ -132,6 +144,9 @@ impl TableDefinition {
             x_label: None,
             y_label: None,
             role: TableRole::default(),
+            rows_size_const: None,
+            cols_size_const: None,
+            max_elements: None,
         }
     }
 
@@ -165,12 +180,20 @@ impl TableDefinition {
             x_label: None,
             y_label: None,
             role: TableRole::default(),
+            rows_size_const: None,
+            cols_size_const: None,
+            max_elements: None,
         }
     }
 
     /// Check if this is a 3D table
     pub fn is_3d(&self) -> bool {
         self.table_type == TableType::ThreeD
+    }
+
+    /// True when the INI sizes this table with `{row}/{col}` scalars.
+    pub fn is_resizable(&self) -> bool {
+        self.rows_size_const.is_some() && self.cols_size_const.is_some()
     }
 
     /// Total number of cells in the table

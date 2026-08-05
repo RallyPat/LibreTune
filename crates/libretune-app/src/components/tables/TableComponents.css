@@ -128,6 +128,8 @@
   position: sticky;
   top: 0;
   z-index: 2;
+  overflow: hidden;
+  white-space: nowrap;
 }
 
 .table-editor-2d .axis-bin-label {
@@ -151,6 +153,11 @@
   user-select: none;
   transition: all 0.1s ease;
   box-sizing: border-box;
+}
+
+/* Dense tables: keep the header hit-target, hide overlapping text */
+.table-editor-2d .axis-bin-label--tick {
+  color: transparent;
 }
 
 .table-editor-2d .axis-bin-label:hover {

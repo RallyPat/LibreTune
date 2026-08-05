@@ -1,10 +1,12 @@
 //! Table editing operations (rebin, interpolate, scale, smooth, set-equal, fill, offset).
 
+use crate::commands::constant_update::update_constant;
 use crate::state::AppState;
 use crate::{
     get_table_data_internal, update_constant_array_internal, update_table_z_values_internal,
     TableData,
 };
+use libretune_core::dynamic_table;
 use libretune_core::table_ops;
 
 /// Re-bins a table with new X and Y axis values.
@@ -66,6 +68,106 @@ pub async fn rebin_table(
         z_values: result.z_values,
         ..table_data
     })
+}
+
+/// Resize a TunerStudio dynamically sized table (and all tables sharing its
+/// row/col count scalars). Requires a live ECU connection.
+#[tauri::command]
+pub async fn resize_table_size(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    table_name: String,
+    new_cols: usize,
+    new_rows: usize,
+) -> Result<TableData, String> {
+    if state.connection.lock().await.is_none() {
+        return Err("ECU must be connected to resize the table".into());
+    }
+
+    let (cols_const, rows_const, shared_tables, x_first, y_first) = {
+        let def_guard = state.definition.lock().await;
+        let def = def_guard.as_ref().ok_or("Definition not loaded")?;
+        let table = def
+            .get_table_by_name_or_map(&table_name)
+            .ok_or_else(|| format!("Table {} not found", table_name))?;
+        let info = dynamic_table::table_size_info(def, table, &|_| None)
+            .ok_or("This table is not resizable in the INI")?;
+        info.allows(new_cols, new_rows)?;
+        let shared = dynamic_table::tables_sharing_size_consts(
+            def,
+            &info.cols_const,
+            &info.rows_const,
+        );
+        let x_bins = table.x_bins.clone();
+        let y_bins = table.y_bins.clone();
+        (
+            info.cols_const,
+            info.rows_const,
+            shared,
+            x_bins,
+            y_bins,
+        )
+    };
+
+    // Primary table: build new linearly spaced axes from current endpoints, interpolate Z.
+    let primary = get_table_data_internal(&state, &table_name).await?;
+    let x0 = *primary.x_bins.first().unwrap_or(&0.0);
+    let x1 = *primary.x_bins.last().unwrap_or(&8000.0);
+    let y0 = *primary.y_bins.first().unwrap_or(&0.0);
+    let y1 = *primary.y_bins.last().unwrap_or(&100.0);
+    let new_x = dynamic_table::linspace_bins(x0, x1, new_cols);
+    let new_y = dynamic_table::linspace_bins(y0, y1, new_rows);
+
+    let mut tables_to_resize = shared_tables;
+    if tables_to_resize.is_empty() {
+        tables_to_resize.push(primary.name.clone());
+    }
+
+    // Shared axes: write bins once from the primary table's endpoints.
+    let mut wrote_bins = false;
+    for name in &tables_to_resize {
+        let current = get_table_data_internal(&state, name).await?;
+        let result = table_ops::rebin_table(
+            &current.x_bins,
+            &current.y_bins,
+            &current.z_values,
+            new_x.clone(),
+            new_y.clone(),
+            true,
+        );
+        update_table_z_values_internal(&state, name, result.z_values).await?;
+
+        if !wrote_bins {
+            let (x_name, y_name) = {
+                let def_guard = state.definition.lock().await;
+                let def = def_guard.as_ref().ok_or("Definition not loaded")?;
+                let t = def
+                    .get_table_by_name_or_map(name)
+                    .ok_or_else(|| format!("Table {} not found", name))?;
+                (t.x_bins.clone(), t.y_bins.clone())
+            };
+            // Prefer primary axis names when available.
+            let x_name = if x_first.is_empty() {
+                x_name
+            } else {
+                x_first.clone()
+            };
+            let y_name = y_first.clone().or(y_name);
+            update_constant_array_internal(&state, &x_name, result.x_bins).await?;
+            if let Some(y) = y_name {
+                update_constant_array_internal(&state, &y, result.y_bins).await?;
+            }
+            wrote_bins = true;
+        }
+    }
+
+    update_constant(state.clone(), cols_const, new_cols as f64).await?;
+    update_constant(state.clone(), rows_const, new_rows as f64).await?;
+
+    let burn = crate::commands::tune_io::burn_to_ecu(app, state.clone()).await;
+    burn.map_err(|e| format!("Resized in RAM but burn failed: {}", e))?;
+
+    get_table_data_internal(&state, &table_name).await
 }
 
 #[tauri::command]

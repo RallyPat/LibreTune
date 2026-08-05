@@ -298,31 +298,51 @@ pub enum Shape {
     Array2D { rows: usize, cols: usize },
 }
 
+/// TunerStudio dynamically sized array (`[{cols}x{rows}]` / `[{count}]`).
+///
+/// See "Configuring Dynamically Sized Tables" in the EFI Analytics INI spec.
+/// The allocated footprint stays in [`Shape`]; these refs name the scalars that
+/// hold the *active* size in the tune.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DynamicSizeRefs {
+    /// Column-count constant (X / RPM). `None` for 1D arrays.
+    pub cols_const: Option<String>,
+    /// Row-count constant (Y / Load), or the sole count field for 1D.
+    pub rows_const: String,
+}
+
 impl Shape {
     /// Parse shape from INI format (e.g., "[16]" or "[16x16]")
     pub fn from_ini_str(s: &str) -> Self {
-        let s = s.trim();
-        if s.is_empty() {
-            return Shape::Scalar;
+        match parse_shape_field(s) {
+            ParsedShape::Fixed(shape) => shape,
+            // Placeholders until post-process fills allocated sizes from
+            // defaultValue / maximumElements / scalar max.
+            ParsedShape::Dynamic1D { .. } => Shape::Array1D(0),
+            ParsedShape::Dynamic2D { .. } => Shape::Array2D { rows: 0, cols: 0 },
         }
+    }
 
-        // Remove brackets if present and trim whitespace
-        let inner = s.trim_start_matches('[').trim_end_matches(']').trim();
-
-        if inner.contains('x') || inner.contains('X') {
-            // 2D array
-            let parts: Vec<&str> = inner.split(['x', 'X']).collect();
-            if parts.len() == 2 {
-                if let (Ok(rows), Ok(cols)) = (parts[0].trim().parse(), parts[1].trim().parse()) {
-                    return Shape::Array2D { rows, cols };
-                }
-            }
-        } else if let Ok(size) = inner.parse() {
-            // 1D array
-            return Shape::Array1D(size);
+    /// Parse a shape field, preserving dynamic `{const}` dimension refs.
+    pub fn parse_with_dynamic(s: &str) -> (Self, Option<DynamicSizeRefs>) {
+        match parse_shape_field(s) {
+            ParsedShape::Fixed(shape) => (shape, None),
+            ParsedShape::Dynamic1D { count } => (
+                Shape::Array1D(0),
+                Some(DynamicSizeRefs {
+                    cols_const: None,
+                    rows_const: count,
+                }),
+            ),
+            // TunerStudio order is [{cols}x{rows}].
+            ParsedShape::Dynamic2D { cols, rows } => (
+                Shape::Array2D { rows: 0, cols: 0 },
+                Some(DynamicSizeRefs {
+                    cols_const: Some(cols),
+                    rows_const: rows,
+                }),
+            ),
         }
-
-        Shape::Scalar
     }
 
     /// Get total element count
@@ -351,6 +371,59 @@ impl Shape {
             Shape::Array2D { rows, .. } => *rows,
         }
     }
+}
+
+/// Result of parsing an INI array shape field.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ParsedShape {
+    /// Literal `[N]` / `[RxC]` (Speeduino-style `[rows x cols]`).
+    Fixed(Shape),
+    /// `[{count}]`
+    Dynamic1D { count: String },
+    /// `[{cols}x{rows}]` (TunerStudio column-first order).
+    Dynamic2D { cols: String, rows: String },
+}
+
+fn parse_brace_name(s: &str) -> Option<String> {
+    let s = s.trim();
+    if s.starts_with('{') && s.ends_with('}') && s.len() >= 3 {
+        let name = s[1..s.len() - 1].trim();
+        if !name.is_empty() && !name.contains('{') {
+            return Some(name.to_string());
+        }
+    }
+    None
+}
+
+/// Parse `[16]`, `[16x16]`, `[{n}]`, or `[{cols}x{rows}]`.
+pub fn parse_shape_field(s: &str) -> ParsedShape {
+    let s = s.trim();
+    if s.is_empty() {
+        return ParsedShape::Fixed(Shape::Scalar);
+    }
+
+    let inner = s.trim_start_matches('[').trim_end_matches(']').trim();
+
+    if inner.contains('x') || inner.contains('X') {
+        let parts: Vec<&str> = inner.split(['x', 'X']).collect();
+        if parts.len() == 2 {
+            let a = parts[0].trim();
+            let b = parts[1].trim();
+            if let (Some(cols), Some(rows)) = (parse_brace_name(a), parse_brace_name(b)) {
+                return ParsedShape::Dynamic2D { cols, rows };
+            }
+            if let (Ok(rows), Ok(cols)) = (a.parse(), b.parse()) {
+                // Fixed form: Speeduino / LibreTune `[rows x cols]`.
+                return ParsedShape::Fixed(Shape::Array2D { rows, cols });
+            }
+        }
+    } else if let Some(count) = parse_brace_name(inner) {
+        return ParsedShape::Dynamic1D { count };
+    } else if let Ok(size) = inner.parse() {
+        return ParsedShape::Fixed(Shape::Array1D(size));
+    }
+
+    ParsedShape::Fixed(Shape::Scalar)
 }
 
 /// Setting group for UI organization
@@ -1058,6 +1131,32 @@ mod tests {
         assert_eq!(
             Shape::from_ini_str("[8X12]"),
             Shape::Array2D { rows: 8, cols: 12 }
+        );
+    }
+
+    #[test]
+    fn test_dynamic_shape_parsing() {
+        assert_eq!(
+            parse_shape_field("[{veTableCols}x{veTableRows}]"),
+            ParsedShape::Dynamic2D {
+                cols: "veTableCols".into(),
+                rows: "veTableRows".into(),
+            }
+        );
+        assert_eq!(
+            parse_shape_field("[{veTableRows}]"),
+            ParsedShape::Dynamic1D {
+                count: "veTableRows".into(),
+            }
+        );
+        let (shape, dyn_refs) = Shape::parse_with_dynamic("[{veTableCols}x{veTableRows}]");
+        assert_eq!(shape, Shape::Array2D { rows: 0, cols: 0 });
+        assert_eq!(
+            dyn_refs,
+            Some(DynamicSizeRefs {
+                cols_const: Some("veTableCols".into()),
+                rows_const: "veTableRows".into(),
+            })
         );
     }
 }

@@ -112,9 +112,12 @@ pub struct EcuDefinition {
     /// Maps variable name -> byte value (e.g., "tsCanId" -> 0x00 for CAN ID 0)
     pub pc_variables: HashMap<String, u8>,
 
-    /// Default values for constants (from [Defaults] section)
+    /// Default values for constants (from [Defaults] / [ConstantsExtensions])
     /// Maps constant name -> default value
     pub default_values: HashMap<String, f64>,
+
+    /// Cell budget for dynamically sized 2D arrays (`maximumElements` in ConstantsExtensions).
+    pub maximum_elements: HashMap<String, usize>,
 
     /// FrontPage configuration for default dashboard layout
     pub frontpage: Option<FrontPageConfig>,
@@ -450,6 +453,7 @@ impl Default for EcuDefinition {
             help_topics: HashMap::new(),
             pc_variables: HashMap::new(),
             default_values: HashMap::new(),
+            maximum_elements: HashMap::new(),
             frontpage: None,
             indicator_panels: HashMap::new(),
             readout_panels: HashMap::new(),

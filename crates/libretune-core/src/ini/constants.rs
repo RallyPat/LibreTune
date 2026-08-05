@@ -3,7 +3,7 @@
 //! Parses the [Constants] section which defines editable ECU parameters.
 
 use super::parser::split_ini_line;
-use super::types::{DataType, Endianness, Shape};
+use super::types::{DataType, DynamicSizeRefs, Endianness, Shape};
 use serde::{Deserialize, Serialize};
 
 /// A constant/parameter definition from the INI file
@@ -71,6 +71,10 @@ pub struct Constant {
 
     /// Whether this is a PC variable (stored locally, not on ECU)
     pub is_pc_variable: bool,
+
+    /// Present when the INI sizes this array with `{const}` refs (resizable tables).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dynamic_size: Option<DynamicSizeRefs>,
 }
 
 impl Constant {
@@ -97,6 +101,7 @@ impl Constant {
             visibility_condition: None,
             bit_options: Vec::new(),
             is_pc_variable: false,
+            dynamic_size: None,
         }
     }
 
@@ -152,6 +157,7 @@ impl Default for Constant {
             visibility_condition: None,
             bit_options: Vec::new(),
             is_pc_variable: false,
+            dynamic_size: None,
         }
     }
 }
@@ -220,7 +226,9 @@ pub fn parse_constant_line(
         }
         return Some(constant);
     } else if class == "array" && parts.len() > 3 {
-        constant.shape = Shape::from_ini_str(parts[3]);
+        let (shape, dyn_refs) = Shape::parse_with_dynamic(parts[3]);
+        constant.shape = shape;
+        constant.dynamic_size = dyn_refs;
     } else if class == "string" && parts.len() > 3 {
         // String constants: name = string, ASCII, offset, length
         // The 4th field is the length in bytes
@@ -306,7 +314,9 @@ pub fn parse_pc_variable_line(name: &str, value: &str, help: Option<String>) -> 
         return Some(constant);
     } else if class == "array" && parts.len() > 2 {
         // Format: array, type, [shape], units, scale, ...
-        constant.shape = Shape::from_ini_str(parts[2]);
+        let (shape, dyn_refs) = Shape::parse_with_dynamic(parts[2]);
+        constant.shape = shape;
+        constant.dynamic_size = dyn_refs;
         // Parse units starting at index 3
         if parts.len() > 3 {
             constant.units = parts[3].trim_matches('"').to_string();

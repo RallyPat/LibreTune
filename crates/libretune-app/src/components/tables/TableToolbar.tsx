@@ -12,7 +12,8 @@ import {
   Grid3X3,
   Crosshair,
   Palette,
-  Box
+  Box,
+  Scaling
 } from 'lucide-react';
 
 interface TableToolbarProps {
@@ -23,6 +24,7 @@ interface TableToolbarProps {
   onInterpolate: () => void;
   onSmooth: () => void;
   onRebin: () => void;
+  onSetSize?: () => void;
   onCopy: () => void;
   onPaste: () => void;
   onUndo: () => void;
@@ -46,6 +48,7 @@ export default function TableToolbar({
   onInterpolate, 
   onSmooth, 
   onRebin,
+  onSetSize,
   onCopy,
   onPaste,
   onUndo,
@@ -125,6 +128,15 @@ export default function TableToolbar({
         >
           <Grid3X3 size={14} />
         </button>
+        {onSetSize && (
+          <button
+            className="ts-toolbar-btn"
+            title="Set table size (resizable VE / ignition / lambda)"
+            onClick={onSetSize}
+          >
+            <Scaling size={14} />
+          </button>
+        )}
       </div>
 
       <div className="ts-toolbar-divider" />

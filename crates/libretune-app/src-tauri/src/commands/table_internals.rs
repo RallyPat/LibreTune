@@ -1,6 +1,7 @@
 //! TableData struct and internal table helpers (extracted from lib.rs).
 
 use crate::{clean_axis_label, AppState};
+use libretune_core::dynamic_table::{self, TableSizeInfo};
 use libretune_core::ini::Constant;
 use libretune_core::tune::{TuneFile, TuneValue};
 use serde::Serialize;
@@ -18,6 +19,40 @@ pub(crate) struct TableData {
     pub x_output_channel: Option<String>,
     /// Output channel name for Y-axis (used for live cell highlighting)
     pub y_output_channel: Option<String>,
+    /// Present when the INI declares TunerStudio dynamically sized arrays.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub size_info: Option<TableSizeInfoDto>,
+}
+
+#[derive(Serialize, Clone)]
+pub(crate) struct TableSizeInfoDto {
+    pub resizable: bool,
+    pub cols_const: String,
+    pub rows_const: String,
+    pub min_cols: usize,
+    pub max_cols: usize,
+    pub min_rows: usize,
+    pub max_rows: usize,
+    pub max_elements: usize,
+    pub active_cols: usize,
+    pub active_rows: usize,
+}
+
+impl From<&TableSizeInfo> for TableSizeInfoDto {
+    fn from(info: &TableSizeInfo) -> Self {
+        Self {
+            resizable: true,
+            cols_const: info.cols_const.clone(),
+            rows_const: info.rows_const.clone(),
+            min_cols: info.min_cols,
+            max_cols: info.max_cols,
+            min_rows: info.min_rows,
+            max_rows: info.max_rows,
+            max_elements: info.max_elements,
+            active_cols: info.active_cols,
+            active_rows: info.active_rows,
+        }
+    }
 }
 
 // Tune health/anomaly/predicted_fills/dyno_overlay extracted to commands/tune_health.rs
@@ -65,6 +100,15 @@ pub(crate) async fn get_table_data_internal(
         .ok_or_else(|| format!("Constant {} not found", map_name))?
         .clone();
 
+    // Snapshot enough to resolve active size without re-locking definition later.
+    let size_snapshot = dynamic_table::table_size_info(def, table, &|_| None).map(|info| {
+        let cols_c = def.constants.get(&info.cols_const).cloned();
+        let rows_c = def.constants.get(&info.rows_const).cloned();
+        let defaults = def.default_values.clone();
+        let max_elements = info.max_elements;
+        (info, cols_c, rows_c, defaults, max_elements)
+    });
+
     drop(def_guard);
 
     // Read from tune file (offline mode)
@@ -110,29 +154,67 @@ pub(crate) async fn get_table_data_internal(
         vec![0.0; element_count]
     }
 
-    let x_bins = read_const_values(&x_const, tune_guard.as_ref(), endianness);
-    let y_bins = if let Some(ref y) = y_const {
+    let x_bins_full = read_const_values(&x_const, tune_guard.as_ref(), endianness);
+    let y_bins_full = if let Some(ref y) = y_const {
         read_const_values(y, tune_guard.as_ref(), endianness)
     } else {
         vec![0.0]
     };
     let z_flat = read_const_values(&z_const, tune_guard.as_ref(), endianness);
 
+    let size_info = size_snapshot.map(|(mut info, cols_c, rows_c, defaults, max_elements)| {
+        if let Some(ref c) = cols_c {
+            if let Some(v) = read_scalar_from_tune(c, tune_guard.as_ref(), endianness) {
+                info.active_cols = (v.round() as usize).clamp(info.min_cols, info.max_cols);
+            } else if let Some(v) = defaults.get(&info.cols_const) {
+                info.active_cols = (v.round() as usize).clamp(info.min_cols, info.max_cols);
+            }
+        }
+        if let Some(ref c) = rows_c {
+            if let Some(v) = read_scalar_from_tune(c, tune_guard.as_ref(), endianness) {
+                info.active_rows = (v.round() as usize).clamp(info.min_rows, info.max_rows);
+            } else if let Some(v) = defaults.get(&info.rows_const) {
+                info.active_rows = (v.round() as usize).clamp(info.min_rows, info.max_rows);
+            }
+        }
+        info.max_elements = max_elements;
+        while info.active_cols * info.active_rows > info.max_elements && info.active_cols > info.min_cols
+        {
+            info.active_cols -= 1;
+        }
+        while info.active_cols * info.active_rows > info.max_elements && info.active_rows > info.min_rows
+        {
+            info.active_rows -= 1;
+        }
+        info
+    });
+
     drop(tune_guard);
 
-    // Reshape Z values into 2D array [y][x]
-    let x_size = x_bins.len();
-    let y_size = if is_3d { y_bins.len() } else { 1 };
-
-    let mut z_values = Vec::with_capacity(y_size);
-    for y in 0..y_size {
-        let mut row = Vec::with_capacity(x_size);
-        for x in 0..x_size {
-            let idx = y * x_size + x;
-            row.push(*z_flat.get(idx).unwrap_or(&0.0));
+    let (x_bins, y_bins, z_values, size_dto) = if let Some(ref info) = size_info {
+        let x_bins = dynamic_table::slice_bins(&x_bins_full, info.active_cols);
+        let y_bins = if is_3d {
+            dynamic_table::slice_bins(&y_bins_full, info.active_rows)
+        } else {
+            y_bins_full
+        };
+        let z_values =
+            dynamic_table::unpack_z(&z_flat, info.active_cols, if is_3d { info.active_rows } else { 1 });
+        (x_bins, y_bins, z_values, Some(TableSizeInfoDto::from(info)))
+    } else {
+        let x_size = x_bins_full.len();
+        let y_size = if is_3d { y_bins_full.len() } else { 1 };
+        let mut z_values = Vec::with_capacity(y_size);
+        for y in 0..y_size {
+            let mut row = Vec::with_capacity(x_size);
+            for x in 0..x_size {
+                let idx = y * x_size + x;
+                row.push(*z_flat.get(idx).unwrap_or(&0.0));
+            }
+            z_values.push(row);
         }
-        z_values.push(row);
-    }
+        (x_bins_full, y_bins_full, z_values, None)
+    };
 
     Ok(TableData {
         name: table_name_out,
@@ -144,7 +226,29 @@ pub(crate) async fn get_table_data_internal(
         y_axis_name: clean_axis_label(&y_label),
         x_output_channel,
         y_output_channel,
+        size_info: size_dto,
     })
+}
+
+fn read_scalar_from_tune(
+    constant: &Constant,
+    tune: Option<&TuneFile>,
+    endianness: libretune_core::ini::Endianness,
+) -> Option<f64> {
+    let tune_file = tune?;
+    if let Some(tune_value) = tune_file.constants.get(&constant.name) {
+        match tune_value {
+            TuneValue::Scalar(v) => return Some(*v),
+            TuneValue::Array(arr) if !arr.is_empty() => return Some(arr[0]),
+            _ => {}
+        }
+    }
+    let page_data = tune_file.pages.get(&constant.page)?;
+    let offset = constant.offset as usize;
+    let raw = constant
+        .data_type
+        .read_from_bytes(page_data, offset, endianness)?;
+    Some(constant.raw_to_display(raw))
 }
 
 /// Helper function to update table z_values internally
@@ -179,16 +283,45 @@ pub(crate) async fn update_table_z_values_internal(
     let mut conn_guard = state.connection.lock().await;
     let mut cache_guard = state.tune_cache.lock().await;
 
-    // Flatten z_values
-    let flat_values: Vec<f64> = z_values.into_iter().flatten().collect();
+    let allocated = dynamic_table::allocated_elements(&constant);
+    let active_rows = z_values.len();
+    let active_cols = z_values.first().map(|r| r.len()).unwrap_or(0);
+    let active_len = active_rows.saturating_mul(active_cols);
 
-    if flat_values.len() != constant.shape.element_count() {
-        return Err(format!(
-            "Invalid data size: expected {}, got {}",
-            constant.shape.element_count(),
-            flat_values.len()
-        ));
-    }
+    // Fixed tables: require full footprint. Dynamic tables: pack active region.
+    let flat_values = if constant.dynamic_size.is_some() {
+        if active_len == 0 || active_len > allocated {
+            return Err(format!(
+                "Invalid dynamic table size: {}x{} (budget {})",
+                active_rows, active_cols, allocated
+            ));
+        }
+        let mut allocated_flat = vec![0.0; allocated];
+        if let Some(cache) = cache_guard.as_ref() {
+            if let Some(page) = cache.get_page(constant.page) {
+                let element_size = constant.data_type.size_bytes();
+                let start = constant.offset as usize;
+                for i in 0..allocated {
+                    let off = start + i * element_size;
+                    if let Some(raw) = constant.data_type.read_from_bytes(page, off, endianness) {
+                        allocated_flat[i] = constant.raw_to_display(raw);
+                    }
+                }
+            }
+        }
+        dynamic_table::pack_z_into(&mut allocated_flat, &z_values);
+        allocated_flat
+    } else {
+        let flat: Vec<f64> = z_values.into_iter().flatten().collect();
+        if flat.len() != allocated {
+            return Err(format!(
+                "Invalid data size: expected {}, got {}",
+                allocated,
+                flat.len()
+            ));
+        }
+        flat
+    };
 
     // Convert display values to raw bytes
     let element_size = constant.data_type.size_bytes();
@@ -267,14 +400,47 @@ pub(crate) async fn update_constant_array_internal(
     let mut conn_guard = state.connection.lock().await;
     let mut cache_guard = state.tune_cache.lock().await;
 
-    if values.len() != constant.shape.element_count() {
+    let allocated = dynamic_table::allocated_elements(&constant);
+    let values = if constant.dynamic_size.is_some() {
+        if values.is_empty() || values.len() > allocated {
+            return Err(format!(
+                "Invalid dynamic axis size for {}: got {}, allocated {}",
+                constant_name,
+                values.len(),
+                allocated
+            ));
+        }
+        let mut full = vec![0.0; allocated];
+        if let Some(cache) = cache_guard.as_ref() {
+            if let Some(page) = cache.get_page(constant.page) {
+                let element_size = constant.data_type.size_bytes();
+                let start = constant.offset as usize;
+                for i in 0..allocated {
+                    let off = start + i * element_size;
+                    if let Some(raw) = constant.data_type.read_from_bytes(page, off, endianness) {
+                        full[i] = constant.raw_to_display(raw);
+                    }
+                }
+            }
+        }
+        full[..values.len()].copy_from_slice(&values);
+        // Extend unused bins with the last active value (stable for firmware clamps).
+        if let Some(&last) = values.last() {
+            for slot in full.iter_mut().skip(values.len()) {
+                *slot = last;
+            }
+        }
+        full
+    } else if values.len() != allocated {
         return Err(format!(
             "Invalid data size for {}: expected {}, got {}",
             constant_name,
-            constant.shape.element_count(),
+            allocated,
             values.len()
         ));
-    }
+    } else {
+        values
+    };
 
     let element_size = constant.data_type.size_bytes();
     let mut raw_data = vec![0u8; constant.size_bytes()];

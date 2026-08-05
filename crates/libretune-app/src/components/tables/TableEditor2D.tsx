@@ -1,13 +1,15 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { ArrowLeft, Save, Zap, ExternalLink, AlertTriangle, Palette, MapPin, Crosshair, Box } from 'lucide-react';
+import { ArrowLeft, Save, Zap, ExternalLink, AlertTriangle, Palette, MapPin, Crosshair, Box, Scaling } from 'lucide-react';
 import TableToolbar from './TableToolbar';
 import TableGrid, { SelectionRange } from './TableGrid';
 import TableEditor3D from './TableEditor3D';
 import TableContextMenu from './TableContextMenu';
 import RebinDialog from '../dialogs/RebinDialog';
+import SetTableSizeDialog from '../dialogs/SetTableSizeDialog';
 import CellEditDialog from '../dialogs/CellEditDialog';
 import { Dialog, Button, FormField } from '../common';
+import type { BackendTableData, TableSizeInfo } from '../../types/app';
 import LambdaPreviewTable from './LambdaPreviewTable';
 import { useHeatmapSettings } from '../../utils/useHeatmapSettings';
 import { useTableYAxisBottom, useTrailFadeSec } from '../../utils/useTableOrientation';
@@ -178,6 +180,9 @@ export default function TableEditor2D({
     newXBins: [...safeXBins],
     newYBins: [...safeYBins],
   });
+  const [sizeInfo, setSizeInfo] = useState<TableSizeInfo | null>(null);
+  const [setSizeOpen, setSetSizeOpen] = useState(false);
+  const [setSizeBusy, setSetSizeBusy] = useState(false);
   const [contextMenu, setContextMenu] = useState<{
     visible: boolean;
     x: number;
@@ -202,6 +207,20 @@ export default function TableEditor2D({
   const [activeCell, setActiveCell] = useState<[number, number] | null>(null);
 
   const { showToast } = useToast();
+
+  useEffect(() => {
+    let cancelled = false;
+    invoke<BackendTableData>('get_table_data', { tableName: table_name })
+      .then((data) => {
+        if (!cancelled) setSizeInfo(data.size_info ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) setSizeInfo(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [table_name]);
 
   const [alertLargeChangeEnabled, setAlertLargeChangeEnabled] = useState(true);
   const [alertLargeChangeAbs, setAlertLargeChangeAbs] = useState(5);
@@ -865,6 +884,30 @@ export default function TableEditor2D({
     else handleDecrease(amount);
   };
 
+  const handleSetTableSize = async (cols: number, rows: number) => {
+    setSetSizeBusy(true);
+    try {
+      const result = await invoke<BackendTableData>('resize_table_size', {
+        tableName: table_name,
+        newCols: cols,
+        newRows: rows,
+      });
+      pushHistory(result.z_values, result.x_bins, result.y_bins);
+      setLocalXBins(result.x_bins);
+      setLocalYBins(result.y_bins);
+      setLocalZValues(result.z_values);
+      setSizeInfo(result.size_info ?? null);
+      setRebinDialog({ show: false, newXBins: result.x_bins, newYBins: result.y_bins });
+      onValuesChange?.(result.z_values);
+      setSetSizeOpen(false);
+      showToast(`Table resized to ${rows}×${cols}`, 'success');
+    } catch (err) {
+      handleOperationError('Set table size', err);
+    } finally {
+      setSetSizeBusy(false);
+    }
+  };
+
   const handleRebin = async (newXBins: number[], newYBins: number[], interpolateZ: boolean) => {
     setRebinDialog({ show: false, newXBins, newYBins });
 
@@ -1152,6 +1195,16 @@ export default function TableEditor2D({
           >
             <Box size={14} />
           </button>
+          {sizeInfo?.resizable && (
+            <button
+              className="embedded-toggle"
+              onClick={() => setSetSizeOpen(true)}
+              title="Set table size"
+              aria-label="Set table size"
+            >
+              <Scaling size={14} />
+            </button>
+          )}
           {onOpenInTab && (
             <button 
               className="pop-out-btn" 
@@ -1225,6 +1278,7 @@ export default function TableEditor2D({
           onInterpolate={handleInterpolate}
           onSmooth={handleSmooth}
           onRebin={() => setRebinDialog({ ...rebinDialog, show: true })}
+          onSetSize={sizeInfo?.resizable ? () => setSetSizeOpen(true) : undefined}
           onCopy={handleCopy}
           onPaste={handlePaste}
           onUndo={handleUndo}
@@ -1343,6 +1397,24 @@ export default function TableEditor2D({
         xAxisName={x_axis_name}
         yAxisName={y_axis_name}
       />
+
+      {sizeInfo?.resizable && (
+        <SetTableSizeDialog
+          isOpen={setSizeOpen}
+          onClose={() => setSetSizeOpen(false)}
+          onApply={handleSetTableSize}
+          isBusy={setSizeBusy}
+          limits={{
+            min_cols: sizeInfo.min_cols,
+            max_cols: sizeInfo.max_cols,
+            min_rows: sizeInfo.min_rows,
+            max_rows: sizeInfo.max_rows,
+            max_elements: sizeInfo.max_elements,
+            active_cols: sizeInfo.active_cols,
+            active_rows: sizeInfo.active_rows,
+          }}
+        />
+      )}
 
       <CellEditDialog
         isOpen={cellEditDialog.show}

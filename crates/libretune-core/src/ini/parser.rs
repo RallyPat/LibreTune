@@ -17,7 +17,7 @@ use super::{
         FrontPageConfig, FrontPageIndicator, GammaEConfig, HelpTopic, IndicatorDefinition,
         IndicatorPanel, KeyAction, LoggerDefinition, MaintainConstantValue, Menu, MenuItem,
         PortEditorConfig, ReadoutDefinition, ReadoutPanel, ReferenceTable, SettingGroup,
-        SettingOption, VeAnalyzeConfig, WueAnalyzeConfig,
+        SettingOption, Shape, VeAnalyzeConfig, WueAnalyzeConfig,
     },
     EcuDefinition, IniError,
 };
@@ -405,7 +405,9 @@ fn parse_ini_internal(content: &str, ctx: &mut IncludeContext) -> Result<EcuDefi
     // (e.g., help topics defined after menu section)
     post_process_menu_items(&mut definition);
 
-    // Post-process tables to resolve x_size/y_size from referenced constants
+    // Resolve allocated sizes for TunerStudio dynamically sized arrays, then
+    // fill table x_size/y_size (defaults / allocated) from those constants.
+    post_process_dynamic_shapes(&mut definition);
     post_process_table_sizes(&mut definition);
 
     // Detect ECU type from signature
@@ -462,6 +464,7 @@ fn merge_definitions(target: &mut EcuDefinition, source: EcuDefinition) {
 
     // Merge default values
     target.default_values.extend(source.default_values);
+    target.maximum_elements.extend(source.maximum_elements);
 
     // Merge indicator panels
     target.indicator_panels.extend(source.indicator_panels);
@@ -1877,6 +1880,77 @@ fn post_process_items(
     }
 }
 
+/// Fill allocated [`Shape`] sizes for constants declared with `{const}` dimensions.
+fn post_process_dynamic_shapes(def: &mut EcuDefinition) {
+    let names: Vec<String> = def
+        .constants
+        .iter()
+        .filter(|(_, c)| c.dynamic_size.is_some())
+        .map(|(n, _)| n.clone())
+        .collect();
+
+    for name in names {
+        let dyn_refs = match def.constants.get(&name).and_then(|c| c.dynamic_size.clone()) {
+            Some(d) => d,
+            None => continue,
+        };
+
+        if let Some(cols_name) = &dyn_refs.cols_const {
+            // 2D: [{cols}x{rows}] — allocated footprint is maximumElements (cell budget).
+            let def_cols = def
+                .default_values
+                .get(cols_name)
+                .copied()
+                .unwrap_or(0.0)
+                .round() as usize;
+            let def_rows = def
+                .default_values
+                .get(&dyn_refs.rows_const)
+                .copied()
+                .unwrap_or(0.0)
+                .round() as usize;
+            let max_el = def
+                .maximum_elements
+                .get(&name)
+                .copied()
+                .unwrap_or(def_cols.saturating_mul(def_rows));
+
+            let (rows, cols) = if def_rows > 0 && def_cols > 0 && def_rows * def_cols == max_el {
+                (def_rows, def_cols)
+            } else if def_cols > 0 && max_el > 0 && max_el % def_cols == 0 {
+                (max_el / def_cols, def_cols)
+            } else if max_el > 0 {
+                (max_el, 1)
+            } else {
+                (def_rows.max(1), def_cols.max(1))
+            };
+
+            if let Some(c) = def.constants.get_mut(&name) {
+                c.shape = Shape::Array2D { rows, cols };
+            }
+        } else {
+            // 1D: [{count}] — allocate to the count scalar's max (axis headroom).
+            let count_name = &dyn_refs.rows_const;
+            let allocated = def
+                .constants
+                .get(count_name)
+                .map(|c| c.max.round() as usize)
+                .filter(|n| *n > 0)
+                .or_else(|| {
+                    def.default_values
+                        .get(count_name)
+                        .map(|v| v.round() as usize)
+                })
+                .unwrap_or(0)
+                .max(1);
+
+            if let Some(c) = def.constants.get_mut(&name) {
+                c.shape = Shape::Array1D(allocated);
+            }
+        }
+    }
+}
+
 /// Post-process tables to resolve x_size and y_size from referenced constant shapes
 ///
 /// TableEditor entries reference constants by name (e.g., xBins = veRpmBins, zBins = veTable)
@@ -1900,6 +1974,24 @@ fn post_process_table_sizes(def: &mut EcuDefinition) {
             )
         };
 
+        // Dynamically sized maps: table editor default size comes from defaultValue
+        // of the count scalars (not the allocated bin/axis headroom).
+        let dynamic_defaults = def.constants.get(&map_name).and_then(|map_const| {
+            let d = map_const.dynamic_size.as_ref()?;
+            let cols_name = d.cols_const.as_ref()?;
+            let cols = def.default_values.get(cols_name).copied()?.round() as usize;
+            let rows = def
+                .default_values
+                .get(&d.rows_const)
+                .copied()?
+                .round() as usize;
+            if cols > 0 && rows > 0 {
+                Some((cols, rows))
+            } else {
+                None
+            }
+        });
+
         // Look up x_size from x_bins constant
         let x_size = if let Some(x_const) = def.constants.get(&x_bins_name) {
             x_const.shape.x_size()
@@ -1919,7 +2011,9 @@ fn post_process_table_sizes(def: &mut EcuDefinition) {
         };
 
         // Alternatively, infer from map constant shape if we have a 2D map
-        let (final_x_size, final_y_size) = if let Some(map_const) = def.constants.get(&map_name) {
+        let (final_x_size, final_y_size) = if let Some((cols, rows)) = dynamic_defaults {
+            (cols, rows)
+        } else if let Some(map_const) = def.constants.get(&map_name) {
             match &map_const.shape {
                 crate::ini::types::Shape::Array2D { rows, cols } => {
                     // Use map's actual dimensions if available
@@ -1939,6 +2033,13 @@ fn post_process_table_sizes(def: &mut EcuDefinition) {
             (x_size, y_size)
         };
 
+        let resize_meta = def.constants.get(&map_name).and_then(|map_const| {
+            let d = map_const.dynamic_size.as_ref()?;
+            let cols = d.cols_const.clone()?;
+            let max_el = def.maximum_elements.get(&map_name).copied();
+            Some((d.rows_const.clone(), cols, max_el))
+        });
+
         // Update the table - only update if we calculated a meaningful size
         // x_size defaults to 0, y_size defaults to 1 in TableDefinition::default()
         if let Some(table) = def.tables.get_mut(&table_name) {
@@ -1947,6 +2048,11 @@ fn post_process_table_sizes(def: &mut EcuDefinition) {
             }
             if table.y_size <= 1 && final_y_size > 1 {
                 table.y_size = final_y_size;
+            }
+            if let Some((rows_c, cols_c, max_el)) = resize_meta {
+                table.rows_size_const = Some(rows_c);
+                table.cols_size_const = Some(cols_c);
+                table.max_elements = max_el;
             }
         }
     }
@@ -3070,6 +3176,16 @@ fn parse_constants_extensions_entry(def: &mut EcuDefinition, key: &str, value: &
                 }
             }
         }
+        "maximumelements" => {
+            // Format: maximumElements = arrayName, cellCount
+            let parts = split_ini_line(value);
+            if parts.len() >= 2 {
+                let name = parts[0].trim().to_string();
+                if let Ok(n) = parts[1].trim().parse::<usize>() {
+                    def.maximum_elements.insert(name, n);
+                }
+            }
+        }
         "requirespowercycle" => {
             // Format: requiresPowerCycle = constName
             let const_name = value.trim().to_string();
@@ -3477,6 +3593,49 @@ table = veTable1, veTableMap, "VE Table 1"
         // Check that x_size and y_size were resolved from the constant shapes
         assert_eq!(table.x_size, 16, "x_size should be 16 from veRpmBins");
         assert_eq!(table.y_size, 16, "y_size should be 16 from veFuelBins");
+    }
+
+    #[test]
+    fn test_dynamic_table_shape_resolution() {
+        let content = r#"
+[MegaTune]
+signature = "epicECU test"
+iniSpecVersion = 3.53
+
+[Constants]
+page = 1
+   veTableRows = scalar, U08, 0, "", 1.0, 0, 8, 32, 0
+   veTableCols = scalar, U08, 1, "", 1.0, 0, 8, 32, 0
+   veTable = array, U16, 2, [{veTableCols}x{veTableRows}], "%", 0.01, 0, 0, 650, 2
+   veLoadBins = array, U16, 514, [{veTableRows}], "kPa", 1, 0, 0, 650, 0
+   veRpmBins = array, U16, 578, [{veTableCols}], "RPM", 1, 0, 0, 32000, 0
+
+[ConstantsExtensions]
+   defaultValue = veTableRows, 16
+   defaultValue = veTableCols, 16
+   maximumElements = veTable, 256
+
+[TableEditor]
+table = veTable1, veTableMap, "VE Table"
+  xBins = veRpmBins
+  yBins = veLoadBins
+  zBins = veTable
+"#;
+
+        let def = parse_ini(content).expect("Should parse dynamic table INI");
+        let ve = def.constants.get("veTable").expect("veTable");
+        assert!(ve.dynamic_size.is_some());
+        assert_eq!(ve.shape.element_count(), 256);
+        assert_eq!(def.constants.get("veLoadBins").unwrap().shape.element_count(), 32);
+        assert_eq!(def.constants.get("veRpmBins").unwrap().shape.element_count(), 32);
+
+        let table = def.tables.get("veTable1").unwrap();
+        assert_eq!(table.x_size, 16);
+        assert_eq!(table.y_size, 16);
+        assert_eq!(table.cols_size_const.as_deref(), Some("veTableCols"));
+        assert_eq!(table.rows_size_const.as_deref(), Some("veTableRows"));
+        assert_eq!(table.max_elements, Some(256));
+        assert!(table.is_resizable());
     }
 
     #[test]

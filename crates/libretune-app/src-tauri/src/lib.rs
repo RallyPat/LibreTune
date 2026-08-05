@@ -148,8 +148,8 @@ use commands::sync_ecu_data::sync_ecu_data;
 use commands::system::{get_build_info, get_serial_ports};
 use commands::table_compare::compare_tables;
 use commands::table_ops::{
-    add_offset, fill_region, interpolate_cells, interpolate_linear, rebin_table, scale_cells,
-    set_cells_equal, smooth_table,
+    add_offset, fill_region, interpolate_cells, interpolate_linear, rebin_table, resize_table_size,
+    scale_cells, set_cells_equal, smooth_table,
 };
 use commands::table_update::update_table_data;
 use commands::ts_import::{import_tunerstudio_project, preview_tunerstudio_import};
@@ -299,6 +299,7 @@ pub fn run() {
             compare_dyno_runs,
             get_dyno_table_overlay,
             rebin_table,
+            resize_table_size,
             smooth_table,
             interpolate_cells,
             interpolate_linear,

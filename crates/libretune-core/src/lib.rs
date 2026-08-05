@@ -46,6 +46,7 @@ pub mod basemap;
 pub mod dash;
 pub mod datalog;
 pub mod demo;
+pub mod dynamic_table;
 pub mod ecu;
 pub mod ini;
 pub mod llm;

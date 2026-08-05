@@ -87,6 +87,19 @@ export interface IniEntry {
   path: string;
 }
 
+export interface TableSizeInfo {
+  resizable: boolean;
+  cols_const: string;
+  rows_const: string;
+  min_cols: number;
+  max_cols: number;
+  min_rows: number;
+  max_rows: number;
+  max_elements: number;
+  active_cols: number;
+  active_rows: number;
+}
+
 export interface BackendTableData {
   name: string;
   title: string;
@@ -97,6 +110,7 @@ export interface BackendTableData {
   z_values: number[][];
   x_output_channel?: string | null;
   y_output_channel?: string | null;
+  size_info?: TableSizeInfo | null;
 }
 
 export interface BackendCurveData {

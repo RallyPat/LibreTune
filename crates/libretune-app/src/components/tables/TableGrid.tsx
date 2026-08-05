@@ -46,6 +46,27 @@ interface TableGridProps {
   fitViewport?: boolean;
 }
 
+/** Clean axis/bin display — drop noisy decimals when values are whole. */
+function formatBinLabel(val: number): string {
+  if (!Number.isFinite(val)) return '';
+  const rounded = Math.round(val);
+  if (Math.abs(val - rounded) < 1e-6) return String(rounded);
+  if (Math.abs(val) >= 100) return val.toFixed(0);
+  return val.toFixed(1);
+}
+
+/** How often to paint axis labels so they don't overlap (~36px apart). */
+function axisLabelStep(count: number, cellPx: number): number {
+  if (count <= 12) return 1;
+  const maxLabels = Math.max(6, Math.floor((count * cellPx) / 36));
+  if (count <= maxLabels) return 1;
+  return Math.ceil(count / maxLabels);
+}
+
+function shouldShowAxisLabel(index: number, count: number, step: number): boolean {
+  return index === 0 || index === count - 1 || index % step === 0;
+}
+
 export default function TableGrid({
   x_bins,
   y_bins,
@@ -368,24 +389,36 @@ export default function TableGrid({
       const fitW = availW - 2;
       const fitH = availH - 2;
 
-      const minCol = 22;
-      const minRow = 16;
-      const minAxis = 28;
+      // Readability floor: never crush below this when fitting. If the table
+      // is denser (e.g. 64 RPM bins), keep this size and scroll instead.
+      const minCol = 28;
+      const minRow = 18;
+      const minAxis = 32;
       const preferredCol = compact ? 56 : 48;
       const preferredRow = 32;
       const preferredAxis = compact ? 52 : 44;
 
-      let col = Math.floor((fitW - minAxis) / x_size);
-      col = Math.max(minCol, Math.min(preferredCol, col));
-      let axis = Math.floor(fitW - col * x_size);
-      axis = Math.max(minAxis, Math.min(preferredAxis, axis));
-      if (axis + col * x_size > fitW) {
-        col = Math.max(minCol, Math.floor((fitW - minAxis) / x_size));
-        axis = Math.max(minAxis, fitW - col * x_size);
+      const naturalCol = Math.floor((fitW - minAxis) / x_size);
+      let col: number;
+      let axis: number;
+      if (naturalCol < minCol) {
+        col = minCol;
+        axis = Math.max(minAxis, Math.min(preferredAxis, Math.floor(fitW * 0.12)));
+      } else {
+        col = Math.min(preferredCol, naturalCol);
+        axis = Math.floor(fitW - col * x_size);
+        axis = Math.max(minAxis, Math.min(preferredAxis, axis));
+        if (axis + col * x_size > fitW) {
+          col = Math.max(minCol, Math.floor((fitW - minAxis) / x_size));
+          axis = Math.max(minAxis, fitW - col * x_size);
+        }
       }
 
-      let row = Math.floor(fitH / (y_size + 1));
-      row = Math.max(minRow, Math.min(preferredRow, row));
+      const naturalRow = Math.floor(fitH / (y_size + 1));
+      const row =
+        naturalRow < minRow
+          ? minRow
+          : Math.max(minRow, Math.min(preferredRow, naturalRow));
 
       setFitPx((prev) =>
         prev && prev.axis === axis && prev.col === col && prev.row === row
@@ -402,6 +435,11 @@ export default function TableGrid({
 
   const axisCol = fitPx ? `${fitPx.axis}px` : compact ? '3.25rem' : '2.75rem';
   const dataCol = fitPx ? `${fitPx.col}px` : compact ? '3.5rem' : '3rem';
+  const colPx = fitPx?.col ?? (compact ? 56 : 48);
+  const xLabelStep = axisLabelStep(x_size, colPx);
+  const yLabelStep = axisLabelStep(y_size, fitPx?.row ?? 32);
+  const showCellNumbers = colPx >= 26;
+  const cellDecimals = colPx < 34 ? 0 : 1;
   const gridTemplateColumns = `${axisCol} repeat(${x_size}, ${dataCol})`;
   const gridStyle: CSSProperties = fitPx
     ? {
@@ -445,15 +483,19 @@ export default function TableGrid({
           );
         }
 
+        const label = formatBinLabel(val);
         return (
           <div
             key={`x-${i}`}
-            className={`axis-bin-label x-bin ${isHeaderSelected ? 'selected' : ''}`}
+            className={`axis-bin-label x-bin ${isHeaderSelected ? 'selected' : ''}${
+              shouldShowAxisLabel(i, x_size, xLabelStep) ? '' : ' axis-bin-label--tick'
+            }`}
+            title={label}
             onMouseDown={e => handleHeaderMouseDown(e, 'x', i)}
             onMouseEnter={() => handleHeaderMouseEnter('x', i)}
             onDoubleClick={() => handleHeaderDoubleClick('x', i)}
           >
-            {val}
+            {shouldShowAxisLabel(i, x_size, xLabelStep) ? label : ''}
           </div>
         );
       })}
@@ -482,12 +524,17 @@ export default function TableGrid({
         ) : (
           <div
             key={`y-${y}`}
-            className={`axis-bin-label y-bin ${isYHeaderSelected ? 'selected' : ''}`}
+            className={`axis-bin-label y-bin ${isYHeaderSelected ? 'selected' : ''}${
+              shouldShowAxisLabel(y, y_size, yLabelStep) ? '' : ' axis-bin-label--tick'
+            }`}
+            title={formatBinLabel(y_bins[y])}
             onMouseDown={e => handleHeaderMouseDown(e, 'y', y)}
             onMouseEnter={() => handleHeaderMouseEnter('y', y)}
             onDoubleClick={() => handleHeaderDoubleClick('y', y)}
           >
-            {y_bins[y]}
+            {shouldShowAxisLabel(y, y_size, yLabelStep)
+              ? formatBinLabel(y_bins[y])
+              : ''}
           </div>
         );
 
@@ -539,8 +586,13 @@ export default function TableGrid({
                       }}
                     />
                   ) : (
-                    <span className={`cell-value ${isSelected ? 'value-selected' : ''}`}>
-                      {value.toFixed(1)}
+                    <span
+                      className={`cell-value ${isSelected ? 'value-selected' : ''}`}
+                      title={value.toFixed(2)}
+                    >
+                      {(showCellNumbers || isSelected)
+                        ? value.toFixed(isSelected ? 1 : cellDecimals)
+                        : ''}
                     </span>
                   )}
                   {isLocked && <div className="lock-indicator" />}
