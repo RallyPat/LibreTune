@@ -93,20 +93,11 @@ pub async fn resize_table_size(
         let info = dynamic_table::table_size_info(def, table, &|_| None)
             .ok_or("This table is not resizable in the INI")?;
         info.allows(new_cols, new_rows)?;
-        let shared = dynamic_table::tables_sharing_size_consts(
-            def,
-            &info.cols_const,
-            &info.rows_const,
-        );
+        let shared =
+            dynamic_table::tables_sharing_size_consts(def, &info.cols_const, &info.rows_const);
         let x_bins = table.x_bins.clone();
         let y_bins = table.y_bins.clone();
-        (
-            info.cols_const,
-            info.rows_const,
-            shared,
-            x_bins,
-            y_bins,
-        )
+        (info.cols_const, info.rows_const, shared, x_bins, y_bins)
     };
 
     // Primary table: build new linearly spaced axes from current endpoints, interpolate Z.

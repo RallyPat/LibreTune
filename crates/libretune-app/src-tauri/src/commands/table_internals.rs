@@ -178,11 +178,13 @@ pub(crate) async fn get_table_data_internal(
             }
         }
         info.max_elements = max_elements;
-        while info.active_cols * info.active_rows > info.max_elements && info.active_cols > info.min_cols
+        while info.active_cols * info.active_rows > info.max_elements
+            && info.active_cols > info.min_cols
         {
             info.active_cols -= 1;
         }
-        while info.active_cols * info.active_rows > info.max_elements && info.active_rows > info.min_rows
+        while info.active_cols * info.active_rows > info.max_elements
+            && info.active_rows > info.min_rows
         {
             info.active_rows -= 1;
         }
@@ -198,8 +200,11 @@ pub(crate) async fn get_table_data_internal(
         } else {
             y_bins_full
         };
-        let z_values =
-            dynamic_table::unpack_z(&z_flat, info.active_cols, if is_3d { info.active_rows } else { 1 });
+        let z_values = dynamic_table::unpack_z(
+            &z_flat,
+            info.active_cols,
+            if is_3d { info.active_rows } else { 1 },
+        );
         (x_bins, y_bins, z_values, Some(TableSizeInfoDto::from(info)))
     } else {
         let x_size = x_bins_full.len();
@@ -301,10 +306,10 @@ pub(crate) async fn update_table_z_values_internal(
             if let Some(page) = cache.get_page(constant.page) {
                 let element_size = constant.data_type.size_bytes();
                 let start = constant.offset as usize;
-                for i in 0..allocated {
+                for (i, slot) in allocated_flat.iter_mut().enumerate() {
                     let off = start + i * element_size;
                     if let Some(raw) = constant.data_type.read_from_bytes(page, off, endianness) {
-                        allocated_flat[i] = constant.raw_to_display(raw);
+                        *slot = constant.raw_to_display(raw);
                     }
                 }
             }
@@ -415,10 +420,10 @@ pub(crate) async fn update_constant_array_internal(
             if let Some(page) = cache.get_page(constant.page) {
                 let element_size = constant.data_type.size_bytes();
                 let start = constant.offset as usize;
-                for i in 0..allocated {
+                for (i, slot) in full.iter_mut().enumerate() {
                     let off = start + i * element_size;
                     if let Some(raw) = constant.data_type.read_from_bytes(page, off, endianness) {
-                        full[i] = constant.raw_to_display(raw);
+                        *slot = constant.raw_to_display(raw);
                     }
                 }
             }

@@ -182,13 +182,12 @@ pub fn unpack_z(flat: &[f64], cols: usize, rows: usize) -> Vec<Vec<f64>> {
 
 /// Pack active Z into an allocated flat buffer (preserves unused tail).
 pub fn pack_z_into(allocated: &mut [f64], z: &[Vec<f64>]) {
-    let rows = z.len();
     let cols = z.first().map(|r| r.len()).unwrap_or(0);
-    for y in 0..rows {
-        for x in 0..cols {
+    for (y, row) in z.iter().enumerate() {
+        for (x, &val) in row.iter().enumerate().take(cols) {
             let idx = y * cols + x;
-            if idx < allocated.len() {
-                allocated[idx] = z[y][x];
+            if let Some(slot) = allocated.get_mut(idx) {
+                *slot = val;
             }
         }
     }

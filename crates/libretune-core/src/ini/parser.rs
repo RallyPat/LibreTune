@@ -1890,7 +1890,11 @@ fn post_process_dynamic_shapes(def: &mut EcuDefinition) {
         .collect();
 
     for name in names {
-        let dyn_refs = match def.constants.get(&name).and_then(|c| c.dynamic_size.clone()) {
+        let dyn_refs = match def
+            .constants
+            .get(&name)
+            .and_then(|c| c.dynamic_size.clone())
+        {
             Some(d) => d,
             None => continue,
         };
@@ -1980,11 +1984,7 @@ fn post_process_table_sizes(def: &mut EcuDefinition) {
             let d = map_const.dynamic_size.as_ref()?;
             let cols_name = d.cols_const.as_ref()?;
             let cols = def.default_values.get(cols_name).copied()?.round() as usize;
-            let rows = def
-                .default_values
-                .get(&d.rows_const)
-                .copied()?
-                .round() as usize;
+            let rows = def.default_values.get(&d.rows_const).copied()?.round() as usize;
             if cols > 0 && rows > 0 {
                 Some((cols, rows))
             } else {
@@ -3626,8 +3626,22 @@ table = veTable1, veTableMap, "VE Table"
         let ve = def.constants.get("veTable").expect("veTable");
         assert!(ve.dynamic_size.is_some());
         assert_eq!(ve.shape.element_count(), 256);
-        assert_eq!(def.constants.get("veLoadBins").unwrap().shape.element_count(), 32);
-        assert_eq!(def.constants.get("veRpmBins").unwrap().shape.element_count(), 32);
+        assert_eq!(
+            def.constants
+                .get("veLoadBins")
+                .unwrap()
+                .shape
+                .element_count(),
+            32
+        );
+        assert_eq!(
+            def.constants
+                .get("veRpmBins")
+                .unwrap()
+                .shape
+                .element_count(),
+            32
+        );
 
         let table = def.tables.get("veTable1").unwrap();
         assert_eq!(table.x_size, 16);
