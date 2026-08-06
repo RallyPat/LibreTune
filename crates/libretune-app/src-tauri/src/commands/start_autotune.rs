@@ -130,7 +130,7 @@ pub async fn start_autotune(
     // best-effort auto-discovery from the INI by common table/map names. Any
     // lookup failure falls back to an empty table, which AutoTune handles by
     // reverting to settings.target_afr and the RPM-based delay curve.
-    let reference_tables = resolve_reference_tables(
+    let mut reference_tables = resolve_reference_tables(
         def,
         cache,
         &table_name,
@@ -138,12 +138,35 @@ pub async fn start_autotune(
         lambda_delay_table_name.as_deref(),
     );
 
+    // Flow-scaled lambda-delay table: when requested and no explicit per-cell
+    // delay table was found (the Speeduino case — no lambdaDelay in the INI),
+    // synthesise one from the VE table. Transport delay ≈ exhaust volume /
+    // flow, and flow ∝ rpm·load·VE, so the delay is long at idle and short at
+    // high load. lambda_delay_ms anchors the low-flow end.
+    if settings.lambda_delay_flow_scaled && reference_tables.lambda_delay_table.is_empty() {
+        if let Some(table) = def.get_table_by_name_or_map(&table_name) {
+            if let Some(ve_z) =
+                read_table_z_values(def, cache, table.map.as_str(), table.x_size, table.y_size)
+            {
+                reference_tables.lambda_delay_table =
+                    libretune_core::autotune::compute_flow_scaled_delay_table(
+                        &ve_z,
+                        &x_bins,
+                        &y_bins,
+                        settings.lambda_delay_ms,
+                        settings.lambda_delay_floor_ms,
+                    );
+            }
+        }
+    }
+
     tracing::info!(
         resolved_load_source = ?resolved_load_source,
         x_bins = x_bins.len(),
         y_bins = y_bins.len(),
         table_in_ini = def.get_table_by_name_or_map(&table_name).is_some(),
         cache_present = cache.is_some(),
+        flow_scaled = settings.lambda_delay_flow_scaled,
         target_afr_table_resolved = !reference_tables.target_afr_table.is_empty(),
         lambda_delay_table_resolved = !reference_tables.lambda_delay_table.is_empty(),
         "start_autotune: resolved session (empty AFR/delay tables fall back to \

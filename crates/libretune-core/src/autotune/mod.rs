@@ -53,7 +53,22 @@ pub struct AutoTuneSettings {
     /// value belongs here because the RPM curve tops out at ~200 ms, far short
     /// of a real exhaust's dead time (this NA6 measures ~990 ms). The
     /// correlation buffer is sized to cover whatever delay is in use.
+    ///
+    /// When `lambda_delay_flow_scaled` is set, this is instead the delay at the
+    /// low-flow (idle/cruise) anchor, and per-cell delays are scaled down from
+    /// it toward `lambda_delay_floor_ms` as exhaust flow rises.
     pub lambda_delay_ms: f64,
+    /// Build a per-cell delay table scaled by exhaust flow instead of using a
+    /// single fixed delay. Transport delay ≈ exhaust-plumbing volume / flow,
+    /// and flow ∝ rpm·load·VE, so the delay is long at idle/cruise and short at
+    /// high load. `lambda_delay_ms` anchors the low-flow end; the table is
+    /// generated at session start from the VE table and populates the same
+    /// per-cell `lambda_delay_table` an INI could otherwise supply.
+    pub lambda_delay_flow_scaled: bool,
+    /// High-flow asymptote (ms) for the flow-scaled table — roughly the
+    /// sensor's own response floor, approached as flow rises. Only used when
+    /// `lambda_delay_flow_scaled` is set.
+    pub lambda_delay_floor_ms: f64,
 }
 
 impl Default for AutoTuneSettings {
@@ -63,6 +78,8 @@ impl Default for AutoTuneSettings {
             algorithm: "simple".to_string(),
             update_rate_ms: 100,
             lambda_delay_ms: 0.0,
+            lambda_delay_flow_scaled: false,
+            lambda_delay_floor_ms: 120.0,
         }
     }
 }
@@ -736,6 +753,80 @@ impl AutoTuneState {
     }
 }
 
+/// Build a per-cell lambda-delay table scaled by exhaust flow.
+///
+/// Transport delay ≈ exhaust-plumbing volume ÷ exhaust volumetric flow, and
+/// flow ∝ rpm·load·VE (the air actually burned, speed-density). So each cell's
+/// delay = `floor + K/flow`, anchored so a nominal warm idle / light-cruise
+/// point takes `idle_delay_ms` (where the cruise logs actually constrain it)
+/// and high-flow cells fall toward `floor_ms` (the sensor's own response).
+///
+/// `ve_table` is indexed `[load_row][rpm_col]` matching `y_bins`×`x_bins`; the
+/// returned table matches, ready for [`AutoTuneState::set_reference_tables`].
+/// Idle is treated as the modelled maximum (cells below the anchor flow clamp
+/// to `idle_delay_ms`).
+pub fn compute_flow_scaled_delay_table(
+    ve_table: &[Vec<f64>],
+    x_bins: &[f64],
+    y_bins: &[f64],
+    idle_delay_ms: f64,
+    floor_ms: f64,
+) -> Vec<Vec<f64>> {
+    // Warm-idle / light-cruise anchor: where cruise logs give the delay a real
+    // measurement. The value only sets which cell equals idle_delay_ms; the
+    // shape is 1/flow either way.
+    const ANCHOR_RPM: f64 = 800.0;
+    const ANCHOR_LOAD: f64 = 40.0;
+
+    let flow = |rpm: f64, load: f64, ve: f64| rpm.max(1.0) * load.max(1.0) * ve.max(1.0);
+    let nearest = |v: f64, b: &[f64]| {
+        b.iter()
+            .enumerate()
+            .min_by(|(_, a), (_, c)| {
+                (**a - v)
+                    .abs()
+                    .partial_cmp(&(**c - v).abs())
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .map(|(i, _)| i)
+            .unwrap_or(0)
+    };
+
+    let ax = nearest(ANCHOR_RPM, x_bins);
+    let ay = nearest(ANCHOR_LOAD, y_bins);
+    let anchor_ve = ve_table
+        .get(ay)
+        .and_then(|r| r.get(ax))
+        .copied()
+        .unwrap_or(50.0);
+    let anchor_flow = flow(
+        x_bins.get(ax).copied().unwrap_or(ANCHOR_RPM),
+        y_bins.get(ay).copied().unwrap_or(ANCHOR_LOAD),
+        anchor_ve,
+    );
+    let idle = idle_delay_ms.max(floor_ms);
+    let k = (idle - floor_ms) * anchor_flow;
+
+    y_bins
+        .iter()
+        .enumerate()
+        .map(|(j, &load)| {
+            x_bins
+                .iter()
+                .enumerate()
+                .map(|(i, &rpm)| {
+                    let ve = ve_table
+                        .get(j)
+                        .and_then(|r| r.get(i))
+                        .copied()
+                        .unwrap_or(anchor_ve);
+                    (floor_ms + k / flow(rpm, load, ve)).clamp(floor_ms, idle)
+                })
+                .collect()
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::field_reassign_with_default)]
@@ -773,7 +864,11 @@ mod tests {
             let f = AutoTuneFilters::default(); // min_clt = 160
             let a = AutoTuneAuthorityLimits::default();
             // clt=20 is far below min_clt: the sample must be rejected AND logged
-            // (before D9 this path returned silently).
+            // (before D9 this path returned silently). The reject log is
+            // throttled by a process-global counter, so feed a full throttle
+            // window (100+) to guarantee at least one line regardless of what
+            // other tests already put on that counter -- otherwise this flakes
+            // depending on test order.
             let p = VEDataPoint {
                 rpm: 2000.0,
                 load: 50.0,
@@ -785,7 +880,9 @@ mod tests {
                 timestamp_ms: 1000,
                 ..Default::default()
             };
-            st.add_data_point(p, &[1000.0, 2000.0], &[40.0, 80.0], &s, &f, &a);
+            for _ in 0..101 {
+                st.add_data_point(p.clone(), &[1000.0, 2000.0], &[40.0, 80.0], &s, &f, &a);
+            }
         });
         assert!(
             logs.lock()
@@ -844,6 +941,36 @@ mod tests {
             "buffer must retain samples ~900 ms old for a 900 ms configured delay"
         );
         assert!(state.buffer_max_age_ms >= 900);
+    }
+
+    #[test]
+    fn flow_scaled_delay_table_shortens_with_flow() {
+        // 3x3 grid, VE flat at 50. Delay must fall as rpm·load (flow) rises,
+        // hit idle_delay at the low-flow anchor, and never breach the bounds.
+        let x = vec![800.0, 3000.0, 6000.0]; // rpm
+        let y = vec![40.0, 70.0, 100.0]; // load
+        let ve = vec![vec![50.0; 3]; 3];
+        let idle = 1050.0;
+        let floor = 120.0;
+        let t = compute_flow_scaled_delay_table(&ve, &x, &y, idle, floor);
+
+        // Low-flow corner (anchor rpm=800, load=40) is the longest.
+        assert!(
+            (t[0][0] - idle).abs() < 1.0,
+            "anchor cell should equal idle delay"
+        );
+        // High-flow corner (6000 rpm, 100 load) is the shortest, near the floor.
+        assert!(t[2][2] < t[0][0], "high flow must be shorter than idle");
+        assert!(t[2][2] >= floor - 0.001 && t[2][2] < 400.0);
+        // Monotonic along rising rpm at fixed load, and rising load at fixed rpm.
+        assert!(t[0][0] > t[0][1] && t[0][1] > t[0][2]);
+        assert!(t[0][0] > t[1][0] && t[1][0] > t[2][0]);
+        // Bounds hold everywhere.
+        for row in &t {
+            for &d in row {
+                assert!((floor - 0.001..=idle + 0.001).contains(&d));
+            }
+        }
     }
 
     #[test]

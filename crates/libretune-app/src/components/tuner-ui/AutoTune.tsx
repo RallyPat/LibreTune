@@ -54,9 +54,18 @@ interface AutoTuneSettings {
   /**
    * Fixed lambda/AFR transport delay in ms (0 = auto: per-cell table if set,
    * else the RPM-based curve). Set a measured value here — the RPM curve tops
-   * out at ~200 ms, far short of a real exhaust's dead time.
+   * out at ~200 ms, far short of a real exhaust's dead time. When flow-scaled
+   * (below) is on, this is the delay at the low-flow (idle/cruise) anchor.
    */
   lambda_delay_ms: number;
+  /**
+   * Build a per-cell delay table scaled by exhaust flow (rpm·load·VE) instead
+   * of one fixed delay: long at idle, short at high load. lambda_delay_ms
+   * anchors the low-flow end; lambda_delay_floor_ms is the high-flow floor.
+   */
+  lambda_delay_flow_scaled: boolean;
+  /** High-flow floor (ms) for the flow-scaled table (sensor response). */
+  lambda_delay_floor_ms: number;
 }
 
 /**
@@ -202,6 +211,8 @@ export function AutoTune({ tableName: initialTableName = '', onClose, isConnecte
     algorithm: 'simple',
     update_rate_ms: 100,
     lambda_delay_ms: 0,
+    lambda_delay_flow_scaled: false,
+    lambda_delay_floor_ms: 120,
   });
 
   const [filters, setFilters] = useState<AutoTuneFilters>({
@@ -993,7 +1004,7 @@ export function AutoTune({ tableName: initialTableName = '', onClose, isConnecte
               />
             </div>
             <div className="setting-row">
-              <label>Lambda Delay (ms):</label>
+              <label>{settings.lambda_delay_flow_scaled ? 'Idle Delay (ms):' : 'Lambda Delay (ms):'}</label>
               <input
                 type="number"
                 value={settings.lambda_delay_ms}
@@ -1006,9 +1017,37 @@ export function AutoTune({ tableName: initialTableName = '', onClose, isConnecte
                 step="10"
                 min="0"
                 placeholder="0 = auto (RPM curve)"
-                title="Fixed AFR transport delay. 0 = auto. Measure it for your car — the RPM curve tops out at ~200 ms."
+                title="AFR transport delay. 0 = auto. Measure it for your car — the RPM curve tops out at ~200 ms. When flow-scaled is on, this is the delay at the low-flow (idle/cruise) anchor."
               />
             </div>
+            <label className="autotune-checkbox-row">
+              <input
+                type="checkbox"
+                checked={settings.lambda_delay_flow_scaled}
+                onChange={(e) =>
+                  setSettings({ ...settings, lambda_delay_flow_scaled: e.target.checked })
+                }
+              />
+              Flow-scale the delay across the table (long at idle, short at high load)
+            </label>
+            {settings.lambda_delay_flow_scaled && (
+              <div className="setting-row">
+                <label>High-flow Floor (ms):</label>
+                <input
+                  type="number"
+                  value={settings.lambda_delay_floor_ms}
+                  onChange={(e) =>
+                    setSettings({
+                      ...settings,
+                      lambda_delay_floor_ms: Math.max(0, parseFloat(e.target.value) || 0),
+                    })
+                  }
+                  step="10"
+                  min="0"
+                  title="High-flow asymptote — roughly the sensor's own response time, approached as exhaust flow rises."
+                />
+              </div>
+            )}
             <label className="autotune-checkbox-row">
               <input
                 type="checkbox"
