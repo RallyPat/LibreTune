@@ -128,9 +128,7 @@ pub(crate) fn compare_signatures_with_prefix(
 
 /// True when an ECU is connected and its signature fully mismatches the loaded INI.
 /// Offline (no connection) is never treated as a mismatch.
-pub(crate) async fn connected_signature_is_mismatch(
-    state: &tauri::State<'_, AppState>,
-) -> bool {
+pub(crate) async fn connected_signature_is_mismatch(state: &tauri::State<'_, AppState>) -> bool {
     let ecu_sig = {
         let conn_guard = state.connection.lock().await;
         match conn_guard.as_ref().and_then(|c| c.signature()) {
@@ -142,11 +140,8 @@ pub(crate) async fn connected_signature_is_mismatch(
     let Some(def) = def_guard.as_ref() else {
         return false;
     };
-    compare_signatures_with_prefix(
-        &ecu_sig,
-        &def.signature,
-        def.signature_prefix.as_deref(),
-    ) == SignatureMatchType::Mismatch
+    compare_signatures_with_prefix(&ecu_sig, &def.signature, def.signature_prefix.as_deref())
+        == SignatureMatchType::Mismatch
 }
 
 /// Block dangerous table-size changes when ECU/INI signatures disagree.
