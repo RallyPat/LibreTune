@@ -3,6 +3,9 @@
 //! Records real-time data from the ECU.
 
 use std::collections::VecDeque;
+use std::fs::File;
+use std::io::{BufWriter, Write};
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use super::LogEntry;
@@ -42,6 +45,14 @@ pub struct DataLogger {
     /// field (rather than the const directly) so tests can exercise the
     /// discard path without pushing hundreds of thousands of samples.
     max_buffer_size: usize,
+    /// Continuous stream-to-disk writer (TunerStudio-style: the log is written
+    /// to a file as it is recorded, so it is saved the whole time and survives
+    /// a crash). `None` = in-memory only.
+    stream: Option<BufWriter<File>>,
+    /// Path of the file being streamed to, if any.
+    stream_path: Option<PathBuf>,
+    /// Rows written to the stream file (used to flush periodically).
+    rows_written: u64,
 }
 
 impl DataLogger {
@@ -56,7 +67,36 @@ impl DataLogger {
             last_sample: None,
             discarded: 0,
             max_buffer_size: MAX_BUFFER_SIZE,
+            stream: None,
+            stream_path: None,
+            rows_written: 0,
         }
+    }
+
+    /// Begin streaming the log to `path` as CSV (`Time` + channel columns),
+    /// written as each sample is recorded. Overwrites any existing file.
+    /// Returns the error if the file cannot be created.
+    pub fn start_streaming<P: AsRef<Path>>(&mut self, path: P) -> std::io::Result<()> {
+        let path = path.as_ref().to_path_buf();
+        if let Some(dir) = path.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let mut w = BufWriter::new(File::create(&path)?);
+        write!(w, "Time")?;
+        for c in &self.channels {
+            write!(w, ",{c}")?;
+        }
+        writeln!(w)?;
+        w.flush()?;
+        self.stream = Some(w);
+        self.stream_path = Some(path);
+        self.rows_written = 0;
+        Ok(())
+    }
+
+    /// Path of the file being streamed to, if streaming is active.
+    pub fn stream_path(&self) -> Option<&Path> {
+        self.stream_path.as_deref()
     }
 
     /// Override the buffer ceiling. Test-only: lets the discard/counter path
@@ -90,9 +130,12 @@ impl DataLogger {
         self.last_sample = None;
     }
 
-    /// Stop recording
+    /// Stop recording. Flushes the stream file so the log on disk is complete.
     pub fn stop(&mut self) {
         self.is_recording = false;
+        if let Some(w) = self.stream.as_mut() {
+            let _ = w.flush();
+        }
     }
 
     /// Check if recording is active
@@ -120,6 +163,20 @@ impl DataLogger {
             .start_time
             .map(|start| now.duration_since(start))
             .unwrap_or_default();
+
+        // Stream this sample straight to disk (saved the whole time). Errors are
+        // swallowed so a disk hiccup never stalls the realtime path.
+        if let Some(w) = self.stream.as_mut() {
+            let _ = write!(w, "{:.3}", timestamp.as_secs_f64());
+            for v in &values {
+                let _ = write!(w, ",{v}");
+            }
+            let _ = writeln!(w);
+            self.rows_written += 1;
+            if self.rows_written.is_multiple_of(25) {
+                let _ = w.flush();
+            }
+        }
 
         let entry = LogEntry::new(timestamp, values);
 
@@ -249,5 +306,29 @@ mod tests {
         // clear() resets the discard counter for a fresh session.
         logger.clear();
         assert_eq!(logger.discarded_count(), 0);
+    }
+
+    #[test]
+    fn streams_samples_to_disk_continuously() {
+        // Each recorded sample must land in the file as it happens (saved the
+        // whole time), with a Time + channel header.
+        let dir = std::env::temp_dir().join(format!("lt_stream_{}", std::process::id()));
+        let path = dir.join("session.csv");
+        let mut logger = DataLogger::new(vec!["rpm".into(), "map".into()]);
+        logger.set_sample_rate(200.0);
+        logger.start_streaming(&path).expect("open stream file");
+        assert_eq!(logger.stream_path(), Some(path.as_path()));
+        logger.start();
+        logger.record(vec![1000.0, 50.0]);
+        std::thread::sleep(Duration::from_millis(7));
+        logger.record(vec![2000.0, 60.0]);
+        logger.stop(); // flushes
+
+        let content = std::fs::read_to_string(&path).expect("read stream file");
+        let lines: Vec<&str> = content.lines().collect();
+        assert_eq!(lines[0], "Time,rpm,map");
+        assert!(lines.len() >= 3, "header + 2 rows, got {}", lines.len());
+        assert!(lines[1].contains("1000") && lines[1].contains("50"));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

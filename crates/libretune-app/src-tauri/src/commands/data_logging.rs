@@ -82,6 +82,9 @@ pub struct LoggingStatus {
     /// Oldest samples dropped because the in-memory buffer hit its ceiling.
     /// Nonzero means the log no longer covers the whole session (D7).
     discarded_count: u64,
+    /// Path of the file the log is being streamed to (saved continuously),
+    /// or null when logging only to memory.
+    stream_path: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -111,6 +114,14 @@ pub async fn start_logging(
         }
     }
 
+    // The log is streamed continuously to a timestamped file in the project's
+    // datalogs/ folder (TunerStudio-style: saved the whole time). Grab the dir
+    // before taking the logger lock to avoid holding two locks at once.
+    let stream_dir = {
+        let proj = state.current_project.lock().await;
+        proj.as_ref().map(|p| p.path.join("datalogs"))
+    };
+
     let mut logger = state.data_logger.lock().await;
 
     // Recording appends to the current session (one continuous log until the
@@ -128,6 +139,18 @@ pub async fn start_logging(
         logger.set_sample_rate(rate);
     }
     logger.start();
+
+    // Open a fresh timestamped file and stream to it (matches TunerStudio's
+    // YYYY-MM-DD_HH.MM.SS naming). Streaming failure is non-fatal — recording
+    // still works in memory and can be saved manually.
+    if let Some(dir) = stream_dir {
+        let name = chrono::Local::now().format("%Y-%m-%d_%H.%M.%S").to_string();
+        let path = dir.join(format!("{name}.csv"));
+        match logger.start_streaming(&path) {
+            Ok(()) => tracing::info!("streaming datalog to {}", path.display()),
+            Err(e) => tracing::warn!("could not stream datalog to {}: {e}", path.display()),
+        }
+    }
 
     // Reset the dropped-sample counter for this session and mark recording
     // active so the stream tick counts (rather than silently swallows) any
@@ -157,6 +180,7 @@ pub async fn get_logging_status(
         duration_ms: logger.duration().as_millis() as u64,
         channels: logger.channels().to_vec(),
         discarded_count: logger.discarded_count(),
+        stream_path: logger.stream_path().map(|p| p.display().to_string()),
     })
 }
 

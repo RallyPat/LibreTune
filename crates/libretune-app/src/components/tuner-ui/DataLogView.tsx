@@ -18,6 +18,8 @@ interface LoggingStatus {
   entry_count: number;
   duration_ms: number;
   channels: string[];
+  /** File the log is being streamed to continuously (null = memory only). */
+  stream_path?: string | null;
 }
 
 interface LogEntry {
@@ -476,8 +478,13 @@ export const DataLogView: React.FC = () => {
 
   const handleSaveLog = useCallback(async () => {
     try {
+      // Default name includes local date AND time, matching TunerStudio's
+      // YYYY-MM-DD_HH.MM.SS convention (so two saves in a day don't collide).
+      const n = new Date();
+      const p2 = (x: number) => String(x).padStart(2, '0');
+      const stamp = `${n.getFullYear()}-${p2(n.getMonth() + 1)}-${p2(n.getDate())}_${p2(n.getHours())}.${p2(n.getMinutes())}.${p2(n.getSeconds())}`;
       const path = await save({
-        defaultPath: `datalog_${new Date().toISOString().split('T')[0]}.csv`,
+        defaultPath: `${stamp}.csv`,
         filters: [{ name: 'CSV Files', extensions: ['csv'] }]
       });
       
@@ -840,6 +847,11 @@ export const DataLogView: React.FC = () => {
           <span className="status-stat">{status.entry_count.toLocaleString()} samples</span>
           <span className="status-stat">{formatDuration(status.duration_ms)}</span>
           <span className="status-stat">{status.channels.length} channels</span>
+          {status.stream_path && (
+            <span className="status-stat" title={status.stream_path}>
+              💾 {status.stream_path.split(/[\\/]/).pop()}
+            </span>
+          )}
         </div>
       )}
       
