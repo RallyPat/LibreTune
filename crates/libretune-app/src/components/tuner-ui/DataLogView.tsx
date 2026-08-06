@@ -318,6 +318,31 @@ export const DataLogView: React.FC = () => {
 
     return () => clearInterval(interval);
   }, [isRecording, fetchLatestEntries]);
+
+  // On mount, resume an in-progress recording. The backend keeps recording even
+  // while this view is unmounted (navigating away), so coming back must reflect
+  // that -- not reset to "Not Logging" with an empty graph.
+  useEffect(() => {
+    (async () => {
+      try {
+        const st = await invoke<LoggingStatus>('get_logging_status');
+        if (st.is_recording) {
+          setIsRecording(true);
+          if (st.entry_count > 0) {
+            const entries = await invoke<LogEntry[]>('get_log_entries', {
+              startIndex: 0,
+              count: st.entry_count,
+              channels: neededChannelsRef.current,
+            });
+            setLogData(entries.map((e) => ({ x: e.timestamp_ms, values: e.values })));
+          }
+        }
+      } catch {
+        // not connected / no logger yet
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   
   // Seed channel list once when ECU data first arrives (avoid subscribing to all channels at 20Hz).
   useEffect(() => {

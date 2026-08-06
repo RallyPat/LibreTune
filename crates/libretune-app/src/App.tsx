@@ -640,27 +640,30 @@ function AppContent() {
   // Realtime ECU data stream lifecycle (extracted to hook).
   useRealtimeStream(status, fetchRealtimeData);
 
-  // Poll logging status when recording
+  // Track logging status from the BACKEND as the single source of truth, so the
+  // indicator is correct from any view and regardless of whether recording was
+  // started from the toolbar or the Data Logging view. (Previously this only
+  // polled once already logging, so a recording started elsewhere -- or still
+  // running after you navigated away -- showed as "Not Logging".)
   useEffect(() => {
-    if (!isLogging) return;
-    
-    const interval = setInterval(async () => {
+    if (status.state !== 'Connected') {
+      setIsLogging(false);
+      return;
+    }
+    const poll = async () => {
       try {
-        const loggingStatus = await invoke<{ is_recording: boolean; entry_count: number; duration_ms: number }>('get_logging_status');
-        setIsLogging(loggingStatus.is_recording);
-        
-        // Format duration as mm:ss
-        const seconds = Math.floor(loggingStatus.duration_ms / 1000);
-        const mins = Math.floor(seconds / 60);
-        const secs = seconds % 60;
-        setLogDuration(`${mins}:${secs.toString().padStart(2, '0')}`);
-      } catch (err) {
-        console.error('Failed to get logging status:', err);
+        const st = await invoke<{ is_recording: boolean; entry_count: number; duration_ms: number }>('get_logging_status');
+        setIsLogging(st.is_recording);
+        const seconds = Math.floor(st.duration_ms / 1000);
+        setLogDuration(`${Math.floor(seconds / 60)}:${(seconds % 60).toString().padStart(2, '0')}`);
+      } catch {
+        // no logger / not ready yet
       }
-    }, 500);
-    
+    };
+    poll();
+    const interval = setInterval(poll, 1000);
     return () => clearInterval(interval);
-  }, [isLogging]);
+  }, [status.state]);
 
   // Load menus when definition is loaded.
   // Gated on has_definition (not just connection) because the menu tree is
