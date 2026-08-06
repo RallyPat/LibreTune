@@ -71,7 +71,8 @@ pub async fn rebin_table(
 }
 
 /// Resize a TunerStudio dynamically sized table (and all tables sharing its
-/// row/col count scalars). Requires a live ECU connection.
+/// row/col count scalars). Works offline (tune RAM/file only); burns when connected.
+/// Blocked when a connected ECU signature fully mismatches the loaded INI.
 #[tauri::command]
 pub async fn resize_table_size(
     app: tauri::AppHandle,
@@ -80,9 +81,7 @@ pub async fn resize_table_size(
     new_cols: usize,
     new_rows: usize,
 ) -> Result<TableData, String> {
-    if state.connection.lock().await.is_none() {
-        return Err("ECU must be connected to resize the table".into());
-    }
+    crate::commands::signature_helpers::assert_resize_allowed(&state).await?;
 
     let (cols_const, rows_const, shared_tables, x_first, y_first) = {
         let def_guard = state.definition.lock().await;
@@ -155,8 +154,12 @@ pub async fn resize_table_size(
     update_constant(state.clone(), cols_const, new_cols as f64).await?;
     update_constant(state.clone(), rows_const, new_rows as f64).await?;
 
-    let burn = crate::commands::tune_io::burn_to_ecu(app, state.clone()).await;
-    burn.map_err(|e| format!("Resized in RAM but burn failed: {}", e))?;
+    let connected = state.connection.lock().await.is_some();
+    if connected {
+        crate::commands::tune_io::burn_to_ecu(app, state.clone())
+            .await
+            .map_err(|e| format!("Resized in RAM but burn failed: {}", e))?;
+    }
 
     get_table_data_internal(&state, &table_name).await
 }

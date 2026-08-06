@@ -221,6 +221,16 @@ pub(crate) async fn get_table_data_internal(
         (x_bins_full, y_bins_full, z_values, None)
     };
 
+    let size_info = if let Some(mut dto) = size_dto {
+        // Hide Set Size when a connected ECU fully mismatches the INI.
+        if crate::commands::signature_helpers::connected_signature_is_mismatch(state).await {
+            dto.resizable = false;
+        }
+        Some(dto)
+    } else {
+        None
+    };
+
     Ok(TableData {
         name: table_name_out,
         title: table_title,
@@ -231,7 +241,7 @@ pub(crate) async fn get_table_data_internal(
         y_axis_name: clean_axis_label(&y_label),
         x_output_channel,
         y_output_channel,
-        size_info: size_dto,
+        size_info,
     })
 }
 

@@ -900,7 +900,7 @@ export default function TableEditor2D({
       setRebinDialog({ show: false, newXBins: result.x_bins, newYBins: result.y_bins });
       onValuesChange?.(result.z_values);
       setSetSizeOpen(false);
-      showToast(`Table resized to ${rows}×${cols}`, 'success');
+      showToast(`Table resized to ${rows}x${cols}`, 'success');
     } catch (err) {
       handleOperationError('Set table size', err);
     } finally {

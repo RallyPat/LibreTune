@@ -57,7 +57,9 @@ export default function SetTableSizeDialog({
       <Dialog.Body>
         <p style={{ marginTop: 0 }}>
           Resize this table (and any tables that share its axes). Axes are regenerated between the
-          current endpoints and Z values are interpolated. ECU must stay connected.
+          current endpoints and Z values are interpolated. Works offline (saved to the tune); when
+          connected, changes are written and burned. Disabled if the ECU signature does not match
+          the INI.
         </p>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
           <label>
