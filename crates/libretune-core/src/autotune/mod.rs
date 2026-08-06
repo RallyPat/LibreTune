@@ -47,6 +47,13 @@ pub struct AutoTuneSettings {
     pub target_afr: f64,
     pub algorithm: String,
     pub update_rate_ms: u32,
+    /// Fixed lambda/AFR transport delay in ms — the lag from a fuelling change
+    /// to the wideband seeing it. `0` (default) means "auto": use the per-cell
+    /// reference table if present, otherwise the RPM-based curve. A measured
+    /// value belongs here because the RPM curve tops out at ~200 ms, far short
+    /// of a real exhaust's dead time (this NA6 measures ~990 ms). The
+    /// correlation buffer is sized to cover whatever delay is in use.
+    pub lambda_delay_ms: f64,
 }
 
 impl Default for AutoTuneSettings {
@@ -55,6 +62,7 @@ impl Default for AutoTuneSettings {
             target_afr: 14.7,
             algorithm: "simple".to_string(),
             update_rate_ms: 100,
+            lambda_delay_ms: 0.0,
         }
     }
 }
@@ -287,6 +295,41 @@ impl AutoTuneState {
 
         delay as u64
     }
+
+    /// Lambda delay to use when no per-cell reference value applies: the
+    /// session's configured fixed delay if set (> 0), otherwise the RPM-based
+    /// curve. The RPM curve tops out at ~200 ms, so a car whose real transport
+    /// delay is longer (this NA6: ~990 ms) must set a fixed value here.
+    fn configured_or_curve_delay_ms(&self, settings: &AutoTuneSettings, rpm: f64) -> u64 {
+        if settings.lambda_delay_ms > 0.0 {
+            settings.lambda_delay_ms as u64
+        } else {
+            self.get_lambda_delay_ms(rpm)
+        }
+    }
+
+    /// How much history the correlation buffer must hold: enough to still
+    /// contain a sample `delay` ago, plus margin so `find_delayed_data_point`
+    /// can bracket the target time. Never shrinks below the original 500 ms.
+    /// When nothing is configured (auto/RPM curve), stays at 500 ms exactly so
+    /// behaviour is unchanged.
+    fn required_buffer_ms(&self, settings: &AutoTuneSettings) -> u64 {
+        const DEFAULT_BUFFER_MS: u64 = 500;
+        const MARGIN_MS: u64 = 500;
+        let table_max = self
+            .reference_tables
+            .lambda_delay_table
+            .iter()
+            .flatten()
+            .cloned()
+            .fold(0.0_f64, f64::max);
+        let configured = settings.lambda_delay_ms.max(0.0).max(table_max);
+        if configured <= 0.0 {
+            DEFAULT_BUFFER_MS
+        } else {
+            (configured as u64 + MARGIN_MS).max(DEFAULT_BUFFER_MS)
+        }
+    }
     /// Prune old entries from the data buffer
     fn prune_data_buffer(&mut self, current_timestamp_ms: u64) {
         let cutoff = current_timestamp_ms.saturating_sub(self.buffer_max_age_ms);
@@ -348,6 +391,14 @@ impl AutoTuneState {
             return;
         }
 
+        // Size the correlation buffer to cover the delay actually in use, so a
+        // delayed AFR sample that old is still present when we look for it.
+        // A configured fixed delay or per-cell reference value can far exceed
+        // the RPM-curve's ~200 ms max (this NA6 measures ~990 ms); the old
+        // fixed 500 ms buffer silently pruned those away, so strict mode
+        // dropped every such sample. Must run before pruning below.
+        self.buffer_max_age_ms = self.required_buffer_ms(settings);
+
         // Always add to buffer for lambda delay correlation
         self.data_buffer.push_back(point.clone());
         self.prune_data_buffer(point.timestamp_ms);
@@ -380,15 +431,15 @@ impl AutoTuneState {
         self.total_samples += 1;
 
         // Resolve the lambda delay. Prefer the per-cell value from the
-        // reference table (bug #14) at the *current* conditions, falling back
-        // to the RPM-based transport-delay curve.
+        // reference table (bug #14) at the *current* conditions; otherwise use
+        // the session's configured fixed delay, or the RPM-based curve.
         let cur_x_idx = self.find_bin_index(point.rpm, table_x_bins);
         let cur_y_idx = self.find_bin_index(point.load, table_y_bins);
         let delay_ms = match (cur_x_idx, cur_y_idx) {
             (Some(cx), Some(cy)) => self
                 .resolve_lambda_delay_ms(cx, cy)
-                .unwrap_or_else(|| self.get_lambda_delay_ms(point.rpm)),
-            _ => self.get_lambda_delay_ms(point.rpm),
+                .unwrap_or_else(|| self.configured_or_curve_delay_ms(settings, point.rpm)),
+            _ => self.configured_or_curve_delay_ms(settings, point.rpm),
         };
 
         // Find the data point from when the current AFR reading was actually
@@ -743,6 +794,56 @@ mod tests {
                 .any(|m| m.contains("rejected by filters")),
             "a filtered-out sample must emit a diagnostic, not drop silently"
         );
+    }
+
+    #[test]
+    fn auto_delay_leaves_buffer_at_default_500ms() {
+        // lambda_delay_ms = 0 (auto) must keep the historical 500 ms window,
+        // so existing behaviour is unchanged when nothing is configured.
+        let state = AutoTuneState::new();
+        let settings = AutoTuneSettings::default();
+        assert_eq!(settings.lambda_delay_ms, 0.0);
+        assert_eq!(state.required_buffer_ms(&settings), 500);
+    }
+
+    #[test]
+    fn configured_delay_extends_buffer_beyond_500ms() {
+        // A configured 900 ms delay must size the buffer past the old fixed
+        // 500 ms cap, and the fixed value (not the RPM curve) must be used.
+        let mut state = AutoTuneState::new();
+        state.start();
+        let mut settings = AutoTuneSettings::default();
+        settings.lambda_delay_ms = 900.0;
+        let filters = AutoTuneFilters::default();
+        let authority = AutoTuneAuthorityLimits::default();
+        let x = vec![1000.0, 2000.0];
+        let y = vec![50.0, 100.0];
+
+        assert_eq!(state.required_buffer_ms(&settings), 1400); // 900 + 500 margin
+        assert_eq!(state.configured_or_curve_delay_ms(&settings, 1500.0), 900);
+
+        // Feed samples spanning 0..1000 ms; the oldest (t=0) must survive,
+        // whereas the old 500 ms buffer would have pruned everything before 500.
+        for ts in (0..=1000).step_by(100) {
+            let p = VEDataPoint {
+                rpm: 1500.0,
+                load: 75.0,
+                afr: 14.0,
+                ve: 50.0,
+                clt: 80.0,
+                tps: 10.0,
+                tps_rate: 0.0,
+                timestamp_ms: ts,
+                ..Default::default()
+            };
+            state.add_data_point(p, &x, &y, &settings, &filters, &authority);
+        }
+        assert_eq!(
+            state.data_buffer.front().map(|p| p.timestamp_ms),
+            Some(0),
+            "buffer must retain samples ~900 ms old for a 900 ms configured delay"
+        );
+        assert!(state.buffer_max_age_ms >= 900);
     }
 
     #[test]

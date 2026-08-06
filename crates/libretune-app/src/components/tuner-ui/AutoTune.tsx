@@ -51,6 +51,12 @@ interface AutoTuneSettings {
   algorithm: string;
   /** How often to process data in milliseconds */
   update_rate_ms: number;
+  /**
+   * Fixed lambda/AFR transport delay in ms (0 = auto: per-cell table if set,
+   * else the RPM-based curve). Set a measured value here — the RPM curve tops
+   * out at ~200 ms, far short of a real exhaust's dead time.
+   */
+  lambda_delay_ms: number;
 }
 
 /**
@@ -195,6 +201,7 @@ export function AutoTune({ tableName: initialTableName = '', onClose, isConnecte
     target_afr: 14.7,
     algorithm: 'simple',
     update_rate_ms: 100,
+    lambda_delay_ms: 0,
   });
 
   const [filters, setFilters] = useState<AutoTuneFilters>({
@@ -983,6 +990,23 @@ export function AutoTune({ tableName: initialTableName = '', onClose, isConnecte
                 placeholder="Optional (blank = RPM-based curve)"
                 value={lambdaDelayTable}
                 onChange={(e) => setLambdaDelayTable(e.target.value)}
+              />
+            </div>
+            <div className="setting-row">
+              <label>Lambda Delay (ms):</label>
+              <input
+                type="number"
+                value={settings.lambda_delay_ms}
+                onChange={(e) =>
+                  setSettings({
+                    ...settings,
+                    lambda_delay_ms: Math.max(0, parseFloat(e.target.value) || 0),
+                  })
+                }
+                step="10"
+                min="0"
+                placeholder="0 = auto (RPM curve)"
+                title="Fixed AFR transport delay. 0 = auto. Measure it for your car — the RPM curve tops out at ~200 ms."
               />
             </div>
             <label className="autotune-checkbox-row">
