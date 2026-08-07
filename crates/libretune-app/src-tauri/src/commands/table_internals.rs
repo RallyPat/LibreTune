@@ -163,31 +163,24 @@ pub(crate) async fn get_table_data_internal(
     let z_flat = read_const_values(&z_const, tune_guard.as_ref(), endianness);
 
     let size_info = size_snapshot.map(|(mut info, cols_c, rows_c, defaults, max_elements)| {
-        if let Some(ref c) = cols_c {
-            if let Some(v) = read_scalar_from_tune(c, tune_guard.as_ref(), endianness) {
-                info.active_cols = (v.round() as usize).clamp(info.min_cols, info.max_cols);
-            } else if let Some(v) = defaults.get(&info.cols_const) {
-                info.active_cols = (v.round() as usize).clamp(info.min_cols, info.max_cols);
-            }
-        }
-        if let Some(ref c) = rows_c {
-            if let Some(v) = read_scalar_from_tune(c, tune_guard.as_ref(), endianness) {
-                info.active_rows = (v.round() as usize).clamp(info.min_rows, info.max_rows);
-            } else if let Some(v) = defaults.get(&info.rows_const) {
-                info.active_rows = (v.round() as usize).clamp(info.min_rows, info.max_rows);
-            }
-        }
+        info.active_cols = dynamic_table::resolve_axis_count(
+            cols_c
+                .as_ref()
+                .and_then(|c| read_scalar_from_tune(c, tune_guard.as_ref(), endianness)),
+            info.min_cols,
+            info.max_cols,
+            defaults.get(&info.cols_const).copied(),
+        );
+        info.active_rows = dynamic_table::resolve_axis_count(
+            rows_c
+                .as_ref()
+                .and_then(|c| read_scalar_from_tune(c, tune_guard.as_ref(), endianness)),
+            info.min_rows,
+            info.max_rows,
+            defaults.get(&info.rows_const).copied(),
+        );
         info.max_elements = max_elements;
-        while info.active_cols * info.active_rows > info.max_elements
-            && info.active_cols > info.min_cols
-        {
-            info.active_cols -= 1;
-        }
-        while info.active_cols * info.active_rows > info.max_elements
-            && info.active_rows > info.min_rows
-        {
-            info.active_rows -= 1;
-        }
+        info.clamp_to_budget();
         info
     });
 

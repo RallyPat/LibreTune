@@ -180,6 +180,26 @@ pub async fn sync_ecu_data(
         set_conn_lock_holder("(none)");
     }
 
+    // Uninitialized resizable-table size scalars (0 / below INI min) → INI defaultValue.
+    // Without this, connected VE opens as 1×1 while TunerStudio shows the full default square.
+    let size_scalars_patched = {
+        let def_guard = state.definition.lock().await;
+        if let Some(def) = def_guard.as_ref() {
+            libretune_core::dynamic_table::patch_invalid_size_scalars(def, &mut tune.pages)
+        } else {
+            0
+        }
+    };
+    if size_scalars_patched > 0 {
+        let mut cache_guard = state.tune_cache.lock().await;
+        if let Some(cache) = cache_guard.as_mut() {
+            for (page_num, page_data) in &tune.pages {
+                cache.load_page(*page_num, page_data.clone());
+            }
+        }
+        *state.tune_modified.lock().await = true;
+    }
+
     // Store tune file in state (even if partial)
     let ecu_tune = tune.clone();
     {
@@ -247,7 +267,10 @@ pub async fn sync_ecu_data(
         restore_baseline_pages(state.inner(), &baseline_pages).await;
         *state.tune_mismatch_snapshot.lock().await = None;
     } else if pages_failed == 0 {
-        *state.tune_modified.lock().await = false;
+        // Keep dirty if we repaired size scalars — user should burn once to persist.
+        if size_scalars_patched == 0 {
+            *state.tune_modified.lock().await = false;
+        }
         *state.tune_mismatch_snapshot.lock().await = None;
         // Keep cache as ECU pages (authoritative after a clean match).
         {
@@ -269,6 +292,10 @@ pub async fn sync_ecu_data(
         for err in &errors {
             eprintln!("  - {}", err);
         }
+    }
+
+    if pages_failed == 0 {
+        let _ = app.emit("tune:loaded", "ecu-sync");
     }
 
     Ok(SyncResult {

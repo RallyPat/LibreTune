@@ -57,6 +57,8 @@ pub fn materialize_project_pages(
             pages.insert(page, data.to_vec());
         }
     }
+    // Old MSQ / pre-dynamic page images leave veTableRows/Cols at 0 — repair like TS defaults.
+    let _ = libretune_core::dynamic_table::patch_invalid_size_scalars(def, &mut pages);
     pages
 }
 

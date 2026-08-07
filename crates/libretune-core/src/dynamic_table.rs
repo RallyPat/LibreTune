@@ -46,21 +46,41 @@ impl TableSizeInfo {
         }
         Ok(())
     }
+
+    pub fn clamp_to_budget(&mut self) {
+        while self.active_cols * self.active_rows > self.max_elements
+            && self.active_cols > self.min_cols
+        {
+            self.active_cols -= 1;
+        }
+        while self.active_cols * self.active_rows > self.max_elements
+            && self.active_rows > self.min_rows
+        {
+            self.active_rows -= 1;
+        }
+    }
 }
 
-/// Read a scalar constant as usize (tune page data / named value / default).
-pub fn read_size_scalar(
-    def: &EcuDefinition,
-    name: &str,
-    get_value: &dyn Fn(&str) -> Option<f64>,
-) -> usize {
-    if let Some(v) = get_value(name) {
-        return v.round().max(0.0) as usize;
+/// Resolve one resizable-table axis count.
+///
+/// Values below INI `min` (including 0 from never-migrated firmware/MSQ) use
+/// `defaultValue`, matching TunerStudio — not a clamp-to-min that yields 1×1.
+pub fn resolve_axis_count(raw: Option<f64>, min: usize, max: usize, default: Option<f64>) -> usize {
+    let fallback = default
+        .map(|v| v.round() as usize)
+        .unwrap_or(min)
+        .clamp(min, max);
+    match raw {
+        Some(v) => {
+            let n = v.round() as i64;
+            if n < min as i64 {
+                fallback
+            } else {
+                (n as usize).clamp(min, max)
+            }
+        }
+        None => fallback,
     }
-    if let Some(v) = def.default_values.get(name) {
-        return v.round().max(0.0) as usize;
-    }
-    0
 }
 
 /// Size metadata for a table whose Z map uses dynamic `{const}` dimensions.
@@ -88,36 +108,19 @@ pub fn table_size_info(
         .unwrap_or_else(|| map.shape.element_count())
         .max(1);
 
-    let mut active_cols = read_size_scalar(def, &cols_const, get_value);
-    let mut active_rows = read_size_scalar(def, &rows_const, get_value);
-    if active_cols == 0 {
-        active_cols = def
-            .default_values
-            .get(&cols_const)
-            .map(|v| v.round() as usize)
-            .unwrap_or(min_cols)
-            .max(min_cols);
-    }
-    if active_rows == 0 {
-        active_rows = def
-            .default_values
-            .get(&rows_const)
-            .map(|v| v.round() as usize)
-            .unwrap_or(min_rows)
-            .max(min_rows);
-    }
-
-    // Clamp like firmware helpers — never exceed axis max or cell budget.
-    active_cols = active_cols.clamp(min_cols, max_cols);
-    active_rows = active_rows.clamp(min_rows, max_rows);
-    while active_cols * active_rows > max_elements && active_cols > min_cols {
-        active_cols -= 1;
-    }
-    while active_cols * active_rows > max_elements && active_rows > min_rows {
-        active_rows -= 1;
-    }
-
-    Some(TableSizeInfo {
+    let mut info = TableSizeInfo {
+        active_cols: resolve_axis_count(
+            get_value(&cols_const),
+            min_cols,
+            max_cols,
+            def.default_values.get(&cols_const).copied(),
+        ),
+        active_rows: resolve_axis_count(
+            get_value(&rows_const),
+            min_rows,
+            max_rows,
+            def.default_values.get(&rows_const).copied(),
+        ),
         cols_const,
         rows_const,
         min_cols,
@@ -125,9 +128,64 @@ pub fn table_size_info(
         min_rows,
         max_rows,
         max_elements,
-        active_cols,
-        active_rows,
-    })
+    };
+    info.clamp_to_budget();
+    Some(info)
+}
+
+/// Names of scalars used as dynamic table row/col counts.
+pub fn size_const_names(def: &EcuDefinition) -> Vec<String> {
+    let mut names = Vec::new();
+    for c in def.constants.values() {
+        let Some(d) = c.dynamic_size.as_ref() else {
+            continue;
+        };
+        if let Some(cols) = &d.cols_const {
+            names.push(cols.clone());
+        }
+        names.push(d.rows_const.clone());
+    }
+    names.sort();
+    names.dedup();
+    names
+}
+
+/// Write INI `defaultValue` into page bytes when a size scalar is out of range.
+/// Returns how many scalars were repaired (so callers can mark the tune dirty).
+pub fn patch_invalid_size_scalars(
+    def: &EcuDefinition,
+    pages: &mut std::collections::HashMap<u8, Vec<u8>>,
+) -> usize {
+    let mut patched = 0;
+    for name in size_const_names(def) {
+        let Some(c) = def.constants.get(&name) else {
+            continue;
+        };
+        if c.data_type.size_bytes() != 1 {
+            continue;
+        }
+        let Some(page) = pages.get_mut(&c.page) else {
+            continue;
+        };
+        let off = c.offset as usize;
+        if off >= page.len() {
+            continue;
+        }
+        let min = c.min.round().max(1.0) as u8;
+        let max = c.max.round().max(min as f64) as u8;
+        let default = def
+            .default_values
+            .get(&name)
+            .map(|v| v.round() as u8)
+            .unwrap_or(min)
+            .clamp(min, max);
+        let cur = page[off];
+        if cur < min || cur > max {
+            page[off] = default;
+            patched += 1;
+        }
+    }
+    patched
 }
 
 /// All table names that share the same row/col count scalars (must resize together).
@@ -238,5 +296,15 @@ mod tests {
     fn linspace_bins_endpoints() {
         let bins = linspace_bins(0.0, 100.0, 5);
         assert_eq!(bins, vec![0.0, 25.0, 50.0, 75.0, 100.0]);
+    }
+
+    #[test]
+    fn resolve_axis_uses_default_when_below_min() {
+        // Uninitialized ECU/MSQ bytes (0 or 1) must not become a 1×1 table.
+        assert_eq!(resolve_axis_count(Some(0.0), 8, 64, Some(32.0)), 32);
+        assert_eq!(resolve_axis_count(Some(1.0), 8, 64, Some(32.0)), 32);
+        assert_eq!(resolve_axis_count(None, 8, 64, Some(32.0)), 32);
+        assert_eq!(resolve_axis_count(Some(24.0), 8, 64, Some(32.0)), 24);
+        assert_eq!(resolve_axis_count(Some(100.0), 8, 64, Some(32.0)), 64);
     }
 }
