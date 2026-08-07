@@ -130,12 +130,19 @@ impl DataLogger {
         self.last_sample = None;
     }
 
-    /// Stop recording. Flushes the stream file so the log on disk is complete.
+    /// Stop recording and finalize the continuous log file.
+    ///
+    /// The stream writer is flushed and dropped (closing the OS file handle), so
+    /// the on-disk log is complete and nothing further can be appended to it.
+    /// This is what ends logging cleanly on ECU disconnect: with the stream
+    /// closed and recording off, the file can never grow with post-disconnect
+    /// junk or be left half-open. A fresh `start_streaming` opens a new file.
     pub fn stop(&mut self) {
         self.is_recording = false;
-        if let Some(w) = self.stream.as_mut() {
+        if let Some(mut w) = self.stream.take() {
             let _ = w.flush();
         }
+        self.stream_path = None;
     }
 
     /// Check if recording is active
@@ -164,17 +171,37 @@ impl DataLogger {
             .map(|start| now.duration_since(start))
             .unwrap_or_default();
 
-        // Stream this sample straight to disk (saved the whole time). Errors are
-        // swallowed so a disk hiccup never stalls the realtime path.
-        if let Some(w) = self.stream.as_mut() {
-            let _ = write!(w, "{:.3}", timestamp.as_secs_f64());
-            for v in &values {
-                let _ = write!(w, ",{v}");
-            }
-            let _ = writeln!(w);
+        // Stream this sample straight to disk (saved the whole time). Any error
+        // here is a disk/file I/O failure (disk full, file gone) — NOT ECU data:
+        // engine cut codes and the like are ordinary channel values and are
+        // recorded in `values` above. Rather than fail silently, a write error
+        // is logged once and the stream is dropped, so a broken file surfaces
+        // instead of quietly stopping and never stalls the realtime path.
+        if self.stream.is_some() {
             self.rows_written += 1;
-            if self.rows_written.is_multiple_of(25) {
-                let _ = w.flush();
+            let should_flush = self.rows_written.is_multiple_of(25);
+            let ts = timestamp.as_secs_f64();
+            let w = self.stream.as_mut().unwrap();
+            let res: std::io::Result<()> = (|| {
+                write!(w, "{ts:.3}")?;
+                for v in &values {
+                    write!(w, ",{v}")?;
+                }
+                writeln!(w)?;
+                if should_flush {
+                    w.flush()?;
+                }
+                Ok(())
+            })();
+            if let Err(e) = res {
+                tracing::warn!(
+                    "Data log stream write failed ({e}); stopping the continuous \
+                     file at {:?}. In-memory recording continues and can still be \
+                     saved manually.",
+                    self.stream_path
+                );
+                self.stream = None;
+                self.stream_path = None;
             }
         }
 

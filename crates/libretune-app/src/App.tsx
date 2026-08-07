@@ -648,6 +648,12 @@ function AppContent() {
   useEffect(() => {
     if (status.state !== 'Connected') {
       setIsLogging(false);
+      // ECU is offline: end logging so the log file is finalized and never
+      // grows with post-disconnect junk (which would waste space and risk a
+      // corrupt/misleading log). We only log while online; reconnecting starts
+      // a fresh recording. stop_logging is idempotent, so this is a no-op if
+      // nothing was recording.
+      invoke('stop_logging').catch(() => {});
       return;
     }
     const poll = async () => {
