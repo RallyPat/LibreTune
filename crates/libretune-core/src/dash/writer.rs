@@ -345,6 +345,15 @@ fn write_gauge_component<W: Write>(
     write_string_property(writer, "GaugePainter", gauge.gauge_painter.to_ts_string())?;
     write_boolean_property(writer, "RunDemo", gauge.run_demo)?;
 
+    // Lossless extras: painter-specific properties (MultiChannelTrend's
+    // lt_seriesN_* overlay series, TelemetryStat's lt_target_channel) and any
+    // unrecognized properties captured at parse time. Without this, a
+    // multi-series trend written to disk silently loses every series but the
+    // first when the file is loaded back.
+    for (k, v) in &gauge.extra_attrs {
+        write_string_property(writer, k, v)?;
+    }
+
     writer.write_event(Event::End(BytesEnd::new("dashComp")))?;
     Ok(())
 }
@@ -559,6 +568,54 @@ mod tests {
         assert!(xml.contains("<Title type=\"String\">RPM</Title>"));
         assert!(xml.contains("<OutputChannel type=\"String\">rpm</OutputChannel>"));
         assert!(xml.contains("Analog Gauge"));
+    }
+
+    #[test]
+    fn gauge_extra_attrs_roundtrip() {
+        // Painter-specific gauge properties (MultiChannelTrend's lt_seriesN_*
+        // overlay series, TelemetryStat's lt_target_channel) must survive
+        // write → parse. They used to be silently dropped, which reduced
+        // every multi-series trend loaded from disk to a single series.
+        let mut dash = DashFile::default();
+        let mut gauge = GaugeConfig {
+            id: "trend".to_string(),
+            title: "Live trend".to_string(),
+            output_channel: "rpm".to_string(),
+            gauge_painter: GaugePainter::MultiChannelTrend,
+            ..Default::default()
+        };
+        gauge
+            .extra_attrs
+            .insert("lt_series2_channel".to_string(), "map".to_string());
+        gauge
+            .extra_attrs
+            .insert("lt_series2_max".to_string(), "110".to_string());
+        gauge
+            .extra_attrs
+            .insert("lt_target_channel".to_string(), "afrTarget".to_string());
+        dash.gauge_cluster
+            .components
+            .push(DashComponent::Gauge(Box::new(gauge)));
+
+        let xml = write_dash_file(&dash).unwrap();
+        let parsed = super::super::parser::parse_dash_file(&xml).unwrap();
+
+        if let DashComponent::Gauge(ref g) = parsed.gauge_cluster.components[0] {
+            assert_eq!(
+                g.extra_attrs.get("lt_series2_channel").map(String::as_str),
+                Some("map")
+            );
+            assert_eq!(
+                g.extra_attrs.get("lt_series2_max").map(String::as_str),
+                Some("110")
+            );
+            assert_eq!(
+                g.extra_attrs.get("lt_target_channel").map(String::as_str),
+                Some("afrTarget")
+            );
+        } else {
+            panic!("Expected Gauge component");
+        }
     }
 
     #[test]

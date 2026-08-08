@@ -1044,6 +1044,10 @@ fn log_multi_trend(
     h: f64,
 ) -> DashComponent {
     let color = TsColor::from_css_hex(primary.color).unwrap_or(LT_LOG_BLUE);
+    let mut attrs = log_series_attrs(extra);
+    // The gauge title is the PANEL heading; the primary line needs its own
+    // legend label ("RPM", not the panel name).
+    attrs.insert("lt_series1_label".to_string(), primary.label.to_string());
     DashComponent::Gauge(Box::new(GaugeConfig {
         id: id.to_string(),
         title: title.to_string(),
@@ -1063,7 +1067,7 @@ fn log_multi_trend(
         trim_color: LT_LOG_GRAY,
         warn_color: LT_WARN_COLOR,
         critical_color: LT_CRITICAL_COLOR,
-        extra_attrs: log_series_attrs(extra),
+        extra_attrs: attrs,
         border_width: 1,
         shortest_size: 0, // see log_stat_tile's comment
         ..Default::default()

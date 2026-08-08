@@ -640,7 +640,14 @@ fn set_gauge_property(gauge: &mut GaugeConfig, prop: &str, value: &str) {
         "GaugeStyle" => gauge.gauge_style = value.to_string(),
         "GaugePainter" => gauge.gauge_painter = GaugePainter::from_ts_string(value),
         "RunDemo" => gauge.run_demo = value.parse().unwrap_or(false),
-        _ => {}
+        // Preserve unrecognized properties (painter-specific lt_* attributes,
+        // future TunerStudio additions) instead of silently dropping them —
+        // the writer emits `extra_attrs` back out, so they round-trip.
+        other => {
+            gauge
+                .extra_attrs
+                .insert(other.to_string(), value.to_string());
+        }
     }
 }
 

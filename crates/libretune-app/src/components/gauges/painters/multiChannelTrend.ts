@@ -43,17 +43,21 @@ function readLatestChannelValue(channel: string): number | undefined {
 
 /** Parse the primary series plus any `lt_seriesN_*` extra series from config. */
 function resolveSeries(config: TsGaugeConfig, primaryColor: string): TrendSeries[] {
+  const attrs = config.extra_attrs || {};
   const series: TrendSeries[] = [
     {
       channel: config.output_channel,
-      label: config.title || config.output_channel || 'Series 1',
+      // Prefer an explicit series label (lt_series1_label), then the channel
+      // name. The gauge title is the PANEL heading ("Live trend") — using it
+      // as the series label mislabeled the primary line's legend entry.
+      label:
+        attrs.lt_series1_label || config.output_channel || config.title || 'Series 1',
       color: primaryColor,
       min: config.min,
       max: config.max,
     },
   ];
 
-  const attrs = config.extra_attrs || {};
   for (let n = 2; n <= 1 + MAX_EXTRA_SERIES; n++) {
     const channel = attrs[`lt_series${n}_channel`];
     if (!channel) continue;
