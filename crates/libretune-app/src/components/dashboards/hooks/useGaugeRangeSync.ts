@@ -51,11 +51,18 @@ export function useGaugeRangeSync(
         const info = byChannel.get(channelKey) || byName.get(nameKey);
         if (!info) return comp;
 
+        // Only adopt the INI range when it's actually usable. Unresolvable
+        // INI range expressions arrive as null/NaN (e.g. `hi = {rpmhigh}`
+        // with no tune loaded), and a degenerate hi <= lo would peg the
+        // gauge; in both cases keep the dashboard's own range.
+        const rangeOk =
+          Number.isFinite(info.lo) && Number.isFinite(info.hi) && info.hi > info.lo;
+
         return {
           Gauge: {
             ...gauge,
-            min: info.lo,
-            max: info.hi,
+            min: rangeOk ? info.lo : gauge.min,
+            max: rangeOk ? info.hi : gauge.max,
             units: info.units,
             low_warning: Number.isFinite(info.low_warning) ? info.low_warning : gauge.low_warning,
             high_warning: Number.isFinite(info.high_warning) ? info.high_warning : gauge.high_warning,

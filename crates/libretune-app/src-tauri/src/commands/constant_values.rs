@@ -23,6 +23,21 @@ pub async fn get_all_constant_values(
     let cache_guard = state.tune_cache.lock().await;
     let tune_guard = state.current_tune.lock().await;
 
+    Ok(collect_scalar_constant_values(
+        def,
+        tune_guard.as_ref(),
+        cache_guard.as_ref(),
+    ))
+}
+
+/// Current value of every scalar constant, read from tune/cache (no ECU
+/// round-trip). Shared by visibility-condition evaluation and INI gauge-range
+/// expression resolution (`{rpmhigh}` etc.).
+pub(crate) fn collect_scalar_constant_values(
+    def: &libretune_core::ini::EcuDefinition,
+    tune: Option<&libretune_core::tune::TuneFile>,
+    cache: Option<&libretune_core::tune::TuneCache>,
+) -> HashMap<String, f64> {
     let mut values = HashMap::new();
     for (name, constant) in &def.constants {
         // Skip array constants (only need scalars for visibility conditions)
@@ -30,18 +45,11 @@ pub async fn get_all_constant_values(
             continue;
         }
 
-        let value = read_constant_from_cache_or_tune(
-            name,
-            constant,
-            def.endianness,
-            tune_guard.as_ref(),
-            cache_guard.as_ref(),
-        );
+        let value = read_constant_from_cache_or_tune(name, constant, def.endianness, tune, cache);
 
         values.insert(name.clone(), value);
     }
-
-    Ok(values)
+    values
 }
 
 /// Read a single constant value from tune file or cache (no ECU connection needed).
