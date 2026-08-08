@@ -546,13 +546,16 @@ pub async fn start_realtime_stream(
                     let elapsed_ms = start_time.elapsed().as_millis() as u64;
                     let mut data = sim.update(elapsed_ms);
 
-                    // User Math Channels Evaluation (Demo)
+                    // User Math Channels Evaluation (Demo). Dependency order,
+                    // not stored order — a channel referencing another math
+                    // channel created after it would otherwise read 0 (#127).
                     {
                         let mut channels_guard = app_state.math_channels.lock().await;
-                        for channel in channels_guard.iter_mut() {
-                            if channel.cached_ast.is_none() {
-                                let _ = channel.compile();
-                            }
+                        let order = libretune_core::project::math_channel_evaluation_order(
+                            &mut channels_guard,
+                        );
+                        for i in order {
+                            let channel = &channels_guard[i];
                             if let Some(expr) = &channel.cached_ast {
                                 if let Ok(val) =
                                     libretune_core::ini::expression::evaluate_simple(expr, &data)
@@ -716,10 +719,14 @@ pub async fn start_realtime_stream(
                             stream_log(&format!("tick #{}: T4-math_ch", tick_count));
                         }
                         if let Ok(mut channels_guard) = app_state.math_channels.try_lock() {
-                            for channel in channels_guard.iter_mut() {
-                                if channel.cached_ast.is_none() {
-                                    let _ = channel.compile();
-                                }
+                            // Dependency order, not stored order — a channel
+                            // referencing another math channel created after
+                            // it would otherwise read 0 (#127).
+                            let order = libretune_core::project::math_channel_evaluation_order(
+                                &mut channels_guard,
+                            );
+                            for i in order {
+                                let channel = &channels_guard[i];
                                 if let Some(expr) = &channel.cached_ast {
                                     if let Ok(val) =
                                         libretune_core::ini::expression::evaluate_simple(
