@@ -136,29 +136,86 @@ pub async fn get_frontpage(
 /// Used to configure dashboard gauges.
 ///
 /// Returns: Vector of GaugeInfo for all defined gauges
+/// Resolve one gauge numeric field: literal value, or its `{expression}`
+/// evaluated against the current tune/default values. An expression that
+/// cannot be resolved yields NaN (serialized as `null`), NOT the parser's
+/// placeholder fallback — a bogus 100 here is what pegged RPM gauges at 100
+/// after a range sync. The frontend treats non-finite as "keep the
+/// dashboard's own value".
+fn resolve_gauge_field(
+    literal: f64,
+    expr: Option<&str>,
+    ctx: &std::collections::HashMap<String, f64>,
+) -> f64 {
+    let Some(expr) = expr else {
+        return literal;
+    };
+    let parsed = match libretune_core::ini::expression::Parser::new(expr).parse() {
+        Ok(p) => p,
+        Err(_) => return f64::NAN,
+    };
+    match libretune_core::ini::expression::evaluate(&parsed, ctx, None) {
+        Ok(v) => {
+            let f = v.as_f64();
+            if f.is_finite() {
+                f
+            } else {
+                f64::NAN
+            }
+        }
+        Err(_) => f64::NAN,
+    }
+}
+
+/// Build the expression context for gauge ranges: scalar constant values from
+/// the tune/cache, plus INI `defaultValue` entries (PcVariables like
+/// `rpmhigh` live there) filling any gaps.
+fn gauge_expr_context(
+    def: &libretune_core::ini::EcuDefinition,
+    tune: Option<&libretune_core::tune::TuneFile>,
+    cache: Option<&libretune_core::tune::TuneCache>,
+) -> std::collections::HashMap<String, f64> {
+    let mut ctx = super::constant_values::collect_scalar_constant_values(def, tune, cache);
+    for (name, value) in &def.default_values {
+        ctx.entry(name.clone()).or_insert(*value);
+    }
+    ctx
+}
+
+fn gauge_to_info(
+    g: &libretune_core::ini::GaugeConfig,
+    ctx: &std::collections::HashMap<String, f64>,
+) -> GaugeInfo {
+    GaugeInfo {
+        name: g.name.clone(),
+        channel: g.channel.clone(),
+        title: g.title.clone(),
+        units: g.units.clone(),
+        lo: resolve_gauge_field(g.lo, g.lo_expr.as_deref(), ctx),
+        hi: resolve_gauge_field(g.hi, g.hi_expr.as_deref(), ctx),
+        low_warning: resolve_gauge_field(g.low_warning, g.low_warning_expr.as_deref(), ctx),
+        high_warning: resolve_gauge_field(g.high_warning, g.high_warning_expr.as_deref(), ctx),
+        low_danger: resolve_gauge_field(g.low_danger, g.low_danger_expr.as_deref(), ctx),
+        high_danger: resolve_gauge_field(g.high_danger, g.high_danger_expr.as_deref(), ctx),
+        digits: g.digits,
+    }
+}
+
 #[tauri::command]
 pub async fn get_gauge_configs(
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<GaugeInfo>, String> {
     let def_guard = state.definition.lock().await;
     let def = def_guard.as_ref().ok_or("Definition not loaded")?;
+    // Same lock order as get_all_constant_values: definition → cache → tune.
+    let cache_guard = state.tune_cache.lock().await;
+    let tune_guard = state.current_tune.lock().await;
+    let ctx = gauge_expr_context(def, tune_guard.as_ref(), cache_guard.as_ref());
 
     let gauges: Vec<GaugeInfo> = def
         .gauges
         .values()
-        .map(|g| GaugeInfo {
-            name: g.name.clone(),
-            channel: g.channel.clone(),
-            title: g.title.clone(),
-            units: g.units.clone(),
-            lo: g.lo,
-            hi: g.hi,
-            low_warning: g.low_warning,
-            high_warning: g.high_warning,
-            low_danger: g.low_danger,
-            high_danger: g.high_danger,
-            digits: g.digits,
-        })
+        .map(|g| gauge_to_info(g, &ctx))
         .collect();
     Ok(gauges)
 }
@@ -177,17 +234,10 @@ pub async fn get_gauge_config(
         .get(&gauge_name)
         .ok_or_else(|| format!("Gauge {} not found", gauge_name))?;
 
-    Ok(GaugeInfo {
-        name: gauge.name.clone(),
-        channel: gauge.channel.clone(),
-        title: gauge.title.clone(),
-        units: gauge.units.clone(),
-        lo: gauge.lo,
-        hi: gauge.hi,
-        low_warning: gauge.low_warning,
-        high_warning: gauge.high_warning,
-        low_danger: gauge.low_danger,
-        high_danger: gauge.high_danger,
-        digits: gauge.digits,
-    })
+    // Same lock order as get_all_constant_values: definition → cache → tune.
+    let cache_guard = state.tune_cache.lock().await;
+    let tune_guard = state.current_tune.lock().await;
+    let ctx = gauge_expr_context(def, tune_guard.as_ref(), cache_guard.as_ref());
+
+    Ok(gauge_to_info(gauge, &ctx))
 }
