@@ -4,6 +4,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::split_ini_line;
+
 /// A gauge configuration for dashboard display
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GaugeConfig {
@@ -128,9 +130,9 @@ fn parse_num_or_expr(raw: &str, fallback: f64) -> (f64, Option<String>) {
 ///
 /// Format: name = channel, title, units, lo, hi, loD, loW, hiW, hiD, digits
 pub fn parse_gauge_line(name: &str, value: &str) -> Option<GaugeConfig> {
-    let parts: Vec<&str> = value.split(',').map(|s| s.trim()).collect();
+    let parts = split_ini_line(value);
 
-    if parts.is_empty() {
+    if parts.is_empty() || parts[0].is_empty() {
         return None;
     }
 
@@ -143,22 +145,22 @@ pub fn parse_gauge_line(name: &str, value: &str) -> Option<GaugeConfig> {
         gauge.units = parts[2].trim_matches('"').to_string();
     }
     if parts.len() > 3 {
-        (gauge.lo, gauge.lo_expr) = parse_num_or_expr(parts[3], 0.0);
+        (gauge.lo, gauge.lo_expr) = parse_num_or_expr(&parts[3], 0.0);
     }
     if parts.len() > 4 {
-        (gauge.hi, gauge.hi_expr) = parse_num_or_expr(parts[4], 100.0);
+        (gauge.hi, gauge.hi_expr) = parse_num_or_expr(&parts[4], 100.0);
     }
     if parts.len() > 5 {
-        (gauge.low_danger, gauge.low_danger_expr) = parse_num_or_expr(parts[5], 0.0);
+        (gauge.low_danger, gauge.low_danger_expr) = parse_num_or_expr(&parts[5], 0.0);
     }
     if parts.len() > 6 {
-        (gauge.low_warning, gauge.low_warning_expr) = parse_num_or_expr(parts[6], 0.0);
+        (gauge.low_warning, gauge.low_warning_expr) = parse_num_or_expr(&parts[6], 0.0);
     }
     if parts.len() > 7 {
-        (gauge.high_warning, gauge.high_warning_expr) = parse_num_or_expr(parts[7], 100.0);
+        (gauge.high_warning, gauge.high_warning_expr) = parse_num_or_expr(&parts[7], 100.0);
     }
     if parts.len() > 8 {
-        (gauge.high_danger, gauge.high_danger_expr) = parse_num_or_expr(parts[8], 100.0);
+        (gauge.high_danger, gauge.high_danger_expr) = parse_num_or_expr(&parts[8], 100.0);
     }
     if parts.len() > 9 {
         gauge.digits = parts[9].parse().unwrap_or(0);
@@ -219,5 +221,22 @@ mod tests {
         assert_eq!(gauge.channel, "rpm");
         assert_eq!(gauge.title, "Engine Speed");
         assert_eq!(gauge.hi, 8000.0);
+    }
+
+    #[test]
+    fn test_parse_gauge_line_braced_title_with_comma() {
+        let gauge = parse_gauge_line(
+            "gppwmGauge1",
+            "gppwmOutput1, { bitStringValue(pwmAxisLabels, gppwm1_loadAxis) }, \"%\", 0, 100, 0, 0, 100, 100, 1",
+        )
+        .expect("parse");
+        assert_eq!(gauge.channel, "gppwmOutput1");
+        assert_eq!(
+            gauge.title,
+            "{ bitStringValue(pwmAxisLabels, gppwm1_loadAxis) }"
+        );
+        assert_eq!(gauge.units, "%");
+        assert_eq!(gauge.hi, 100.0);
+        assert_eq!(gauge.digits, 1);
     }
 }

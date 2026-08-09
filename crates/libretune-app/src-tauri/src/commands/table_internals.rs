@@ -1,7 +1,9 @@
 //! TableData struct and internal table helpers (extracted from lib.rs).
 
-use crate::{clean_axis_label, AppState};
+use crate::commands::string_context::{build_string_context, numeric_context_from_tune};
+use crate::state::AppState;
 use libretune_core::dynamic_table::{self, TableSizeInfo};
+use libretune_core::ini::expression::evaluate_display_string;
 use libretune_core::ini::Constant;
 use libretune_core::tune::{TuneFile, TuneValue};
 use serde::Serialize;
@@ -224,14 +226,20 @@ pub(crate) async fn get_table_data_internal(
         None
     };
 
+    let string_ctx = build_string_context(state).await;
+    let numeric = {
+        let tune = state.current_tune.lock().await;
+        numeric_context_from_tune(tune.as_ref())
+    };
+
     Ok(TableData {
         name: table_name_out,
         title: table_title,
         x_bins,
         y_bins,
         z_values,
-        x_axis_name: clean_axis_label(&x_label),
-        y_axis_name: clean_axis_label(&y_label),
+        x_axis_name: evaluate_display_string(&x_label, &numeric, Some(&string_ctx)),
+        y_axis_name: evaluate_display_string(&y_label, &numeric, Some(&string_ctx)),
         x_output_channel,
         y_output_channel,
         size_info,

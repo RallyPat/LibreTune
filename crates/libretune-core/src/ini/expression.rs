@@ -36,6 +36,21 @@ impl Value {
             Value::String(s) => !s.is_empty(),
         }
     }
+
+    /// Format for UI labels (gauge titles, axis labels, etc.).
+    pub fn to_display_string(&self) -> String {
+        match self {
+            Value::Number(n) => {
+                if n.fract() == 0.0 && n.abs() < 1e15 {
+                    format!("{}", *n as i64)
+                } else {
+                    n.to_string()
+                }
+            }
+            Value::Bool(b) => b.to_string(),
+            Value::String(s) => s.clone(),
+        }
+    }
 }
 
 /// Binary operators
@@ -1144,6 +1159,34 @@ pub fn evaluate_simple(expr: &Expr, context: &HashMap<String, f64>) -> Result<Va
     evaluate(expr, context, None)
 }
 
+/// Resolve a display string that may be a braced INI expression.
+///
+/// If `raw` trims to `{ ... }`, the inner expression is evaluated and stringified.
+/// Otherwise `raw` is returned unchanged. On parse/eval failure, returns `raw`.
+pub fn evaluate_display_string(
+    raw: &str,
+    context: &HashMap<String, f64>,
+    string_context: Option<&StringContext>,
+) -> String {
+    let trimmed = raw.trim();
+    if trimmed.starts_with('{') && trimmed.ends_with('}') && trimmed.len() >= 2 {
+        let inner = trimmed[1..trimmed.len() - 1].trim();
+        if inner.is_empty() {
+            return raw.to_string();
+        }
+        let mut parser = Parser::new(inner);
+        match parser.parse() {
+            Ok(expr) => match evaluate(&expr, context, string_context) {
+                Ok(value) => value.to_display_string(),
+                Err(_) => raw.to_string(),
+            },
+            Err(_) => raw.to_string(),
+        }
+    } else {
+        raw.to_string()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1251,6 +1294,70 @@ mod tests {
         assert_eq!(
             evaluate_simple(&expr, &context).unwrap(),
             Value::Number(0.0)
+        );
+    }
+
+    #[test]
+    fn test_string_value_with_context() {
+        let mut p = Parser::new("stringValue(gpPwmNote1)");
+        let expr = p.parse().unwrap();
+        let context = HashMap::new();
+
+        assert_eq!(
+            evaluate_simple(&expr, &context).unwrap(),
+            Value::String(String::new())
+        );
+
+        let mut string_ctx = StringContext::default();
+        string_ctx.get_string_value = Some(Box::new(|name| {
+            if name == "gpPwmNote1" {
+                Some("Radiator Fan".to_string())
+            } else {
+                None
+            }
+        }));
+        assert_eq!(
+            evaluate(&expr, &context, Some(&string_ctx)).unwrap(),
+            Value::String("Radiator Fan".to_string())
+        );
+        assert_eq!(
+            evaluate_display_string("{ stringValue(gpPwmNote1) }", &context, Some(&string_ctx)),
+            "Radiator Fan"
+        );
+    }
+
+    #[test]
+    fn test_bit_string_value_with_context() {
+        let mut p = Parser::new("bitStringValue(pwmAxisLabels, gppwm1_loadAxis)");
+        let expr = p.parse().unwrap();
+        let mut context = HashMap::new();
+        context.insert("gppwm1_loadAxis".to_string(), 1.0);
+
+        assert_eq!(
+            evaluate_simple(&expr, &context).unwrap(),
+            Value::String("INVALID[1]".to_string())
+        );
+
+        let mut string_ctx = StringContext::default();
+        string_ctx.get_bit_options = Some(Box::new(|name| {
+            if name == "pwmAxisLabels" {
+                Some(vec!["RPM".into(), "MAP".into(), "TPS".into()])
+            } else {
+                None
+            }
+        }));
+        assert_eq!(
+            evaluate(&expr, &context, Some(&string_ctx)).unwrap(),
+            Value::String("MAP".to_string())
+        );
+    }
+
+    #[test]
+    fn test_evaluate_display_string_passthrough() {
+        let context = HashMap::new();
+        assert_eq!(
+            evaluate_display_string("Engine Speed", &context, None),
+            "Engine Speed"
         );
     }
 }

@@ -61,6 +61,7 @@ export function useGaugeRangeSync(
         return {
           Gauge: {
             ...gauge,
+            title: info.title || gauge.title,
             min: rangeOk ? info.lo : gauge.min,
             max: rangeOk ? info.hi : gauge.max,
             units: info.units,

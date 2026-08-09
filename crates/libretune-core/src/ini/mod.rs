@@ -22,7 +22,7 @@ mod types;
 
 pub use constants::Constant;
 pub use error::IniError;
-pub use gauges::GaugeConfig;
+pub use gauges::{parse_gauge_line, GaugeConfig};
 pub use inc_tables::{IncTable, IncTableCache};
 pub use output_channels::OutputChannel;
 pub use tables::{CurveDefinition, TableDefinition, TableRole, TableType};
@@ -30,6 +30,41 @@ pub use types::*;
 
 use std::collections::HashMap;
 use std::path::Path;
+
+/// Split an INI line value by commas, respecting quotes and braces.
+/// Handles expressions like `{ bitStringValue(algorithmUnits , algorithm) }`.
+pub fn split_ini_line(value: &str) -> Vec<String> {
+    let mut parts = Vec::new();
+    let mut current = String::new();
+    let mut in_quotes = false;
+    let mut in_braces = 0;
+
+    for ch in value.chars() {
+        match ch {
+            '"' => {
+                in_quotes = !in_quotes;
+                current.push(ch);
+            }
+            '{' if !in_quotes => {
+                in_braces += 1;
+                current.push(ch);
+            }
+            '}' if !in_quotes => {
+                in_braces -= 1;
+                current.push(ch);
+            }
+            ',' if !in_quotes && in_braces == 0 => {
+                parts.push(current.trim().to_string());
+                current = String::new();
+            }
+            _ => {
+                current.push(ch);
+            }
+        }
+    }
+    parts.push(current.trim().to_string());
+    parts
+}
 
 /// Complete ECU definition parsed from an INI file
 #[derive(Debug, Clone)]

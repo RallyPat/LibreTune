@@ -10,7 +10,9 @@ use libretune_core::autotune::{
     AutoTuneState,
 };
 use libretune_core::datalog::DataLogger;
-use libretune_core::ini::{EcuDefinition, Endianness, OutputChannel, ProtocolSettings};
+use libretune_core::ini::{
+    EcuDefinition, Endianness, IncTableCache, OutputChannel, ProtocolSettings,
+};
 use libretune_core::plugin_system::PluginManager as WasmPluginManager;
 use libretune_core::project::{IniRepository, OnlineIniRepository, Project, UserMathChannel};
 use libretune_core::protocol::{Connection, ConnectionConfig};
@@ -208,6 +210,25 @@ pub struct AppState {
     /// JoinHandle for the currently-running AI assistant turn (if any).
     /// Aborted by `agent_stop` to cancel an in-flight LLM request.
     pub agent_task: Mutex<Option<tokio::task::JoinHandle<()>>>,
+    /// Process-start epoch seconds for INI `timeNow()`.
+    pub app_start_epoch: f64,
+    /// Cached `.inc` table files for INI `table()` expressions.
+    pub inc_table_cache: Arc<std::sync::Mutex<IncTableCache>>,
+}
+
+impl AppState {
+    /// Epoch seconds at process start (for `timeNow()`).
+    pub fn process_start_epoch() -> f64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs_f64())
+            .unwrap_or(0.0)
+    }
+
+    /// Empty `.inc` table cache for AppState construction.
+    pub fn new_inc_table_cache() -> Arc<std::sync::Mutex<IncTableCache>> {
+        Arc::new(std::sync::Mutex::new(IncTableCache::default()))
+    }
 }
 
 #[derive(Clone, Debug)]

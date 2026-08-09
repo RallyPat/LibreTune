@@ -1,6 +1,8 @@
 //! Menu tree and searchable index commands.
 
+use crate::commands::string_context::build_string_context;
 use crate::state::AppState;
+use libretune_core::ini::expression::StringContext;
 use libretune_core::ini::{Menu, MenuItem};
 use std::collections::HashMap;
 
@@ -9,6 +11,7 @@ pub async fn get_menu_tree(
     state: tauri::State<'_, AppState>,
     filter_context: Option<HashMap<String, f64>>,
 ) -> Result<Vec<Menu>, String> {
+    let string_ctx = build_string_context(&state).await;
     let def_guard = state.definition.lock().await;
     let def = def_guard.as_ref().ok_or("Definition not loaded")?;
 
@@ -17,7 +20,7 @@ pub async fn get_menu_tree(
     if let Some(context) = filter_context {
         let mut all_menus = Vec::new();
         for menu in &def.menus {
-            let items_with_flags = add_visibility_flags(&menu.items, &context);
+            let items_with_flags = add_visibility_flags(&menu.items, &context, &string_ctx);
             all_menus.push(Menu {
                 name: menu.name.clone(),
                 title: menu.title.clone(),
@@ -31,7 +34,11 @@ pub async fn get_menu_tree(
 }
 
 /// Recursively add visibility/enabled flags to menu items without filtering them out
-fn add_visibility_flags(items: &[MenuItem], context: &HashMap<String, f64>) -> Vec<MenuItem> {
+fn add_visibility_flags(
+    items: &[MenuItem],
+    context: &HashMap<String, f64>,
+    string_ctx: &StringContext,
+) -> Vec<MenuItem> {
     items
         .iter()
         .map(|item| {
@@ -43,8 +50,8 @@ fn add_visibility_flags(items: &[MenuItem], context: &HashMap<String, f64>) -> V
                     enabled_condition,
                     ..
                 } => {
-                    let visible = evaluate_visibility(visibility_condition, context);
-                    let enabled = evaluate_visibility(enabled_condition, context);
+                    let visible = evaluate_visibility(visibility_condition, context, string_ctx);
+                    let enabled = evaluate_visibility(enabled_condition, context, string_ctx);
                     MenuItem::Dialog {
                         label: label.clone(),
                         target: target.clone(),
@@ -61,8 +68,8 @@ fn add_visibility_flags(items: &[MenuItem], context: &HashMap<String, f64>) -> V
                     enabled_condition,
                     ..
                 } => {
-                    let visible = evaluate_visibility(visibility_condition, context);
-                    let enabled = evaluate_visibility(enabled_condition, context);
+                    let visible = evaluate_visibility(visibility_condition, context, string_ctx);
+                    let enabled = evaluate_visibility(enabled_condition, context, string_ctx);
                     MenuItem::Table {
                         label: label.clone(),
                         target: target.clone(),
@@ -79,10 +86,10 @@ fn add_visibility_flags(items: &[MenuItem], context: &HashMap<String, f64>) -> V
                     enabled_condition,
                     ..
                 } => {
-                    let visible = evaluate_visibility(visibility_condition, context);
-                    let enabled = evaluate_visibility(enabled_condition, context);
+                    let visible = evaluate_visibility(visibility_condition, context, string_ctx);
+                    let enabled = evaluate_visibility(enabled_condition, context, string_ctx);
                     // Recursively process children
-                    let children_with_flags = add_visibility_flags(sub_items, context);
+                    let children_with_flags = add_visibility_flags(sub_items, context, string_ctx);
                     MenuItem::SubMenu {
                         label: label.clone(),
                         items: children_with_flags,
@@ -99,8 +106,8 @@ fn add_visibility_flags(items: &[MenuItem], context: &HashMap<String, f64>) -> V
                     enabled_condition,
                     ..
                 } => {
-                    let visible = evaluate_visibility(visibility_condition, context);
-                    let enabled = evaluate_visibility(enabled_condition, context);
+                    let visible = evaluate_visibility(visibility_condition, context, string_ctx);
+                    let enabled = evaluate_visibility(enabled_condition, context, string_ctx);
                     MenuItem::Std {
                         label: label.clone(),
                         target: target.clone(),
@@ -117,8 +124,8 @@ fn add_visibility_flags(items: &[MenuItem], context: &HashMap<String, f64>) -> V
                     enabled_condition,
                     ..
                 } => {
-                    let visible = evaluate_visibility(visibility_condition, context);
-                    let enabled = evaluate_visibility(enabled_condition, context);
+                    let visible = evaluate_visibility(visibility_condition, context, string_ctx);
+                    let enabled = evaluate_visibility(enabled_condition, context, string_ctx);
                     MenuItem::Help {
                         label: label.clone(),
                         target: target.clone(),
@@ -135,11 +142,17 @@ fn add_visibility_flags(items: &[MenuItem], context: &HashMap<String, f64>) -> V
 }
 
 /// Evaluate visibility condition - returns true if visible (or on error/missing condition)
-fn evaluate_visibility(condition: &Option<String>, context: &HashMap<String, f64>) -> bool {
+fn evaluate_visibility(
+    condition: &Option<String>,
+    context: &HashMap<String, f64>,
+    string_ctx: &StringContext,
+) -> bool {
     if let Some(cond) = condition {
         let mut parser = libretune_core::ini::expression::Parser::new(cond);
         if let Ok(expr) = parser.parse() {
-            if let Ok(val) = libretune_core::ini::expression::evaluate_simple(&expr, context) {
+            if let Ok(val) =
+                libretune_core::ini::expression::evaluate(&expr, context, Some(string_ctx))
+            {
                 return val.as_bool();
             }
         }

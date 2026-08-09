@@ -60,6 +60,7 @@ pub mod save_tune;
 pub mod settings;
 pub mod signature_helpers;
 pub mod start_autotune;
+pub mod string_context;
 pub mod sync_ecu_data;
 pub mod system;
 pub mod table_compare;

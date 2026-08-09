@@ -2,7 +2,7 @@
 //!
 //! Parses the [Constants] section which defines editable ECU parameters.
 
-use super::parser::split_ini_line;
+use super::split_ini_line;
 use super::types::{DataType, DynamicSizeRefs, Endianness, Shape};
 use serde::{Deserialize, Serialize};
 

@@ -1,6 +1,8 @@
 //! INI metadata commands (tables, curves, frontpage, gauges).
 
+use crate::commands::string_context::{build_string_context, numeric_context_from_tune};
 use crate::state::AppState;
+use libretune_core::ini::expression::evaluate_display_string;
 use serde::Serialize;
 
 #[derive(Serialize)]
@@ -108,6 +110,12 @@ pub(crate) struct FrontPageInfo {
 pub async fn get_frontpage(
     state: tauri::State<'_, AppState>,
 ) -> Result<Option<FrontPageInfo>, String> {
+    let string_ctx = build_string_context(&state).await;
+    let numeric = {
+        let tune = state.current_tune.lock().await;
+        numeric_context_from_tune(tune.as_ref())
+    };
+
     let def_guard = state.definition.lock().await;
     let def = def_guard.as_ref().ok_or("Definition not loaded")?;
 
@@ -118,8 +126,8 @@ pub async fn get_frontpage(
             .iter()
             .map(|ind| FrontPageIndicatorInfo {
                 expression: ind.expression.clone(),
-                label_off: ind.label_off.clone(),
-                label_on: ind.label_on.clone(),
+                label_off: evaluate_display_string(&ind.label_off, &numeric, Some(&string_ctx)),
+                label_on: evaluate_display_string(&ind.label_on, &numeric, Some(&string_ctx)),
                 bg_off: libretune_core::ini::FrontPageIndicator::color_to_css(&ind.bg_off),
                 fg_off: libretune_core::ini::FrontPageIndicator::color_to_css(&ind.fg_off),
                 bg_on: libretune_core::ini::FrontPageIndicator::color_to_css(&ind.bg_on),
@@ -185,12 +193,13 @@ fn gauge_expr_context(
 fn gauge_to_info(
     g: &libretune_core::ini::GaugeConfig,
     ctx: &std::collections::HashMap<String, f64>,
+    string_ctx: &libretune_core::ini::expression::StringContext,
 ) -> GaugeInfo {
     GaugeInfo {
         name: g.name.clone(),
         channel: g.channel.clone(),
-        title: g.title.clone(),
-        units: g.units.clone(),
+        title: evaluate_display_string(&g.title, ctx, Some(string_ctx)),
+        units: evaluate_display_string(&g.units, ctx, Some(string_ctx)),
         lo: resolve_gauge_field(g.lo, g.lo_expr.as_deref(), ctx),
         hi: resolve_gauge_field(g.hi, g.hi_expr.as_deref(), ctx),
         low_warning: resolve_gauge_field(g.low_warning, g.low_warning_expr.as_deref(), ctx),
@@ -205,6 +214,8 @@ fn gauge_to_info(
 pub async fn get_gauge_configs(
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<GaugeInfo>, String> {
+    let string_ctx = build_string_context(&state).await;
+
     let def_guard = state.definition.lock().await;
     let def = def_guard.as_ref().ok_or("Definition not loaded")?;
     // Same lock order as get_all_constant_values: definition → cache → tune.
@@ -215,7 +226,7 @@ pub async fn get_gauge_configs(
     let gauges: Vec<GaugeInfo> = def
         .gauges
         .values()
-        .map(|g| gauge_to_info(g, &ctx))
+        .map(|g| gauge_to_info(g, &ctx, &string_ctx))
         .collect();
     Ok(gauges)
 }
@@ -226,6 +237,8 @@ pub async fn get_gauge_config(
     state: tauri::State<'_, AppState>,
     gauge_name: String,
 ) -> Result<GaugeInfo, String> {
+    let string_ctx = build_string_context(&state).await;
+
     let def_guard = state.definition.lock().await;
     let def = def_guard.as_ref().ok_or("Definition not loaded")?;
 
@@ -239,5 +252,5 @@ pub async fn get_gauge_config(
     let tune_guard = state.current_tune.lock().await;
     let ctx = gauge_expr_context(def, tune_guard.as_ref(), cache_guard.as_ref());
 
-    Ok(gauge_to_info(gauge, &ctx))
+    Ok(gauge_to_info(gauge, &ctx, &string_ctx))
 }

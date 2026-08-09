@@ -3,6 +3,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use crate::commands::string_context::refresh_inc_table_paths;
 use crate::paths::get_definitions_dir;
 use crate::{load_settings, save_settings, AppState};
 use libretune_core::ini::EcuDefinition;
@@ -44,6 +45,20 @@ pub async fn load_ini(
             let mut guard = state.definition.lock().await;
             *guard = Some(def);
             drop(guard);
+
+            {
+                let project_path = state
+                    .current_project
+                    .lock()
+                    .await
+                    .as_ref()
+                    .map(|p| p.path.clone());
+                refresh_inc_table_paths(
+                    &state.inc_table_cache,
+                    project_path.as_ref(),
+                    Some(get_definitions_dir(&app)),
+                );
+            }
 
             // An in-progress recording's channels were resolved against the
             // OLD definition — stop it rather than silently mixing

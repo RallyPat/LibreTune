@@ -126,10 +126,22 @@ impl OutputChannel {
         endian: super::Endianness,
         context: &std::collections::HashMap<String, f64>,
     ) -> Option<f64> {
+        self.parse_with_contexts(data, endian, context, None)
+    }
+
+    /// Like [`parse_with_context`], but supplies a [`super::expression::StringContext`]
+    /// so functions such as `timeNow()` / `table()` can resolve.
+    pub fn parse_with_contexts(
+        &self,
+        data: &[u8],
+        endian: super::Endianness,
+        context: &std::collections::HashMap<String, f64>,
+        string_context: Option<&super::expression::StringContext>,
+    ) -> Option<f64> {
         if self.is_computed() {
             // Use cached expression if available (much faster)
             if let Some(ref expr) = self.cached_expr {
-                match super::expression::evaluate_simple(expr, context) {
+                match super::expression::evaluate(expr, context, string_context) {
                     Ok(value) => return Some(value.as_f64()),
                     Err(_) => return None,
                 }
@@ -138,7 +150,7 @@ impl OutputChannel {
             if let Some(ref expr_str) = self.expression {
                 let mut parser = super::expression::Parser::new(expr_str);
                 match parser.parse() {
-                    Ok(expr) => match super::expression::evaluate_simple(&expr, context) {
+                    Ok(expr) => match super::expression::evaluate(&expr, context, string_context) {
                         Ok(value) => return Some(value.as_f64()),
                         Err(_) => return None,
                     },

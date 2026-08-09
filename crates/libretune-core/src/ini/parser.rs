@@ -678,40 +678,7 @@ fn parse_key_value(line: &str) -> Option<(&str, &str)> {
     }
 }
 
-/// Split an INI line value by commas, respecting quotes and braces
-/// This handles expressions like `{ bitStringValue(algorithmUnits , algorithm) }` correctly
-pub fn split_ini_line(value: &str) -> Vec<String> {
-    let mut parts = Vec::new();
-    let mut current = String::new();
-    let mut in_quotes = false;
-    let mut in_braces = 0;
-
-    for ch in value.chars() {
-        match ch {
-            '"' => {
-                in_quotes = !in_quotes;
-                current.push(ch);
-            }
-            '{' if !in_quotes => {
-                in_braces += 1;
-                current.push(ch);
-            }
-            '}' if !in_quotes => {
-                in_braces -= 1;
-                current.push(ch);
-            }
-            ',' if !in_quotes && in_braces == 0 => {
-                parts.push(current.trim().to_string());
-                current = String::new();
-            }
-            _ => {
-                current.push(ch);
-            }
-        }
-    }
-    parts.push(current.trim().to_string());
-    parts
-}
+pub use super::split_ini_line;
 
 /// Parse a #define directive
 /// Format: #define name = value1, value2, value3

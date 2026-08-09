@@ -22,6 +22,8 @@ const mockCtx = (): CanvasRenderingContext2D =>
     createLinearGradient: () => ({ addColorStop: vi.fn() }),
     arc: vi.fn(),
     setLineDash: vi.fn(),
+    save: vi.fn(),
+    restore: vi.fn(),
     shadowColor: '',
     shadowBlur: 0,
     shadowOffsetY: 0,

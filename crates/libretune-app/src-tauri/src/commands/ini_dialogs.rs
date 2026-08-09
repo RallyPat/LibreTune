@@ -1,7 +1,9 @@
 //! INI dialog/indicator/port-editor/help/expression query commands.
 
+use crate::commands::string_context::build_string_context;
 use crate::port_editor::{load_port_editor_store, save_port_editor_store, PortEditorAssignment};
 use crate::state::AppState;
+use libretune_core::ini::expression::{evaluate, evaluate_display_string, Parser};
 use libretune_core::ini::{DialogDefinition, HelpTopic};
 use std::collections::HashMap;
 
@@ -17,14 +19,30 @@ use std::collections::HashMap;
 /// Returns: Boolean result of expression evaluation
 #[tauri::command]
 pub async fn evaluate_expression(
-    _state: tauri::State<'_, AppState>,
+    state: tauri::State<'_, AppState>,
     expression: String,
     context: HashMap<String, f64>,
 ) -> Result<bool, String> {
-    let mut parser = libretune_core::ini::expression::Parser::new(&expression);
+    let string_ctx = build_string_context(&state).await;
+    let mut parser = Parser::new(&expression);
     let expr = parser.parse()?;
-    let val = libretune_core::ini::expression::evaluate_simple(&expr, &context)?;
+    let val = evaluate(&expr, &context, Some(&string_ctx))?;
     Ok(val.as_bool())
+}
+
+/// Evaluate a display string that may be a braced INI expression (e.g. gauge titles).
+#[tauri::command]
+pub async fn evaluate_string_expression(
+    state: tauri::State<'_, AppState>,
+    expression: String,
+    context: HashMap<String, f64>,
+) -> Result<String, String> {
+    let string_ctx = build_string_context(&state).await;
+    Ok(evaluate_display_string(
+        &expression,
+        &context,
+        Some(&string_ctx),
+    ))
 }
 
 /// Retrieves a dialog definition from the INI file.

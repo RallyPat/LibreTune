@@ -225,6 +225,8 @@ mod demo_mode_tests {
             math_channels: Mutex::new(Vec::new()),
             stream_stats: Mutex::new(StreamStats::default()),
             agent_task: Mutex::new(None),
+            app_start_epoch: AppState::process_start_epoch(),
+            inc_table_cache: AppState::new_inc_table_cache(),
         };
 
         let dev_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))

@@ -33,8 +33,8 @@ pub(crate) use commands::types::{
     MatchingIniInfo, SignatureMatchType, SignatureMismatchInfo, SyncProgress, SyncResult,
 };
 pub(crate) use commands::util_helpers::{
-    clean_axis_label, get_conn_lock_holder, parse_runtime_packet_mode, read_raw_value,
-    set_conn_lock_holder, stream_log,
+    get_conn_lock_holder, parse_runtime_packet_mode, read_raw_value, set_conn_lock_holder,
+    stream_log,
 };
 
 // Tauri command imports — sorted alphabetically by module name.
@@ -102,8 +102,9 @@ use commands::hotkeys::{
     get_hotkey_bindings, is_onboarding_completed, mark_onboarding_completed, save_hotkey_bindings,
 };
 use commands::ini_dialogs::{
-    evaluate_expression, get_dialog_definition, get_help_topic, get_indicator_panel,
-    get_port_editor, get_port_editor_assignments, get_readout_panel, save_port_editor_assignments,
+    evaluate_expression, evaluate_string_expression, get_dialog_definition, get_help_topic,
+    get_indicator_panel, get_port_editor, get_port_editor_assignments, get_readout_panel,
+    save_port_editor_assignments,
 };
 use commands::ini_meta::{
     get_curves, get_frontpage, get_gauge_config, get_gauge_configs, get_tables,
@@ -218,6 +219,8 @@ pub fn run() {
             math_channels: Mutex::new(Vec::new()),
             stream_stats: Mutex::new(StreamStats::default()),
             agent_task: Mutex::new(None),
+            app_start_epoch: AppState::process_start_epoch(),
+            inc_table_cache: AppState::new_inc_table_cache(),
         })
         .invoke_handler(tauri::generate_handler![
             get_serial_ports,
@@ -280,6 +283,7 @@ pub fn run() {
             update_constant,
             auto_load_last_ini,
             evaluate_expression,
+            evaluate_string_expression,
             get_all_constant_values,
             start_autotune,
             stop_autotune,

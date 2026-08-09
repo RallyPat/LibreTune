@@ -24,38 +24,6 @@ pub(crate) fn bit_mask_u8(bits: u8) -> u8 {
     }
 }
 
-/// Clean up INI expression labels for display
-/// Converts expressions like `{bitStringValue(pwmAxisLabels, gppwm1_loadAxis)}`
-/// to a readable fallback like `gppwm1_loadAxis`
-pub(crate) fn clean_axis_label(label: &str) -> String {
-    let trimmed = label.trim();
-
-    // If it's an expression (starts with {), try to extract meaningful part
-    if trimmed.starts_with('{') && trimmed.ends_with('}') {
-        // Extract content inside braces
-        let inner = &trimmed[1..trimmed.len() - 1];
-
-        // Check for bitStringValue(list, index) pattern
-        if inner.starts_with("bitStringValue(") {
-            // Extract the second parameter (the index variable name)
-            if let Some(comma_pos) = inner.find(',') {
-                let second_part = inner[comma_pos + 1..].trim();
-                // Remove trailing ) if present
-                let name = second_part.trim_end_matches(')').trim();
-                if !name.is_empty() {
-                    return name.to_string();
-                }
-            }
-        }
-
-        // Fallback: just return the inner content without braces
-        return inner.to_string();
-    }
-
-    // Not an expression, return as-is
-    trimmed.to_string()
-}
-
 /// Helper to write stream diagnostic logs to /tmp/libretune-stream.log
 pub(crate) fn stream_log(msg: &str) {
     use std::io::Write;
