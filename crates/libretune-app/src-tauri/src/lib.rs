@@ -125,6 +125,7 @@ use commands::math_channels::{
 use commands::menu::{get_menu_tree, get_searchable_index};
 use commands::metrics::stop_metrics_task;
 use commands::online_ini::{check_internet_connectivity, download_ini, search_online_inis};
+use commands::pin_conflicts::check_pin_conflicts;
 use commands::project_lifecycle::{create_project, open_project};
 use commands::project_listing::{get_projects_path, list_projects};
 use commands::project_mgmt::{
@@ -341,6 +342,7 @@ pub fn run() {
             get_tune_constant_manifest,
             list_tune_files,
             burn_to_ecu,
+            check_pin_conflicts,
             execute_controller_command,
             get_firmware_flasher_info,
             get_firmware_update_guidance,

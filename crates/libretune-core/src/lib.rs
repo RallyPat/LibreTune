@@ -51,6 +51,7 @@ pub mod ecu;
 pub mod ini;
 pub mod llm;
 pub mod lua;
+pub mod pin_conflict;
 pub mod plugin_api;
 pub mod plugin_system;
 pub mod port_editor;

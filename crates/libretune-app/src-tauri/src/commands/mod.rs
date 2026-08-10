@@ -47,6 +47,7 @@ pub mod math_channels;
 pub mod menu;
 pub mod metrics;
 pub mod online_ini;
+pub mod pin_conflicts;
 pub mod project_lifecycle;
 pub mod project_listing;
 pub mod project_mgmt;

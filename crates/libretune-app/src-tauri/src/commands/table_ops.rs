@@ -156,7 +156,7 @@ pub async fn resize_table_size(
 
     let connected = state.connection.lock().await.is_some();
     if connected {
-        crate::commands::tune_io::burn_to_ecu(app, state.clone())
+        crate::commands::tune_io::burn_to_ecu(app, state.clone(), None)
             .await
             .map_err(|e| format!("Resized in RAM but burn failed: {}", e))?;
     }

@@ -51,12 +51,24 @@ pub async fn list_tune_files() -> Result<Vec<String>, String> {
 /// This is the critical "save to ECU" operation that persists changes.
 /// Saves window state first in case of issues.
 ///
+/// When `force` is not true, overlapping pin assignments abort the burn with
+/// a conflict summary (TunerStudio does not catch this; rusEFI reports it only
+/// after the fact as a Settings Error).
+///
 /// Returns: Nothing on success
 #[tauri::command]
 pub async fn burn_to_ecu(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
+    force: Option<bool>,
 ) -> Result<(), String> {
+    if !force.unwrap_or(false) {
+        let report = crate::commands::pin_conflicts::scan_pin_conflicts(&state).await?;
+        if report.has_conflicts() {
+            return Err(report.summary());
+        }
+    }
+
     // Save window state before critical operation (in case of crash)
     let _ = app.save_window_state(StateFlags::all());
 

@@ -198,7 +198,8 @@ pub async fn use_project_tune(
             ));
         }
 
-        let burn_result = crate::commands::tune_io::burn_to_ecu(app.clone(), state.clone()).await;
+        let burn_result =
+            crate::commands::tune_io::burn_to_ecu(app.clone(), state.clone(), None).await;
         {
             let mut conn_guard = state.connection.lock().await;
             if let Some(conn) = conn_guard.as_mut() {

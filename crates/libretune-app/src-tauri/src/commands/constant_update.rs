@@ -27,6 +27,11 @@ pub async fn update_constant(
         .unwrap_or(256) as usize;
     drop(def_guard);
 
+    // Block assigning a pin that another output already uses (rusEFI Settings Error).
+    if constant.data_type == libretune_core::ini::DataType::Bits {
+        crate::commands::pin_conflicts::deny_if_pin_conflict(&state, &name, value).await?;
+    }
+
     let mut conn_guard = state.connection.lock().await;
     let mut cache_guard = state.tune_cache.lock().await;
 
