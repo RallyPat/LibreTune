@@ -6,7 +6,6 @@ use libretune_core::project::{
     format_commit_message, BranchInfo, CommitDiff, CommitInfo, VersionControl,
 };
 use serde::Serialize;
-use tauri::Emitter;
 
 use crate::state::AppState;
 
@@ -162,18 +161,37 @@ pub async fn git_checkout(
     state: tauri::State<'_, AppState>,
     sha: String,
 ) -> Result<(), String> {
-    let proj_guard = state.current_project.lock().await;
-    let project = proj_guard
-        .as_ref()
-        .ok_or_else(|| "No project open".to_string())?;
+    // Checkout writes the historical CurrentTune.msq to the working tree.
+    // Resolve the path and release the lock before reloading — the checkout
+    // alone previously left every layer above the filesystem untouched
+    // (cache, state.current_tune, UI all kept serving the pre-checkout tune,
+    // and the next save wrote it back over the restored file; ledger R9,
+    // observed live). Reloading through load_tune is what the emitted
+    // "tune:loaded" event always assumed had happened.
+    let tune_path = {
+        let proj_guard = state.current_project.lock().await;
+        let project = proj_guard
+            .as_ref()
+            .ok_or_else(|| "No project open".to_string())?;
 
-    let vc = VersionControl::open(&project.path)
-        .map_err(|e| format!("Git repository not initialized: {}", e))?;
+        let vc = VersionControl::open(&project.path)
+            .map_err(|e| format!("Git repository not initialized: {}", e))?;
 
-    vc.checkout_commit(&sha)
-        .map_err(|e| format!("Failed to checkout: {}", e))?;
+        vc.checkout_commit(&sha)
+            .map_err(|e| format!("Failed to checkout: {}", e))?;
 
-    let _ = app.emit("tune:loaded", "git_checkout");
+        project.path.join("CurrentTune.msq")
+    };
+
+    crate::commands::load_tune::load_tune(
+        state.clone(),
+        app,
+        tune_path.to_string_lossy().to_string(),
+    )
+    .await?;
+
+    // The restored tune is not what the ECU is running until written/burned.
+    *state.tune_modified.lock().await = true;
 
     Ok(())
 }
@@ -223,18 +241,32 @@ pub async fn git_switch_branch(
     state: tauri::State<'_, AppState>,
     name: String,
 ) -> Result<(), String> {
-    let proj_guard = state.current_project.lock().await;
-    let project = proj_guard
-        .as_ref()
-        .ok_or_else(|| "No project open".to_string())?;
+    // Same shape as git_checkout: the branch switch rewrites CurrentTune.msq
+    // on disk, so the in-memory tune must be reloaded or the app keeps
+    // serving (and re-saving) the previous branch's tune.
+    let tune_path = {
+        let proj_guard = state.current_project.lock().await;
+        let project = proj_guard
+            .as_ref()
+            .ok_or_else(|| "No project open".to_string())?;
 
-    let vc = VersionControl::open(&project.path)
-        .map_err(|e| format!("Git repository not initialized: {}", e))?;
+        let vc = VersionControl::open(&project.path)
+            .map_err(|e| format!("Git repository not initialized: {}", e))?;
 
-    vc.switch_branch(&name)
-        .map_err(|e| format!("Failed to switch branch: {}", e))?;
+        vc.switch_branch(&name)
+            .map_err(|e| format!("Failed to switch branch: {}", e))?;
 
-    let _ = app.emit("tune:loaded", "git_switch_branch");
+        project.path.join("CurrentTune.msq")
+    };
+
+    crate::commands::load_tune::load_tune(
+        state.clone(),
+        app,
+        tune_path.to_string_lossy().to_string(),
+    )
+    .await?;
+
+    *state.tune_modified.lock().await = true;
 
     Ok(())
 }
