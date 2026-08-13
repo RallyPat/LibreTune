@@ -81,7 +81,20 @@ pub fn is_unassigned_pin_label(label: &str) -> bool {
     }
     matches!(
         t.to_ascii_lowercase().as_str(),
-        "none" | "invalid" | "off" | "disabled" | "not used" | "unused" | "n/a" | "na"
+        // "Board Default" (Speeduino) delegates to the board's pinout — it is
+        // not a physical pin, and most outputs legitimately sit there at once.
+        // Counting it produced a phantom conflict listing a dozen stock
+        // functions, and blocked ever assigning a selector back to it.
+        "none"
+            | "invalid"
+            | "off"
+            | "disabled"
+            | "not used"
+            | "unused"
+            | "n/a"
+            | "na"
+            | "default"
+            | "board default"
     )
 }
 
@@ -282,6 +295,32 @@ mod tests {
         let c = conflict.unwrap();
         assert_eq!(c.pin_label, "PD13");
         assert!(c.constants.contains(&"gppwm1_pin".to_string()));
+    }
+
+    #[test]
+    fn board_default_is_not_a_conflict() {
+        // Speeduino outputs default to "Board Default" (use the board pinout).
+        // Many constants share it simultaneously; that is not a pin collision,
+        // and assigning back to it must always be allowed.
+        let opts = ["Board Default", "1", "3", "30"];
+        let def = def_with(vec![
+            pin_const("fuelPumpPin", &opts),
+            pin_const("fanPin", &opts),
+            pin_const("boostPin", &opts),
+        ]);
+        let values = HashMap::from([
+            ("fuelPumpPin".to_string(), 0usize),
+            ("fanPin".to_string(), 0usize),
+            ("boostPin".to_string(), 0usize),
+        ]);
+        let report = detect_pin_conflicts(&def, |name, _| values.get(name).copied());
+        assert!(!report.has_conflicts(), "{}", report.summary());
+
+        assert!(
+            conflict_if_assigning(&def, "boostPin", 0, |name, _| values.get(name).copied())
+                .is_none(),
+            "assigning back to Board Default must never be blocked"
+        );
     }
 
     #[test]

@@ -198,8 +198,13 @@ pub async fn use_project_tune(
             ));
         }
 
+        // Loading an existing tune is not a pin-assignment action: the pin
+        // lint must not block persisting a tune the user already runs. Burn
+        // with force — interactive conflict resolution lives in BurnDialog,
+        // which surfaces the same scan with an explicit acknowledge-and-force
+        // checkbox before its own burn.
         let burn_result =
-            crate::commands::tune_io::burn_to_ecu(app.clone(), state.clone(), None).await;
+            crate::commands::tune_io::burn_to_ecu(app.clone(), state.clone(), Some(true)).await;
         {
             let mut conn_guard = state.connection.lock().await;
             if let Some(conn) = conn_guard.as_mut() {
