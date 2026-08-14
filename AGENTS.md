@@ -55,39 +55,42 @@ The project aims to provide professional ECU tuning workflow and functionality w
   - Multi-location documentation: docs/src and public/manual (kept in sync)
 
 ### 3. Dashboard System (TunerStudio-Compatible)
-- **NEW**: `crates/libretune-app/src/components/dashboards/TsDashboard.tsx` - Main dashboard component
-- **NEW**: `crates/libretune-app/src/components/dashboards/dashTypes.ts` - TypeScript types for TunerStudio format
-- **NEW**: `crates/libretune-app/src/components/dashboards/GaugeContextMenu.tsx` - Right-click context menu
-- **NEW**: `crates/libretune-app/src/components/gauges/TsGauge.tsx` - Canvas-based gauge renderer
-- **NEW**: `crates/libretune-app/src/components/gauges/TsIndicator.tsx` - Boolean indicator renderer
-- Backend: `crates/libretune-core/src/dash/{mod.rs,types.rs,parser.rs,writer.rs}`
-- Features: Native .ltdash.xml format, TunerStudio .dash import, right-click context menu, designer mode, gauge demo, dashboard selector
-- Dashboard Storage: `<app_data>/dashboards/` with auto-generated defaults (Basic, Tuning, Racing)
+- `crates/libretune-app/src/components/dashboards/TsDashboard.tsx` - Thin shell; all dashboard state lives in `src/stores/dashboardStore.ts` (Zustand)
+- `crates/libretune-app/src/components/dashboards/components/DashComponentView.tsx` - Shared positioned gauge/indicator renderer (live canvas + WYSIWYG designer)
+- `crates/libretune-app/src/components/dashboards/GaugeContextMenu.tsx` - Right-click context menu (works in both live and designer modes)
+- `crates/libretune-app/src/components/gauges/TsGauge.tsx` - Canvas-based gauge renderer
+- `crates/libretune-app/src/components/gauges/TsIndicator.tsx` - Boolean indicator renderer
+- Backend: `crates/libretune-core/src/dash/{mod.rs,types.rs,parser.rs,writer.rs,templates.rs,validation.rs}`
+- Commands: `crates/libretune-app/src-tauri/src/commands/{dash_files.rs,dash_layout.rs}`
+- Features: Native .ltdash.xml format, TunerStudio .dash/.gauge import (lossless round-trip via extra_attrs), right-click context menu, designer mode, gauge demo, dashboard selector, template picker, reset-to-defaults, suggested channel remaps for foreign-INI dashboards
+- Dashboard Storage: `<app_data>/dashboards/` with auto-generated defaults (Basic, Tuning, Telemetry Live)
+- Realtime data NEVER flows through dashboard React state: gauges read the Zustand realtime store imperatively inside their rAF loop (`gauges/useGaugeRenderer.ts`); sweep/demo values use the non-reactive `stores/gaugeOverride.ts`
 
 ### 4. Gauge Rendering (TunerStudio-Compatible)
-- Location: `crates/libretune-app/src/components/gauges/TsGauge.tsx`
-- **Enhanced in Jan 2026**: All gauge types now feature metallic bezels, shadows, gradients, and 3D effects
-- Gauge Types Implemented (13 of 13 - ALL COMPLETE):
+- Location: `crates/libretune-app/src/components/gauges/` — painter-registry architecture: `TsGauge.tsx` dispatches to pure per-painter modules under `painters/` (20 painter types), rendering lifecycle owned by `useGaugeRenderer.ts`, shared drawing helpers in `drawUtils.ts`
+- Gauge Types Implemented (20, incl. LibreTune-native TelemetryStat and MultiChannelTrend):
   - BasicReadout - LCD-style digital numeric display with metallic frame and inset shadows
   - HorizontalBarGauge - Horizontal progress bar with rounded corners and gradient fills
   - VerticalBarGauge - Vertical progress bar with tick marks and 3D gradient effects
-  - AnalogGauge - Classic circular dial with metallic bezel, minor ticks, gradient needle, center cap
+  - AnalogGauge (aliases: BasicAnalogGauge, CircleAnalogGauge) - Classic circular dial with metallic bezel, minor ticks, gradient needle, center cap
   - AsymmetricSweepGauge - Curved sweep gauge with glowing tip, warning zones, gradient fills
   - HorizontalLineGauge - Horizontal line indicator with position dot and glow effect
-  - VerticalDashedBar - Segmented vertical bar with per-segment zone coloring
+  - VerticalDashedBar / HorizontalDashedBar - Segmented bars with per-segment zone coloring
   - Histogram - Bar chart distribution visualization centered on current value
   - LineGraph - Time-series line chart with filled gradient area and current value dot
   - RoundGauge - Circular gauge with 270° arc and tick marks
   - RoundDashedGauge - Circular gauge with segmented arc
   - FuelMeter - Specialized fuel level gauge
   - Tachometer - RPM-specific gauge with redline zone
+  - AnalogBarGauge / AnalogMovingBarGauge - Arc-scale bar variants
+  - TelemetryStat / MultiChannelTrend - LibreTune-native tiles for dense telemetry views
 
 ### 5. Professional Default Dashboards
-- Location: `crates/libretune-app/src-tauri/src/lib.rs` (create_*_dashboard functions)
+- Location: builders in `crates/libretune-core/src/dash/templates.rs`; single template registry (id, file name, display info) in `crates/libretune-app/src-tauri/src/commands/dash_layout.rs` (`TEMPLATE_SPECS`)
 - Three professionally designed dashboards:
   - **Basic**: Large analog RPM + digital AFR + vertical CLT/IAT bars + horizontal MAP bar + battery/advance/VE/PW readouts
-  - **Racing**: Giant center RPM analog + oil pressure/water temp vertical bars + speed/AFR/boost/fuel digital readouts
   - **Tuning**: Mixed layout with sweep gauge, analog gauge, vertical bars, horizontal bars, lambda line graph, EGT/duty dashed bars, correction factor readouts
+  - **Telemetry Live**: Dense Grafana-style view — stat tiles, multi-series charts, sparklines ("Racing" was retired)
 - All dashboards use consistent dark color scheme with accent colors matching gauge purposes
 
 ### 6. Dialog System

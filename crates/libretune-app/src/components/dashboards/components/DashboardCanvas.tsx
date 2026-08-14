@@ -1,7 +1,6 @@
 import React from 'react';
-import { DashFile, GaugeCluster, isGauge, isIndicator } from '../dashTypes';
+import { DashFile, isGauge, isIndicator } from '../dashTypes';
 import DashComponentView from './DashComponentView';
-import { useEnabledCondition } from '../hooks/useEnabledCondition';
 
 interface Props {
   dashFile: DashFile;
@@ -70,52 +69,7 @@ export default function DashboardCanvas({
             onContextMenu={onContextMenu}
           />
         ))}
-        {/* Additional clusters layered on top of the primary cluster (Plan D-6).
-            They share the wrapper's coordinate space; per-cluster
-            enabled_condition gates their visibility. */}
-        {(dashFile.additional_clusters ?? []).map((extra, idx) => (
-          <ExtraClusterLayer
-            key={`extra-cluster-${idx}`}
-            cluster={extra}
-            embeddedImages={embeddedImages}
-            legacyMode={legacyMode}
-            isConnected={isConnected}
-            onContextMenu={onContextMenu}
-          />
-        ))}
       </div>
     </div>
-  );
-}
-
-/** Renders an additional cluster atop the primary one (Plan D-6, multi-cluster). */
-function ExtraClusterLayer({
-  cluster,
-  embeddedImages,
-  legacyMode,
-  isConnected,
-  onContextMenu,
-}: {
-  cluster: GaugeCluster;
-  embeddedImages: Map<string, string>;
-  legacyMode: boolean;
-  isConnected: boolean;
-  onContextMenu: (e: React.MouseEvent, gaugeId: string | null) => void;
-}) {
-  const visible = useEnabledCondition(cluster.enabled_condition ?? null);
-  if (!visible) return null;
-  return (
-    <>
-      {cluster.components.map((component, index) => (
-        <DashComponentView
-          key={(isGauge(component) ? component.Gauge.id : isIndicator(component) ? component.Indicator.id : null) || `xg-${index}`}
-          component={component}
-          embeddedImages={embeddedImages}
-          legacyMode={legacyMode}
-          isConnected={isConnected}
-          onContextMenu={onContextMenu}
-        />
-      ))}
-    </>
   );
 }

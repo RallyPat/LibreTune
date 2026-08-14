@@ -1,5 +1,5 @@
 
-import { FolderOpen } from 'lucide-react';
+import { FolderOpen, RotateCcw } from 'lucide-react';
 import { DashFileInfo } from '../dashTypes';
 import { dashBaseName } from '../shared/dashFilename';
 
@@ -9,6 +9,7 @@ interface Props {
   onSelect: (path: string) => void;
   onClose: () => void;
   onImportClick: () => void;
+  onResetDefaultsClick: () => void;
 }
 
 /**
@@ -21,6 +22,7 @@ export default function DashboardSelectorOverlay({
   onSelect,
   onClose,
   onImportClick,
+  onResetDefaultsClick,
 }: Props) {
   // Group dashboards by category
   const categories = new Map<string, DashFileInfo[]>();
@@ -74,6 +76,13 @@ export default function DashboardSelectorOverlay({
         <div className="ts-dashboard-import-section">
           <button className="ts-dashboard-import-btn" onClick={onImportClick}>
             <FolderOpen size={14} /> Import TS Dashboard Files...
+          </button>
+          <button
+            className="ts-dashboard-import-btn danger"
+            onClick={onResetDefaultsClick}
+            title="Delete all dashboards and recreate the built-in defaults"
+          >
+            <RotateCcw size={14} /> Reset to Defaults...
           </button>
         </div>
       </div>

@@ -61,6 +61,113 @@ pub struct ValidationReport {
     pub stats: DashboardStats,
 }
 
+/// A suggested output-channel substitution for a dashboard component whose
+/// channel is unknown in the loaded INI (e.g. a Speeduino-authored default
+/// dashboard opened against a rusEFI definition).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChannelRemap {
+    pub component_id: String,
+    pub from_channel: String,
+    pub to_channel: String,
+    /// How the suggestion was derived: "synonym" (cross-firmware alias
+    /// table) or "fuzzy" (substring match).
+    pub match_kind: String,
+}
+
+/// Cross-firmware channel aliases, normalized (lowercase, alphanumeric
+/// only). Used to suggest remaps when a dashboard references channels the
+/// loaded INI doesn't define.
+const CHANNEL_SYNONYMS: &[&[&str]] = &[
+    &["rpm", "rpmvalue", "rpmdot", "enginespeed", "enginerpm", "revs", "tach"],
+    &["coolant", "clt", "coolanttemp", "watertemp", "enginetemp"],
+    &["iat", "mat", "intaketemp", "intakeairtemp", "airtemp"],
+    &["map", "mappressure", "manifoldpressure"],
+    &["baro", "barometric", "baropressure"],
+    &["tps", "throttleposition", "throttlepos", "throttle"],
+    &["afr", "afr1", "airfuelratio", "lambda", "lambda1", "ego"],
+    &["afrtarget", "targetafr", "lambdatarget", "targetlambda"],
+    &["ve", "ve1", "volumetricefficiency"],
+    &["pulsewidth", "pulsewidth1", "pw", "pw1", "injpw", "injectiontime"],
+    &["dutycycle", "duty", "injectordutycycle"],
+    &["advance", "sparkadvance", "ignitionadvance", "timingadvance"],
+    &["dwell", "coildwell", "dwelltime"],
+    &["battery", "batteryvoltage", "vbat", "vbatt", "volts"],
+    &["oilpressure", "oilpres"],
+    &["oiltemp", "oiltemperature"],
+    &["boost", "boosttarget", "boostpsi"],
+    &["egt", "exhausttemp", "exhaustgastemp"],
+];
+
+/// Normalize a channel name for matching (lowercase, alphanumeric only).
+fn normalize_channel(name: &str) -> String {
+    name.chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .collect::<String>()
+        .to_lowercase()
+}
+
+/// Suggest channel remaps for every component whose output channel is not
+/// defined by `ecu_def`. Synonym matches win; a guarded substring match is
+/// the fallback. Returns only suggestions whose target actually exists.
+pub fn suggest_channel_remaps(dash: &DashFile, ecu_def: &EcuDefinition) -> Vec<ChannelRemap> {
+    let known: Vec<(String, String)> = ecu_def
+        .output_channels
+        .keys()
+        .map(|k| (normalize_channel(k), k.clone()))
+        .collect();
+    let lookup = |norm: &str| -> Option<&String> {
+        known.iter().find(|(n, _)| n == norm).map(|(_, k)| k)
+    };
+
+    let mut remaps = Vec::new();
+    for component in &dash.gauge_cluster.components {
+        let (id, from) = match component {
+            DashComponent::Gauge(g) => (g.id.clone(), g.output_channel.clone()),
+            DashComponent::Indicator(i) => (i.id.clone(), i.output_channel.clone()),
+        };
+        if from.is_empty() {
+            continue;
+        }
+        let norm = normalize_channel(&from);
+        if lookup(&norm).is_some() {
+            continue; // Channel already resolves in this INI.
+        }
+
+        // Synonym group: pick the first alias this INI actually defines.
+        let synonym_group = CHANNEL_SYNONYMS
+            .iter()
+            .find(|group| group.iter().any(|a| normalize_channel(a) == norm));
+        if let Some(group) = synonym_group {
+            if let Some(alias) = group.iter().find_map(|a| lookup(&normalize_channel(a))) {
+                remaps.push(ChannelRemap {
+                    component_id: id,
+                    from_channel: from.clone(),
+                    to_channel: alias.clone(),
+                    match_kind: "synonym".to_string(),
+                });
+                continue;
+            }
+        }
+
+        // Fuzzy: substring in either direction, with a length floor so
+        // short names like "ve" don't match everything containing "ve".
+        if norm.len() >= 4 {
+            let fuzzy = known.iter().find(|(n, _)| {
+                n.len() >= 4 && (n.contains(&norm) || norm.contains(n.as_str()))
+            });
+            if let Some((_, to)) = fuzzy {
+                remaps.push(ChannelRemap {
+                    component_id: id,
+                    from_channel: from.clone(),
+                    to_channel: to.clone(),
+                    match_kind: "fuzzy".to_string(),
+                });
+            }
+        }
+    }
+    remaps
+}
+
 /// Statistics about a dashboard.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DashboardStats {

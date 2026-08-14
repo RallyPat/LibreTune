@@ -740,30 +740,11 @@ pub struct DashFile {
     pub bibliography: Bibliography,
     /// Version information
     pub version_info: VersionInfo,
-    /// Primary gauge cluster (main content). Most TS dashes have exactly one.
+    /// Primary gauge cluster (main content). TS dashes have exactly one.
     pub gauge_cluster: GaugeCluster,
-    /// Additional gauge clusters for multi-cluster dashboards (Plan D-1).
-    /// Empty by default; iterate via [`DashFile::clusters`] to walk all
-    /// clusters in render order.
-    #[serde(default)]
-    pub additional_clusters: Vec<GaugeCluster>,
     /// Catch-all for un-modeled root-level `.dash` attributes.
     #[serde(default)]
     pub extra_attrs: BTreeMap<String, String>,
-}
-
-impl DashFile {
-    /// Iterate every gauge cluster (primary first, then additional) in
-    /// render order. Multi-cluster dashboards (Plan D-1) extend the
-    /// existing single-cluster code path without breaking it.
-    pub fn clusters(&self) -> impl Iterator<Item = &GaugeCluster> {
-        std::iter::once(&self.gauge_cluster).chain(self.additional_clusters.iter())
-    }
-
-    /// Mutable counterpart to [`DashFile::clusters`].
-    pub fn clusters_mut(&mut self) -> impl Iterator<Item = &mut GaugeCluster> {
-        std::iter::once(&mut self.gauge_cluster).chain(self.additional_clusters.iter_mut())
-    }
 }
 
 impl Default for DashFile {
@@ -779,7 +760,6 @@ impl Default for DashFile {
                 firmware_signature: None,
             },
             gauge_cluster: GaugeCluster::default(),
-            additional_clusters: Vec::new(),
             extra_attrs: BTreeMap::new(),
         }
     }

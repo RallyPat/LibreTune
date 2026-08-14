@@ -427,6 +427,12 @@ fn write_indicator_component<W: Write>(
     )?;
     write_boolean_property(writer, "RunDemo", indicator.run_demo)?;
 
+    // Lossless extras: same guarantee gauges have — unrecognized
+    // properties captured at parse time are emitted back out.
+    for (k, v) in &indicator.extra_attrs {
+        write_string_property(writer, k, v)?;
+    }
+
     writer.write_event(Event::End(BytesEnd::new("dashComp")))?;
     Ok(())
 }
@@ -615,6 +621,45 @@ mod tests {
             );
         } else {
             panic!("Expected Gauge component");
+        }
+    }
+
+    #[test]
+    fn indicator_extra_attrs_roundtrip() {
+        // Unrecognized indicator properties must survive write → parse
+        // (same lossless guarantee gauges have). They used to be silently
+        // dropped by the parser's `_ => {}` catch-all.
+        let mut dash = DashFile::default();
+        let mut indicator = IndicatorConfig {
+            id: "shift-light".to_string(),
+            on_text: "SHIFT".to_string(),
+            output_channel: "rpm".to_string(),
+            ..Default::default()
+        };
+        indicator
+            .extra_attrs
+            .insert("lt_designer_hidden".to_string(), "true".to_string());
+        indicator
+            .extra_attrs
+            .insert("SomeFutureTsProperty".to_string(), "blue".to_string());
+        dash.gauge_cluster
+            .components
+            .push(DashComponent::Indicator(Box::new(indicator)));
+
+        let xml = write_dash_file(&dash).unwrap();
+        let parsed = super::super::parser::parse_dash_file(&xml).unwrap();
+
+        if let DashComponent::Indicator(ref ind) = parsed.gauge_cluster.components[0] {
+            assert_eq!(
+                ind.extra_attrs.get("lt_designer_hidden").map(String::as_str),
+                Some("true")
+            );
+            assert_eq!(
+                ind.extra_attrs.get("SomeFutureTsProperty").map(String::as_str),
+                Some("blue")
+            );
+        } else {
+            panic!("Expected Indicator component");
         }
     }
 

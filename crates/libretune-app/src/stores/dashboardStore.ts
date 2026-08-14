@@ -69,6 +69,8 @@ interface DashboardState {
   duplicateDashboard: () => Promise<void>;
   exportDashboard: () => Promise<void>;
   importCompleted: (imported: DashFileInfo[]) => Promise<void>;
+  /** Delete every dashboard (including user files) and recreate the built-in defaults. */
+  resetToDefaults: () => Promise<void>;
 
   // In-file edits
   /** Replace the dash file (designer/history writes). Marks dirty. */
@@ -314,6 +316,22 @@ export const useDashboardStore = create<DashboardState>()(
       await get().refreshList();
       if (imported.length > 0) {
         get().selectDashboard(imported[0].path);
+      }
+    },
+
+    resetToDefaults: async () => {
+      try {
+        await invoke('reset_dashboards_to_defaults');
+        const dashes = await get().refreshList();
+        const first =
+          dashes.find((d) => d.name === 'Telemetry Live.ltdash.xml') ?? dashes[0];
+        if (first) {
+          get().selectDashboard(first.path);
+        } else {
+          set({ selectedPath: '', dashFile: null });
+        }
+      } catch (e) {
+        console.error('Failed to reset dashboards to defaults:', e);
       }
     },
 

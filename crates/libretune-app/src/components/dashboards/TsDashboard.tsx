@@ -1,6 +1,7 @@
 import {
   DashFile,
   isGauge,
+  isIndicator,
   buildEmbeddedImageMap,
   tsColorToRgba,
 } from './dashTypes';
@@ -15,7 +16,7 @@ import GaugeContextMenu from './GaugeContextMenu';
 import ImportDashboardDialog from '../dialogs/ImportDashboardDialog';
 import DashboardDesigner from './DashboardDesigner';
 import DashboardHeader from './components/DashboardHeader';
-import ValidationPanel from './components/ValidationPanel';
+import ValidationPanel, { type ChannelRemap } from './components/ValidationPanel';
 import CompatibilityBar from './components/CompatibilityBar';
 import DashboardSelectorOverlay from './components/DashboardSelectorOverlay';
 import DashboardManagementDialogs from './components/DashboardManagementDialogs';
@@ -73,6 +74,7 @@ export default function TsDashboard({ isConnected = false }: TsDashboardProps) {
   const duplicateDashboard = useDashboardStore((s) => s.duplicateDashboard);
   const exportDashboard = useDashboardStore((s) => s.exportDashboard);
   const importCompleted = useDashboardStore((s) => s.importCompleted);
+  const resetToDefaults = useDashboardStore((s) => s.resetToDefaults);
   const setDashFile = useDashboardStore((s) => s.setDashFile);
   const setDesignerMode = useDashboardStore((s) => s.setDesignerMode);
   const setSelectedGaugeId = useDashboardStore((s) => s.setSelectedGaugeId);
@@ -89,6 +91,7 @@ export default function TsDashboard({ isConnected = false }: TsDashboardProps) {
   const [showNewDialog, setShowNewDialog] = useState(false);
   const [showRenameDialog, setShowRenameDialog] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [compatBarVisible, setCompatBarVisible] = useState(true);
   const [showValidationPanel, setShowValidationPanel] = useState(false);
   const channelInfoMap = useChannelInfoMap();
@@ -180,9 +183,9 @@ export default function TsDashboard({ isConnected = false }: TsDashboardProps) {
     setShowImportDialog(false);
   }, [importCompleted]);
 
-  const handleNewDashboard = useCallback(async (name: string) => {
+  const handleNewDashboard = useCallback(async (name: string, template: string) => {
     if (!name.trim()) return;
-    await createDashboard(name);
+    await createDashboard(name, template);
     setShowNewDialog(false);
   }, [createDashboard]);
 
@@ -196,6 +199,29 @@ export default function TsDashboard({ isConnected = false }: TsDashboardProps) {
     await deleteDashboard();
     setShowDeleteConfirm(false);
   }, [deleteDashboard]);
+
+  const handleResetDefaults = useCallback(async () => {
+    await resetToDefaults();
+    setShowResetConfirm(false);
+    setShowSelector(false);
+  }, [resetToDefaults]);
+
+  const handleApplyRemap = useCallback((remap: ChannelRemap) => {
+    if (!dashFile) return;
+    const updatedComponents = dashFile.gauge_cluster.components.map((comp) => {
+      if (isGauge(comp) && comp.Gauge.id === remap.component_id) {
+        return { Gauge: { ...comp.Gauge, output_channel: remap.to_channel } };
+      }
+      if (isIndicator(comp) && comp.Indicator.id === remap.component_id) {
+        return { Indicator: { ...comp.Indicator, output_channel: remap.to_channel } };
+      }
+      return comp;
+    });
+    setDashFile({
+      ...dashFile,
+      gauge_cluster: { ...dashFile.gauge_cluster, components: updatedComponents },
+    });
+  }, [dashFile, setDashFile]);
 
   const currentName = dashBaseName(selectedPath) || 'Dashboard';
 
@@ -279,7 +305,12 @@ export default function TsDashboard({ isConnected = false }: TsDashboardProps) {
       />
 
       {showValidationPanel && validationReport && (
-        <ValidationPanel report={validationReport} onClose={() => setShowValidationPanel(false)} />
+        <ValidationPanel
+          report={validationReport}
+          dashFile={dashFile}
+          onApplyRemap={handleApplyRemap}
+          onClose={() => setShowValidationPanel(false)}
+        />
       )}
 
       {compatibilityReport && compatBarVisible && hasCompatibilityIssues && (
@@ -299,6 +330,10 @@ export default function TsDashboard({ isConnected = false }: TsDashboardProps) {
           onImportClick={() => {
             setShowSelector(false);
             setShowImportDialog(true);
+          }}
+          onResetDefaultsClick={() => {
+            setShowSelector(false);
+            setShowResetConfirm(true);
           }}
         />
       )}
@@ -322,6 +357,9 @@ export default function TsDashboard({ isConnected = false }: TsDashboardProps) {
         deleteTargetName={currentName}
         onDeleteClose={() => setShowDeleteConfirm(false)}
         onDeleteConfirm={handleDeleteDashboard}
+        resetOpen={showResetConfirm}
+        onResetClose={() => setShowResetConfirm(false)}
+        onResetConfirm={handleResetDefaults}
       />
 
       {/* Designer Mode - full screen editor */}

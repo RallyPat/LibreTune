@@ -301,8 +301,6 @@ export interface DashFile {
   bibliography: Bibliography;
   version_info: VersionInfo;
   gauge_cluster: GaugeCluster;
-  /** Multi-cluster support (Plan D-1). Empty for single-cluster dashboards. */
-  additional_clusters?: GaugeCluster[];
   extra_attrs?: Record<string, string>;
 }
 

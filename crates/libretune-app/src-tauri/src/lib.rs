@@ -72,7 +72,7 @@ use commands::csv_io::{export_tune_as_csv, import_tune_from_csv, reset_tune_to_d
 use commands::curve_ops::{get_curve_data, update_curve_data};
 use commands::dash_files::{
     create_new_dashboard, delete_dashboard, duplicate_dashboard, export_dashboard, get_dash_file,
-    rename_dashboard, save_dash_file, validate_dashboard,
+    rename_dashboard, save_dash_file, suggest_channel_remaps, validate_dashboard,
 };
 use commands::dash_layout::{
     check_dash_conflict, get_dashboard_templates, import_dash_file, list_available_dashes,
@@ -322,6 +322,7 @@ pub fn run() {
             get_dashboard_templates,
             get_dash_file,
             validate_dashboard,
+            suggest_channel_remaps,
             save_dash_file,
             list_available_dashes,
             reset_dashboards_to_defaults,

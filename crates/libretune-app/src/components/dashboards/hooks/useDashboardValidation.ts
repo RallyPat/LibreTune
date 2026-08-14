@@ -17,10 +17,7 @@ export function useDashboardValidation(dashFile: DashFile | null): ValidationRep
       return;
     }
 
-    invoke<ValidationReport>('validate_dashboard', {
-      dashFile,
-      projectName: null,
-    })
+    invoke<ValidationReport>('validate_dashboard', { dashFile })
       .then(setReport)
       .catch((err) => {
         console.warn('[useDashboardValidation] Validation failed:', err);

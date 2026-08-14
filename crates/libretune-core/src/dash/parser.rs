@@ -615,7 +615,14 @@ fn set_indicator_property(indicator: &mut IndicatorConfig, prop: &str, value: &s
         }
         "Painter" => indicator.indicator_painter = IndicatorPainter::from_ts_string(value),
         "RunDemo" => indicator.run_demo = value.parse().unwrap_or(false),
-        _ => {}
+        // Preserve unrecognized properties instead of silently dropping
+        // them — the writer emits `extra_attrs` back out, so they
+        // round-trip (same lossless guarantee gauges already have).
+        other => {
+            indicator
+                .extra_attrs
+                .insert(other.to_string(), value.to_string());
+        }
     }
 }
 

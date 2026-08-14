@@ -176,7 +176,6 @@ pub fn create_basic_dashboard() -> DashFile {
             enabled_condition: None,
             extra_attrs: std::collections::BTreeMap::new(),
         },
-        additional_clusters: Vec::new(),
         extra_attrs: std::collections::BTreeMap::new(),
     };
 
@@ -489,7 +488,6 @@ pub fn create_tuning_dashboard() -> DashFile {
             enabled_condition: None,
             extra_attrs: std::collections::BTreeMap::new(),
         },
-        additional_clusters: Vec::new(),
         extra_attrs: std::collections::BTreeMap::new(),
     };
 
@@ -1103,7 +1101,6 @@ pub fn create_telemetry_live_dashboard() -> DashFile {
             enabled_condition: None,
             extra_attrs: std::collections::BTreeMap::new(),
         },
-        additional_clusters: Vec::new(),
         extra_attrs: std::collections::BTreeMap::new(),
     };
 
