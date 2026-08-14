@@ -231,6 +231,101 @@ pub async fn get_gauge_configs(
     Ok(gauges)
 }
 
+/// A grouped gauge entry for the dashboard "Replace gauge" context menu.
+#[derive(Serialize)]
+pub(crate) struct GaugeCategoryEntry {
+    pub name: String,
+    pub channel: String,
+    pub title: String,
+    pub units: String,
+    pub min: f64,
+    pub max: f64,
+}
+
+/// A named group of gauges (e.g. "Fueling") for the context menu submenus.
+#[derive(Serialize)]
+pub(crate) struct GaugeCategoryInfo {
+    pub name: String,
+    pub gauges: Vec<GaugeCategoryEntry>,
+}
+
+/// Channel-name keywords for each context-menu category, checked in order.
+/// The INI `[GaugeConfigurations]` section carries no grouping metadata of
+/// its own, so this heuristic mirrors how TunerStudio organizes its gauge
+/// picker. Unmatched gauges land in "Other".
+const GAUGE_CATEGORY_KEYWORDS: &[(&str, &[&str])] = &[
+    ("Engine", &["rpm", "engine", "tach", "sync", "crank", "cam", "tooth", "step", "stroke"]),
+    ("Fueling", &["afr", "lambda", "fuel", "ve", "pulse", "pw", "inj", "duty", "stoich", "ego", "correction", "enrich"]),
+    ("Ignition", &["adv", "spark", "dwell", "coil", "ign", "timing", "knock", "retard", "trim"]),
+    ("Temperatures", &["temp", "coolant", "clt", "iat", "mat", "egt", "water", "oil"]),
+    ("Pressures", &["map", "baro", "boost", "pressure", "vacuum", "emap"]),
+    ("Driver Inputs", &["tps", "throttle", "pedal", "brake", "gear", "clutch", "idle", "load"]),
+    ("Electrical", &["volt", "battery", "vbat", "curr", "amp"]),
+];
+
+fn gauge_category_index(channel: &str) -> usize {
+    let lower = channel.to_lowercase();
+    GAUGE_CATEGORY_KEYWORDS
+        .iter()
+        .position(|(_, kws)| kws.iter().any(|kw| lower.contains(kw)))
+        .unwrap_or(GAUGE_CATEGORY_KEYWORDS.len())
+}
+
+/// Group the loaded INI's gauge configurations into categories for the
+/// dashboard context-menu gauge picker ("Replace gauge").
+#[tauri::command]
+pub async fn get_gauge_categories(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<GaugeCategoryInfo>, String> {
+    let string_ctx = build_string_context(&state).await;
+
+    let def_guard = state.definition.lock().await;
+    let def = def_guard.as_ref().ok_or("Definition not loaded")?;
+    // Same lock order as get_all_constant_values: definition → cache → tune.
+    let cache_guard = state.tune_cache.lock().await;
+    let tune_guard = state.current_tune.lock().await;
+    let ctx = gauge_expr_context(def, tune_guard.as_ref(), cache_guard.as_ref());
+
+    let mut entries: Vec<(usize, GaugeCategoryEntry)> = def
+        .gauges
+        .values()
+        .map(|g| {
+            let info = gauge_to_info(g, &ctx, &string_ctx);
+            (
+                gauge_category_index(&info.channel),
+                GaugeCategoryEntry {
+                    name: info.name,
+                    channel: info.channel,
+                    title: info.title,
+                    units: info.units,
+                    min: info.lo,
+                    max: info.hi,
+                },
+            )
+        })
+        .collect();
+    entries.sort_by(|a, b| a.1.title.to_lowercase().cmp(&b.1.title.to_lowercase()));
+
+    let mut names: Vec<&str> = GAUGE_CATEGORY_KEYWORDS
+        .iter()
+        .map(|(name, _)| *name)
+        .collect();
+    names.push("Other");
+
+    let mut categories: Vec<GaugeCategoryInfo> = names
+        .into_iter()
+        .map(|name| GaugeCategoryInfo {
+            name: name.to_string(),
+            gauges: Vec::new(),
+        })
+        .collect();
+    for (idx, entry) in entries {
+        categories[idx].gauges.push(entry);
+    }
+    categories.retain(|c| !c.gauges.is_empty());
+    Ok(categories)
+}
+
 /// Get a single gauge configuration by name
 #[tauri::command]
 pub async fn get_gauge_config(

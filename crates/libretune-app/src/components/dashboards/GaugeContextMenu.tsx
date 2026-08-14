@@ -102,8 +102,8 @@ export default function GaugeContextMenu({
         const categories = await invoke<GaugeCategory[]>('get_gauge_categories');
         setGaugeCategories(categories);
       } catch (_e) {
-        // Backend command not yet implemented — use fallback defaults
-        // Provide some default categories if backend doesn't have them yet
+        // No INI definition loaded (or command failed) — fall back to a
+        // small generic catalog so the picker is still usable offline.
         setGaugeCategories([
           {
             name: 'Sensors - Basic',

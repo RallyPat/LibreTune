@@ -4,6 +4,7 @@ import TsGauge from '../../gauges/TsGauge';
 import LiveTsIndicator from './LiveTsIndicator';
 import { resolveGaugeValue } from '../utils/resolveGaugeValue';
 import { useEnabledCondition } from '../hooks/useEnabledCondition';
+import { isDesignerHidden } from '../shared/designerHidden';
 
 interface Props {
   dashFile: DashFile;
@@ -72,6 +73,8 @@ export default function DashboardCanvas({
         onContextMenu={(e) => onContextMenu(e, null)}
       >
         {cluster.components.map((component, index) => {
+          if (isDesignerHidden(component)) return null;
+
           if (isGauge(component)) {
             const gauge = component.Gauge;
             const value = resolveGaugeValue(gauge, { sweepActive, sweepValues, gaugeDemoActive, demoValues });
@@ -191,6 +194,8 @@ function ExtraClusterLayer({
   return (
     <>
       {cluster.components.map((component, index) => {
+        if (isDesignerHidden(component)) return null;
+
         if (isGauge(component)) {
           const gauge = component.Gauge;
           const value = resolveGaugeValue(gauge, { sweepActive, sweepValues, gaugeDemoActive, demoValues });

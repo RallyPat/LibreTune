@@ -107,7 +107,8 @@ use commands::ini_dialogs::{
     save_port_editor_assignments,
 };
 use commands::ini_meta::{
-    get_curves, get_frontpage, get_gauge_config, get_gauge_configs, get_tables,
+    get_curves, get_frontpage, get_gauge_categories, get_gauge_config, get_gauge_configs,
+    get_tables,
 };
 use commands::ini_metadata::{
     get_ini_capabilities, get_protocol_capabilities, get_protocol_defaults, get_ve_analyze_config,
@@ -249,6 +250,7 @@ pub fn run() {
             get_curves,
             get_gauge_configs,
             get_gauge_config,
+            get_gauge_categories,
             get_available_channels,
             get_output_channel_status,
             get_status_bar_defaults,

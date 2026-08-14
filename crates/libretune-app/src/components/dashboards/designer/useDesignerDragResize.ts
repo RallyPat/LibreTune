@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, RefObject } from 'react';
+import { useState, useCallback, useEffect, useRef, RefObject } from 'react';
 import { DashFile, DashComponent, isGauge, isIndicator } from '../dashTypes';
 
 // 8 resize handles, named after the compass edge/corner they sit on:
@@ -76,6 +76,13 @@ export function useDesignerDragResize({
     gaugeId: null,
   });
 
+  // DashFile as it was when the current drag/resize began. Compared by
+  // identity at mouseup — any movement produces a new object — so a plain
+  // select-click (mousedown + mouseup, no movement) pushes no history entry.
+  // Without this, every click stacked a no-op entry that made the next undo
+  // appear to do nothing.
+  const dragStartFileRef = useRef<DashFile | null>(null);
+
   const onGaugeMouseDown = useCallback(
     (e: React.MouseEvent, gaugeId: string, component: DashComponent) => {
       const target = e.target as HTMLElement;
@@ -111,8 +118,9 @@ export function useDesignerDragResize({
         startRelativeY: relY,
         gaugeId,
       });
+      dragStartFileRef.current = dashFile;
     },
-    [onSelectGauge],
+    [onSelectGauge, dashFile],
   );
 
   const onResizeMouseDown = useCallback(
@@ -147,8 +155,9 @@ export function useDesignerDragResize({
         startRelativeY: relY,
         gaugeId,
       });
+      dragStartFileRef.current = dashFile;
     },
-    [],
+    [dashFile],
   );
 
   // Window-level mousemove / mouseup handlers while dragging or resizing.
@@ -257,11 +266,20 @@ export function useDesignerDragResize({
     };
 
     const handleMouseUp = () => {
-      if (dragState.isDragging) {
-        pushHistory(dashFile, `Move ${dragState.gaugeId}`);
-      }
-      if (resizeState.isResizing) {
-        pushHistory(dashFile, `Resize ${resizeState.gaugeId}`);
+      const startFile = dragStartFileRef.current;
+      dragStartFileRef.current = null;
+
+      // `dashFile` here is the post-drag state (the last mousemove's
+      // onDashFileChange). Record it only when the interaction actually
+      // changed something; identity comparison works because every mousemove
+      // produces a fresh object.
+      if (startFile && startFile !== dashFile) {
+        if (dragState.isDragging) {
+          pushHistory(dashFile, `Move ${dragState.gaugeId}`);
+        }
+        if (resizeState.isResizing) {
+          pushHistory(dashFile, `Resize ${resizeState.gaugeId}`);
+        }
       }
 
       setDragState((prev) => ({ ...prev, isDragging: false, gaugeId: null }));

@@ -6,7 +6,7 @@ import {
   tsColorToRgba,
 } from './dashTypes';
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useRealtimeStore } from '../../stores/realtimeStore';
 import { invoke } from '@tauri-apps/api/core';
 import GaugeContextMenu, { ContextMenuState } from './GaugeContextMenu';
@@ -325,20 +325,26 @@ export default function TsDashboard({ isConnected = false }: TsDashboardProps) {
   // On dashboard file load, decide whether to run the initial sweep using a snapshot of realtime data.
   // Uses a direct store read for RPM instead of the async rpmChannel state (which is null on mount,
   // causing sweep to fire on every tab switch even when the engine is running).
+  const isConnectedRef = useRef(isConnected);
+  isConnectedRef.current = isConnected;
+  const lastSweepDashRef = useRef<DashFile | null>(null);
+
   useEffect(() => {
     if (!dashFile) return;
+    // Fire at most once per loaded file (the guard makes the effect
+    // idempotent if it re-runs due to callback identity changes).
+    if (lastSweepDashRef.current === dashFile) return;
+    lastSweepDashRef.current = dashFile;
 
     // Try common RPM channel names directly from the store (no async dependency)
     const channels = useRealtimeStore.getState().channels;
     const rpm = channels['rpm'] ?? channels['RPM'] ?? channels['RPMValue'] ?? channels['engineSpeed'] ?? undefined;
     const isEngineRunning = typeof rpm === 'number' && rpm > 50;
 
-    if (!isConnected || !isEngineRunning) {
+    if (!isConnectedRef.current || !isEngineRunning) {
       startGaugeSweep(dashFile);
     }
-    // Only trigger on dashFile load (not on every isConnected change)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dashFile]);
+  }, [dashFile, startGaugeSweep]);
 
   const handleDashSelect = (path: string) => {
     setSelectedPath(path);
@@ -492,7 +498,6 @@ export default function TsDashboard({ isConnected = false }: TsDashboardProps) {
           channelInfoMap={channelInfoMap}
         />
       ) : (
-        <>
       <DashboardCanvas
         dashFile={dashFile}
         embeddedImages={embeddedImages}
@@ -512,8 +517,9 @@ export default function TsDashboard({ isConnected = false }: TsDashboardProps) {
         wrapperRef={dashboardWrapperRef}
         onContextMenu={handleContextMenu}
       />
+      )}
 
-      {/* Context Menu */}
+      {/* Context Menu — rendered in both branches so right-click also works in designer mode */}
       <GaugeContextMenu
         state={contextMenu}
         onClose={closeContextMenu}
@@ -579,8 +585,6 @@ export default function TsDashboard({ isConnected = false }: TsDashboardProps) {
           closeContextMenu();
         }}
       />
-        </>
-      )}
     </div>
   );
 }
