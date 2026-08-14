@@ -61,10 +61,15 @@ export function useGaugeRangeSync(
         return {
           Gauge: {
             ...gauge,
-            title: info.title || gauge.title,
+            // Keep the dashboard's own title/units; only fill them from the
+            // INI when the gauge has none. The INI's gauge configurations
+            // carry display placeholders (Speeduino uses "TEMP" as the units
+            // token for its temperature gauges) that must not overwrite the
+            // curated labels a dashboard ships with.
+            title: gauge.title || info.title,
             min: rangeOk ? info.lo : gauge.min,
             max: rangeOk ? info.hi : gauge.max,
-            units: info.units,
+            units: gauge.units || info.units,
             low_warning: Number.isFinite(info.low_warning) ? info.low_warning : gauge.low_warning,
             high_warning: Number.isFinite(info.high_warning) ? info.high_warning : gauge.high_warning,
             low_critical: Number.isFinite(info.low_danger) ? info.low_danger : gauge.low_critical,

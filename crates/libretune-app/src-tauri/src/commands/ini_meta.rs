@@ -191,15 +191,32 @@ fn gauge_expr_context(
 }
 
 fn gauge_to_info(
+    def: &libretune_core::ini::EcuDefinition,
     g: &libretune_core::ini::GaugeConfig,
     ctx: &std::collections::HashMap<String, f64>,
     string_ctx: &libretune_core::ini::expression::StringContext,
 ) -> GaugeInfo {
+    // Some INI gauge configurations use category placeholders as the units
+    // token (Speeduino ships "TEMP" for its temperature gauges). When we
+    // would otherwise display one, prefer the channel's own units from
+    // [OutputChannels] (e.g. "deg C"), keeping the placeholder only when
+    // the channel defines nothing better.
+    let evaluated_units = evaluate_display_string(&g.units, ctx, Some(string_ctx));
+    let units = if evaluated_units.is_empty() || evaluated_units.eq_ignore_ascii_case("TEMP") {
+        def.output_channels
+            .get(&g.channel)
+            .map(|ch| ch.units.clone())
+            .filter(|u| !u.is_empty())
+            .unwrap_or(evaluated_units)
+    } else {
+        evaluated_units
+    };
+
     GaugeInfo {
         name: g.name.clone(),
         channel: g.channel.clone(),
         title: evaluate_display_string(&g.title, ctx, Some(string_ctx)),
-        units: evaluate_display_string(&g.units, ctx, Some(string_ctx)),
+        units,
         lo: resolve_gauge_field(g.lo, g.lo_expr.as_deref(), ctx),
         hi: resolve_gauge_field(g.hi, g.hi_expr.as_deref(), ctx),
         low_warning: resolve_gauge_field(g.low_warning, g.low_warning_expr.as_deref(), ctx),
@@ -226,7 +243,7 @@ pub async fn get_gauge_configs(
     let gauges: Vec<GaugeInfo> = def
         .gauges
         .values()
-        .map(|g| gauge_to_info(g, &ctx, &string_ctx))
+        .map(|g| gauge_to_info(def, g, &ctx, &string_ctx))
         .collect();
     Ok(gauges)
 }
@@ -290,7 +307,7 @@ pub async fn get_gauge_categories(
         .gauges
         .values()
         .map(|g| {
-            let info = gauge_to_info(g, &ctx, &string_ctx);
+            let info = gauge_to_info(def, g, &ctx, &string_ctx);
             (
                 gauge_category_index(&info.channel),
                 GaugeCategoryEntry {
@@ -347,5 +364,5 @@ pub async fn get_gauge_config(
     let tune_guard = state.current_tune.lock().await;
     let ctx = gauge_expr_context(def, tune_guard.as_ref(), cache_guard.as_ref());
 
-    Ok(gauge_to_info(gauge, &ctx, &string_ctx))
+    Ok(gauge_to_info(def, gauge, &ctx, &string_ctx))
 }
