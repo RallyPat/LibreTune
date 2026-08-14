@@ -17,7 +17,12 @@ import type { Painter } from './types';
 export const telemetryStatPainter: Painter = (pctx) => {
   const { ctx, width, height, value, config, getValueColor, getFontSpec } = pctx;
 
-  const compact = height < 42 || height < width * 0.45;
+  // Compact = one-row "label left, value right" layout, used for the dense
+  // telemetry walls. The threshold and font floors keep text legible: tiles
+  // below ~48px can't fit the two-row layout, and the 9/12px floors stop
+  // the proportional scaling from shrinking into unreadability on small
+  // windows (the whole-dashboard CSS scale already shrinks everything).
+  const compact = height < 48 || height < width * 0.45;
   const cornerRadius = compact ? 2 : Math.min(6, width * 0.04, height * 0.08);
   const accentWidth = compact ? 0 : Math.max(3, width * 0.025);
   const padding = compact ? Math.max(4, width * 0.04) : Math.max(8, width * 0.06);
@@ -52,14 +57,14 @@ export const telemetryStatPainter: Painter = (pctx) => {
 
   if (compact) {
     // Dense Grafana-style: label left, value right on one row.
-    const labelSize = Math.max(7, minDim * 0.22 * fontScale);
+    const labelSize = Math.max(9, minDim * 0.26 * fontScale);
     ctx.fillStyle = tsColorToHex(config.trim_color);
     ctx.font = getFontSpec(labelSize, { bold: true });
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
     ctx.fillText(config.title.toUpperCase(), contentX, height / 2);
 
-    const valueSize = Math.max(9, minDim * 0.34 * fontScale);
+    const valueSize = Math.max(12, minDim * 0.42 * fontScale);
     if (valueHex !== tsColorToHex(config.font_color)) {
       ctx.shadowColor = valueHex;
       ctx.shadowBlur = 6;
@@ -74,7 +79,7 @@ export const telemetryStatPainter: Painter = (pctx) => {
   }
 
   // Uppercase label, letter-spaced.
-  const labelSize = Math.max(9, minDim * 0.13 * fontScale);
+  const labelSize = Math.max(10, minDim * 0.14 * fontScale);
   ctx.fillStyle = tsColorToHex(config.trim_color);
   ctx.font = getFontSpec(labelSize, { bold: true });
   ctx.textAlign = 'left';
@@ -82,7 +87,7 @@ export const telemetryStatPainter: Painter = (pctx) => {
   drawLetterSpaced(ctx, config.title.toUpperCase(), contentX, padding * 0.55, Math.max(1, labelSize * 0.12));
 
   // Big value + units on the baseline.
-  const valueSize = Math.max(16, minDim * 0.40 * fontScale);
+  const valueSize = Math.max(18, minDim * 0.44 * fontScale);
   const isAlert = valueHex !== tsColorToHex(config.font_color);
   if (isAlert) {
     ctx.shadowColor = valueHex;

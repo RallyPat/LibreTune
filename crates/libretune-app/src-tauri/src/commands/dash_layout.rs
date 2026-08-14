@@ -310,7 +310,7 @@ const TEMPLATE_SPECS: &[TemplateSpec] = &[
         id: "telemetry_live",
         file_name: "Telemetry Live.ltdash.xml",
         display_name: "Telemetry Live",
-        description: "Dense Grafana-style live view: 22 stat tiles, 4 multi-series charts, 16 sparklines",
+        description: "Dense Grafana-style live view: 22 stat tiles, 4 multi-series charts, 12 sparklines",
         builder: dash::create_telemetry_live_dashboard,
     },
 ];
