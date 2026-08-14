@@ -91,14 +91,17 @@ export const multiChannelTrendPainter: Painter = (pctx) => {
   const series = resolveSeries(config, tsColorToHex(config.font_color));
 
   // Legend grows with series count — Grafana-style multi-row when dense.
-  const legendRowHeight = Math.max(11, height * 0.045);
-  const legendCols = Math.max(2, Math.floor((width - padding * 2) / 110));
+  // The value font is the point of the legend: rows are sized so values
+  // render at a legible size (they used to bottom out near 7px).
+  const legendRowHeight = Math.max(15, height * 0.085);
+  const legendCols = Math.max(2, Math.floor((width - padding * 2) / 130));
   const legendRows = Math.max(1, Math.ceil(series.length / legendCols));
   const legendHeight = legendRows * legendRowHeight + 4;
 
+  // Graph sits between the title and the legend UNDER it (Grafana-style).
   const graphWidth = width - padding * 2;
-  const graphY = titleHeight + legendHeight + padding * 0.5;
-  const graphHeight = height - graphY - padding;
+  const graphY = titleHeight + padding * 0.5;
+  const graphHeight = height - graphY - legendHeight - padding;
 
   // Background.
   const bgHex = tsColorToHex(config.back_color);
@@ -115,8 +118,10 @@ export const multiChannelTrendPainter: Painter = (pctx) => {
   ctx.textBaseline = 'top';
   ctx.fillText(config.title.toUpperCase(), padding, 2);
 
-  const legendFontSize = Math.max(7, legendRowHeight * 0.65);
-  ctx.font = getFontSpec(legendFontSize, { bold: true, monospace: true });
+  // Legend (below the graph): small muted label + large colored value.
+  const valueFontSize = Math.max(11, legendRowHeight * 0.9);
+  const labelFontSize = Math.max(9, valueFontSize * 0.7);
+  const labelColor = tsColorToHex(config.trim_color);
   ctx.textBaseline = 'middle';
   const colWidth = (width - padding * 2) / legendCols;
 
@@ -126,18 +131,23 @@ export const multiChannelTrendPainter: Painter = (pctx) => {
     const col = i % legendCols;
     const row = Math.floor(i / legendCols);
     const legendX = padding + col * colWidth;
-    const legendY = titleHeight + row * legendRowHeight + legendRowHeight / 2 + 2;
-    const dotR = Math.max(2, legendFontSize * 0.22);
+    const legendY = graphY + graphHeight + padding * 0.5 + row * legendRowHeight + legendRowHeight / 2;
+    const dotR = Math.max(2.5, valueFontSize * 0.18);
 
     ctx.fillStyle = s.color;
     ctx.beginPath();
     ctx.arc(legendX + dotR, legendY, dotR, 0, Math.PI * 2);
     ctx.fill();
 
-    ctx.fillStyle = s.color;
     ctx.textAlign = 'left';
-    const text = `${s.label} ${live.toFixed(1)}`;
-    ctx.fillText(text, legendX + dotR * 2 + 3, legendY);
+    ctx.font = getFontSpec(labelFontSize, { bold: true });
+    ctx.fillStyle = labelColor;
+    ctx.fillText(s.label, legendX + dotR * 2 + 3, legendY);
+    const labelW = ctx.measureText(s.label).width;
+
+    ctx.font = getFontSpec(valueFontSize, { bold: true, monospace: true });
+    ctx.fillStyle = s.color;
+    ctx.fillText(live.toFixed(1), legendX + dotR * 2 + 3 + labelW + 6, legendY);
   }
 
   // Graph panel (inset).
