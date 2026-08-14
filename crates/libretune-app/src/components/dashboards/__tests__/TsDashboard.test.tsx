@@ -2,6 +2,7 @@ import { render, waitFor } from '@testing-library/react';
 import { vi } from 'vitest';
 import { invoke } from '@tauri-apps/api/core';
 import { useRealtimeStore } from '../../../stores/realtimeStore';
+import { useDashboardStore } from '../../../stores/dashboardStore';
 import TsDashboard from '../TsDashboard';
 import { act } from 'react';
 
@@ -29,6 +30,23 @@ describe('TsDashboard', () => {
     vi.resetAllMocks();
     // Reset realtime store
     useRealtimeStore.getState().clearChannels();
+    // The dashboard store is module-level and persists across tests in this
+    // file — reset it so each test's init() resolves a fresh selection.
+    useDashboardStore.setState({
+      dashFile: null,
+      selectedPath: '',
+      availableDashes: [],
+      loading: true,
+      error: null,
+      dirty: false,
+      designerMode: false,
+      selectedGaugeId: null,
+      gridSnap: 5,
+      showGrid: true,
+      demoActive: false,
+      contextMenu: { visible: false, x: 0, y: 0, targetGaugeId: null },
+      legacyModeOverride: null,
+    });
   });
 
   it('loads dashboard file only on selectedPath change and does not reload on rapid realtime updates', async () => {

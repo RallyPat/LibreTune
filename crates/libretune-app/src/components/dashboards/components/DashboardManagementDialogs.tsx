@@ -1,20 +1,18 @@
 
+import { useEffect, useState } from 'react';
 import { Dialog, Button } from '../../common';
 
 interface Props {
   // New
   newOpen: boolean;
-  newName: string;
-  onNewNameChange: (v: string) => void;
   onNewClose: () => void;
-  onNewCreate: () => void;
+  onNewCreate: (name: string) => void;
 
   // Rename
   renameOpen: boolean;
-  renameValue: string;
-  onRenameValueChange: (v: string) => void;
+  renameInitialValue: string;
   onRenameClose: () => void;
-  onRenameConfirm: () => void;
+  onRenameConfirm: (name: string) => void;
 
   // Delete
   deleteOpen: boolean;
@@ -24,18 +22,15 @@ interface Props {
 }
 
 /**
- * New / Rename / Delete dashboard dialogs.
- * Extracted from TsDashboard during Phase C4.
+ * New / Rename / Delete dashboard dialogs. Owns its form fields; the shell
+ * only controls open/close. Extracted from TsDashboard during Phase C4.
  */
 export default function DashboardManagementDialogs({
   newOpen,
-  newName,
-  onNewNameChange,
   onNewClose,
   onNewCreate,
   renameOpen,
-  renameValue,
-  onRenameValueChange,
+  renameInitialValue,
   onRenameClose,
   onRenameConfirm,
   deleteOpen,
@@ -43,6 +38,17 @@ export default function DashboardManagementDialogs({
   onDeleteClose,
   onDeleteConfirm,
 }: Props) {
+  const [newName, setNewName] = useState('');
+  const [renameValue, setRenameValue] = useState('');
+
+  // Re-seed the form fields each time a dialog opens.
+  useEffect(() => {
+    if (newOpen) setNewName('');
+  }, [newOpen]);
+  useEffect(() => {
+    if (renameOpen) setRenameValue(renameInitialValue);
+  }, [renameOpen, renameInitialValue]);
+
   return (
     <>
       {/* New Dashboard Dialog */}
@@ -52,15 +58,15 @@ export default function DashboardManagementDialogs({
           <input
             type="text"
             value={newName}
-            onChange={(e) => onNewNameChange(e.target.value)}
+            onChange={(e) => setNewName(e.target.value)}
             placeholder="My Dashboard"
             autoFocus
-            onKeyDown={(e) => e.key === 'Enter' && onNewCreate()}
+            onKeyDown={(e) => e.key === 'Enter' && onNewCreate(newName)}
           />
         </Dialog.Body>
         <Dialog.Footer>
           <Button variant="secondary" onClick={onNewClose}>Cancel</Button>
-          <Button variant="primary" onClick={onNewCreate} disabled={!newName.trim()}>
+          <Button variant="primary" onClick={() => onNewCreate(newName)} disabled={!newName.trim()}>
             Create
           </Button>
         </Dialog.Footer>
@@ -73,15 +79,15 @@ export default function DashboardManagementDialogs({
           <input
             type="text"
             value={renameValue}
-            onChange={(e) => onRenameValueChange(e.target.value)}
+            onChange={(e) => setRenameValue(e.target.value)}
             placeholder="Dashboard Name"
             autoFocus
-            onKeyDown={(e) => e.key === 'Enter' && onRenameConfirm()}
+            onKeyDown={(e) => e.key === 'Enter' && onRenameConfirm(renameValue)}
           />
         </Dialog.Body>
         <Dialog.Footer>
           <Button variant="secondary" onClick={onRenameClose}>Cancel</Button>
-          <Button variant="primary" onClick={onRenameConfirm} disabled={!renameValue.trim()}>
+          <Button variant="primary" onClick={() => onRenameConfirm(renameValue)} disabled={!renameValue.trim()}>
             Rename
           </Button>
         </Dialog.Footer>

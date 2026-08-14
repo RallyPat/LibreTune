@@ -2,28 +2,24 @@
  * useGaugeSweep — sportscar-style gauge sweep animation (min → max → min)
  * triggered when a dashboard loads while the engine is not running.
  *
- * Returns:
- *  - `sweepActive`: true while the animation is running
- *  - `sweepValues`: per-channel interpolated values for sweeping gauges
- *  - `startGaugeSweep(file)`: begin the animation for the given dash
+ * Values are written to the non-reactive gaugeOverride module (read each
+ * animation frame by useGaugeRenderer), so the 60fps sweep never
+ * re-renders the React tree.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { DashFile, isGauge } from '../dashTypes';
+import { setGaugeOverrides } from '../../../stores/gaugeOverride';
 
 const SWEEP_DURATION_MS = 1500;
 
 export function useGaugeSweep() {
-  const [sweepActive, setSweepActive] = useState(false);
-  const [sweepValues, setSweepValues] = useState<Record<string, number>>({});
-
   const sweepActiveRef = useRef(false);
   const sweepAnimRef = useRef<number | null>(null);
 
   const startGaugeSweep = useCallback((file: DashFile) => {
     if (sweepActiveRef.current) return;
     sweepActiveRef.current = true;
-    setSweepActive(true);
 
     if (sweepAnimRef.current !== null) {
       cancelAnimationFrame(sweepAnimRef.current);
@@ -51,15 +47,14 @@ export function useGaugeSweep() {
           newValues[gauge.output_channel] = gauge.min + range * sweepPosition;
         }
       });
-      setSweepValues(newValues);
+      setGaugeOverrides(newValues, true);
 
       if (rawProgress < 1) {
         sweepAnimRef.current = requestAnimationFrame(animate);
       } else {
         sweepAnimRef.current = null;
         sweepActiveRef.current = false;
-        setSweepActive(false);
-        setSweepValues({});
+        setGaugeOverrides({}, false);
       }
     };
 
@@ -73,9 +68,12 @@ export function useGaugeSweep() {
         cancelAnimationFrame(sweepAnimRef.current);
         sweepAnimRef.current = null;
       }
-      sweepActiveRef.current = false;
+      if (sweepActiveRef.current) {
+        sweepActiveRef.current = false;
+        setGaugeOverrides({}, false);
+      }
     };
   }, []);
 
-  return { sweepActive, sweepValues, startGaugeSweep };
+  return { startGaugeSweep };
 }

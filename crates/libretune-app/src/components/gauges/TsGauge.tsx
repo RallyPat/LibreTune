@@ -24,11 +24,8 @@ ensurePaintersRegistered();
 
 interface TsGaugeProps {
   config: TsGaugeConfig;
-  value: number;
   embeddedImages?: Map<string, string>;
   legacyMode?: boolean;
-  /** When true, the value prop takes priority over the store subscription (sweep/demo mode) */
-  overrideStore?: boolean;
   /** Whether the ECU/stream is connected. Time-series painters only continuous-render while connected. */
   isConnected?: boolean;
 }
@@ -36,7 +33,7 @@ interface TsGaugeProps {
 /**
  * Internal TsGauge component - wrapped in React.memo below
  */
-function TsGaugeInner({ config, value, embeddedImages, legacyMode = false, overrideStore = false, isConnected = false }: TsGaugeProps) {
+function TsGaugeInner({ config, embeddedImages, legacyMode = false, isConnected = false }: TsGaugeProps) {
   const [fontsReady, setFontsReady] = useState(false);
   const [imagesReady, setImagesReady] = useState(false);
 
@@ -223,8 +220,6 @@ function TsGaugeInner({ config, value, embeddedImages, legacyMode = false, overr
 
   const { canvasRef, displayValueRef } = useGaugeRenderer({
     config,
-    value,
-    overrideStore,
     enabled: fontsReady && imagesReady,
     paint,
     continuousRender,
@@ -244,20 +239,17 @@ function TsGaugeInner({ config, value, embeddedImages, legacyMode = false, overr
 
 /**
  * TsGauge - Memoized gauge component.
- * 
- * Uses custom comparator to skip re-renders when:
- * - Config hasn't changed
- * For live data, the internal store subscription drives the animation loop
- * directly (bypassing React rendering). The value prop only matters for
- * sweep/demo mode (when overrideStore is true).
+ *
+ * Uses custom comparator to skip re-renders when config/images haven't
+ * changed. Live data never flows through props: the rendering host reads
+ * the realtime store (and the sweep/demo override map) imperatively each
+ * animation frame.
  */
 const TsGauge = React.memo(TsGaugeInner, (prevProps, nextProps) => {
   return (
-    prevProps.value === nextProps.value &&
     prevProps.config === nextProps.config &&
     prevProps.embeddedImages === nextProps.embeddedImages &&
     prevProps.legacyMode === nextProps.legacyMode &&
-    prevProps.overrideStore === nextProps.overrideStore &&
     prevProps.isConnected === nextProps.isConnected
   );
 });

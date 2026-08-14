@@ -1,15 +1,18 @@
 import {
   DashFile,
-  DashFileInfo,
   isGauge,
   buildEmbeddedImageMap,
   tsColorToRgba,
 } from './dashTypes';
 
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { useRealtimeStore } from '../../stores/realtimeStore';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import GaugeContextMenu, { ContextMenuState } from './GaugeContextMenu';
+import { useRealtimeStore } from '../../stores/realtimeStore';
+import {
+  useDashboardStore,
+  selectLegacyMode,
+} from '../../stores/dashboardStore';
+import GaugeContextMenu from './GaugeContextMenu';
 import ImportDashboardDialog from '../dialogs/ImportDashboardDialog';
 import DashboardDesigner from './DashboardDesigner';
 import DashboardHeader from './components/DashboardHeader';
@@ -23,11 +26,11 @@ import {
   hasCompatibilityIssues as hasCompatIssues,
 } from './utils/compatibility';
 import { computeDashboardBounds } from './utils/dashboardBounds';
+import { dashBaseName } from './shared/dashFilename';
 import { useGaugeSweep } from './hooks/useGaugeSweep';
 import { useGaugeDemo } from './hooks/useGaugeDemo';
 import { useDashboardScale } from './hooks/useDashboardScale';
 import { useDashboardValidation } from './hooks/useDashboardValidation';
-import { useDashboardCRUD } from './hooks/useDashboardCRUD';
 import { useGaugeRangeSync } from './hooks/useGaugeRangeSync';
 import './TsDashboard.css';
 
@@ -47,61 +50,62 @@ interface ChannelInfo {
   translate: number;
 }
 
+/**
+ * Dashboard shell — layout and wiring only. All dashboard state lives in
+ * the dashboardStore (see stores/dashboardStore.ts); realtime channel data
+ * lives in realtimeStore and never flows through this component. Each
+ * TsGauge subscribes to its own channel directly inside its rAF loop.
+ */
 export default function TsDashboard({ isConnected = false }: TsDashboardProps) {
-  const [dashFile, setDashFile] = useState<DashFile | null>(null);
-  const [selectedPath, setSelectedPath] = useState<string>('');
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  // --- Store state -----------------------------------------------------------
+  const dashFile = useDashboardStore((s) => s.dashFile);
+  const selectedPath = useDashboardStore((s) => s.selectedPath);
+  const loading = useDashboardStore((s) => s.loading);
+  const error = useDashboardStore((s) => s.error);
+  const availableDashes = useDashboardStore((s) => s.availableDashes);
+  const designerMode = useDashboardStore((s) => s.designerMode);
+  const selectedGaugeId = useDashboardStore((s) => s.selectedGaugeId);
+  const gridSnap = useDashboardStore((s) => s.gridSnap);
+  const showGrid = useDashboardStore((s) => s.showGrid);
+  const demoActive = useDashboardStore((s) => s.demoActive);
+  const contextMenu = useDashboardStore((s) => s.contextMenu);
+  const legacyMode = useDashboardStore(selectLegacyMode);
+
+  const init = useDashboardStore((s) => s.init);
+  const selectDashboard = useDashboardStore((s) => s.selectDashboard);
+  const reloadCurrent = useDashboardStore((s) => s.reloadCurrent);
+  const saveDashboard = useDashboardStore((s) => s.save);
+  const createDashboard = useDashboardStore((s) => s.createDashboard);
+  const renameDashboard = useDashboardStore((s) => s.renameDashboard);
+  const deleteDashboard = useDashboardStore((s) => s.deleteDashboard);
+  const duplicateDashboard = useDashboardStore((s) => s.duplicateDashboard);
+  const exportDashboard = useDashboardStore((s) => s.exportDashboard);
+  const importCompleted = useDashboardStore((s) => s.importCompleted);
+  const setDashFile = useDashboardStore((s) => s.setDashFile);
+  const setDesignerMode = useDashboardStore((s) => s.setDesignerMode);
+  const setSelectedGaugeId = useDashboardStore((s) => s.setSelectedGaugeId);
+  const setGridSnap = useDashboardStore((s) => s.setGridSnap);
+  const setShowGrid = useDashboardStore((s) => s.setShowGrid);
+  const setDemoActive = useDashboardStore((s) => s.setDemoActive);
+  const setLegacyModeOverride = useDashboardStore((s) => s.setLegacyModeOverride);
+  const openContextMenu = useDashboardStore((s) => s.openContextMenu);
+  const closeContextMenu = useDashboardStore((s) => s.closeContextMenu);
+
+  // --- Local UI-only state ---------------------------------------------------
   const [showSelector, setShowSelector] = useState(false);
-  const [channelInfoMap, setChannelInfoMap] = useState<Record<string, ChannelInfo>>({});
-  
-  // Gauge sweep animation (sportscar-style min→max→min on load)
-  const { sweepActive, sweepValues, startGaugeSweep } = useGaugeSweep();
-
-  // Context menu state
-  const [contextMenu, setContextMenu] = useState<ContextMenuState>({
-    visible: false,
-    x: 0,
-    y: 0,
-    targetGaugeId: null,
-  });
-
-  // Dashboard settings
-  const [designerMode, setDesignerMode] = useState(false);
-  const [gaugeDemoActive, setGaugeDemoActive] = useState(false);
-  const demoValues = useGaugeDemo(gaugeDemoActive, dashFile);
-  
-  // Designer mode state
-  const [selectedGaugeId, setSelectedGaugeId] = useState<string | null>(null);
-  const [gridSnap, setGridSnap] = useState(5); // 5% snap
-  const [showGrid, setShowGrid] = useState(true);
-  
-  // Import dialog state
   const [showImportDialog, setShowImportDialog] = useState(false);
-  
-  // Dashboard management dialogs
   const [showNewDialog, setShowNewDialog] = useState(false);
   const [showRenameDialog, setShowRenameDialog] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  const [newDashName, setNewDashName] = useState('');
-  const [renameName, setRenameName] = useState('');
-  const [legacyMode, setLegacyMode] = useState(false);
   const [compatBarVisible, setCompatBarVisible] = useState(true);
   const [showValidationPanel, setShowValidationPanel] = useState(false);
+  const [channelInfoMap, setChannelInfoMap] = useState<Record<string, ChannelInfo>>({});
 
-  // Build embedded images map — memoized so TsGauge's React.memo and
-  // animation effect don't re-run on every TsDashboard render.
-  const embeddedImages = useMemo(
-    () => dashFile
-      ? buildEmbeddedImageMap(dashFile.gauge_cluster.embedded_images)
-      : new Map<string, string>(),
-    [dashFile]
-  );
+  // --- Init: load dashboard list and initial selection -----------------------
+  useEffect(() => {
+    void init();
+  }, [init]);
 
-  // NOTE: TsDashboard no longer subscribes to realtime channel data.
-  // Each TsGauge subscribes to its own channel directly via the Zustand store,
-  // and indicators use the LiveTsIndicator wrapper below.
-  // This eliminates the 20Hz re-render cascade that was freezing the UI.
   useEffect(() => {
     const loadChannels = async () => {
       try {
@@ -119,17 +123,22 @@ export default function TsDashboard({ isConnected = false }: TsDashboardProps) {
     loadChannels();
   }, []);
 
+  // --- Derived data -----------------------------------------------------------
+  // Build embedded images map — memoized so TsGauge's React.memo doesn't
+  // re-run on every TsDashboard render.
+  const embeddedImages = useMemo(
+    () => dashFile
+      ? buildEmbeddedImageMap(dashFile.gauge_cluster.embedded_images)
+      : new Map<string, string>(),
+    [dashFile]
+  );
+
   // Calculate dashboard aspect ratio from gauge bounding box.
   // Must be before any early returns to comply with React Rules of Hooks.
   const dashboardBounds = useMemo(
     () => computeDashboardBounds(dashFile),
     [dashFile],
   );
-
-  const isLegacyPath = useMemo(() => {
-    const lower = (selectedPath ?? '').toLowerCase();
-    return lower.endsWith('.dash') || lower.endsWith('.gauge');
-  }, [selectedPath]);
 
   const compatibilityReport = useMemo(
     () => (dashFile ? computeCompatibilityReport(dashFile) : null),
@@ -148,183 +157,10 @@ export default function TsDashboard({ isConnected = false }: TsDashboardProps) {
   // Validation: re-runs whenever the dash file changes.
   const validationReport = useDashboardValidation(dashFile);
 
+  // --- Animations (non-reactive override module; no container re-renders) ----
+  const { startGaugeSweep } = useGaugeSweep();
+  useGaugeDemo(demoActive, dashFile);
 
-
-  // Handle right-click context menu
-  const handleContextMenu = useCallback((e: React.MouseEvent, gaugeId: string | null) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setContextMenu({
-      visible: true,
-      x: e.clientX,
-      y: e.clientY,
-      targetGaugeId: gaugeId,
-    });
-  }, []);
-
-  // Close context menu
-  const closeContextMenu = useCallback(() => {
-    setContextMenu(prev => ({ ...prev, visible: false }));
-  }, []);
-
-  // Reload default gauges
-  // Dashboard CRUD operations (list, save, new, rename, delete, duplicate, export, import).
-  const {
-    availableDashes,
-    refreshDashboardList,
-    reloadCurrentDashboard,
-    saveDashboard,
-    createDashboard,
-    renameDashboard,
-    deleteDashboard,
-    duplicateDashboard,
-    exportDashboard,
-    onImportComplete,
-  } = useDashboardCRUD({ dashFile, selectedPath, setSelectedPath, setDashFile });
-
-  // Sync gauge ranges from INI GaugeConfigurations (manual trigger).
-  const { syncGaugeRanges: handleSyncGaugeRanges } =
-    useGaugeRangeSync(dashFile, setDashFile);
-
-  // Exit designer mode
-  const handleExitDesigner = useCallback(() => {
-    setDesignerMode(false);
-    setSelectedGaugeId(null);
-  }, []);
-
-  const handleReloadDefaultGauges = useCallback(
-    () => reloadCurrentDashboard(),
-    [reloadCurrentDashboard],
-  );
-
-  const handleSaveDashboard = useCallback(
-    () => saveDashboard(),
-    [saveDashboard],
-  );
-
-  // Handle import completion - close dialog after CRUD has refreshed/selected
-  const handleImportComplete = useCallback(async (imported: DashFileInfo[]) => {
-    await onImportComplete(imported);
-    setShowImportDialog(false);
-  }, [onImportComplete]);
-
-  // Create new dashboard from template
-  const handleNewDashboard = useCallback(async () => {
-    if (!newDashName.trim()) return;
-    await createDashboard(newDashName);
-    setShowNewDialog(false);
-    setNewDashName('');
-  }, [newDashName, createDashboard]);
-
-  // Rename current dashboard
-  const handleRenameDashboard = useCallback(async () => {
-    if (!renameName.trim() || !selectedPath) return;
-    await renameDashboard(renameName);
-    setShowRenameDialog(false);
-    setRenameName('');
-  }, [renameName, selectedPath, renameDashboard]);
-
-  // Delete current dashboard
-  const handleDeleteDashboard = useCallback(async () => {
-    await deleteDashboard();
-    setShowDeleteConfirm(false);
-  }, [deleteDashboard]);
-
-  const handleDuplicateDashboard = useCallback(
-    () => duplicateDashboard(),
-    [duplicateDashboard],
-  );
-
-  const handleExportDashboard = useCallback(
-    () => exportDashboard(),
-    [exportDashboard],
-  );
-
-  // Recompute scale when validation panel visibility changes
-  useEffect(() => {
-    // Small delay to ensure DOM has updated and layout has settled
-    const timer = setTimeout(() => computeScale(), 100);
-    return () => clearTimeout(timer);
-  }, [showValidationPanel, computeScale]);
-
-  // Load available dashboards
-  useEffect(() => {
-    const loadInitial = async () => {
-      const dashes = await refreshDashboardList();
-      
-      // If no initial path, select the persisted dashboard or fall back to defaults.
-      if (!selectedPath && dashes.length > 0) {
-        // 1. Prefer the last-selected dashboard (persisted in settings).
-        try {
-          const settings = await invoke<{ selected_dashboard?: string }>('get_settings');
-          if (settings.selected_dashboard) {
-            const saved = dashes.find(d => d.name === settings.selected_dashboard);
-            if (saved) {
-              setSelectedPath(saved.path);
-              return;
-            }
-          }
-        } catch { /* ignore — fall through to defaults */ }
-
-        // 2. Prefer Telemetry Live.ltdash.xml as the default dashboard
-        const telemetryDash = dashes.find(d => d.name === 'Telemetry Live.ltdash.xml');
-        if (telemetryDash) {
-          setSelectedPath(telemetryDash.path);
-          return;
-        }
-
-        // 3. Fall back to Basic.ltdash.xml if Telemetry Live isn't present
-        const basicDash = dashes.find(d => d.name === 'Basic.ltdash.xml');
-        if (basicDash) {
-          setSelectedPath(basicDash.path);
-          return;
-        }
-
-        const libreTuneDash = dashes.find(d => d.category === 'LibreTune');
-        setSelectedPath(libreTuneDash?.path || dashes[0].path);
-      }
-    };
-    loadInitial();
-  }, []);
-
-  // Persist the selected dashboard name whenever it changes.
-  useEffect(() => {
-    if (!selectedPath) return;
-    const name = selectedPath.split(/[\\/]/).pop() || '';
-    void invoke('update_setting', { key: 'selected_dashboard', value: name }).catch(() => {});
-  }, [selectedPath]);
-
-  // Load selected dashboard (only when the selected path changes)
-  useEffect(() => {
-    const loadDashboard = async () => {
-      if (!selectedPath) {
-        setLoading(false);
-        return;
-      }
-
-      setLoading(true);
-      setError(null);
-
-      try {
-        const file = await invoke<DashFile>('get_dash_file', { path: selectedPath });
-        setDashFile(file);
-        setLegacyMode(isLegacyPath);
-        requestAnimationFrame(() => computeScale());
-
-        // Note: Do not start sweep here based on realtime updates — we will decide sweep in a separate effect using an instantaneous snapshot
-      } catch (e) {
-        setError(String(e));
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    loadDashboard();
-  }, [selectedPath, isLegacyPath, computeScale]);
-
-  // On dashboard file load, decide whether to run the initial sweep using a snapshot of realtime data.
-  // Uses a direct store read for RPM instead of the async rpmChannel state (which is null on mount,
-  // causing sweep to fire on every tab switch even when the engine is running).
   const isConnectedRef = useRef(isConnected);
   isConnectedRef.current = isConnected;
   const lastSweepDashRef = useRef<DashFile | null>(null);
@@ -346,11 +182,49 @@ export default function TsDashboard({ isConnected = false }: TsDashboardProps) {
     }
   }, [dashFile, startGaugeSweep]);
 
-  const handleDashSelect = (path: string) => {
-    setSelectedPath(path);
-    setShowSelector(false);
-  };
+  // Sync gauge ranges from INI GaugeConfigurations (manual trigger + auto).
+  const { syncGaugeRanges: handleSyncGaugeRanges } =
+    useGaugeRangeSync(dashFile, setDashFile);
 
+  // Recompute scale when validation panel visibility changes
+  useEffect(() => {
+    // Small delay to ensure DOM has updated and layout has settled
+    const timer = setTimeout(() => computeScale(), 100);
+    return () => clearTimeout(timer);
+  }, [showValidationPanel, computeScale]);
+
+  // Handle right-click context menu
+  const handleContextMenu = useCallback((e: React.MouseEvent, gaugeId: string | null) => {
+    e.preventDefault();
+    e.stopPropagation();
+    openContextMenu(e.clientX, e.clientY, gaugeId);
+  }, [openContextMenu]);
+
+  const handleImportComplete = useCallback(async (imported: Parameters<typeof importCompleted>[0]) => {
+    await importCompleted(imported);
+    setShowImportDialog(false);
+  }, [importCompleted]);
+
+  const handleNewDashboard = useCallback(async (name: string) => {
+    if (!name.trim()) return;
+    await createDashboard(name);
+    setShowNewDialog(false);
+  }, [createDashboard]);
+
+  const handleRenameDashboard = useCallback(async (name: string) => {
+    if (!name.trim() || !selectedPath) return;
+    await renameDashboard(name);
+    setShowRenameDialog(false);
+  }, [selectedPath, renameDashboard]);
+
+  const handleDeleteDashboard = useCallback(async () => {
+    await deleteDashboard();
+    setShowDeleteConfirm(false);
+  }, [deleteDashboard]);
+
+  const currentName = dashBaseName(selectedPath) || 'Dashboard';
+
+  // --- Render -----------------------------------------------------------------
   if (loading) {
     return (
       <div className="ts-dashboard ts-dashboard-loading">
@@ -411,28 +285,22 @@ export default function TsDashboard({ isConnected = false }: TsDashboardProps) {
       ? 'repeat'
       : (cluster.cluster_background_image_style === 'Tile' ? 'repeat' : 'no-repeat');
 
-
-
   return (
     <div className="ts-dashboard-container">
       <DashboardHeader
-        title={dashFile.bibliography.author || selectedPath.split('/').pop()?.replace(/\.(ltdash\.xml|dash)$/i, '') || 'Dashboard'}
+        title={dashFile.bibliography.author || currentName}
         showSelector={showSelector}
         onToggleSelector={() => setShowSelector(!showSelector)}
-        onNew={() => { setNewDashName(''); setShowNewDialog(true); }}
-        onDuplicate={handleDuplicateDashboard}
-        onRename={() => {
-          const currentName = selectedPath.split('/').pop()?.replace(/\.(ltdash\.xml|dash)$/i, '') || '';
-          setRenameName(currentName);
-          setShowRenameDialog(true);
-        }}
+        onNew={() => setShowNewDialog(true)}
+        onDuplicate={() => duplicateDashboard()}
+        onRename={() => setShowRenameDialog(true)}
         onDelete={() => setShowDeleteConfirm(true)}
-        onExport={handleExportDashboard}
+        onExport={() => exportDashboard()}
         onSyncRanges={handleSyncGaugeRanges}
         validationReport={validationReport}
         onToggleValidationPanel={() => setShowValidationPanel((prev) => !prev)}
         legacyMode={legacyMode}
-        onToggleLegacyMode={() => setLegacyMode((prev) => !prev)}
+        onToggleLegacyMode={() => setLegacyModeOverride(!legacyMode)}
       />
 
       {showValidationPanel && validationReport && (
@@ -448,7 +316,10 @@ export default function TsDashboard({ isConnected = false }: TsDashboardProps) {
         <DashboardSelectorOverlay
           availableDashes={availableDashes}
           selectedPath={selectedPath}
-          onSelect={handleDashSelect}
+          onSelect={(path) => {
+            selectDashboard(path);
+            setShowSelector(false);
+          }}
           onClose={() => setShowSelector(false)}
           onImportClick={() => {
             setShowSelector(false);
@@ -466,23 +337,20 @@ export default function TsDashboard({ isConnected = false }: TsDashboardProps) {
 
       <DashboardManagementDialogs
         newOpen={showNewDialog}
-        newName={newDashName}
-        onNewNameChange={setNewDashName}
         onNewClose={() => setShowNewDialog(false)}
         onNewCreate={handleNewDashboard}
         renameOpen={showRenameDialog}
-        renameValue={renameName}
-        onRenameValueChange={setRenameName}
+        renameInitialValue={currentName}
         onRenameClose={() => setShowRenameDialog(false)}
         onRenameConfirm={handleRenameDashboard}
         deleteOpen={showDeleteConfirm}
-        deleteTargetName={selectedPath.split('/').pop()?.replace(/\.(ltdash\.xml|dash)$/i, '') || ''}
+        deleteTargetName={currentName}
         onDeleteClose={() => setShowDeleteConfirm(false)}
         onDeleteConfirm={handleDeleteDashboard}
       />
 
       {/* Designer Mode - full screen editor */}
-      {designerMode && dashFile ? (
+      {designerMode ? (
         <DashboardDesigner
           dashFile={dashFile}
           onDashFileChange={setDashFile}
@@ -493,30 +361,26 @@ export default function TsDashboard({ isConnected = false }: TsDashboardProps) {
           onGridSnapChange={setGridSnap}
           showGrid={showGrid}
           onShowGridChange={setShowGrid}
-          onSave={handleSaveDashboard}
-          onExit={handleExitDesigner}
+          onSave={saveDashboard}
+          onExit={() => setDesignerMode(false)}
           channelInfoMap={channelInfoMap}
         />
       ) : (
-      <DashboardCanvas
-        dashFile={dashFile}
-        embeddedImages={embeddedImages}
-        legacyMode={legacyMode}
-        scale={scale}
-        scrollable={scrollable}
-        aspectRatio={dashboardBounds.aspectRatio}
-        bgColor={bgColor}
-        backgroundImageLayers={backgroundImageLayers}
-        backgroundSizeLayers={backgroundSizeLayers}
-        backgroundRepeatLayers={backgroundRepeatLayers}
-        sweepActive={sweepActive}
-        sweepValues={sweepValues}
-        gaugeDemoActive={gaugeDemoActive}
-        demoValues={demoValues}
-        isConnected={isConnected}
-        wrapperRef={dashboardWrapperRef}
-        onContextMenu={handleContextMenu}
-      />
+        <DashboardCanvas
+          dashFile={dashFile}
+          embeddedImages={embeddedImages}
+          legacyMode={legacyMode}
+          scale={scale}
+          scrollable={scrollable}
+          aspectRatio={dashboardBounds.aspectRatio}
+          bgColor={bgColor}
+          backgroundImageLayers={backgroundImageLayers}
+          backgroundSizeLayers={backgroundSizeLayers}
+          backgroundRepeatLayers={backgroundRepeatLayers}
+          isConnected={isConnected}
+          wrapperRef={dashboardWrapperRef}
+          onContextMenu={handleContextMenu}
+        />
       )}
 
       {/* Context Menu — rendered in both branches so right-click also works in designer mode */}
@@ -527,43 +391,37 @@ export default function TsDashboard({ isConnected = false }: TsDashboardProps) {
         onDesignerModeChange={setDesignerMode}
         antialiasingEnabled={cluster.anti_aliasing}
         onAntialiasingChange={(enabled) => {
-          if (dashFile) {
-            setDashFile({
-              ...dashFile,
-              gauge_cluster: { ...dashFile.gauge_cluster, anti_aliasing: enabled }
-            });
-          }
+          setDashFile({
+            ...dashFile,
+            gauge_cluster: { ...dashFile.gauge_cluster, anti_aliasing: enabled }
+          });
         }}
-        gaugeDemoActive={gaugeDemoActive}
-        onGaugeDemoToggle={() => setGaugeDemoActive(!gaugeDemoActive)}
+        gaugeDemoActive={demoActive}
+        onGaugeDemoToggle={() => setDemoActive(!demoActive)}
         backgroundColor={cluster.cluster_background_color}
         onBackgroundColorChange={(color) => {
-          if (dashFile) {
-            setDashFile({
-              ...dashFile,
-              gauge_cluster: { ...dashFile.gauge_cluster, cluster_background_color: color }
-            });
-          }
+          setDashFile({
+            ...dashFile,
+            gauge_cluster: { ...dashFile.gauge_cluster, cluster_background_color: color }
+          });
         }}
         backgroundDitherColor={cluster.background_dither_color}
         onBackgroundDitherColorChange={(color) => {
-          if (dashFile) {
-            setDashFile({
-              ...dashFile,
-              gauge_cluster: { ...dashFile.gauge_cluster, background_dither_color: color }
-            });
-          }
+          setDashFile({
+            ...dashFile,
+            gauge_cluster: { ...dashFile.gauge_cluster, background_dither_color: color }
+          });
         }}
-        onReloadDefaultGauges={handleReloadDefaultGauges}
+        onReloadDefaultGauges={() => reloadCurrent()}
         onReplaceGauge={(channel, gaugeInfo) => {
           // Replace the targeted gauge with a new one from INI
-          if (!dashFile || !contextMenu.targetGaugeId) return;
-          
+          if (!contextMenu.targetGaugeId) return;
+
           // Find the gauge to replace
           const updatedComponents = dashFile.gauge_cluster.components.map((comp) => {
             if (!isGauge(comp)) return comp;
             if (comp.Gauge.id !== contextMenu.targetGaugeId) return comp;
-            
+
             // Replace with new gauge info - keep position/size but update channel
             return {
               Gauge: {
@@ -576,12 +434,11 @@ export default function TsDashboard({ isConnected = false }: TsDashboardProps) {
               }
             };
           });
-          
-          const newFile = {
+
+          setDashFile({
             ...dashFile,
             gauge_cluster: { ...dashFile.gauge_cluster, components: updatedComponents },
-          };
-          setDashFile(newFile);
+          });
           closeContextMenu();
         }}
       />

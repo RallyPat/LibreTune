@@ -2,7 +2,6 @@ import React from 'react';
 import { DashFile, GaugeCluster, isGauge, isIndicator } from '../dashTypes';
 import TsGauge from '../../gauges/TsGauge';
 import LiveTsIndicator from './LiveTsIndicator';
-import { resolveGaugeValue } from '../utils/resolveGaugeValue';
 import { useEnabledCondition } from '../hooks/useEnabledCondition';
 import { isDesignerHidden } from '../shared/designerHidden';
 
@@ -17,17 +16,13 @@ interface Props {
   backgroundImageLayers: string;
   backgroundSizeLayers: string | undefined;
   backgroundRepeatLayers: string | undefined;
-  sweepActive: boolean;
-  sweepValues: Record<string, number>;
-  gaugeDemoActive: boolean;
-  demoValues: Record<string, number>;
   isConnected: boolean;
   wrapperRef: React.RefObject<HTMLDivElement>;
   onContextMenu: (e: React.MouseEvent, gaugeId: string | null) => void;
 }
 
 /**
- * Dashboard rendering surface (scaling wrapper, drop handler, gauge/indicator map).
+ * Dashboard rendering surface (scaling wrapper, gauge/indicator map).
  * Extracted from TsDashboard during Phase C4.
  */
 export default function DashboardCanvas({
@@ -41,10 +36,6 @@ export default function DashboardCanvas({
   backgroundImageLayers,
   backgroundSizeLayers,
   backgroundRepeatLayers,
-  sweepActive,
-  sweepValues,
-  gaugeDemoActive,
-  demoValues,
   isConnected,
   wrapperRef,
   onContextMenu,
@@ -77,7 +68,6 @@ export default function DashboardCanvas({
 
           if (isGauge(component)) {
             const gauge = component.Gauge;
-            const value = resolveGaugeValue(gauge, { sweepActive, sweepValues, gaugeDemoActive, demoValues });
 
             const gaugeStyle: React.CSSProperties = {
               left: `${toPercent(gauge.relative_x)}%`,
@@ -98,10 +88,8 @@ export default function DashboardCanvas({
                 >
                   <TsGauge
                     config={gauge}
-                    value={value}
                     embeddedImages={embeddedImages}
                     legacyMode={legacyMode}
-                    overrideStore={sweepActive || gaugeDemoActive}
                     isConnected={isConnected}
                   />
                 </div>
@@ -140,10 +128,6 @@ export default function DashboardCanvas({
             cluster={extra}
             embeddedImages={embeddedImages}
             legacyMode={legacyMode}
-            sweepActive={sweepActive}
-            sweepValues={sweepValues}
-            gaugeDemoActive={gaugeDemoActive}
-            demoValues={demoValues}
             isConnected={isConnected}
             onContextMenu={onContextMenu}
           />
@@ -171,20 +155,12 @@ function ExtraClusterLayer({
   cluster,
   embeddedImages,
   legacyMode,
-  sweepActive,
-  sweepValues,
-  gaugeDemoActive,
-  demoValues,
   isConnected,
   onContextMenu,
 }: {
   cluster: GaugeCluster;
   embeddedImages: Map<string, string>;
   legacyMode: boolean;
-  sweepActive: boolean;
-  sweepValues: Record<string, number>;
-  gaugeDemoActive: boolean;
-  demoValues: Record<string, number>;
   isConnected: boolean;
   onContextMenu: (e: React.MouseEvent, gaugeId: string | null) => void;
 }) {
@@ -198,7 +174,6 @@ function ExtraClusterLayer({
 
         if (isGauge(component)) {
           const gauge = component.Gauge;
-          const value = resolveGaugeValue(gauge, { sweepActive, sweepValues, gaugeDemoActive, demoValues });
           const style: React.CSSProperties = {
             left: `${toPercent(gauge.relative_x)}%`,
             top: `${toPercent(gauge.relative_y)}%`,
@@ -215,10 +190,8 @@ function ExtraClusterLayer({
               >
                 <TsGauge
                   config={gauge}
-                  value={value}
                   embeddedImages={embeddedImages}
                   legacyMode={legacyMode}
-                  overrideStore={sweepActive || gaugeDemoActive}
                   isConnected={isConnected}
                 />
               </div>

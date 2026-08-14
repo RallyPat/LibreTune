@@ -20,6 +20,7 @@
 import { useEffect, useRef } from 'react';
 import type { TsGaugeConfig } from '../dashboards/dashTypes';
 import { useRealtimeStore } from '../../stores/realtimeStore';
+import { getGaugeOverride } from '../../stores/gaugeOverride';
 
 /** Lerp factor per animation frame (~280ms to converge at 60fps). */
 const ANIMATION_LERP = 0.25;
@@ -45,10 +46,6 @@ export type GaugePaintFn = (
 
 export interface UseGaugeRendererOptions {
   config: TsGaugeConfig;
-  /** Prop-supplied value; only consulted when `overrideStore` is true. */
-  value: number;
-  /** When true, the value prop drives the gauge instead of the store (sweep/demo). */
-  overrideStore: boolean;
   /** Block the rAF loop from starting until embedded fonts/images have loaded. */
   enabled: boolean;
   /** Per-frame painter — called with the current display value. */
@@ -67,11 +64,9 @@ export interface UseGaugeRendererResult {
   /** Attach this to the `<canvas>` element. */
   canvasRef: React.RefObject<HTMLCanvasElement>;
   /**
-   * Live ref to the smoothly-animated display value. Painters that
-   * still live as nested closures inside the host component can read
-   * `displayValueRef.current` directly instead of using the value
-   * passed into the `paint` callback. Equivalent for now; will go
-   * away once every painter is a top-level pure function.
+   * Live ref to the smoothly-animated display value. Helpers that need the
+   * current value outside the paint callback (e.g. threshold-zone coloring)
+   * read `displayValueRef.current` directly.
    */
   displayValueRef: React.MutableRefObject<number>;
   /**
@@ -84,28 +79,22 @@ export interface UseGaugeRendererResult {
 }
 
 export function useGaugeRenderer(opts: UseGaugeRendererOptions): UseGaugeRendererResult {
-  const { config, value, overrideStore, enabled, paint, continuousRender } = opts;
+  const { config, enabled, paint, continuousRender } = opts;
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   // Initial clamped value used to seed both display and target on first render.
   const initialClamped = config.peg_limits
-    ? Math.max(config.min, Math.min(config.max, value))
-    : value;
+    ? Math.max(config.min, Math.min(config.max, config.min))
+    : config.min;
 
   // displayValueRef holds the CURRENTLY DISPLAYED (smoothly animated) value.
   const displayValueRef = useRef(initialClamped);
   // peakValueRef holds the maximum value ever observed by the gauge —
   // used for the optional `peak_hold` marker.
   const peakValueRef = useRef(initialClamped);
-  // targetRef holds the ANIMATION TARGET — updated by store reads or the
-  // sweep/demo prop-sync effect below.
+  // targetRef holds the ANIMATION TARGET — updated by store/override reads.
   const targetRef = useRef(initialClamped);
-
-  // Track overrideStore in a ref so the animation loop closure always
-  // sees the current value without forcing the effect to restart.
-  const overrideStoreRef = useRef(overrideStore);
-  overrideStoreRef.current = overrideStore;
 
   // Stash the latest paint callback in a ref so we can swap it across
   // renders without tearing down the animation loop.
@@ -131,16 +120,6 @@ export function useGaugeRenderer(opts: UseGaugeRendererOptions): UseGaugeRendere
     cssW: 0,
     cssH: 0,
   });
-
-  // Sync targetRef when overrideStore is true (sweep/demo mode).
-  useEffect(() => {
-    if (!overrideStore) return;
-    const clamped = config.peg_limits
-      ? Math.max(config.min, Math.min(config.max, value))
-      : value;
-    targetRef.current = clamped;
-    if (startAnimationRef.current) startAnimationRef.current();
-  }, [config.peg_limits, config.min, config.max, value, overrideStore]);
 
   // ResizeObserver — keeps the backing-store size in sync with CSS size.
   useEffect(() => {
@@ -170,14 +149,11 @@ export function useGaugeRenderer(opts: UseGaugeRendererOptions): UseGaugeRendere
 
   // Main animation/render effect.
   //
-  // Self-contained: the loop reads the store value imperatively each frame
-  // (via `getState()`, NOT via subscribe). This eliminates fragile cross-
-  // effect ref sharing that previously caused gauges to freeze when the
-  // animation effect re-ran while the subscription still held a stale
-  // `startAnimationRef`.
-  //
-  // When `overrideStore` is true (sweep/demo), `targetRef` is driven by
-  // the prop-sync effect above; the loop still runs but skips the store read.
+  // Self-contained: the loop reads the current target value imperatively each
+  // frame (via `getState()`, NOT via subscribe) — first from the non-reactive
+  // sweep/demo override map, then from the realtime store. This eliminates
+  // fragile cross-effect ref sharing and keeps live data entirely out of
+  // React's render path.
   useEffect(() => {
     if (!enabled) return;
 
@@ -220,6 +196,10 @@ export function useGaugeRenderer(opts: UseGaugeRendererOptions): UseGaugeRendere
       return undefined;
     };
 
+    /** Current animation target: sweep/demo override first, then the store. */
+    const readTargetValue = (): number | undefined =>
+      getGaugeOverride(channel) ?? readStoreValue();
+
     /** Draw one frame using `displayValueRef.current` as the gauge value. */
     const drawFrame = () => {
       const { w, h, cssW, cssH } = canvasSizeRef.current;
@@ -243,9 +223,9 @@ export function useGaugeRenderer(opts: UseGaugeRendererOptions): UseGaugeRendere
     const animate = (timestamp: number) => {
       if (!loopActive) return;
 
-      // Normal mode: read the store each frame to pick up new data.
-      if (!overrideStoreRef.current && channel) {
-        const raw = readStoreValue();
+      // Pick up new data each frame: override (sweep/demo) first, then store.
+      if (channel) {
+        const raw = readTargetValue();
         if (raw !== undefined) {
           const peg = config.peg_limits;
           const clamped = peg ? Math.max(config.min, Math.min(config.max, raw)) : raw;
@@ -258,7 +238,7 @@ export function useGaugeRenderer(opts: UseGaugeRendererOptions): UseGaugeRendere
         peakValueRef.current = target;
       }
       const diff = target - displayValueRef.current;
-      const keepAlive = continuousRender && !overrideStoreRef.current && channel;
+      const keepAlive = continuousRender && channel;
       if (Math.abs(diff) > epsilon) {
         displayValueRef.current = displayValueRef.current + diff * ANIMATION_LERP;
         if (timestamp - lastDrawTimeRef.current >= DRAW_INTERVAL_MS) {
@@ -298,12 +278,13 @@ export function useGaugeRenderer(opts: UseGaugeRendererOptions): UseGaugeRendere
     // Initial kick.
     rafIdRef.current = requestAnimationFrame(animate);
 
-    // Watchdog: when the rAF loop is idle (converged), poll the store
-    // every 100ms. Costs ~one hash lookup per gauge per tick.
+    // Watchdog: when the rAF loop is idle (converged), poll the target
+    // (override, then store) every 100ms. Costs ~one hash lookup per gauge
+    // per tick.
     const watchdog = setInterval(() => {
-      if (!loopActive || overrideStoreRef.current || !channel) return;
+      if (!loopActive || !channel) return;
       if (rafIdRef.current !== null) return; // Already animating.
-      const raw = readStoreValue();
+      const raw = readTargetValue();
       if (raw !== undefined) {
         const peg = config.peg_limits;
         const clamped = peg ? Math.max(config.min, Math.min(config.max, raw)) : raw;
@@ -323,9 +304,9 @@ export function useGaugeRenderer(opts: UseGaugeRendererOptions): UseGaugeRendere
         rafIdRef.current = null;
       }
     };
-    // Note: `value` and `paint` are intentionally omitted — they're
-    // consumed via refs so the effect only restarts when channel/range
-    // semantics or the readiness gate change.
+    // Note: `paint` is intentionally omitted — it's consumed via a ref so
+    // the effect only restarts when channel/range semantics or the
+    // readiness gate change.
   }, [
     enabled,
     config.output_channel,

@@ -90,10 +90,11 @@ vi.mock('@react-three/drei', () => ({
   OrbitControls: () => null,
 }));
 
-// Provide a default mock for event.listen
+// Provide a default mock for event.listen / event.emit
 vi.mock('@tauri-apps/api/event', () => ({
   listen: vi.fn(async (_event: string, _handler: any) => {
     // Return a no-op unlisten function
     return () => {};
   }),
+  emit: vi.fn(async (_event: string, _payload?: unknown) => {}),
 }));
