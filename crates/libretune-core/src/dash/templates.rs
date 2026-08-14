@@ -148,8 +148,17 @@ const LT_LOG_CYAN: TsColor = TsColor {
 };
 
 /// Create a basic dashboard layout - LibreTune default
-/// Clean 4x2 grid: Large RPM + AFR in center, supporting gauges around edges
-/// Perfect for general monitoring and everyday driving
+///
+/// Widescreen (16:9 forced aspect) three-zone layout:
+///   - Top strip: four compact readout cards (battery, intake temp,
+///     ignition timing, pulse width)
+///   - Flanks: two large square dials — RPM tachometer left, AFR right
+///   - Center column: three small dials (MAP, coolant, throttle)
+///
+/// All dial boxes are square IN PIXELS (w% · 16 = h% · 9 on the 16:9
+/// canvas), so the circular painters fill their boxes instead of drawing
+/// a small circle inside a tall rectangle. `shortest_size: 0` keeps the
+/// 50px default floor from fighting the percentage layout at small sizes.
 pub fn create_basic_dashboard() -> DashFile {
     let mut dash = DashFile {
         bibliography: Bibliography {
@@ -163,9 +172,9 @@ pub fn create_basic_dashboard() -> DashFile {
         },
         gauge_cluster: GaugeCluster {
             anti_aliasing: true,
-            force_aspect: false,
-            force_aspect_width: 0.0,
-            force_aspect_height: 0.0,
+            force_aspect: true,
+            force_aspect_width: 16.0,
+            force_aspect_height: 9.0,
             cluster_background_color: LT_DARKER_BG,
             background_dither_color: None,
             cluster_background_image_file_name: None,
@@ -179,283 +188,142 @@ pub fn create_basic_dashboard() -> DashFile {
         extra_attrs: std::collections::BTreeMap::new(),
     };
 
-    // CENTER LEFT: Large RPM tachometer
+    // --- Top strip: compact readout cards ---------------------------------
+    // Four equal cards spanning the width: y 0.03–0.18, x 0.02–0.98.
+    // Tuple: (x, channel, title, units, min, max, low_warn, low_crit,
+    //         high_warn, high_crit, digits, accent)
+    for card in [
+        (0.02, "battery", "BATTERY", "V", 10.0, 16.0, Some(11.5), None, Some(14.5), None, 1, LT_ACCENT_GREEN),
+        (0.266, "iat", "INTAKE TEMP", "°C", -40.0, 80.0, None, None, Some(55.0), None, 0, LT_ACCENT_AMBER),
+        (0.512, "advance", "TIMING", "°", -10.0, 50.0, None, None, None, None, 1, LT_ACCENT_TEAL),
+        (0.758, "pulseWidth", "INJECTOR PW", "ms", 0.0, 25.0, None, None, Some(20.0), None, 1, LT_ACCENT_BLUE),
+    ] {
+        dash.gauge_cluster.components.push(DashComponent::Gauge(Box::new(GaugeConfig {
+            id: card.1.to_string(),
+            title: card.2.to_string(),
+            units: card.3.to_string(),
+            output_channel: card.1.to_string(),
+            min: card.4,
+            max: card.5,
+            low_warning: card.6,
+            low_critical: card.7,
+            high_warning: card.8,
+            high_critical: card.9,
+            value_digits: card.10,
+            gauge_painter: GaugePainter::BasicReadout,
+            relative_x: card.0,
+            relative_y: 0.03,
+            relative_width: 0.222,
+            relative_height: 0.15,
+            needle_color: card.11,
+            ..basic_style()
+        })));
+    }
+
+    // --- Left flank: RPM tachometer (square box: 0.40·16 ≈ 0.71·9) --------
     dash.gauge_cluster
         .components
         .push(DashComponent::Gauge(Box::new(GaugeConfig {
             id: "rpm".to_string(),
-            title: "ENGINE RPM".to_string(),
+            title: "RPM".to_string(),
             units: "".to_string(),
             output_channel: "rpm".to_string(),
             min: 0.0,
             max: 8000.0,
             high_warning: Some(6500.0),
             high_critical: Some(7200.0),
+            value_digits: 0,
             gauge_painter: GaugePainter::Tachometer,
             start_angle: 135,
             sweep_angle: 270,
             major_ticks: 8.0,
             minor_ticks: 4.0,
-            value_digits: 0,
             relative_x: 0.02,
-            relative_y: 0.10,
-            relative_width: 0.45,
-            relative_height: 0.80,
-            back_color: LT_GAUGE_BG,
-            font_color: LT_TEXT_PRIMARY,
+            relative_y: 0.22,
+            relative_width: 0.40,
+            relative_height: 0.71,
             needle_color: LT_ACCENT_AMBER,
-            trim_color: LT_TEXT_SECONDARY,
-            warn_color: LT_WARN_COLOR,
-            critical_color: LT_CRITICAL_COLOR,
             font_size_adjustment: 2,
-            ..Default::default()
+            ..basic_style()
         })));
 
-    // CENTER RIGHT: Large AFR gauge
+    // --- Right flank: AFR dial (square box) --------------------------------
     dash.gauge_cluster
         .components
         .push(DashComponent::Gauge(Box::new(GaugeConfig {
             id: "afr".to_string(),
-            title: "AIR/FUEL RATIO".to_string(),
-            units: ":1".to_string(),
+            title: "AFR".to_string(),
+            units: "".to_string(),
             output_channel: "afr".to_string(),
             min: 10.0,
             max: 20.0,
             low_warning: Some(11.5),
             low_critical: Some(10.5),
             high_warning: Some(16.0),
+            high_critical: Some(18.0),
             value_digits: 1,
             gauge_painter: GaugePainter::AnalogGauge,
             start_angle: 225,
             sweep_angle: 270,
             major_ticks: 10.0,
             minor_ticks: 5.0,
-            relative_x: 0.52,
-            relative_y: 0.10,
-            relative_width: 0.46,
-            relative_height: 0.80,
-            back_color: LT_GAUGE_BG,
+            relative_x: 0.58,
+            relative_y: 0.22,
+            relative_width: 0.40,
+            relative_height: 0.71,
             font_color: LT_ACCENT_GREEN,
             needle_color: LT_ACCENT_GREEN,
-            trim_color: LT_TEXT_SECONDARY,
-            warn_color: LT_WARN_COLOR,
-            critical_color: LT_CRITICAL_COLOR,
             font_size_adjustment: 1,
-            ..Default::default()
+            ..basic_style()
         })));
 
-    // TOP LEFT: Coolant temp bar
-    dash.gauge_cluster
-        .components
-        .push(DashComponent::Gauge(Box::new(GaugeConfig {
-            id: "coolant".to_string(),
-            title: "COOLANT".to_string(),
-            units: "°C".to_string(),
-            output_channel: "coolant".to_string(),
-            min: -40.0,
-            max: 120.0,
-            high_warning: Some(100.0),
-            high_critical: Some(110.0),
+    // --- Center column: three small dials (square: 0.12·16 ≈ 0.21·9) ------
+    // Tuple: (y, channel, title, units, min, max, high_warn, high_crit, accent)
+    for dial in [
+        (0.24, "map", "MAP", "kPa", 0.0, 250.0, Some(220.0), None, LT_ACCENT_TEAL),
+        (0.49, "coolant", "COOLANT", "°C", -40.0, 130.0, Some(100.0), Some(110.0), LT_ACCENT_BLUE),
+        (0.74, "tps", "THROTTLE", "%", 0.0, 100.0, None, None, LT_ACCENT_AMBER),
+    ] {
+        dash.gauge_cluster.components.push(DashComponent::Gauge(Box::new(GaugeConfig {
+            id: dial.1.to_string(),
+            title: dial.2.to_string(),
+            units: dial.3.to_string(),
+            output_channel: dial.1.to_string(),
+            min: dial.4,
+            max: dial.5,
+            high_warning: dial.6,
+            high_critical: dial.7,
             value_digits: 0,
-            gauge_painter: GaugePainter::HorizontalBarGauge,
-            relative_x: 0.02,
-            relative_y: 0.02,
-            relative_width: 0.23,
-            relative_height: 0.06,
-            back_color: LT_GAUGE_BG,
-            font_color: LT_ACCENT_BLUE,
-            needle_color: LT_ACCENT_BLUE,
-            trim_color: LT_TEXT_SECONDARY,
-            warn_color: LT_WARN_COLOR,
-            critical_color: LT_CRITICAL_COLOR,
-            ..Default::default()
+            gauge_painter: GaugePainter::AnalogGauge,
+            start_angle: 225,
+            sweep_angle: 270,
+            major_ticks: 5.0,
+            minor_ticks: 2.0,
+            relative_x: 0.44,
+            relative_y: dial.0,
+            relative_width: 0.12,
+            relative_height: 0.21,
+            needle_color: dial.8,
+            ..basic_style()
         })));
-
-    // TOP CENTER: MAP bar
-    dash.gauge_cluster
-        .components
-        .push(DashComponent::Gauge(Box::new(GaugeConfig {
-            id: "map".to_string(),
-            title: "MAP".to_string(),
-            units: "kPa".to_string(),
-            output_channel: "map".to_string(),
-            min: 0.0,
-            max: 250.0,
-            high_warning: Some(200.0),
-            value_digits: 0,
-            gauge_painter: GaugePainter::HorizontalBarGauge,
-            relative_x: 0.27,
-            relative_y: 0.02,
-            relative_width: 0.23,
-            relative_height: 0.06,
-            back_color: LT_GAUGE_BG,
-            font_color: LT_ACCENT_TEAL,
-            needle_color: LT_ACCENT_TEAL,
-            trim_color: LT_TEXT_SECONDARY,
-            warn_color: LT_WARN_COLOR,
-            critical_color: LT_CRITICAL_COLOR,
-            ..Default::default()
-        })));
-
-    // TOP RIGHT: TPS bar
-    dash.gauge_cluster
-        .components
-        .push(DashComponent::Gauge(Box::new(GaugeConfig {
-            id: "tps".to_string(),
-            title: "THROTTLE".to_string(),
-            units: "%".to_string(),
-            output_channel: "tps".to_string(),
-            min: 0.0,
-            max: 100.0,
-            value_digits: 0,
-            gauge_painter: GaugePainter::HorizontalBarGauge,
-            relative_x: 0.52,
-            relative_y: 0.02,
-            relative_width: 0.23,
-            relative_height: 0.06,
-            back_color: LT_GAUGE_BG,
-            font_color: LT_ACCENT_AMBER,
-            needle_color: LT_ACCENT_AMBER,
-            trim_color: LT_TEXT_SECONDARY,
-            warn_color: LT_WARN_COLOR,
-            critical_color: LT_CRITICAL_COLOR,
-            ..Default::default()
-        })));
-
-    // TOP FAR RIGHT: Battery readout
-    dash.gauge_cluster
-        .components
-        .push(DashComponent::Gauge(Box::new(GaugeConfig {
-            id: "battery".to_string(),
-            title: "BATT".to_string(),
-            units: "V".to_string(),
-            output_channel: "battery".to_string(),
-            min: 10.0,
-            max: 16.0,
-            low_warning: Some(11.5),
-            low_critical: Some(11.0),
-            value_digits: 1,
-            gauge_painter: GaugePainter::BasicReadout,
-            relative_x: 0.77,
-            relative_y: 0.02,
-            relative_width: 0.21,
-            relative_height: 0.06,
-            back_color: LT_GAUGE_BG,
-            font_color: LT_TEXT_PRIMARY,
-            needle_color: LT_ACCENT_GREEN,
-            trim_color: LT_TEXT_SECONDARY,
-            warn_color: LT_WARN_COLOR,
-            critical_color: LT_CRITICAL_COLOR,
-            font_size_adjustment: -1,
-            ..Default::default()
-        })));
-
-    // BOTTOM LEFT: IAT readout
-    dash.gauge_cluster
-        .components
-        .push(DashComponent::Gauge(Box::new(GaugeConfig {
-            id: "iat".to_string(),
-            title: "INTAKE TEMP".to_string(),
-            units: "°C".to_string(),
-            output_channel: "iat".to_string(),
-            min: -40.0,
-            max: 80.0,
-            high_warning: Some(50.0),
-            value_digits: 0,
-            gauge_painter: GaugePainter::BasicReadout,
-            relative_x: 0.02,
-            relative_y: 0.92,
-            relative_width: 0.23,
-            relative_height: 0.06,
-            back_color: LT_GAUGE_BG,
-            font_color: LT_TEXT_PRIMARY,
-            needle_color: LT_ACCENT_AMBER,
-            trim_color: LT_TEXT_SECONDARY,
-            warn_color: LT_WARN_COLOR,
-            critical_color: LT_CRITICAL_COLOR,
-            font_size_adjustment: -1,
-            ..Default::default()
-        })));
-
-    // BOTTOM CENTER: Ignition advance
-    dash.gauge_cluster
-        .components
-        .push(DashComponent::Gauge(Box::new(GaugeConfig {
-            id: "advance".to_string(),
-            title: "TIMING".to_string(),
-            units: "°".to_string(),
-            output_channel: "advance".to_string(),
-            min: -10.0,
-            max: 50.0,
-            value_digits: 1,
-            gauge_painter: GaugePainter::BasicReadout,
-            relative_x: 0.27,
-            relative_y: 0.92,
-            relative_width: 0.23,
-            relative_height: 0.06,
-            back_color: LT_GAUGE_BG,
-            font_color: LT_TEXT_PRIMARY,
-            needle_color: LT_ACCENT_TEAL,
-            trim_color: LT_TEXT_SECONDARY,
-            warn_color: LT_WARN_COLOR,
-            critical_color: LT_CRITICAL_COLOR,
-            font_size_adjustment: -1,
-            ..Default::default()
-        })));
-
-    // BOTTOM CENTER-RIGHT: VE percentage
-    dash.gauge_cluster
-        .components
-        .push(DashComponent::Gauge(Box::new(GaugeConfig {
-            id: "ve".to_string(),
-            title: "VE".to_string(),
-            units: "%".to_string(),
-            output_channel: "ve".to_string(),
-            min: 0.0,
-            max: 150.0,
-            value_digits: 0,
-            gauge_painter: GaugePainter::BasicReadout,
-            relative_x: 0.52,
-            relative_y: 0.92,
-            relative_width: 0.23,
-            relative_height: 0.06,
-            back_color: LT_GAUGE_BG,
-            font_color: LT_TEXT_PRIMARY,
-            needle_color: LT_ACCENT_GREEN,
-            trim_color: LT_TEXT_SECONDARY,
-            warn_color: LT_WARN_COLOR,
-            critical_color: LT_CRITICAL_COLOR,
-            font_size_adjustment: -1,
-            ..Default::default()
-        })));
-
-    // BOTTOM RIGHT: Pulse width
-    dash.gauge_cluster
-        .components
-        .push(DashComponent::Gauge(Box::new(GaugeConfig {
-            id: "pw".to_string(),
-            title: "PULSE".to_string(),
-            units: "ms".to_string(),
-            output_channel: "pulseWidth".to_string(),
-            min: 0.0,
-            max: 25.0,
-            value_digits: 2,
-            gauge_painter: GaugePainter::BasicReadout,
-            relative_x: 0.77,
-            relative_y: 0.92,
-            relative_width: 0.21,
-            relative_height: 0.06,
-            back_color: LT_GAUGE_BG,
-            font_color: LT_TEXT_PRIMARY,
-            needle_color: LT_ACCENT_BLUE,
-            trim_color: LT_TEXT_SECONDARY,
-            warn_color: LT_WARN_COLOR,
-            critical_color: LT_CRITICAL_COLOR,
-            font_size_adjustment: -1,
-            ..Default::default()
-        })));
+    }
 
     dash
+}
+
+/// Shared chrome for the Basic template's gauges: dark card background,
+/// shared threshold colors, no pixel floor.
+fn basic_style() -> GaugeConfig {
+    GaugeConfig {
+        back_color: LT_GAUGE_BG,
+        font_color: LT_TEXT_PRIMARY,
+        trim_color: LT_TEXT_SECONDARY,
+        warn_color: LT_WARN_COLOR,
+        critical_color: LT_CRITICAL_COLOR,
+        shortest_size: 0,
+        antialiasing_on: true,
+        ..Default::default()
+    }
 }
 
 /// Create a tuning-focused dashboard
@@ -1893,6 +1761,73 @@ mod tests {
                      it to a pixel floor that fights its relative-percentage \
                      layout at smaller dashboard sizes",
                     gauge.id
+                );
+            }
+        }
+    }
+
+    /// The Basic dashboard's layout contract: widescreen canvas, circular
+    /// painters in pixel-square boxes (so dials fill their boxes instead of
+    /// leaving dead margins), no pixel floors, and no overlapping boxes.
+    /// All geometry is checked in pixel units (w·16 × h·9) so the math
+    /// matches what actually renders on the forced 16:9 canvas.
+    #[test]
+    fn test_basic_dashboard_layout_geometry() {
+        let dash = create_basic_dashboard();
+
+        assert!(dash.gauge_cluster.force_aspect, "Basic must force its aspect");
+        assert_eq!(dash.gauge_cluster.force_aspect_width, 16.0);
+        assert_eq!(dash.gauge_cluster.force_aspect_height, 9.0);
+
+        let boxes: Vec<(String, f64, f64, f64, f64, bool)> = dash
+            .gauge_cluster
+            .components
+            .iter()
+            .filter_map(|c| match c {
+                DashComponent::Gauge(g) => Some((
+                    g.id.clone(),
+                    g.relative_x * 16.0,
+                    g.relative_y * 9.0,
+                    g.relative_width * 16.0,
+                    g.relative_height * 9.0,
+                    matches!(
+                        g.gauge_painter,
+                        GaugePainter::Tachometer | GaugePainter::AnalogGauge
+                    ),
+                )),
+                _ => None,
+            })
+            .collect();
+
+        assert!(boxes.len() >= 9, "Basic should carry a full gauge set");
+
+        for (id, _x, _y, w, h, is_dial) in &boxes {
+            assert!(
+                w > &0.0 && h > &0.0,
+                "gauge '{id}' has a non-positive box"
+            );
+            if *is_dial {
+                assert!(
+                    (w - h).abs() < 0.5,
+                    "dial '{id}' box is {w:.2}×{h:.2} pixel-units — circular \
+                     painters need square boxes or they render a small circle \
+                     inside a tall/narrow box",
+                );
+            }
+        }
+
+        for i in 0..boxes.len() {
+            for j in (i + 1)..boxes.len() {
+                let (_, x1, y1, w1, h1, _) = boxes[i];
+                let (_, x2, y2, w2, h2, _) = boxes[j];
+                let separated = x1 + w1 <= x2 + 1e-9
+                    || x2 + w2 <= x1 + 1e-9
+                    || y1 + h1 <= y2 + 1e-9
+                    || y2 + h2 <= y1 + 1e-9;
+                assert!(
+                    separated,
+                    "components '{}' and '{}' overlap",
+                    boxes[i].0, boxes[j].0
                 );
             }
         }

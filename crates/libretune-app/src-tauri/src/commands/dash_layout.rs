@@ -296,7 +296,7 @@ const TEMPLATE_SPECS: &[TemplateSpec] = &[
         id: "basic",
         file_name: "Basic.ltdash.xml",
         display_name: "Basic Dashboard",
-        description: "Essential gauges: RPM, AFR, Coolant, Throttle",
+        description: "Widescreen driver cluster: RPM + AFR center stage, MAP/coolant/TPS dials, key readouts up top",
         builder: dash::create_basic_dashboard,
     },
     TemplateSpec {

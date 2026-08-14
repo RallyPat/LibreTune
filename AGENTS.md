@@ -88,7 +88,7 @@ The project aims to provide professional ECU tuning workflow and functionality w
 ### 5. Professional Default Dashboards
 - Location: builders in `crates/libretune-core/src/dash/templates.rs`; single template registry (id, file name, display info) in `crates/libretune-app/src-tauri/src/commands/dash_layout.rs` (`TEMPLATE_SPECS`)
 - Three professionally designed dashboards:
-  - **Basic**: Large analog RPM + digital AFR + vertical CLT/IAT bars + horizontal MAP bar + battery/advance/VE/PW readouts
+  - **Basic**: Widescreen (16:9) driver cluster — RPM tachometer and AFR dial flanking three center dials (MAP, coolant, throttle), with battery/intake-temp/timing/injector-PW readout cards along the top
   - **Tuning**: Mixed layout with sweep gauge, analog gauge, vertical bars, horizontal bars, lambda line graph, EGT/duty dashed bars, correction factor readouts
   - **Telemetry Live**: Dense Grafana-style view — stat tiles, multi-series charts, sparklines ("Racing" was retired)
 - All dashboards use consistent dark color scheme with accent colors matching gauge purposes
