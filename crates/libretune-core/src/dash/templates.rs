@@ -1872,11 +1872,6 @@ pub fn create_telemetry_live_dashboard() -> DashFile {
     dash
 }
 
-/// Backward-compatible alias — the old "F1 Telemetry" name pointed here.
-pub fn create_f1_telemetry_dashboard() -> DashFile {
-    create_telemetry_live_dashboard()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -43,8 +43,6 @@ describe('TsDashboard', () => {
     });
 
     // Seed store with initial RPM value
-
-    // Seed store with initial RPM value
     act(() => {
       useRealtimeStore.getState().updateChannels({ RPM: 0 });
     });
@@ -114,7 +112,6 @@ describe('TsDashboard', () => {
     // We do not assert a strict upper bound on calls since the animation loop will call rAF multiple times
     // The important thing is that it was started (no overlapping simultaneous starts).
 
-    rafSpy.mockRestore();
     rafSpy.mockRestore();
   });
 });

@@ -1,27 +1,13 @@
 import React from 'react';
-import { invoke } from '@tauri-apps/api/core';
-import { DashFile, GaugeCluster, TsGaugeConfig, isGauge, isIndicator } from '../dashTypes';
+import { DashFile, GaugeCluster, isGauge, isIndicator } from '../dashTypes';
 import TsGauge from '../../gauges/TsGauge';
 import LiveTsIndicator from './LiveTsIndicator';
-import { buildDefaultGauge } from '../utils/defaultGauge';
 import { resolveGaugeValue } from '../utils/resolveGaugeValue';
 import { useEnabledCondition } from '../hooks/useEnabledCondition';
 
-interface ChannelInfo {
-  name: string;
-  label?: string | null;
-  units: string;
-  scale: number;
-  translate: number;
-}
-
 interface Props {
   dashFile: DashFile;
-  selectedPath: string;
-  setDashFile: (file: DashFile) => void;
-  channelInfoMap: Record<string, ChannelInfo>;
   embeddedImages: Map<string, string>;
-  designerMode: boolean;
   legacyMode: boolean;
   scale: number;
   scrollable?: boolean;
@@ -45,11 +31,7 @@ interface Props {
  */
 export default function DashboardCanvas({
   dashFile,
-  selectedPath,
-  setDashFile,
-  channelInfoMap,
   embeddedImages,
-  designerMode,
   legacyMode,
   scale,
   scrollable = false,
@@ -69,66 +51,13 @@ export default function DashboardCanvas({
   const cluster = dashFile.gauge_cluster;
   const toPercent = (v: number | undefined | null) => (v ?? 0) * 100;
 
-  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
-    if (!designerMode) return;
-    e.preventDefault();
-    e.stopPropagation();
-    e.currentTarget.style.opacity = '1';
-
-    try {
-      const data = e.dataTransfer.getData('application/json');
-      if (!data) return;
-
-      const channel = JSON.parse(data);
-      if (channel.type !== 'channel' || !dashFile) return;
-
-      const rect = e.currentTarget.getBoundingClientRect();
-      const relX = (e.clientX - rect.left) / rect.width;
-      const relY = (e.clientY - rect.top) / rect.height;
-
-      const info = channelInfoMap[channel.id];
-      const units = info?.units || '';
-      const label = info?.label || channel.label;
-
-      const defaultGauge: TsGaugeConfig = buildDefaultGauge({
-        id: `gauge_${Date.now()}`,
-        channel: channel.id,
-        title: label || channel.label,
-        units,
-        relativeX: relX - 0.1,
-        relativeY: relY - 0.1,
-      });
-
-      const updatedComponents = [...dashFile.gauge_cluster.components, { Gauge: defaultGauge }];
-      const updatedFile: DashFile = {
-        ...dashFile,
-        gauge_cluster: {
-          ...dashFile.gauge_cluster,
-          components: updatedComponents,
-        },
-      };
-      setDashFile(updatedFile);
-
-      try {
-        invoke('save_dash_file', {
-          path: selectedPath,
-          dashFile: updatedFile,
-        }).catch((err) => console.error('Failed to auto-save dashboard:', err));
-      } catch (err) {
-        console.error('Failed to save dashboard:', err);
-      }
-    } catch (err) {
-      console.error('Failed to process dropped channel:', err);
-    }
-  };
-
   return (
     <div
       ref={wrapperRef}
       className={`ts-dashboard-wrapper${scrollable ? ' ts-dashboard-wrapper--scroll' : ''}`}
     >
       <div
-        className={`ts-dashboard ${designerMode ? 'designer-mode' : ''}`}
+        className="ts-dashboard"
         style={{
           backgroundColor: bgColor,
           backgroundImage: backgroundImageLayers || undefined,
@@ -141,18 +70,6 @@ export default function DashboardCanvas({
           transformOrigin: 'top center',
         }}
         onContextMenu={(e) => onContextMenu(e, null)}
-        onDragOver={(e) => {
-          if (!designerMode) return;
-          e.preventDefault();
-          e.stopPropagation();
-          e.dataTransfer.dropEffect = 'copy';
-          e.currentTarget.style.opacity = '0.8';
-        }}
-        onDragLeave={(e) => {
-          if (!designerMode) return;
-          e.currentTarget.style.opacity = '1';
-        }}
-        onDrop={handleDrop}
       >
         {cluster.components.map((component, index) => {
           if (isGauge(component)) {
@@ -172,7 +89,7 @@ export default function DashboardCanvas({
             return (
               <ConditionalWrapper key={gauge.id || `gauge-${index}`} condition={gauge.enabled_condition ?? null}>
                 <div
-                  className={`ts-component ts-gauge ${designerMode ? 'editable' : ''}`}
+                  className="ts-component ts-gauge"
                   style={gaugeStyle}
                   onContextMenu={(e) => onContextMenu(e, gauge.id)}
                 >
@@ -194,7 +111,7 @@ export default function DashboardCanvas({
             return (
               <ConditionalWrapper key={indicator.id || `indicator-${index}`} condition={indicator.enabled_condition ?? null}>
                 <div
-                  className={`ts-component ts-indicator ${designerMode ? 'editable' : ''}`}
+                  className="ts-component ts-indicator"
                   style={{
                     left: `${toPercent(indicator.relative_x)}%`,
                     top: `${toPercent(indicator.relative_y)}%`,
@@ -219,7 +136,6 @@ export default function DashboardCanvas({
             key={`extra-cluster-${idx}`}
             cluster={extra}
             embeddedImages={embeddedImages}
-            designerMode={designerMode}
             legacyMode={legacyMode}
             sweepActive={sweepActive}
             sweepValues={sweepValues}
@@ -251,7 +167,6 @@ function ConditionalWrapper({
 function ExtraClusterLayer({
   cluster,
   embeddedImages,
-  designerMode,
   legacyMode,
   sweepActive,
   sweepValues,
@@ -262,7 +177,6 @@ function ExtraClusterLayer({
 }: {
   cluster: GaugeCluster;
   embeddedImages: Map<string, string>;
-  designerMode: boolean;
   legacyMode: boolean;
   sweepActive: boolean;
   sweepValues: Record<string, number>;
@@ -290,7 +204,7 @@ function ExtraClusterLayer({
           return (
             <ConditionalWrapper key={gauge.id || `xg-${index}`} condition={gauge.enabled_condition ?? null}>
               <div
-                className={`ts-component ts-gauge ${designerMode ? 'editable' : ''}`}
+                className="ts-component ts-gauge"
                 style={style}
                 onContextMenu={(e) => onContextMenu(e, gauge.id)}
               >
@@ -311,7 +225,7 @@ function ExtraClusterLayer({
           return (
             <ConditionalWrapper key={ind.id || `xi-${index}`} condition={ind.enabled_condition ?? null}>
               <div
-                className={`ts-component ts-indicator ${designerMode ? 'editable' : ''}`}
+                className="ts-component ts-indicator"
                 style={{
                   left: `${toPercent(ind.relative_x)}%`,
                   top: `${toPercent(ind.relative_y)}%`,

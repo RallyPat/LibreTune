@@ -35,8 +35,6 @@ import './TsDashboard.css';
  * Props for the TsDashboard component.
  */
 interface TsDashboardProps {
-  /** Path to initially load (optional, uses last dashboard or default) */
-  initialDashPath?: string;
   /** Whether ECU is connected (enables data display) */
   isConnected?: boolean;
 }
@@ -49,9 +47,9 @@ interface ChannelInfo {
   translate: number;
 }
 
-export default function TsDashboard({ initialDashPath, isConnected = false }: TsDashboardProps) {
+export default function TsDashboard({ isConnected = false }: TsDashboardProps) {
   const [dashFile, setDashFile] = useState<DashFile | null>(null);
-  const [selectedPath, setSelectedPath] = useState<string>(initialDashPath || '');
+  const [selectedPath, setSelectedPath] = useState<string>('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showSelector, setShowSelector] = useState(false);
@@ -497,11 +495,7 @@ export default function TsDashboard({ initialDashPath, isConnected = false }: Ts
         <>
       <DashboardCanvas
         dashFile={dashFile}
-        selectedPath={selectedPath}
-        setDashFile={setDashFile}
-        channelInfoMap={channelInfoMap}
         embeddedImages={embeddedImages}
-        designerMode={designerMode}
         legacyMode={legacyMode}
         scale={scale}
         scrollable={scrollable}
@@ -555,22 +549,6 @@ export default function TsDashboard({ initialDashPath, isConnected = false }: Ts
           }
         }}
         onReloadDefaultGauges={handleReloadDefaultGauges}
-        onResetValue={() => {
-          // Reset channel value to minimum
-          if (!contextMenu.targetGaugeId || !dashFile) return;
-          
-          const gauge = dashFile.gauge_cluster.components.find((comp) =>
-            isGauge(comp) && comp.Gauge.id === contextMenu.targetGaugeId
-          );
-          
-          if (gauge && isGauge(gauge)) {
-            const channel = gauge.Gauge.output_channel;
-            const minValue = gauge.Gauge.min || 0;
-            // You would need to emit an update to the realtime store or send to ECU
-            console.log('Reset channel', channel, 'to', minValue);
-          }
-          closeContextMenu();
-        }}
         onReplaceGauge={(channel, gaugeInfo) => {
           // Replace the targeted gauge with a new one from INI
           if (!dashFile || !contextMenu.targetGaugeId) return;

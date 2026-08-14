@@ -27,9 +27,6 @@ pub enum ValidationError {
         image_name: String,
     },
 
-    #[error("Gauge '{gauge_id}' has overlapping position with '{other_id}'")]
-    OverlappingGauges { gauge_id: String, other_id: String },
-
     #[error("Indicator '{indicator_id}' references unknown output channel '{channel}'")]
     UnknownIndicatorChannel {
         indicator_id: String,
@@ -38,16 +35,11 @@ pub enum ValidationError {
 
     #[error("Dashboard has no gauges or indicators")]
     EmptyDashboard,
-
-    #[error("Gauge '{gauge_id}' uses unsupported painter type (will render as BasicReadout)")]
-    UnsupportedPainter { gauge_id: String },
 }
 
 /// Warning messages for non-critical issues.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ValidationWarning {
-    /// Gauge uses a color that may be hard to see
-    PoorContrast { gauge_id: String },
     /// Gauge is very small and may be hard to read
     TinyGauge { gauge_id: String },
     /// Gauge extends beyond dashboard bounds

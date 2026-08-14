@@ -57,7 +57,6 @@ export interface GaugeContextMenuProps {
   
   // Gauge operations
   onReloadDefaultGauges: () => void;
-  onResetValue: () => void;
   onReplaceGauge: (channel: string, gaugeInfo: GaugeInfo) => void;
 }
 
@@ -75,7 +74,6 @@ export default function GaugeContextMenu({
   backgroundDitherColor,
   onBackgroundDitherColorChange,
   onReloadDefaultGauges,
-  onResetValue,
   onReplaceGauge,
 }: GaugeContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
@@ -214,13 +212,6 @@ export default function GaugeContextMenu({
         </>
       )}
 
-      {/* Reset Value (only if a gauge is selected) */}
-      {state.targetGaugeId && (
-        <div className="menu-item" onClick={() => { onResetValue(); onClose(); }}>
-          Reset Value
-        </div>
-      )}
-
       <div className="menu-separator" />
 
       {/* Background Submenu */}
@@ -266,24 +257,6 @@ export default function GaugeContextMenu({
                   className="color-picker"
                 />
               </label>
-            </div>
-            <div className="menu-item">
-              Set Background Image...
-            </div>
-            <div
-              className="menu-item has-submenu"
-              onMouseEnter={() => setExpandedCategory('imagePosition')}
-            >
-              Image Position
-              <span className="submenu-arrow">▶</span>
-              
-              {expandedCategory === 'imagePosition' && (
-                <div className="submenu">
-                  <div className="menu-item">Stretch</div>
-                  <div className="menu-item">Tile</div>
-                  <div className="menu-item">Center</div>
-                </div>
-              )}
             </div>
           </div>
         )}

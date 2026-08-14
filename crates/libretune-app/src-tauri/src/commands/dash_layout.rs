@@ -16,7 +16,7 @@ pub struct DashFileInfo {
 }
 
 /// Helper to scan a directory for .dash and .ltdash.xml files
-fn scan_dash_directory(dir: &Path, _category: &str, dashes: &mut Vec<DashFileInfo>) {
+fn scan_dash_directory(dir: &Path, dashes: &mut Vec<DashFileInfo>) {
     if let Ok(entries) = std::fs::read_dir(dir) {
         for entry in entries.flatten() {
             let path = entry.path();
@@ -70,7 +70,7 @@ pub async fn list_available_dashes(app: tauri::AppHandle) -> Result<Vec<DashFile
     let mut dashes = Vec::new();
 
     // Scan only the user dashboards directory (imported or created by user)
-    scan_dash_directory(&dash_dir, "User", &mut dashes);
+    scan_dash_directory(&dash_dir, &mut dashes);
 
     // Sort by name
     dashes.sort_by(|a, b| a.name.cmp(&b.name));
@@ -90,7 +90,7 @@ pub struct DashConflictInfo {
     pub suggested_name: Option<String>,
 }
 
-/// Reset dashboards to defaults - removes all user dashboards and recreates the 4 defaults
+/// Reset dashboards to defaults - removes all user dashboards and recreates the built-in defaults
 #[tauri::command]
 pub async fn reset_dashboards_to_defaults(app: tauri::AppHandle) -> Result<(), String> {
     let dash_dir = get_dashboards_dir(&app);
@@ -110,10 +110,10 @@ pub async fn reset_dashboards_to_defaults(app: tauri::AppHandle) -> Result<(), S
     std::fs::create_dir_all(&dash_dir)
         .map_err(|e| format!("Failed to create dashboards directory: {}", e))?;
 
-    // Create the 4 defaults
+    // Recreate the built-in defaults
     create_default_dashboard_files(&dash_dir)?;
 
-    println!("[reset_dashboards_to_defaults] Reset complete - 4 default dashboards created");
+    println!("[reset_dashboards_to_defaults] Reset complete - default dashboards recreated");
     Ok(())
 }
 

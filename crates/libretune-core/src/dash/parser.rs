@@ -13,12 +13,6 @@ use std::io::BufRead;
 pub enum DashParseError {
     #[error("XML parsing error: {0}")]
     XmlError(#[from] quick_xml::Error),
-    #[error("Invalid file format: {0}")]
-    InvalidFormat(String),
-    #[error("Missing required element: {0}")]
-    MissingElement(String),
-    #[error("Invalid value for {0}: {1}")]
-    InvalidValue(String, String),
     #[error("IO error: {0}")]
     IoError(#[from] std::io::Error),
 }
