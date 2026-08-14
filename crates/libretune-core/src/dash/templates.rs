@@ -153,7 +153,9 @@ const LT_LOG_CYAN: TsColor = TsColor {
 ///   - Top strip: four compact readout cards (battery, intake temp,
 ///     ignition timing, pulse width)
 ///   - Flanks: two large square dials — RPM tachometer left, AFR right
-///   - Center column: three small dials (MAP, coolant, throttle)
+///   - Center column: three horizontal bar cards (MAP, coolant, throttle);
+///     bar painters stay legible at center-column size, where a dial's
+///     tick labels would collide
 ///
 /// All dial boxes are square IN PIXELS (w% · 16 = h% · 9 on the 16:9
 /// canvas), so the circular painters fill their boxes instead of drawing
@@ -277,33 +279,32 @@ pub fn create_basic_dashboard() -> DashFile {
             ..basic_style()
         })));
 
-    // --- Center column: three small dials (square: 0.12·16 ≈ 0.21·9) ------
-    // Tuple: (y, channel, title, units, min, max, high_warn, high_crit, accent)
-    for dial in [
-        (0.24, "map", "MAP", "kPa", 0.0, 250.0, Some(220.0), None, LT_ACCENT_TEAL),
-        (0.49, "coolant", "COOLANT", "°C", -40.0, 130.0, Some(100.0), Some(110.0), LT_ACCENT_BLUE),
-        (0.74, "tps", "THROTTLE", "%", 0.0, 100.0, None, None, LT_ACCENT_AMBER),
+    // --- Center column: three horizontal bar cards -------------------------
+    // The AnalogGauge painter needs ~300px+ before its tick labels stop
+    // colliding; at center-column size (~240px) bar cards stay legible and
+    // match the top strip's card language. Tuple: (y, channel, title,
+    // units, min, max, high_warn, high_crit, accent)
+    for bar in [
+        (0.22, "map", "MAP", "kPa", 0.0, 250.0, Some(220.0), None, LT_ACCENT_TEAL),
+        (0.47, "coolant", "COOLANT", "°C", -40.0, 130.0, Some(100.0), Some(110.0), LT_ACCENT_BLUE),
+        (0.72, "tps", "THROTTLE", "%", 0.0, 100.0, None, None, LT_ACCENT_AMBER),
     ] {
         dash.gauge_cluster.components.push(DashComponent::Gauge(Box::new(GaugeConfig {
-            id: dial.1.to_string(),
-            title: dial.2.to_string(),
-            units: dial.3.to_string(),
-            output_channel: dial.1.to_string(),
-            min: dial.4,
-            max: dial.5,
-            high_warning: dial.6,
-            high_critical: dial.7,
+            id: bar.1.to_string(),
+            title: bar.2.to_string(),
+            units: bar.3.to_string(),
+            output_channel: bar.1.to_string(),
+            min: bar.4,
+            max: bar.5,
+            high_warning: bar.6,
+            high_critical: bar.7,
             value_digits: 0,
-            gauge_painter: GaugePainter::AnalogGauge,
-            start_angle: 225,
-            sweep_angle: 270,
-            major_ticks: 5.0,
-            minor_ticks: 2.0,
-            relative_x: 0.44,
-            relative_y: dial.0,
-            relative_width: 0.12,
-            relative_height: 0.21,
-            needle_color: dial.8,
+            gauge_painter: GaugePainter::HorizontalBarGauge,
+            relative_x: 0.425,
+            relative_y: bar.0,
+            relative_width: 0.15,
+            relative_height: 0.22,
+            needle_color: bar.8,
             ..basic_style()
         })));
     }
