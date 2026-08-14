@@ -150,32 +150,28 @@
   transition: border-color 0.2s, background-color 0.2s;
 }
 
-/* Gauge placeholder in designer */
+/* WYSIWYG gauge wrapper: carries position/size + drag/selection chrome;
+   the live gauge renders inside it via DashComponentView. */
 .designer-gauge {
   position: absolute;
-  background: rgba(60, 60, 60, 0.8);
-  border: 2px dashed #666;
+  border: 1px dashed transparent;
   border-radius: 4px;
   cursor: move;
   transition: border-color 0.15s, box-shadow 0.15s;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .designer-gauge:hover {
-  border-color: var(--accent-color);
+  border-color: rgba(120, 160, 220, 0.6);
 }
 
 .designer-gauge.selected {
   border-color: var(--accent-color);
-  border-style: solid;
   box-shadow: 0 0 0 2px rgba(58, 123, 213, 0.3);
 }
 
 .designer-gauge.dragging {
-  opacity: 0.8;
+  opacity: 0.85;
   cursor: grabbing;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
 }
@@ -184,19 +180,19 @@
   border-color: var(--warning-color);
 }
 
-.gauge-preview {
-  padding: 8px;
-  text-align: center;
+/* Live gauge content: fills the wrapper; never captures pointer events so
+   drag/select/context-menu reach the wrapper. */
+.designer-live {
   pointer-events: none;
+  border-radius: 4px;
+  overflow: hidden;
 }
 
-.gauge-label {
-  color: var(--text-secondary);
-  font-size: 11px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  overflow: hidden;
-  display: block;
+/* Components hidden via the LayerPanel render dimmed in the designer but
+   stay fully visible on the live dashboard until un-hidden. */
+.designer-hidden-dim {
+  opacity: 0.35;
+  filter: saturate(0.4);
 }
 
 /* Resize handles */

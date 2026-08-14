@@ -24,11 +24,15 @@ export interface DashComponentViewProps {
   onContextMenu: (e: React.MouseEvent, gaugeId: string | null) => void;
   /** Extra classes for the positioned wrapper (designer selection chrome). */
   className?: string;
-  /** Overrides for position/size (designer drag preview). */
+  /** Overrides for position/size (designer drag preview / fill-parent). */
   styleOverride?: React.CSSProperties;
   children?: React.ReactNode;
   onMouseDown?: (e: React.MouseEvent, id: string) => void;
   onClick?: (e: React.MouseEvent, id: string) => void;
+  /** Designer mode: render designer-hidden components (dimmed by caller). */
+  showHidden?: boolean;
+  /** Designer mode: skip enabled_condition gating so everything is editable. */
+  ignoreConditions?: boolean;
 }
 
 export default function DashComponentView({
@@ -42,8 +46,14 @@ export default function DashComponentView({
   children,
   onMouseDown,
   onClick,
+  showHidden = false,
+  ignoreConditions = false,
 }: DashComponentViewProps) {
-  if (isDesignerHidden(component)) return null;
+  if (!showHidden && isDesignerHidden(component)) return null;
+
+  /** Gates children on the enabled_condition unless the designer asked to skip it. */
+  const wrapConditionally = (condition: string | null, element: React.ReactElement) =>
+    ignoreConditions ? element : <ConditionalWrapper condition={condition}>{element}</ConditionalWrapper>;
 
   if (isGauge(component)) {
     const gauge = component.Gauge;
@@ -57,48 +67,46 @@ export default function DashComponentView({
       aspectRatio: gauge.shape_locked_to_aspect ? '1 / 1' : undefined,
       ...styleOverride,
     };
-    return (
-      <ConditionalWrapper condition={gauge.enabled_condition ?? null}>
-        <div
-          className={`ts-component ts-gauge ${className}`}
-          style={style}
-          onContextMenu={(e) => onContextMenu(e, gauge.id)}
-          onMouseDown={onMouseDown ? (e) => onMouseDown(e, gauge.id) : undefined}
-          onClick={onClick ? (e) => onClick(e, gauge.id) : undefined}
-        >
-          <TsGauge
-            config={gauge}
-            embeddedImages={embeddedImages}
-            legacyMode={legacyMode}
-            isConnected={isConnected}
-          />
-          {children}
-        </div>
-      </ConditionalWrapper>
+    return wrapConditionally(
+      gauge.enabled_condition ?? null,
+      <div
+        className={`ts-component ts-gauge ${className}`}
+        style={style}
+        onContextMenu={(e) => onContextMenu(e, gauge.id)}
+        onMouseDown={onMouseDown ? (e) => onMouseDown(e, gauge.id) : undefined}
+        onClick={onClick ? (e) => onClick(e, gauge.id) : undefined}
+      >
+        <TsGauge
+          config={gauge}
+          embeddedImages={embeddedImages}
+          legacyMode={legacyMode}
+          isConnected={isConnected}
+        />
+        {children}
+      </div>,
     );
   }
 
   if (isIndicator(component)) {
     const indicator = component.Indicator;
-    return (
-      <ConditionalWrapper condition={indicator.enabled_condition ?? null}>
-        <div
-          className={`ts-component ts-indicator ${className}`}
-          style={{
-            left: `${toPercent(indicator.relative_x)}%`,
-            top: `${toPercent(indicator.relative_y)}%`,
-            width: `${toPercent(indicator.relative_width)}%`,
-            height: `${toPercent(indicator.relative_height)}%`,
-            ...styleOverride,
-          }}
-          onContextMenu={(e) => onContextMenu(e, indicator.id)}
-          onMouseDown={onMouseDown ? (e) => onMouseDown(e, indicator.id) : undefined}
-          onClick={onClick ? (e) => onClick(e, indicator.id) : undefined}
-        >
-          <LiveTsIndicator config={indicator} embeddedImages={embeddedImages} />
-          {children}
-        </div>
-      </ConditionalWrapper>
+    return wrapConditionally(
+      indicator.enabled_condition ?? null,
+      <div
+        className={`ts-component ts-indicator ${className}`}
+        style={{
+          left: `${toPercent(indicator.relative_x)}%`,
+          top: `${toPercent(indicator.relative_y)}%`,
+          width: `${toPercent(indicator.relative_width)}%`,
+          height: `${toPercent(indicator.relative_height)}%`,
+          ...styleOverride,
+        }}
+        onContextMenu={(e) => onContextMenu(e, indicator.id)}
+        onMouseDown={onMouseDown ? (e) => onMouseDown(e, indicator.id) : undefined}
+        onClick={onClick ? (e) => onClick(e, indicator.id) : undefined}
+      >
+        <LiveTsIndicator config={indicator} embeddedImages={embeddedImages} />
+        {children}
+      </div>,
     );
   }
 

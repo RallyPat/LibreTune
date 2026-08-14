@@ -39,6 +39,10 @@ interface DashboardDesignerProps {
   onSave: () => void;
   onExit: () => void;
   channelInfoMap?: ChannelInfoMap; // INI channel metadata for gauge creation
+  /** Embedded image/font map for live (WYSIWYG) gauge rendering. */
+  embeddedImages?: Map<string, string>;
+  /** ECU connection state for live gauge rendering. */
+  isConnected?: boolean;
 }
 
 
@@ -57,6 +61,8 @@ export default function DashboardDesigner({
   onSave,
   onExit,
   channelInfoMap = {},
+  embeddedImages = new Map<string, string>(),
+  isConnected = false,
 }: DashboardDesignerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -185,6 +191,8 @@ export default function DashboardDesigner({
           selectedGaugeId={selectedGaugeId}
           dragState={dragState}
           resizeState={resizeState}
+          embeddedImages={embeddedImages}
+          isConnected={isConnected}
           onSelectGauge={onSelectGauge}
           onContextMenu={onContextMenu}
           onDragOver={handleDragOver}

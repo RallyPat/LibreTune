@@ -1,5 +1,7 @@
 import { RefObject } from 'react';
 import { DashFile, DashComponent, isGauge, isIndicator } from '../dashTypes';
+import { isDesignerHidden } from '../shared/designerHidden';
+import DashComponentView from '../components/DashComponentView';
 import { ResizeHandle } from './useDesignerDragResize';
 
 interface DragState {
@@ -20,6 +22,8 @@ interface DesignerCanvasProps {
   selectedGaugeId: string | null;
   dragState: DragState;
   resizeState: ResizeState;
+  embeddedImages: Map<string, string>;
+  isConnected: boolean;
   onSelectGauge: (id: string | null) => void;
   onContextMenu: (e: React.MouseEvent, id: string | null) => void;
   onDragOver: (e: React.DragEvent) => void;
@@ -31,6 +35,13 @@ interface DesignerCanvasProps {
 
 const RESIZE_HANDLES: ResizeHandle[] = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw'];
 
+/**
+ * WYSIWYG designer canvas: components render as LIVE gauges/indicators
+ * (the same DashComponentView as the dashboard), with selection chrome and
+ * resize handles overlaid. The live content is pointer-events:none so all
+ * mouse interaction reaches the positioned wrapper (drag/select/context
+ * menu); only the resize handles themselves capture their own mousedowns.
+ */
 export default function DesignerCanvas({
   containerRef,
   dashFile,
@@ -39,6 +50,8 @@ export default function DesignerCanvas({
   selectedGaugeId,
   dragState,
   resizeState,
+  embeddedImages,
+  isConnected,
   onSelectGauge,
   onContextMenu,
   onDragOver,
@@ -82,6 +95,7 @@ export default function DesignerCanvas({
         const isSelected = selectedGaugeId === id;
         const isDraggingThis = dragState.isDragging && dragState.gaugeId === id;
         const isResizingThis = resizeState.isResizing && resizeState.gaugeId === id;
+        const hidden = isDesignerHidden(component);
 
         return (
           <div
@@ -100,14 +114,17 @@ export default function DesignerCanvas({
             }}
             onContextMenu={(e) => onContextMenu(e, id)}
           >
-            <div className="gauge-preview">
-              {isGauge(component) && (
-                <span className="gauge-label">{component.Gauge.title || component.Gauge.output_channel}</span>
-              )}
-              {isIndicator(component) && (
-                <span className="gauge-label">{component.Indicator.on_text || component.Indicator.output_channel}</span>
-              )}
-            </div>
+            <DashComponentView
+              component={component}
+              embeddedImages={embeddedImages}
+              legacyMode={false}
+              isConnected={isConnected}
+              onContextMenu={onContextMenu}
+              className={`designer-live ${hidden ? 'designer-hidden-dim' : ''}`}
+              styleOverride={{ left: 0, top: 0, width: '100%', height: '100%' }}
+              showHidden
+              ignoreConditions
+            />
             {isSelected && RESIZE_HANDLES.map(handle => (
               <div
                 key={handle}

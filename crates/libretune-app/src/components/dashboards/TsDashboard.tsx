@@ -377,6 +377,8 @@ export default function TsDashboard({ isConnected = false }: TsDashboardProps) {
           onSave={saveDashboard}
           onExit={() => setDesignerMode(false)}
           channelInfoMap={channelInfoMap}
+          embeddedImages={embeddedImages}
+          isConnected={isConnected}
         />
       ) : (
         <DashboardCanvas
