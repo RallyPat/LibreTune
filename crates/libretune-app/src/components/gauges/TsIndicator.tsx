@@ -5,6 +5,7 @@
  */
 
 import { TsIndicatorConfig, tsColorToRgba } from '../dashboards/dashTypes';
+import { getFontStack } from './drawUtils';
 
 interface TsIndicatorProps {
   config: TsIndicatorConfig;
@@ -13,32 +14,7 @@ interface TsIndicatorProps {
 }
 
 export default function TsIndicator({ config, isOn, embeddedImages }: TsIndicatorProps) {
-  const getFontFamily = (fontFamily?: string): string => {
-    const webSafeStacks: Record<string, string> = {
-      Arial: 'Arial, Helvetica, sans-serif',
-      'Arial Black': '"Arial Black", Gadget, sans-serif',
-      Verdana: 'Verdana, Geneva, sans-serif',
-      Tahoma: 'Tahoma, Geneva, sans-serif',
-      'Trebuchet MS': '"Trebuchet MS", Helvetica, sans-serif',
-      Georgia: 'Georgia, serif',
-      'Times New Roman': '"Times New Roman", Times, serif',
-      'Courier New': '"Courier New", Courier, monospace',
-      Consolas: 'Consolas, Monaco, "Lucida Console", monospace',
-      Monaco: 'Monaco, Consolas, monospace',
-    };
-
-    const defaultStack = 'Arial, Helvetica, sans-serif';
-
-    if (!fontFamily) {
-      return defaultStack;
-    }
-
-    if (webSafeStacks[fontFamily]) {
-      return webSafeStacks[fontFamily];
-    }
-
-    return `"${fontFamily}", Arial, Helvetica, sans-serif`;
-  };
+  const getFontFamily = (fontFamily?: string): string => getFontStack(fontFamily);
 
   const backgroundColor = isOn 
     ? tsColorToRgba(config.on_background_color)

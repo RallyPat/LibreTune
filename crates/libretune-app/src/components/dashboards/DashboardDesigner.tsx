@@ -13,6 +13,7 @@
 
 import { useCallback, useRef } from 'react';
 import { DashFile, isGauge, isIndicator } from './dashTypes';
+import type { ChannelInfoMap } from './shared/channelInfo';
 import PropertyEditor from './designer/PropertyEditor';
 import LayerPanel from './designer/LayerPanel';
 import GaugePalette from './designer/GaugePalette';
@@ -24,14 +25,6 @@ import { useDesignerDragResize } from './designer/useDesignerDragResize';
 import { useDesignerKeyboard } from './designer/useDesignerKeyboard';
 import { useDesignerDrop } from './designer/useDesignerDrop';
 import './DashboardDesigner.css';
-
-interface ChannelInfo {
-  name: string;
-  label?: string | null;
-  units: string;
-  scale: number;
-  translate: number;
-}
 
 interface DashboardDesignerProps {
   dashFile: DashFile;
@@ -45,7 +38,7 @@ interface DashboardDesignerProps {
   onShowGridChange: (show: boolean) => void;
   onSave: () => void;
   onExit: () => void;
-  channelInfoMap?: Record<string, ChannelInfo>; // INI channel metadata for gauge creation
+  channelInfoMap?: ChannelInfoMap; // INI channel metadata for gauge creation
 }
 
 

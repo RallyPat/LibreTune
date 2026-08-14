@@ -1,7 +1,7 @@
 /** AsymmetricSweepGauge — curved sweep gauge with glowing tip and warning zones. */
 
 import { tsColorToHex } from '../../dashboards/dashTypes';
-import { lightenColor, darkenColor } from '../drawUtils';
+import { lightenColor, darkenColor, angleAtPercent, insetTrackGradient } from '../drawUtils';
 import type { Painter } from './types';
 
 export const sweepGaugePainter: Painter = (pctx) => {
@@ -33,9 +33,7 @@ export const sweepGaugePainter: Painter = (pctx) => {
   const endAngle = ccw ? startAngle - sweepAngle : startAngle + sweepAngle;
 
   // Helper to calculate angle at a given percentage
-  const angleAt = (percent: number) => ccw
-    ? startAngle - percent * sweepAngle
-    : startAngle + percent * sweepAngle;
+  const angleAt = (percent: number) => angleAtPercent(startAngle, sweepAngle, ccw, percent);
 
   // Arc track background with inset effect
   ctx.shadowColor = 'rgba(0, 0, 0, 0.4)';
@@ -43,10 +41,7 @@ export const sweepGaugePainter: Painter = (pctx) => {
   ctx.shadowOffsetX = 2;
   ctx.shadowOffsetY = 2;
 
-  const trackGradient = ctx.createLinearGradient(0, centerY - radius, 0, centerY + radius);
-  trackGradient.addColorStop(0, '#252525');
-  trackGradient.addColorStop(0.5, '#404040');
-  trackGradient.addColorStop(1, '#303030');
+  const trackGradient = insetTrackGradient(ctx, 0, centerY - radius, 0, centerY + radius);
   ctx.beginPath();
   ctx.arc(centerX, centerY, radius, startAngle, endAngle, ccw);
   ctx.strokeStyle = trackGradient;

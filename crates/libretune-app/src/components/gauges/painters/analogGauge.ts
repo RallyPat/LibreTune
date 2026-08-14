@@ -1,7 +1,7 @@
 /** AnalogGauge — classic circular dial with metallic bezel, ticks, gradient needle, center cap. */
 
 import { tsColorToHex, tsColorToRgba } from '../../dashboards/dashTypes';
-import { roundRect, lightenColor, darkenColor, createMetallicGradient } from '../drawUtils';
+import { roundRect, lightenColor, darkenColor, createMetallicGradient, angleAtPercent } from '../drawUtils';
 import type { Painter } from './types';
 
 export const analogGaugePainter: Painter = (pctx) => {
@@ -81,9 +81,7 @@ export const analogGaugePainter: Painter = (pctx) => {
   const endAngle = ccw ? startAngle - sweepAngle : startAngle + sweepAngle;
 
   // Helper to calculate angle at a given percentage (0-1) along the sweep
-  const angleAt = (percent: number) => ccw
-    ? startAngle - percent * sweepAngle
-    : startAngle + percent * sweepAngle;
+  const angleAt = (percent: number) => angleAtPercent(startAngle, sweepAngle, ccw, percent);
 
   // Draw warning/critical zones as arcs (behind tick marks)
   const zoneRadius = faceRadius - 4;

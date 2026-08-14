@@ -7,34 +7,11 @@
  * property editor or by dragging a channel onto the gauge.
  */
 
-import { GaugePainter, SUPPORTED_GAUGE_PAINTERS } from '../dashTypes';
+import { PAINTER_LABELS, SUPPORTED_GAUGE_PAINTERS } from '../dashTypes';
 
 interface Props {
   collapsed?: boolean;
 }
-
-const PAINTER_LABELS: Record<GaugePainter, string> = {
-  AnalogGauge: 'Analog',
-  BasicAnalogGauge: 'Basic Analog',
-  CircleAnalogGauge: 'Circle Analog',
-  AsymmetricSweepGauge: 'Sweep',
-  BasicReadout: 'Digital Readout',
-  HorizontalBarGauge: 'Horiz. Bar',
-  HorizontalDashedBar: 'Horiz. Dashed',
-  VerticalBarGauge: 'Vert. Bar',
-  HorizontalLineGauge: 'Horiz. Line',
-  VerticalDashedBar: 'Vert. Dashed',
-  AnalogBarGauge: 'Analog Bar',
-  AnalogMovingBarGauge: 'Moving Bar',
-  Histogram: 'Histogram',
-  LineGraph: 'Line Graph',
-  RoundGauge: 'Round',
-  RoundDashedGauge: 'Round Dashed',
-  FuelMeter: 'Fuel Meter',
-  Tachometer: 'Tachometer',
-  TelemetryStat: 'Telemetry Stat',
-  MultiChannelTrend: 'Multi-Channel Trend',
-};
 
 export default function GaugePalette({ collapsed = false }: Props) {
   if (collapsed) return null;

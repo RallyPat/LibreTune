@@ -1,11 +1,10 @@
 //! Dashboard discovery, templates, conflict-checking, and import commands.
 
 use crate::paths::get_dashboards_dir;
-use libretune_core::dash::{
-    self, create_basic_dashboard, create_telemetry_live_dashboard, create_tuning_dashboard,
-};
+use libretune_core::dash;
 use serde::Serialize;
 use std::path::Path;
+use tracing::{debug, info};
 
 /// Info about an available dashboard file
 #[derive(Serialize)]
@@ -75,7 +74,7 @@ pub async fn list_available_dashes(app: tauri::AppHandle) -> Result<Vec<DashFile
     // Sort by name
     dashes.sort_by(|a, b| a.name.cmp(&b.name));
 
-    println!("[list_available_dashes] Found {} dashboards", dashes.len());
+    debug!("Found {} dashboards", dashes.len());
     Ok(dashes)
 }
 
@@ -95,10 +94,7 @@ pub struct DashConflictInfo {
 pub async fn reset_dashboards_to_defaults(app: tauri::AppHandle) -> Result<(), String> {
     let dash_dir = get_dashboards_dir(&app);
 
-    println!(
-        "[reset_dashboards_to_defaults] Clearing dashboards directory: {:?}",
-        dash_dir
-    );
+    info!("Resetting dashboards directory: {:?}", dash_dir);
 
     // Remove the entire dashboards directory
     if dash_dir.exists() {
@@ -113,7 +109,7 @@ pub async fn reset_dashboards_to_defaults(app: tauri::AppHandle) -> Result<(), S
     // Recreate the built-in defaults
     create_default_dashboard_files(&dash_dir)?;
 
-    println!("[reset_dashboards_to_defaults] Reset complete - default dashboards recreated");
+    info!("Reset complete - default dashboards recreated");
     Ok(())
 }
 
@@ -264,10 +260,7 @@ pub async fn import_dash_file(
     // Copy file to dashboards directory
     std::fs::copy(source, &dest_path).map_err(|e| format!("Failed to copy file: {}", e))?;
 
-    println!(
-        "[import_dash_file] Imported {} -> {:?}",
-        source_path, dest_path
-    );
+    info!("Imported dashboard {} -> {:?}", source_path, dest_path);
 
     Ok(DashImportResult {
         source_path,
@@ -284,14 +277,60 @@ pub async fn import_dash_file(
 /// Builder function for a built-in default dashboard template.
 type DefaultDashBuilder = fn() -> dash::DashFile;
 
-/// (file name, builder) pairs for every built-in default dashboard. Adding a
-/// new built-in template only requires appending a row here.
+/// One row of the built-in template registry — the single source powering
+/// the default-dashboard seeding, the "new dashboard" template picker, and
+/// `create_new_dashboard`'s id lookup. Adding a template only requires
+/// appending a row here.
+pub(crate) struct TemplateSpec {
+    /// Template id used by the frontend (`create_new_dashboard`).
+    pub id: &'static str,
+    /// File name the default dashboard is seeded under.
+    pub file_name: &'static str,
+    pub display_name: &'static str,
+    pub description: &'static str,
+    pub builder: DefaultDashBuilder,
+}
+
+const TEMPLATE_SPECS: &[TemplateSpec] = &[
+    TemplateSpec {
+        id: "basic",
+        file_name: "Basic.ltdash.xml",
+        display_name: "Basic Dashboard",
+        description: "Essential gauges: RPM, AFR, Coolant, Throttle",
+        builder: dash::create_basic_dashboard,
+    },
+    TemplateSpec {
+        id: "tuning",
+        file_name: "Tuning.ltdash.xml",
+        display_name: "Tuning Dashboard",
+        description: "AFR, VE, Spark advance, and correction factors",
+        builder: dash::create_tuning_dashboard,
+    },
+    TemplateSpec {
+        id: "telemetry_live",
+        file_name: "Telemetry Live.ltdash.xml",
+        display_name: "Telemetry Live",
+        description: "Dense Grafana-style live view: 22 stat tiles, 4 multi-series charts, 16 sparklines",
+        builder: dash::create_telemetry_live_dashboard,
+    },
+];
+
+/// Look up a template by id (with the retired "f1_telemetry" alias kept
+/// working so older saved client state still resolves).
+pub(crate) fn template_by_id(id: &str) -> Option<&'static TemplateSpec> {
+    let resolved = match id {
+        "f1_telemetry" => "telemetry_live",
+        other => other,
+    };
+    TEMPLATE_SPECS.iter().find(|spec| spec.id == resolved)
+}
+
+/// (file name, builder) pairs for every built-in default dashboard.
 fn default_dashboard_specs() -> Vec<(&'static str, DefaultDashBuilder)> {
-    vec![
-        ("Basic.ltdash.xml", create_basic_dashboard),
-        ("Tuning.ltdash.xml", create_tuning_dashboard),
-        ("Telemetry Live.ltdash.xml", create_telemetry_live_dashboard),
-    ]
+    TEMPLATE_SPECS
+        .iter()
+        .map(|spec| (spec.file_name, spec.builder))
+        .collect()
 }
 
 /// Write a single default dashboard file, overwriting any existing copy.
@@ -312,8 +351,8 @@ pub(crate) fn create_default_dashboard_files(dir: &Path) -> Result<(), String> {
     for (file_name, builder) in default_dashboard_specs() {
         write_default_dashboard(dir, file_name, &builder())?;
     }
-    println!(
-        "[create_default_dashboard_files] Created {} default dashboards",
+    debug!(
+        "Created {} default dashboards",
         default_dashboard_specs().len()
     );
     Ok(())
@@ -345,10 +384,7 @@ pub(crate) fn ensure_missing_default_dashboards(dir: &Path) -> Result<(), String
         created += 1;
     }
     if created > 0 {
-        println!(
-            "[ensure_missing_default_dashboards] Added {} missing default dashboard(s) in {:?}",
-            created, dir
-        );
+        debug!("Added {} missing default dashboard(s) in {:?}", created, dir);
     }
     Ok(())
 }
@@ -356,25 +392,14 @@ pub(crate) fn ensure_missing_default_dashboards(dir: &Path) -> Result<(), String
 /// Get list of available dashboard templates
 #[tauri::command]
 pub async fn get_dashboard_templates() -> Result<Vec<DashboardTemplateInfo>, String> {
-    Ok(vec![
-        DashboardTemplateInfo {
-            id: "basic".to_string(),
-            name: "Basic Dashboard".to_string(),
-            description: "Essential gauges: RPM, AFR, Coolant, Throttle".to_string(),
-        },
-        DashboardTemplateInfo {
-            id: "tuning".to_string(),
-            name: "Tuning Dashboard".to_string(),
-            description: "AFR, VE, Spark advance, and correction factors".to_string(),
-        },
-        DashboardTemplateInfo {
-            id: "telemetry_live".to_string(),
-            name: "Telemetry Live".to_string(),
-            description:
-                "Dense Grafana-style live view: 22 stat tiles, 4 multi-series charts, 16 sparklines"
-                    .to_string(),
-        },
-    ])
+    Ok(TEMPLATE_SPECS
+        .iter()
+        .map(|spec| DashboardTemplateInfo {
+            id: spec.id.to_string(),
+            name: spec.display_name.to_string(),
+            description: spec.description.to_string(),
+        })
+        .collect())
 }
 
 #[derive(Serialize)]

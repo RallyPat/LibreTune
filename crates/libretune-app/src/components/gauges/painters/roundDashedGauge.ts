@@ -1,7 +1,7 @@
 /** RoundDashedGauge — circular gauge with segmented arc (~270°). */
 
 import { tsColorToHex, tsColorToRgba } from '../../dashboards/dashTypes';
-import { lightenColor, createMetallicGradient } from '../drawUtils';
+import { lightenColor, createMetallicGradient, roundZoneColor } from '../drawUtils';
 import type { Painter } from './types';
 
 export const roundDashedGaugePainter: Painter = (pctx) => {
@@ -46,13 +46,8 @@ export const roundDashedGaugePainter: Painter = (pctx) => {
     const x2 = centerX + Math.cos(angle) * outerRadius;
     const y2 = centerY + Math.sin(angle) * outerRadius;
 
-    // Determine color
-    let segmentColor = tsColorToHex(config.trim_color);
-    if (segmentValue >= config.max - (config.max - config.min) * 0.1) {
-      segmentColor = tsColorToHex(config.critical_color);
-    } else if (segmentValue >= config.max - (config.max - config.min) * 0.25) {
-      segmentColor = tsColorToHex(config.warn_color);
-    }
+    // Zone color: configured thresholds, else the top-10%/25% heuristic
+    const segmentColor = roundZoneColor(config, segmentValue);
 
     // Draw segment
     ctx.beginPath();

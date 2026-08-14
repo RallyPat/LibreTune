@@ -7,7 +7,7 @@
  */
 
 import { tsColorToRgba, tsColorToHex } from '../../dashboards/dashTypes';
-import { roundRect, lightenColor, darkenColor } from '../drawUtils';
+import { roundRect, lightenColor, darkenColor, insetTrackGradient } from '../drawUtils';
 import type { Painter } from './types';
 
 export const horizontalBarPainter: Painter = (pctx) => {
@@ -39,10 +39,7 @@ export const horizontalBarPainter: Painter = (pctx) => {
   ctx.shadowBlur = 3;
   ctx.shadowOffsetX = 1;
   ctx.shadowOffsetY = 1;
-  const barBgGradient = ctx.createLinearGradient(0, barY, 0, barY + barHeight);
-  barBgGradient.addColorStop(0, '#252525');
-  barBgGradient.addColorStop(0.5, '#404040');
-  barBgGradient.addColorStop(1, '#303030');
+  const barBgGradient = insetTrackGradient(ctx, 0, barY, 0, barY + barHeight);
   ctx.fillStyle = barBgGradient;
   roundRect(ctx, padding, barY, barWidth, barHeight, cornerRadius);
   ctx.fill();

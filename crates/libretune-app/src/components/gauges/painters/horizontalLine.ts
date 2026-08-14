@@ -1,7 +1,7 @@
 /** HorizontalLineGauge — horizontal line with a glowing position dot. */
 
 import { tsColorToHex } from '../../dashboards/dashTypes';
-import { lightenColor, darkenColor } from '../drawUtils';
+import { lightenColor, darkenColor, insetTrackGradient } from '../drawUtils';
 import type { Painter } from './types';
 
 export const horizontalLinePainter: Painter = (pctx) => {
@@ -30,10 +30,7 @@ export const horizontalLinePainter: Painter = (pctx) => {
   ctx.shadowColor = 'rgba(0, 0, 0, 0.4)';
   ctx.shadowBlur = 3;
   ctx.shadowOffsetY = 1;
-  const trackGradient = ctx.createLinearGradient(0, lineY - 4, 0, lineY + 4);
-  trackGradient.addColorStop(0, '#252525');
-  trackGradient.addColorStop(0.5, '#404040');
-  trackGradient.addColorStop(1, '#353535');
+  const trackGradient = insetTrackGradient(ctx, 0, lineY - 4, 0, lineY + 4, '#353535');
   ctx.strokeStyle = trackGradient;
   ctx.lineWidth = 6;
   ctx.lineCap = 'round';

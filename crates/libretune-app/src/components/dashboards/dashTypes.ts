@@ -85,28 +85,34 @@ export type GaugePainter =
   | 'TelemetryStat'
   | 'MultiChannelTrend';
 
-export const SUPPORTED_GAUGE_PAINTERS = [
-  'AnalogGauge',
-  'BasicAnalogGauge',
-  'CircleAnalogGauge',
-  'AsymmetricSweepGauge',
-  'BasicReadout',
-  'HorizontalBarGauge',
-  'HorizontalDashedBar',
-  'VerticalBarGauge',
-  'HorizontalLineGauge',
-  'VerticalDashedBar',
-  'AnalogBarGauge',
-  'AnalogMovingBarGauge',
-  'Histogram',
-  'LineGraph',
-  'RoundGauge',
-  'RoundDashedGauge',
-  'FuelMeter',
-  'Tachometer',
-  'TelemetryStat',
-  'MultiChannelTrend',
-] as const satisfies readonly GaugePainter[];
+/**
+ * Human-readable label for each painter — the single source for the
+ * designer palette tiles and the property-editor type dropdown.
+ */
+export const PAINTER_LABELS: Record<GaugePainter, string> = {
+  AnalogGauge: 'Analog Gauge',
+  BasicAnalogGauge: 'Basic Analog Gauge',
+  CircleAnalogGauge: 'Circle Analog Gauge',
+  AsymmetricSweepGauge: 'Sweep Gauge',
+  BasicReadout: 'Digital Readout',
+  HorizontalBarGauge: 'Horizontal Bar',
+  HorizontalDashedBar: 'Horizontal Dashed Bar',
+  VerticalBarGauge: 'Vertical Bar',
+  VerticalDashedBar: 'Vertical Dashed Bar',
+  HorizontalLineGauge: 'Horizontal Line',
+  AnalogBarGauge: 'Analog Bar',
+  AnalogMovingBarGauge: 'Moving Bar',
+  Histogram: 'Histogram',
+  LineGraph: 'Line Graph',
+  RoundGauge: 'Round Gauge',
+  RoundDashedGauge: 'Round Dashed Gauge',
+  FuelMeter: 'Fuel Meter',
+  Tachometer: 'Tachometer',
+  TelemetryStat: 'Telemetry Stat',
+  MultiChannelTrend: 'Multi-Channel Trend',
+};
+
+export const SUPPORTED_GAUGE_PAINTERS = Object.keys(PAINTER_LABELS) as GaugePainter[];
 
 /** Indicator painter type */
 export type IndicatorPainter = 'BasicRectangleIndicator' | 'BulbIndicator' | 'Led';

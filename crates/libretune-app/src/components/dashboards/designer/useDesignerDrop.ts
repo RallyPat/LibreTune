@@ -1,12 +1,6 @@
 import { useCallback } from 'react';
 import { DashFile, TsGaugeConfig } from '../dashTypes';
-
-interface ChannelInfo {
-  units?: string | null;
-  label?: string | null;
-  scale: number;
-  translate: number;
-}
+import type { ChannelInfo } from '../shared/channelInfo';
 
 /** Default size for a gauge created by a canvas drop (both painter-tile and
  * channel drops go through `createDefaultGaugeFromChannel`, which hardcodes

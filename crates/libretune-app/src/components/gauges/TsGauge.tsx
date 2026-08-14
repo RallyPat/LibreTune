@@ -10,9 +10,9 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { TsGaugeConfig, TsColor } from '../dashboards/dashTypes';
 import {
   getEmbeddedImage as getCachedEmbeddedImage,
-  isFontLoaded,
   loadEmbeddedAssets,
 } from './assetCache';
+import { getFontStack } from './drawUtils';
 import { useGaugeRenderer } from './useGaugeRenderer';
 import {
   ensurePaintersRegistered,
@@ -62,52 +62,13 @@ function TsGaugeInner({ config, embeddedImages, legacyMode = false, isConnected 
     [],
   );
   
-  /** 
+  /**
    * Get font family with web-safe fallbacks.
    * If the configured font is an embedded font ID, it will be used first,
    * followed by similar web-safe alternatives.
    */
   const getFontFamily = useCallback((preferMonospace = false): string => {
-    const customFont = config.font_family;
-    
-    // Map common font names to web-safe stacks
-    const webSafeStacks: Record<string, string> = {
-      'Arial': 'Arial, Helvetica, sans-serif',
-      'Arial Black': '"Arial Black", Gadget, sans-serif',
-      'Verdana': 'Verdana, Geneva, sans-serif',
-      'Tahoma': 'Tahoma, Geneva, sans-serif',
-      'Trebuchet MS': '"Trebuchet MS", Helvetica, sans-serif',
-      'Georgia': 'Georgia, serif',
-      'Times New Roman': '"Times New Roman", Times, serif',
-      'Courier New': '"Courier New", Courier, monospace',
-      'Consolas': 'Consolas, Monaco, "Lucida Console", monospace',
-      'Monaco': 'Monaco, Consolas, monospace',
-    };
-    
-    const defaultStack = preferMonospace 
-      ? '"Courier New", Consolas, Monaco, monospace'
-      : 'Arial, Helvetica, sans-serif';
-    
-    if (!customFont) {
-      return defaultStack;
-    }
-    
-    // Check if it's a well-known font with a web-safe stack
-    if (webSafeStacks[customFont]) {
-      return webSafeStacks[customFont];
-    }
-    
-    // If it's an embedded font (should be loaded), use it with fallbacks
-    if (isFontLoaded(customFont)) {
-      return preferMonospace 
-        ? `"${customFont}", "Courier New", monospace`
-        : `"${customFont}", Arial, sans-serif`;
-    }
-    
-    // Unknown font - try it but add fallbacks
-    return preferMonospace 
-      ? `"${customFont}", "Courier New", Consolas, monospace`
-      : `"${customFont}", Arial, Helvetica, sans-serif`;
+    return getFontStack(config.font_family, preferMonospace);
   }, [config.font_family]);
 
   const getFontSpec = useCallback((

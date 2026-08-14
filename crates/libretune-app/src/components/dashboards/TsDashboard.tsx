@@ -6,7 +6,6 @@ import {
 } from './dashTypes';
 
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { invoke } from '@tauri-apps/api/core';
 import { useRealtimeStore } from '../../stores/realtimeStore';
 import {
   useDashboardStore,
@@ -27,6 +26,7 @@ import {
 } from './utils/compatibility';
 import { computeDashboardBounds } from './utils/dashboardBounds';
 import { dashBaseName } from './shared/dashFilename';
+import { useChannelInfoMap } from './shared/channelInfo';
 import { useGaugeSweep } from './hooks/useGaugeSweep';
 import { useGaugeDemo } from './hooks/useGaugeDemo';
 import { useDashboardScale } from './hooks/useDashboardScale';
@@ -40,14 +40,6 @@ import './TsDashboard.css';
 interface TsDashboardProps {
   /** Whether ECU is connected (enables data display) */
   isConnected?: boolean;
-}
-
-interface ChannelInfo {
-  name: string;
-  label?: string | null;
-  units: string;
-  scale: number;
-  translate: number;
 }
 
 /**
@@ -99,29 +91,12 @@ export default function TsDashboard({ isConnected = false }: TsDashboardProps) {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [compatBarVisible, setCompatBarVisible] = useState(true);
   const [showValidationPanel, setShowValidationPanel] = useState(false);
-  const [channelInfoMap, setChannelInfoMap] = useState<Record<string, ChannelInfo>>({});
+  const channelInfoMap = useChannelInfoMap();
 
   // --- Init: load dashboard list and initial selection -----------------------
   useEffect(() => {
     void init();
   }, [init]);
-
-  useEffect(() => {
-    const loadChannels = async () => {
-      try {
-        const channels = await invoke<ChannelInfo[]>('get_available_channels');
-        const map: Record<string, ChannelInfo> = {};
-        channels.forEach((ch) => {
-          map[ch.name] = ch;
-        });
-        setChannelInfoMap(map);
-      } catch (e) {
-        console.warn('[TsDashboard] Failed to load available channels:', e);
-        setChannelInfoMap({});
-      }
-    };
-    loadChannels();
-  }, []);
 
   // --- Derived data -----------------------------------------------------------
   // Build embedded images map — memoized so TsGauge's React.memo doesn't

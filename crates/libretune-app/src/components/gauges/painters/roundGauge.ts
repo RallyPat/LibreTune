@@ -1,7 +1,7 @@
 /** RoundGauge — 360° circular gauge with segments. */
 
 import { tsColorToHex, tsColorToRgba } from '../../dashboards/dashTypes';
-import { lightenColor, createMetallicGradient } from '../drawUtils';
+import { lightenColor, createMetallicGradient, roundZoneColor } from '../drawUtils';
 import type { Painter } from './types';
 
 export const roundGaugePainter: Painter = (pctx) => {
@@ -44,13 +44,8 @@ export const roundGaugePainter: Painter = (pctx) => {
     ctx.arc(centerX, centerY, innerRadius, endAngle, startAngle, true);
     ctx.closePath();
 
-    // Color based on value and warning zones
-    let segmentColor = tsColorToHex(config.trim_color);
-    if (segmentValue >= config.max - (config.max - config.min) * 0.1) {
-      segmentColor = tsColorToHex(config.critical_color);
-    } else if (segmentValue >= config.max - (config.max - config.min) * 0.25) {
-      segmentColor = tsColorToHex(config.warn_color);
-    }
+    // Zone color: configured thresholds, else the top-10%/25% heuristic
+    const segmentColor = roundZoneColor(config, segmentValue);
 
     // Dim segments beyond current value
     if (segmentValue > value) {

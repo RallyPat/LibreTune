@@ -74,107 +74,24 @@ pub fn parse_dash_file(xml: &str) -> Result<DashFile, DashParseError> {
 }
 
 /// Parse a TunerStudio .gauge file from a string.
+///
+/// A .gauge file is a single-`dashComp` variant of the .dash format wrapped
+/// in a `<gauge>` element, so it reuses the dash parser wholesale: the
+/// wrapper element is ignored by the dash machinery, and the last parsed
+/// gauge component (files carry exactly one) is lifted into the GaugeFile.
 pub fn parse_gauge_file(xml: &str) -> Result<GaugeFile, DashParseError> {
-    let mut reader = Reader::from_str(xml);
-    reader.config_mut().trim_text(true);
-
-    let mut gauge_file = GaugeFile::default();
-    let mut state = ParserState::default();
-    let mut buf = Vec::new();
-    let mut text_buf = String::new();
-    let mut gauge_depth = 0usize;
-
-    loop {
-        match reader.read_event_into(&mut buf) {
-            Ok(Event::Start(ref e)) => {
-                let name = String::from_utf8_lossy(e.name().as_ref()).to_string();
-
-                if name == "gauge" {
-                    gauge_depth = gauge_depth.saturating_add(1);
-                } else if gauge_depth > 0 {
-                    if name == "dashComp" {
-                        state.in_dash_comp = true;
-                        state.current_dash_comp_type = Some("Gauge".to_string());
-                        state.current_gauge = Some(GaugeConfig::default());
-                    } else if name == "imageFile" {
-                        state.in_image_file = true;
-                        state.current_image = Some(parse_image_file_attributes(e));
-                    } else if state.in_dash_comp {
-                        state.current_property = Some(name.clone());
-                        if is_color_property(&name) {
-                            state.color_property = Some(name.clone());
-                            state.current_color = Some(parse_color_attributes(e));
-                        }
-                    }
-                }
-                text_buf.clear();
-            }
-            Ok(Event::End(ref e)) => {
-                let name = String::from_utf8_lossy(e.name().as_ref()).to_string();
-
-                if name == "gauge" {
-                    gauge_depth = gauge_depth.saturating_sub(1);
-                } else if name == "dashComp" && state.in_dash_comp {
-                    if let Some(gauge) = state.current_gauge.take() {
-                        gauge_file.gauge = gauge;
-                    }
-                    state.in_dash_comp = false;
-                    state.current_dash_comp_type = None;
-                } else if name == "imageFile" && state.in_image_file {
-                    if let Some(mut img) = state.current_image.take() {
-                        img.data = text_buf.trim().to_string();
-                        gauge_file.embedded_images.push(img);
-                    }
-                    state.in_image_file = false;
-                } else if state.in_dash_comp {
-                    // Handle color end
-                    if is_color_property(&name) {
-                        if let (Some(mut color), Some(prop)) =
-                            (state.current_color.take(), state.color_property.take())
-                        {
-                            if let Ok(int_val) = text_buf.trim().parse::<i32>() {
-                                color = TsColor::from_argb_int(int_val);
-                            }
-                            if let Some(ref mut gauge) = state.current_gauge {
-                                set_gauge_color(gauge, &prop, color);
-                            }
-                        }
-                    } else if state.current_property.as_deref() == Some(&name) {
-                        // Set the property value
-                        if let Some(ref mut gauge) = state.current_gauge {
-                            set_gauge_property(gauge, &name, &text_buf);
-                        }
-                        state.current_property = None;
-                    }
-                }
-                text_buf.clear();
-            }
-            Ok(Event::Empty(ref e)) => {
-                let name = String::from_utf8_lossy(e.name().as_ref()).to_string();
-                if name == "bibliography" {
-                    gauge_file.bibliography = parse_bibliography_attributes(e);
-                } else if name == "versionInfo" {
-                    gauge_file.version_info = parse_version_info_attributes(e);
-                } else if state.in_dash_comp && is_color_property(&name) {
-                    let color = parse_color_attributes(e);
-                    if let Some(ref mut gauge) = state.current_gauge {
-                        set_gauge_color(gauge, &name, color);
-                    }
-                }
-            }
-            Ok(Event::Text(ref e)) => {
-                text_buf = e.decode().map(|c| c.into_owned()).unwrap_or_default();
-            }
-            Ok(Event::CData(ref e)) => {
-                text_buf = String::from_utf8_lossy(e.as_ref()).to_string();
-            }
-            Ok(Event::Eof) => break,
-            Err(e) => return Err(DashParseError::XmlError(e)),
-            _ => {}
+    let dash = parse_dash_file(xml)?;
+    let mut gauge_file = GaugeFile {
+        bibliography: dash.bibliography,
+        version_info: dash.version_info,
+        ..Default::default()
+    };
+    for component in dash.gauge_cluster.components {
+        if let DashComponent::Gauge(gauge) = component {
+            gauge_file.gauge = *gauge;
         }
-        buf.clear();
     }
-
+    gauge_file.embedded_images = dash.gauge_cluster.embedded_images;
     Ok(gauge_file)
 }
 

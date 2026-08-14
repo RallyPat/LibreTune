@@ -1,18 +1,16 @@
 //! Dashboard file IO commands: load/save/rename/duplicate/delete + validate + create.
 
-use crate::commands::dash_layout::generate_unique_filename;
+use crate::commands::dash_layout::{generate_unique_filename, template_by_id};
 use crate::paths::{get_dashboards_dir, get_projects_dir};
-use libretune_core::dash::{
-    self, create_basic_dashboard, create_telemetry_live_dashboard, create_tuning_dashboard,
-    DashComponent, DashFile, VersionInfo,
-};
+use libretune_core::dash::{self, DashComponent, DashFile, VersionInfo};
 use libretune_core::ini::EcuDefinition;
 use std::path::{Path, PathBuf};
+use tracing::{debug, info, warn};
 
 /// Load a TS .dash file and return the full DashFile structure
 #[tauri::command]
 pub async fn get_dash_file(path: String) -> Result<DashFile, String> {
-    println!("[get_dash_file] Loading from: {}", path);
+    debug!("Loading dashboard from: {}", path);
 
     let lower = path.to_lowercase();
 
@@ -39,8 +37,8 @@ pub async fn get_dash_file(path: String) -> Result<DashFile, String> {
             .map_err(|e| format!("Failed to parse dashboard XML: {}", e))?
     };
 
-    println!(
-        "[get_dash_file] Loaded {} components, {} embedded images",
+    debug!(
+        "Loaded dashboard: {} components, {} embedded images",
         dash_file.gauge_cluster.components.len(),
         dash_file.gauge_cluster.embedded_images.len()
     );
@@ -65,10 +63,7 @@ pub async fn validate_dashboard(
             match EcuDefinition::from_file(ini_path.to_string_lossy().as_ref()) {
                 Ok(def) => Some(def),
                 Err(e) => {
-                    println!(
-                        "[validate_dashboard] Warning: Could not load INI for validation: {}",
-                        e
-                    );
+                    warn!("Could not load INI for dashboard validation: {}", e);
                     None
                 }
             }
@@ -81,8 +76,8 @@ pub async fn validate_dashboard(
 
     let report = dash::validate_dashboard(&dash_file, ecu_def.as_ref());
 
-    println!(
-        "[validate_dashboard] Validation complete: {} errors, {} warnings",
+    info!(
+        "Dashboard validation complete: {} errors, {} warnings",
         report.errors.len(),
         report.warnings.len()
     );
@@ -154,12 +149,9 @@ pub async fn create_new_dashboard(
         file_name
     };
 
-    let dash_file = match template.as_str() {
-        "basic" => create_basic_dashboard(),
-        "tuning" => create_tuning_dashboard(),
-        "telemetry_live" | "f1_telemetry" => create_telemetry_live_dashboard(),
-        _ => create_basic_dashboard(),
-    };
+    let dash_file = template_by_id(&template)
+        .map(|spec| (spec.builder)())
+        .unwrap_or_else(libretune_core::dash::create_basic_dashboard);
 
     let target_path = dash_dir.join(&target_name);
     dash::save_dash_file(&dash_file, &target_path)
@@ -168,28 +160,37 @@ pub async fn create_new_dashboard(
     Ok(target_path.to_string_lossy().to_string())
 }
 
-/// Rename an existing dashboard file.
-#[tauri::command]
-pub async fn rename_dashboard(path: String, new_name: String) -> Result<String, String> {
-    let source = PathBuf::from(&path);
+/// The dashboard file extension carried by `path` ("" when unrecognized).
+fn dashboard_extension(path: &str) -> &'static str {
+    let lower = path.to_lowercase();
+    if lower.ends_with(".ltdash.xml") {
+        ".ltdash.xml"
+    } else if lower.ends_with(".dash") {
+        ".dash"
+    } else if lower.ends_with(".gauge") {
+        ".gauge"
+    } else {
+        ""
+    }
+}
+
+/// Resolve the destination for a rename/duplicate: keep the source's
+/// extension (unless `new_name` already carries one) and de-conflict
+/// against existing files in the same directory.
+fn resolve_copy_target(
+    source: &Path,
+    new_name: &str,
+    default_name: &str,
+) -> Result<PathBuf, String> {
     let parent = source
         .parent()
         .ok_or_else(|| "Invalid dashboard path".to_string())?
         .to_path_buf();
 
-    let ext = if path.to_lowercase().ends_with(".ltdash.xml") {
-        ".ltdash.xml"
-    } else if path.to_lowercase().ends_with(".dash") {
-        ".dash"
-    } else if path.to_lowercase().ends_with(".gauge") {
-        ".gauge"
-    } else {
-        ""
-    };
-
+    let ext = dashboard_extension(&source.to_string_lossy());
     let mut file_name = new_name.trim().to_string();
     if file_name.is_empty() {
-        file_name = "Dashboard".to_string();
+        file_name = default_name.to_string();
     }
     if !ext.is_empty() && !file_name.to_lowercase().ends_with(ext) {
         file_name = format!("{}{}", file_name, ext);
@@ -201,7 +202,15 @@ pub async fn rename_dashboard(path: String, new_name: String) -> Result<String, 
         file_name
     };
 
-    let target_path = parent.join(&target_name);
+    Ok(parent.join(target_name))
+}
+
+/// Rename an existing dashboard file.
+#[tauri::command]
+pub async fn rename_dashboard(path: String, new_name: String) -> Result<String, String> {
+    let source = PathBuf::from(&path);
+    let target_path = resolve_copy_target(&source, &new_name, "Dashboard")?;
+
     std::fs::rename(&source, &target_path)
         .map_err(|e| format!("Failed to rename dashboard: {}", e))?;
 
@@ -212,36 +221,8 @@ pub async fn rename_dashboard(path: String, new_name: String) -> Result<String, 
 #[tauri::command]
 pub async fn duplicate_dashboard(path: String, new_name: String) -> Result<String, String> {
     let source = PathBuf::from(&path);
-    let parent = source
-        .parent()
-        .ok_or_else(|| "Invalid dashboard path".to_string())?
-        .to_path_buf();
+    let target_path = resolve_copy_target(&source, &new_name, "Dashboard Copy")?;
 
-    let ext = if path.to_lowercase().ends_with(".ltdash.xml") {
-        ".ltdash.xml"
-    } else if path.to_lowercase().ends_with(".dash") {
-        ".dash"
-    } else if path.to_lowercase().ends_with(".gauge") {
-        ".gauge"
-    } else {
-        ""
-    };
-
-    let mut file_name = new_name.trim().to_string();
-    if file_name.is_empty() {
-        file_name = "Dashboard Copy".to_string();
-    }
-    if !ext.is_empty() && !file_name.to_lowercase().ends_with(ext) {
-        file_name = format!("{}{}", file_name, ext);
-    }
-
-    let target_name = if parent.join(&file_name).exists() {
-        generate_unique_filename(&parent, &file_name)
-    } else {
-        file_name
-    };
-
-    let target_path = parent.join(&target_name);
     std::fs::copy(&source, &target_path)
         .map_err(|e| format!("Failed to duplicate dashboard: {}", e))?;
 

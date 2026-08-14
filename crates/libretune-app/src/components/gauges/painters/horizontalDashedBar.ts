@@ -1,7 +1,7 @@
 /** HorizontalDashedBar — segmented horizontal bar with per-segment zone coloring. */
 
 import { tsColorToHex } from '../../dashboards/dashTypes';
-import { roundRect, lightenColor, darkenColor } from '../drawUtils';
+import { segmentZoneColor, drawDashedSegment, lightenColor, darkenColor } from '../drawUtils';
 import type { Painter } from './types';
 
 export const horizontalDashedBarPainter: Painter = (pctx) => {
@@ -46,41 +46,17 @@ export const horizontalDashedBarPainter: Painter = (pctx) => {
     const segmentPercent = i / numSegments;
     const segmentValue = config.min + segmentPercent * (config.max - config.min);
 
-    let segmentColor: string;
-    if (config.high_critical !== null && segmentValue >= config.high_critical) {
-      segmentColor = isFilled ? tsColorToHex(config.critical_color) : '#401010';
-    } else if (config.high_warning !== null && segmentValue >= config.high_warning) {
-      segmentColor = isFilled ? tsColorToHex(config.warn_color) : '#403010';
-    } else {
-      segmentColor = isFilled ? tsColorToHex(config.needle_color) : '#303030';
-    }
+    const color = segmentZoneColor(config, segmentValue, isFilled);
 
-    if (isFilled) {
-      const segGradient = ctx.createLinearGradient(segmentX, 0, segmentX + segmentWidth, 0);
-      segGradient.addColorStop(0, darkenColor(segmentColor, 15));
-      segGradient.addColorStop(0.3, lightenColor(segmentColor, 20));
-      segGradient.addColorStop(0.7, lightenColor(segmentColor, 15));
-      segGradient.addColorStop(1, darkenColor(segmentColor, 10));
-      ctx.fillStyle = segGradient;
-
-      if (i === filledSegments - 1) {
-        ctx.shadowColor = segmentColor;
-        ctx.shadowBlur = 6;
-      }
-    } else {
-      ctx.fillStyle = segmentColor;
-    }
-
-    roundRect(
+    drawDashedSegment(
       ctx,
-      segmentX + segmentGap / 2,
-      barY,
-      segmentWidth - segmentGap,
-      barHeight,
-      2,
+      { x: segmentX + segmentGap / 2, y: barY, w: segmentWidth - segmentGap, h: barHeight },
+      segmentX,
+      segmentX + segmentWidth,
+      color,
+      isFilled,
+      i === filledSegments - 1,
     );
-    ctx.fill();
-    ctx.shadowColor = 'transparent';
   }
 
   // Value

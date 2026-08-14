@@ -1,6 +1,7 @@
 
 import { FolderOpen } from 'lucide-react';
 import { DashFileInfo } from '../dashTypes';
+import { dashBaseName } from '../shared/dashFilename';
 
 interface Props {
   availableDashes: DashFileInfo[];
@@ -61,7 +62,7 @@ export default function DashboardSelectorOverlay({
                     onClick={() => onSelect(dash.path)}
                     title={dash.path}
                   >
-                    {dash.name.replace(/\.(ltdash\.xml|dash|gauge)$/i, '')}
+                    {dashBaseName(dash.name)}
                   </button>
                 ))}
               </div>

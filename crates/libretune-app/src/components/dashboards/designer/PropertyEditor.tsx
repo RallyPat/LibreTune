@@ -1,4 +1,4 @@
-import { DashComponent, TsGaugeConfig, TsIndicatorConfig, isGauge, isIndicator } from '../dashTypes';
+import { DashComponent, TsGaugeConfig, TsIndicatorConfig, isGauge, isIndicator, PAINTER_LABELS, SUPPORTED_GAUGE_PAINTERS } from '../dashTypes';
 import PercentField from './PercentField';
 import NumberField from './NumberField';
 
@@ -94,26 +94,9 @@ export default function PropertyEditor({ component, onChange }: Props) {
             value={gauge.gauge_painter || 'AnalogGauge'}
             onChange={(e) => updateGauge({ gauge_painter: e.target.value as TsGaugeConfig['gauge_painter'] })}
           >
-            <option value="AnalogGauge">Analog Gauge</option>
-            <option value="BasicAnalogGauge">Basic Analog Gauge</option>
-            <option value="CircleAnalogGauge">Circle Analog Gauge</option>
-            <option value="BasicReadout">Digital Readout</option>
-            <option value="HorizontalBarGauge">Horizontal Bar</option>
-            <option value="HorizontalDashedBar">Horizontal Dashed Bar</option>
-            <option value="VerticalBarGauge">Vertical Bar</option>
-            <option value="VerticalDashedBar">Vertical Dashed Bar</option>
-            <option value="HorizontalLineGauge">Horizontal Line</option>
-            <option value="AnalogBarGauge">Analog Bar</option>
-            <option value="AnalogMovingBarGauge">Analog Moving Bar</option>
-            <option value="AsymmetricSweepGauge">Sweep Gauge</option>
-            <option value="RoundGauge">Round Gauge</option>
-            <option value="RoundDashedGauge">Round Dashed Gauge</option>
-            <option value="Tachometer">Tachometer</option>
-            <option value="FuelMeter">Fuel Meter</option>
-            <option value="LineGraph">Line Graph</option>
-            <option value="Histogram">Histogram</option>
-            <option value="TelemetryStat">Telemetry Stat</option>
-            <option value="MultiChannelTrend">Multi-Channel Trend</option>
+            {SUPPORTED_GAUGE_PAINTERS.map((painter) => (
+              <option key={painter} value={painter}>{PAINTER_LABELS[painter]}</option>
+            ))}
           </select>
         </div>
 
