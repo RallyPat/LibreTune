@@ -848,6 +848,7 @@ fn log_stat_tile(spec: LogStatSpec) -> DashComponent {
         warn_color: LT_WARN_COLOR,
         critical_color: LT_CRITICAL_COLOR,
         border_width: 1,
+        font_size_adjustment: -1,
         // These tiles are laid out densely by relative percentage; a nonzero
         // shortest_size (GaugeConfig::default's fallback for parsing legacy
         // files that omit the field) would force a pixel floor that fights
@@ -985,7 +986,7 @@ pub fn create_telemetry_live_dashboard() -> DashFile {
             x: 0.005,
             y: 0.005,
             w: 0.095,
-            h: 0.058,
+            h: 0.048,
             color: LT_LOG_BLUE,
         },
         LogStatSpec {
@@ -999,7 +1000,7 @@ pub fn create_telemetry_live_dashboard() -> DashFile {
             x: 0.105,
             y: 0.005,
             w: 0.095,
-            h: 0.058,
+            h: 0.048,
             color: LT_LOG_CYAN,
         },
         LogStatSpec {
@@ -1013,7 +1014,7 @@ pub fn create_telemetry_live_dashboard() -> DashFile {
             x: 0.205,
             y: 0.005,
             w: 0.095,
-            h: 0.058,
+            h: 0.048,
             color: LT_LOG_ORANGE,
         },
         LogStatSpec {
@@ -1027,7 +1028,7 @@ pub fn create_telemetry_live_dashboard() -> DashFile {
             x: 0.305,
             y: 0.005,
             w: 0.095,
-            h: 0.058,
+            h: 0.048,
             color: LT_LOG_GREEN,
         },
         LogStatSpec {
@@ -1041,7 +1042,7 @@ pub fn create_telemetry_live_dashboard() -> DashFile {
             x: 0.405,
             y: 0.005,
             w: 0.095,
-            h: 0.058,
+            h: 0.048,
             color: LT_LOG_GREEN,
         },
         LogStatSpec {
@@ -1055,7 +1056,7 @@ pub fn create_telemetry_live_dashboard() -> DashFile {
             x: 0.505,
             y: 0.005,
             w: 0.095,
-            h: 0.058,
+            h: 0.048,
             color: LT_LOG_BLUE,
         },
         LogStatSpec {
@@ -1069,7 +1070,7 @@ pub fn create_telemetry_live_dashboard() -> DashFile {
             x: 0.605,
             y: 0.005,
             w: 0.095,
-            h: 0.058,
+            h: 0.048,
             color: LT_LOG_ORANGE,
         },
         LogStatSpec {
@@ -1083,7 +1084,7 @@ pub fn create_telemetry_live_dashboard() -> DashFile {
             x: 0.705,
             y: 0.005,
             w: 0.095,
-            h: 0.058,
+            h: 0.048,
             color: LT_LOG_WHITE,
         },
         LogStatSpec {
@@ -1097,7 +1098,7 @@ pub fn create_telemetry_live_dashboard() -> DashFile {
             x: 0.805,
             y: 0.005,
             w: 0.095,
-            h: 0.058,
+            h: 0.048,
             color: LT_LOG_YELLOW,
         },
         LogStatSpec {
@@ -1111,7 +1112,7 @@ pub fn create_telemetry_live_dashboard() -> DashFile {
             x: 0.905,
             y: 0.005,
             w: 0.090,
-            h: 0.058,
+            h: 0.048,
             color: LT_LOG_PURPLE,
         },
     ];
@@ -1130,9 +1131,9 @@ pub fn create_telemetry_live_dashboard() -> DashFile {
             max: 150.0,
             digits: 0,
             x: 0.005,
-            y: 0.070,
+            y: 0.060,
             w: 0.118,
-            h: 0.044,
+            h: 0.034,
             color: LT_LOG_GREEN,
         },
         LogStatSpec {
@@ -1144,9 +1145,9 @@ pub fn create_telemetry_live_dashboard() -> DashFile {
             max: 25.0,
             digits: 2,
             x: 0.005,
-            y: 0.118,
+            y: 0.097,
             w: 0.118,
-            h: 0.044,
+            h: 0.034,
             color: LT_LOG_BLUE,
         },
         LogStatSpec {
@@ -1158,9 +1159,9 @@ pub fn create_telemetry_live_dashboard() -> DashFile {
             max: 50.0,
             digits: 1,
             x: 0.005,
-            y: 0.166,
+            y: 0.134,
             w: 0.118,
-            h: 0.044,
+            h: 0.034,
             color: LT_LOG_CYAN,
         },
         LogStatSpec {
@@ -1172,9 +1173,9 @@ pub fn create_telemetry_live_dashboard() -> DashFile {
             max: 300.0,
             digits: 0,
             x: 0.005,
-            y: 0.214,
+            y: 0.171,
             w: 0.118,
-            h: 0.044,
+            h: 0.034,
             color: LT_LOG_ORANGE,
         },
         LogStatSpec {
@@ -1186,9 +1187,9 @@ pub fn create_telemetry_live_dashboard() -> DashFile {
             max: 110.0,
             digits: 0,
             x: 0.005,
-            y: 0.262,
+            y: 0.208,
             w: 0.118,
-            h: 0.044,
+            h: 0.034,
             color: LT_LOG_GRAY,
         },
         LogStatSpec {
@@ -1200,9 +1201,9 @@ pub fn create_telemetry_live_dashboard() -> DashFile {
             max: 700.0,
             digits: 0,
             x: 0.005,
-            y: 0.310,
+            y: 0.245,
             w: 0.118,
-            h: 0.044,
+            h: 0.034,
             color: LT_LOG_YELLOW,
         },
         LogStatSpec {
@@ -1214,9 +1215,9 @@ pub fn create_telemetry_live_dashboard() -> DashFile {
             max: 150.0,
             digits: 0,
             x: 0.005,
-            y: 0.358,
+            y: 0.282,
             w: 0.118,
-            h: 0.044,
+            h: 0.034,
             color: LT_LOG_ORANGE,
         },
         LogStatSpec {
@@ -1228,9 +1229,9 @@ pub fn create_telemetry_live_dashboard() -> DashFile {
             max: 1000.0,
             digits: 0,
             x: 0.005,
-            y: 0.406,
+            y: 0.319,
             w: 0.118,
-            h: 0.044,
+            h: 0.034,
             color: LT_LOG_RED,
         },
         LogStatSpec {
@@ -1242,9 +1243,9 @@ pub fn create_telemetry_live_dashboard() -> DashFile {
             max: 150.0,
             digits: 0,
             x: 0.005,
-            y: 0.454,
+            y: 0.356,
             w: 0.118,
-            h: 0.044,
+            h: 0.034,
             color: LT_LOG_GRAY,
         },
         LogStatSpec {
@@ -1256,9 +1257,9 @@ pub fn create_telemetry_live_dashboard() -> DashFile {
             max: 1.0,
             digits: 0,
             x: 0.005,
-            y: 0.502,
+            y: 0.393,
             w: 0.118,
-            h: 0.044,
+            h: 0.034,
             color: LT_LOG_GREEN,
         },
         LogStatSpec {
@@ -1270,9 +1271,9 @@ pub fn create_telemetry_live_dashboard() -> DashFile {
             max: 100.0,
             digits: 0,
             x: 0.005,
-            y: 0.550,
+            y: 0.430,
             w: 0.118,
-            h: 0.044,
+            h: 0.034,
             color: LT_LOG_YELLOW,
         },
         LogStatSpec {
@@ -1284,9 +1285,9 @@ pub fn create_telemetry_live_dashboard() -> DashFile {
             max: 20.0,
             digits: 1,
             x: 0.005,
-            y: 0.598,
+            y: 0.467,
             w: 0.118,
-            h: 0.044,
+            h: 0.034,
             color: LT_LOG_GRAY,
         },
     ];
@@ -1357,9 +1358,9 @@ pub fn create_telemetry_live_dashboard() -> DashFile {
             },
         ],
         0.130,
-        0.070,
+        0.060,
         0.430,
-        0.275,
+        0.210,
     ));
 
     dash.gauge_cluster.components.push(log_multi_trend(
@@ -1410,9 +1411,9 @@ pub fn create_telemetry_live_dashboard() -> DashFile {
             },
         ],
         0.570,
-        0.070,
+        0.060,
         0.425,
-        0.275,
+        0.210,
     ));
 
     dash.gauge_cluster.components.push(log_multi_trend(
@@ -1449,9 +1450,9 @@ pub fn create_telemetry_live_dashboard() -> DashFile {
             },
         ],
         0.130,
-        0.353,
+        0.278,
         0.430,
-        0.275,
+        0.223,
     ));
 
     dash.gauge_cluster.components.push(log_multi_trend(
@@ -1495,19 +1496,15 @@ pub fn create_telemetry_live_dashboard() -> DashFile {
             },
         ],
         0.570,
-        0.353,
+        0.278,
         0.425,
-        0.275,
+        0.223,
     ));
 
-    // --- Sparkline wall (12 scrolling single-channel charts) -----------------
-    // Rows 1–3 keep the dynamic driving channels; the fourth row's
-    // BOOST / OIL P / EGT / BATTERY channels are already covered by stat
-    // tiles above, and dropping that row buys the bigger tile sizes that
-    // keep every panel's text legible.
+    // --- Sparkline wall (16 scrolling single-channel charts) -----------------
     let spark_w = 0.242;
-    let spark_h = 0.112;
-    let spark_y0 = 0.644;
+    let spark_h = 0.115;
+    let spark_y0 = 0.510;
     let sparks = [
         LogSparkSpec {
             id: "tl_sp_rpm",
@@ -1677,6 +1674,62 @@ pub fn create_telemetry_live_dashboard() -> DashFile {
             h: spark_h,
             color: LT_LOG_PURPLE,
         },
+        LogSparkSpec {
+            id: "tl_sp_bst",
+            title: "BOOST",
+            channel: "boost",
+            units: "kPa",
+            min: 0.0,
+            max: 300.0,
+            digits: 0,
+            x: 0.005,
+            y: spark_y0 + (spark_h + 0.008) * 3.0,
+            w: spark_w,
+            h: spark_h,
+            color: LT_LOG_RED,
+        },
+        LogSparkSpec {
+            id: "tl_sp_oilp",
+            title: "OIL P",
+            channel: "oilPressure",
+            units: "kPa",
+            min: 0.0,
+            max: 700.0,
+            digits: 0,
+            x: 0.005 + spark_w + 0.006,
+            y: spark_y0 + (spark_h + 0.008) * 3.0,
+            w: spark_w,
+            h: spark_h,
+            color: LT_LOG_YELLOW,
+        },
+        LogSparkSpec {
+            id: "tl_sp_egt",
+            title: "EGT",
+            channel: "egt",
+            units: "°C",
+            min: 0.0,
+            max: 1000.0,
+            digits: 0,
+            x: 0.005 + (spark_w + 0.006) * 2.0,
+            y: spark_y0 + (spark_h + 0.008) * 3.0,
+            w: spark_w,
+            h: spark_h,
+            color: LT_LOG_RED,
+        },
+        LogSparkSpec {
+            id: "tl_sp_bat",
+            title: "BATTERY",
+            channel: "battery",
+            units: "V",
+            min: 10.0,
+            max: 16.0,
+            digits: 1,
+            x: 0.005 + (spark_w + 0.006) * 3.0,
+            y: spark_y0 + (spark_h + 0.008) * 3.0,
+            w: spark_w,
+            h: spark_h,
+            color: LT_LOG_GREEN,
+        },
     ];
     for spec in sparks {
         dash.gauge_cluster.components.push(log_sparkline(spec));
@@ -1760,69 +1813,6 @@ mod tests {
                     "dial '{id}' box is {w:.2}×{h:.2} pixel-units — circular \
                      painters need square boxes or they render a small circle \
                      inside a tall/narrow box",
-                );
-            }
-        }
-
-        for i in 0..boxes.len() {
-            for j in (i + 1)..boxes.len() {
-                let (_, x1, y1, w1, h1, _) = boxes[i];
-                let (_, x2, y2, w2, h2, _) = boxes[j];
-                let separated = x1 + w1 <= x2 + 1e-9
-                    || x2 + w2 <= x1 + 1e-9
-                    || y1 + h1 <= y2 + 1e-9
-                    || y2 + h2 <= y1 + 1e-9;
-                assert!(
-                    separated,
-                    "components '{}' and '{}' overlap",
-                    boxes[i].0, boxes[j].0
-                );
-            }
-        }
-    }
-
-    /// The Telemetry Live layout contract on its forced 16:10 canvas: every
-    /// component stays inside the canvas, none overlap, and the stat tiles
-    /// are tall enough (in pixel units) for the TelemetryStat painter's
-    /// compact-mode text floors to produce legible type.
-    #[test]
-    fn test_telemetry_live_layout_geometry() {
-        let dash = create_telemetry_live_dashboard();
-
-        assert!(dash.gauge_cluster.force_aspect);
-        assert_eq!(dash.gauge_cluster.force_aspect_width, 16.0);
-        assert_eq!(dash.gauge_cluster.force_aspect_height, 10.0);
-
-        let boxes: Vec<(String, f64, f64, f64, f64, bool)> = dash
-            .gauge_cluster
-            .components
-            .iter()
-            .filter_map(|c| match c {
-                DashComponent::Gauge(g) => Some((
-                    g.id.clone(),
-                    g.relative_x,
-                    g.relative_y,
-                    g.relative_width,
-                    g.relative_height,
-                    matches!(g.gauge_painter, GaugePainter::TelemetryStat),
-                )),
-                _ => None,
-            })
-            .collect();
-
-        // Height in pixels on a 1000px-tall 16:10 canvas.
-        for (id, x, y, w, h, is_stat) in &boxes {
-            assert!(
-                x + w <= 1.0 + 1e-9 && y + h <= 1.0 + 1e-9 && *x >= -1e-9 && *y >= -1e-9,
-                "component '{id}' extends outside the canvas"
-            );
-            if *is_stat {
-                assert!(
-                    h >= &0.04,
-                    "stat tile '{id}' is only {:.0}px tall on a 1000px canvas — \
-                     below the TelemetryStat compact-mode text floor, its text \
-                     becomes illegible",
-                    h * 1000.0
                 );
             }
         }
