@@ -304,7 +304,7 @@ pub async fn get_gauge_categories(
             )
         })
         .collect();
-    entries.sort_by(|a, b| a.1.title.to_lowercase().cmp(&b.1.title.to_lowercase()));
+    entries.sort_by_key(|(_, entry)| entry.title.to_lowercase());
 
     let mut names: Vec<&str> = GAUGE_CATEGORY_KEYWORDS
         .iter()
