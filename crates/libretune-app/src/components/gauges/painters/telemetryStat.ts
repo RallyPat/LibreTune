@@ -51,24 +51,35 @@ export const telemetryStatPainter: Painter = (pctx) => {
   const valueText = value.toFixed(config.value_digits);
 
   if (compact) {
-    // Dense Grafana-style: label left, value right on one row.
-    const labelSize = Math.max(7, minDim * 0.22 * fontScale);
+    // Value-forward two-line layout: small label top-left, large value on
+    // the line below, filling the tile's width. A one-row "label left,
+    // value right" layout caps the value font at a fraction of the tile's
+    // HEIGHT — the smaller dimension of these wide, short telemetry tiles —
+    // which left the values unreadable no matter how much width was spare.
+    const labelSize = Math.max(9, height * 0.22 * fontScale);
     ctx.fillStyle = tsColorToHex(config.trim_color);
     ctx.font = getFontSpec(labelSize, { bold: true });
     ctx.textAlign = 'left';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(config.title.toUpperCase(), contentX, height / 2);
+    ctx.textBaseline = 'top';
+    ctx.fillText(config.title.toUpperCase(), padding, height * 0.07);
 
-    const valueSize = Math.max(9, minDim * 0.34 * fontScale);
+    const valueLine = config.units ? `${valueText} ${config.units}` : valueText;
+    let valueSize = Math.max(14, height * 0.58 * fontScale);
+    ctx.font = getFontSpec(valueSize, { bold: true, monospace: true });
+    // Shrink to fit only when a long value+units would overflow the tile.
+    const availW = width - padding * 2;
+    while (ctx.measureText(valueLine).width > availW && valueSize > 10) {
+      valueSize -= 1;
+      ctx.font = getFontSpec(valueSize, { bold: true, monospace: true });
+    }
     if (valueHex !== tsColorToHex(config.font_color)) {
       ctx.shadowColor = valueHex;
       ctx.shadowBlur = 6;
     }
     ctx.fillStyle = valueHex;
-    ctx.font = getFontSpec(valueSize, { bold: true, monospace: true });
-    ctx.textAlign = 'right';
-    const valueLine = config.units ? `${valueText} ${config.units}` : valueText;
-    ctx.fillText(valueLine, width - padding, height / 2);
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillText(valueLine, padding, height * 0.95);
     ctx.shadowColor = 'transparent';
     return;
   }
