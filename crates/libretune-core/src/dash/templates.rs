@@ -1120,22 +1120,12 @@ pub fn create_telemetry_live_dashboard() -> DashFile {
         dash.gauge_cluster.components.push(log_stat_tile(spec));
     }
 
-    // --- Left stat column (12 channels) --------------------------------------
+    // --- Left stat column (8 channels) ---------------------------------------
+    // Only physical-sensor readings you want as at-a-glance numbers; the
+    // computed channels (VE, CORR, SYNC, AFR TGT) live on the trend panels.
+    // Eight tiles instead of twelve buys each one ~50px of height so its
+    // value text stays readable — the old 12×34px column was illegible.
     let left_stats = [
-        LogStatSpec {
-            id: "tl_ve",
-            title: "VE",
-            channel: "ve",
-            units: "%",
-            min: 0.0,
-            max: 150.0,
-            digits: 0,
-            x: 0.005,
-            y: 0.060,
-            w: 0.118,
-            h: 0.034,
-            color: LT_LOG_GREEN,
-        },
         LogStatSpec {
             id: "tl_pw",
             title: "PW",
@@ -1145,9 +1135,9 @@ pub fn create_telemetry_live_dashboard() -> DashFile {
             max: 25.0,
             digits: 2,
             x: 0.005,
-            y: 0.097,
+            y: 0.060,
             w: 0.118,
-            h: 0.034,
+            h: 0.050,
             color: LT_LOG_BLUE,
         },
         LogStatSpec {
@@ -1159,9 +1149,9 @@ pub fn create_telemetry_live_dashboard() -> DashFile {
             max: 50.0,
             digits: 1,
             x: 0.005,
-            y: 0.134,
+            y: 0.116,
             w: 0.118,
-            h: 0.034,
+            h: 0.050,
             color: LT_LOG_CYAN,
         },
         LogStatSpec {
@@ -1175,7 +1165,7 @@ pub fn create_telemetry_live_dashboard() -> DashFile {
             x: 0.005,
             y: 0.171,
             w: 0.118,
-            h: 0.034,
+            h: 0.050,
             color: LT_LOG_ORANGE,
         },
         LogStatSpec {
@@ -1187,9 +1177,9 @@ pub fn create_telemetry_live_dashboard() -> DashFile {
             max: 110.0,
             digits: 0,
             x: 0.005,
-            y: 0.208,
+            y: 0.227,
             w: 0.118,
-            h: 0.034,
+            h: 0.050,
             color: LT_LOG_GRAY,
         },
         LogStatSpec {
@@ -1201,9 +1191,9 @@ pub fn create_telemetry_live_dashboard() -> DashFile {
             max: 700.0,
             digits: 0,
             x: 0.005,
-            y: 0.245,
+            y: 0.282,
             w: 0.118,
-            h: 0.034,
+            h: 0.050,
             color: LT_LOG_YELLOW,
         },
         LogStatSpec {
@@ -1215,9 +1205,9 @@ pub fn create_telemetry_live_dashboard() -> DashFile {
             max: 150.0,
             digits: 0,
             x: 0.005,
-            y: 0.282,
+            y: 0.338,
             w: 0.118,
-            h: 0.034,
+            h: 0.050,
             color: LT_LOG_ORANGE,
         },
         LogStatSpec {
@@ -1229,38 +1219,10 @@ pub fn create_telemetry_live_dashboard() -> DashFile {
             max: 1000.0,
             digits: 0,
             x: 0.005,
-            y: 0.319,
-            w: 0.118,
-            h: 0.034,
-            color: LT_LOG_RED,
-        },
-        LogStatSpec {
-            id: "tl_corr",
-            title: "CORR",
-            channel: "correction",
-            units: "%",
-            min: 50.0,
-            max: 150.0,
-            digits: 0,
-            x: 0.005,
-            y: 0.356,
-            w: 0.118,
-            h: 0.034,
-            color: LT_LOG_GRAY,
-        },
-        LogStatSpec {
-            id: "tl_sync",
-            title: "SYNC",
-            channel: "sync",
-            units: "",
-            min: 0.0,
-            max: 1.0,
-            digits: 0,
-            x: 0.005,
             y: 0.393,
             w: 0.118,
-            h: 0.034,
-            color: LT_LOG_GREEN,
+            h: 0.050,
+            color: LT_LOG_RED,
         },
         LogStatSpec {
             id: "tl_fuel",
@@ -1271,24 +1233,10 @@ pub fn create_telemetry_live_dashboard() -> DashFile {
             max: 100.0,
             digits: 0,
             x: 0.005,
-            y: 0.430,
+            y: 0.449,
             w: 0.118,
-            h: 0.034,
+            h: 0.050,
             color: LT_LOG_YELLOW,
-        },
-        LogStatSpec {
-            id: "tl_tgt",
-            title: "AFR TGT",
-            channel: "afrTarget",
-            units: ":1",
-            min: 10.0,
-            max: 20.0,
-            digits: 1,
-            x: 0.005,
-            y: 0.467,
-            w: 0.118,
-            h: 0.034,
-            color: LT_LOG_GRAY,
         },
     ];
     for spec in left_stats {
