@@ -13,6 +13,83 @@ relevant.
 
 ## [Unreleased]
 
+### 2026-08-14 – 2026-08-16 — Dashboard system refactor
+
+A full pass over the dashboard subsystem: dead code removed, real bugs fixed,
+state consolidated into a store, shared logic deduplicated, the designer made
+WYSIWYG, and the TunerStudio-format backend modernized. Net −500 lines.
+
+#### Added
+- **WYSIWYG designer** — designer mode renders live gauges through the same
+  component as the dashboard instead of gray placeholder boxes; selection
+  outline + 8 resize handles overlay the live content, hidden components
+  render dimmed, and per-component condition polling is skipped while editing.
+- **INI-aware "Replace gauge"** — new `get_gauge_categories` command lists the
+  loaded INI's gauge configurations (grouped by a channel-keyword heuristic)
+  in the context-menu submenu; previously the submenu always fell back to ~10
+  hardcoded channels because the command was never implemented.
+- **Template picker + Reset to Defaults** — the New Dashboard dialog offers
+  the three built-in templates (single `TEMPLATE_SPECS` registry in the
+  backend), and the dashboard selector gains a confirmed destructive
+  reset-to-defaults action.
+- **Suggested channel remaps** — new `suggest_channel_remaps` core
+  fn + command (cross-firmware synonym table with guarded fuzzy fallback)
+  surfaced in the Validation panel with one-click Apply, so dashboards
+  authored for one firmware quickly adapt to another.
+- Designer drag/resize history no longer records no-op entries for plain
+  select-clicks (identity check against the mousedown snapshot).
+- Regression tests: Basic layout geometry (forced 16:9, pixel-square dial
+  boxes, no overlaps), indicator `extra_attrs` round-trip.
+
+#### Changed
+- **State architecture** — new Zustand `dashboardStore` owns the dashboard
+  file, selection, CRUD, and designer state; `TsDashboard` went from a
+  ~22-`useState` orchestrator to a thin shell. Sweep/demo values moved to a
+  non-reactive override module read by each gauge's rAF loop — demo mode no
+  longer re-renders the tree at 20Hz, and `TsGauge` lost its
+  `value`/`overrideStore` props entirely.
+- **Pop-out sync** — dashboard selection broadcasts a `dashboard:changed`
+  Tauri event (session-id guarded) so the main window and pop-outs follow
+  each other instead of fighting over the persisted setting.
+- **Lossless indicators** — unknown indicator properties round-trip through
+  `extra_attrs` like gauges always did (parser catch-all + writer emission).
+- **`validate_dashboard` uses the loaded definition** — channel checks run
+  against `AppState`'s loaded INI instead of requiring a `project_name` the
+  frontend never passed, so unknown-channel errors actually appear now.
+- Basic dashboard redesigned as a forced-16:9 three-zone cluster (tach +
+  AFR dial flanking MAP/coolant/throttle bar cards over a readout strip);
+  Telemetry Live left stat column reduced to 8 physical-sensor tiles at
+  readable size; `MultiChannelTrend` legend moved below the graph with
+  value-forward sizing; `TelemetryStat` compact tiles render value-forward
+  two-line with larger labels.
+- `parse_gauge_file` delegates to the dash parser (a `.gauge` file is a
+  single-component `.dash`); shared rename/duplicate target resolution;
+  dash commands log via `tracing` instead of `println!`.
+- INI range-sync keeps the dashboard's own title/units (only fills when
+  empty); `get_gauge_configs` substitutes the channel's real units for
+  placeholder tokens like Speeduino's `"TEMP"`.
+
+#### Fixed
+- Right-click in designer mode set state but no context menu appeared (menu
+  was only rendered in the live-view branch).
+- Startup sweep read a stale `isConnected` snapshot; after the down-sweep,
+  live connected values took over instantly so the minimums rest was never
+  visible (now holds ~600ms before releasing).
+- Layer-panel hide/show clobbered the runtime-evaluated `enabled_condition`
+  with the literal `"false"`; now uses a dedicated
+  `extra_attrs['lt_designer_hidden']` flag.
+- Windows path bug: `selectedPath.split('/')` broke backslash paths, so the
+  header title degenerated to "Dashboard".
+- Round gauges ignored configured `high_warning`/`high_critical`, using
+  hardcoded top-10%/25% zones.
+
+#### Removed
+- Dead code: never-imported `IndicatorRow`, unreachable `DashboardCanvas`
+  drop path, dead `create_f1_telemetry_dashboard`, never-constructed error
+  variants, orphaned `buildDefaultGauge`, unreferenced `Gauges.css`.
+- Half-built multi-cluster support (`additional_clusters` was never populated
+  by the parser nor serialized by the writer — unreachable data).
+
 ### 2026-08-01 — Table editing operations restored
 
 #### Fixed

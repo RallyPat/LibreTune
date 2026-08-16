@@ -176,21 +176,23 @@ The project aims to provide professional ECU tuning workflow and functionality w
 
 ### Backend (Rust)
 ```bash
-cd /home/pat/.gemini/antigravity/scratch/libretune
+# From the repository root
 cargo build -p libretune-core
 cargo test -p libretune-core
 cargo clippy -p libretune-core
+# The Tauri app crate:
+cargo check -p libretune-app
 ```
 
 ### Frontend (React/Tauri)
 ```bash
 cd crates/libretune-app
 npm install
-npm run dev        # Development mode
-npm run tauri dev  # Full Tauri app
-npm run build       # Production build
-npm run lint       # ESLint
+npm run dev        # Browser-only Vite dev server (no Tauri backend — invoke calls fail)
+npm run tauri dev  # Full Tauri app (use this for feature work)
+npm run build      # Production build
 npm run typecheck  # TypeScript checking
+npx vitest run     # Unit tests
 ```
 
 ## INI File Format
@@ -304,6 +306,24 @@ Based on analysis of common ECU tuning software patterns:
 
 Detailed session-by-session history has moved to [CHANGELOG.md](CHANGELOG.md).
 What follows is a high-level pointer to the most recent cleanup pass.
+
+### Dashboard system refactor (Aug 2026)
+
+- **State**: new Zustand `dashboardStore` (see `src/stores/dashboardStore.ts`)
+  owns dashFile/selection/CRUD/designer state; `TsDashboard.tsx` is a thin
+  shell. Sweep/demo values live in the non-reactive `stores/gaugeOverride.ts`
+  read by `useGaugeRenderer` each frame. Pop-outs follow selection via the
+  `dashboard:changed` Tauri event.
+- **WYSIWYG designer**: `DesignerCanvas` renders live `DashComponentView`s
+  (shared with the live canvas) instead of gray boxes; hidden components show
+  dimmed via `extra_attrs['lt_designer_hidden']`.
+- **Backend**: single `TEMPLATE_SPECS` registry in
+  `commands/dash_layout.rs`; `suggest_channel_remaps` + `get_gauge_categories`
+  commands; indicators round-trip unknown properties losslessly;
+  `validate_dashboard` checks channels against the loaded definition.
+- Docs: `docs/src/features/dashboards*` rewritten to match.
+- See the `2026-08-14 – 2026-08-16 — Dashboard system refactor` CHANGELOG
+  block for the full breakdown.
 
 ### UI / menu pass (Jul 2026)
 

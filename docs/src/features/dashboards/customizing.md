@@ -1,100 +1,84 @@
 # Customizing Gauges
 
-Configure individual gauge appearance and behavior.
+Configure individual gauge appearance and behavior in the WYSIWYG designer.
 
-## Accessing Gauge Settings
+## Designer Mode
 
-1. Enter Designer Mode (right-click → Designer Mode)
-2. Right-click the gauge
-3. Select **Configure Gauge**
+Right-click the dashboard (anywhere — background or gauge) and select **Designer Mode**.
 
-## Gauge Properties
+The designer is fully **WYSIWYG**: gauges render live exactly as on the dashboard — same painters, same realtime data — with selection outlines and resize handles overlaid. What you edit is what you get.
+
+Components hidden from the live dashboard via the layer panel appear dimmed in the designer so you can still select and edit them.
+
+## Editing Basics
+
+| Action | How |
+|--------|-----|
+| Select | Click a component (or pick it in the layer panel) |
+| Move | Drag the component |
+| Resize | Drag one of the 8 handles on a selected component |
+| Delete | Select, then press **Delete** (or **Backspace**) |
+| Copy / Paste | **Ctrl+C** / **Ctrl+V** (pasted components get a fresh id and a small offset) |
+| Undo / Redo | **Ctrl+Z** / **Ctrl+Shift+Z** (or **Ctrl+Y**) |
+| Deselect | **Escape** |
+| Save | **Ctrl+S** or the toolbar **Save** button |
+| Align to canvas | Toolbar align buttons (left / center / right / top / middle / bottom) |
+
+Edits are held in memory until you save — the dashboard file on disk is only written when you do.
+
+## Grid and Snapping
+
+The toolbar toggles the grid overlay and the snap step (in percent). With snap enabled, moves and resizes round to the grid.
+
+## Adding Components
+
+Two ways, both drop onto the canvas in designer mode:
+
+- **Drag a channel from the sidebar** onto the canvas — creates a gauge bound to that channel, inheriting units, range, and warning thresholds from the INI definition
+- **Drag a tile from the Gauge Palette** — creates a gauge of that painter type with no channel assigned yet; bind a channel in the property editor
+
+## Layer Panel
+
+The right rail lists every component top-down (top of list = top of the visual stack):
+
+- Click to select
+- **▲ / ▼** reorder the stack
+- **● / ○** hide or show a component on the live dashboard (hidden components stay visible, dimmed, in the designer)
+- **✕** delete
+
+## Property Editor
+
+With a component selected, the property editor exposes its full configuration:
 
 ### Data Channel
-Select which ECU value to display:
-- RPM, MAP, TPS, AFR, etc.
-- Any channel defined in your INI
+Select which ECU value to display — any channel defined in your INI.
 
 ### Range Settings
 
 | Property | Description |
 |----------|-------------|
-| Minimum | Lowest displayable value |
-| Maximum | Highest displayable value |
-| Low Warning | Threshold for warning zone |
-| High Warning | Threshold for warning zone |
-| Low Danger | Threshold for danger zone |
-| High Danger | Threshold for danger zone |
+| Minimum / Maximum | Display range |
+| Low / High Warning | Threshold for the warning zone |
+| Low / High Danger | Threshold for the danger zone |
 
 ### Appearance
 
 | Property | Description |
 |----------|-------------|
-| Gauge Type | Analog, digital, bar, etc. |
+| Gauge Type | Any of the 20 painter styles (see the gauge types table on the [Dashboards](../dashboards.md) page) |
 | Title | Display name |
-| Units | Unit label (RPM, °F, etc.) |
-| Decimal Places | Precision of display |
+| Units | Unit label (°C, kPa, %, …) |
+| Decimal Places | Value precision |
+| Colors | Value, warning, danger, background, bezel |
 
-### Colors
+### Conditional Visibility
 
-| Property | Description |
-|----------|-------------|
-| Normal Color | Safe range color |
-| Warning Color | Warning zone color |
-| Danger Color | Danger zone color |
-| Background | Gauge background |
-| Bezel | Frame color |
+The **Enabled Condition** field accepts an expression (e.g. `rpm > 0` or `hasLambdaSensor`); the component only renders on the live dashboard while the expression holds true.
 
-## Gauge Types
+## Replacing a Gauge from the INI
 
-### Analog Gauge
-- Classic round dial with needle
-- Best for: RPM, speed, boost
-- Shows relative position well
+In designer mode, right-click a gauge and open the **TS/LibreTune Gauges** submenu: it lists the loaded INI's gauge configurations grouped by category. Choosing one keeps the gauge's position and size but rebinds its channel, title, units, and range to the INI definition.
 
-### Digital Readout
-- LCD-style numeric display
-- Best for: AFR, temperatures, voltages
-- Shows precise values
+## Embedded Assets
 
-### Bar Gauge
-- Horizontal or vertical progress bar
-- Best for: Coolant temp, fuel level
-- Good for compact layouts
-
-### Sweep Gauge
-- Curved arc indicator
-- Best for: Stylized displays
-- Good visual impact
-
-### Line Graph
-- Time-series history
-- Best for: Trends, lambda history
-- Shows recent changes
-
-## Resizing Gauges
-
-In Designer Mode:
-1. Click to select gauge
-2. Drag corner handles to resize
-3. Maintain aspect ratio with Shift
-
-## Positioning Gauges
-
-In Designer Mode:
-1. Click and drag gauge center
-2. Snap to grid (optional)
-3. Use arrow keys for fine adjustment
-
-## Copying Gauges
-
-1. Right-click gauge
-2. Select **Duplicate**
-3. New gauge appears offset
-4. Modify channel/settings
-
-## Deleting Gauges
-
-1. Select gauge
-2. Press Delete key
-3. Or right-click → **Remove Gauge**
+The **Asset Manager** (bottom of the right rail) embeds images and fonts into the dashboard file itself, so custom backgrounds, needle images, and indicator art travel with the file.
