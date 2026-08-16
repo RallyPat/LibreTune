@@ -80,14 +80,10 @@ export const RecursivePanel = memo(function RecursivePanel({
     setGaugeConfig(null);
     setPortEditor(null);
 
-    const stdPlaceholder = buildStdPlaceholderDefinition(name);
-    if (stdPlaceholder) {
-      setDefinition(stdPlaceholder);
-      setPanelType('dialog');
-      return () => {
-        cancelled = true;
-      };
-    }
+    // `std_*` panels (like std_injection) are synthesized on the backend in
+    // get_dialog_definition → EcuDefinition::std_panel_definition, so they
+    // must fall through to that lookup rather than being pre-empted here.
+    // buildStdPlaceholderDefinition is used only as the final fallback below.
 
     // First try as indicatorPanel
     invoke<IndicatorPanel>('get_indicator_panel', { name })
@@ -188,7 +184,16 @@ export const RecursivePanel = memo(function RecursivePanel({
                           curve: String(err2),
                           portEditor: String(err3),
                         });
-                        setPanelType('unknown');
+                        // Last resort: a std_* panel the backend couldn't
+                        // synthesize (e.g. std_ms2gentherm) gets a friendly
+                        // placeholder instead of the bare "unknown" pane.
+                        const fallback = buildStdPlaceholderDefinition(name);
+                        if (fallback) {
+                          setDefinition(fallback);
+                          setPanelType('dialog');
+                        } else {
+                          setPanelType('unknown');
+                        }
                       });
                   });
               });

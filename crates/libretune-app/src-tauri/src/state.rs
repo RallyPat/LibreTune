@@ -125,6 +125,11 @@ pub static LOGGER_RECORDING: std::sync::atomic::AtomicBool =
 pub enum AutoTuneLoadSource {
     Map,
     Maf,
+    /// Throttle Position Sensor — used by Alpha-N / ITB (individual throttle
+    /// body) fuelling strategies where the VE table's load (Y) axis is indexed
+    /// by throttle opening rather than manifold pressure or mass airflow.
+    /// See GitHub issue #132.
+    Tps,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -140,10 +145,25 @@ pub fn is_maf_channel_name(name: &str) -> bool {
     lower.contains("maf") || lower.contains("airmass") || lower.contains("airflow")
 }
 
+/// Detect a throttle-position (Alpha-N) load channel from an INI channel name
+/// or label. Mirrors [`is_maf_channel_name`]. Typical Speeduino / rusEFI
+/// channel names: `tps`, `tpsValue`, `throttle`, `throttlePos`, `tp` (and
+/// `tpsAccel`/`tpsDot`, which are rate channels but still indicate a
+/// TPS-based tune — we match on the `tps`/`throttle` root).
+pub fn is_tps_channel_name(name: &str) -> bool {
+    let lower = name.to_lowercase();
+    // Match `tps`/`throttle` roots but avoid `map`/`maf` false positives and
+    // avoid bare `tp` matching substrings like `output`/`stopt`.
+    lower == "tps"
+        || lower == "tp"
+        || lower == "throttle"
+        || lower.contains("tps")
+        || lower.contains("throttle")
+}
+
 /// AutoTune configuration stored when tuning session starts
 #[derive(Clone)]
 pub struct AutoTuneConfig {
-    #[allow(dead_code)]
     pub table_name: String,
     /// Signature of the ECU definition this session's bins/tables were
     /// resolved against. If the loaded definition changes (e.g. reconnect to
@@ -214,6 +234,45 @@ pub struct AppState {
     pub app_start_epoch: f64,
     /// Cached `.inc` table files for INI `table()` expressions.
     pub inc_table_cache: Arc<std::sync::Mutex<IncTableCache>>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{is_maf_channel_name, is_tps_channel_name};
+
+    #[test]
+    fn detects_tps_load_channels() {
+        // The names a Speeduino / rusEFI INI actually uses for the throttle
+        // channel on an Alpha-N / ITB tune. All must be recognised so a TPS
+        // Y-axis is auto-detected and the load source switches off MAP.
+        for name in [
+            "tps",
+            "TPS",
+            "tpsValue",
+            "throttle",
+            "throttlePos",
+            "tp",
+            "tpsDot",
+        ] {
+            assert!(is_tps_channel_name(name), "{name:?} should be TPS");
+        }
+    }
+
+    #[test]
+    fn does_not_false_positive_tps() {
+        // Channels that must NOT be treated as throttle load sources.
+        for name in ["map", "maf", "rpm", "afr", "clt", "boost", "dwell"] {
+            assert!(!is_tps_channel_name(name), "{name:?} should not be TPS");
+        }
+    }
+
+    #[test]
+    fn tps_detection_independent_of_maf() {
+        // The two detectors are orthogonal: a MAF channel is not a TPS channel
+        // and vice-versa, so auto-detection picks the right load source.
+        assert!(is_maf_channel_name("maf") && !is_tps_channel_name("maf"));
+        assert!(is_tps_channel_name("tps") && !is_maf_channel_name("tps"));
+    }
 }
 
 impl AppState {

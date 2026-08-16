@@ -111,7 +111,7 @@ interface AutoTuneAuthorityLimits {
   max_value: number;
 }
 
-type AutoTuneLoadSource = 'map' | 'maf';
+type AutoTuneLoadSource = 'map' | 'maf' | 'tps';
 
 /**
  * Heat map data for a single table cell.
@@ -250,6 +250,16 @@ export function AutoTune({ tableName: initialTableName = '', onClose, isConnecte
     return lower.includes('maf') || lower.includes('airmass') || lower.includes('airflow');
   }, []);
 
+  // Detect a throttle-position (Alpha-N / ITB) load channel from an INI
+  // channel name or label. Mirrors isMafChannelName. A TPS-based VE table has
+  // its load (Y) axis indexed by throttle opening, so live data must be
+  // attributed by TPS instead of MAP/MAF (issue #132).
+  const isTpsChannelName = useCallback((name?: string | null) => {
+    if (!name) return false;
+    const lower = name.toLowerCase();
+    return lower === 'tps' || lower === 'tp' || lower === 'throttle' || lower.includes('tps') || lower.includes('throttle');
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
 
@@ -342,6 +352,37 @@ export function AutoTune({ tableName: initialTableName = '', onClose, isConnecte
     }
   }, [secondaryTableEnabled, secondaryTable, selectedTable, secondaryOptions]);
 
+  // Re-attach to a live session. The backend session survives this view
+  // unmounting (switching to the dashboard and back), but isRunning is
+  // component state and resets to false on remount — so the view showed a
+  // running session as stopped and never resumed polling.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const status = await invoke<{
+          running: boolean;
+          tableName: string | null;
+          secondaryTableName: string | null;
+        }>('get_autotune_status');
+        if (cancelled || !status?.running) return;
+        setIsRunning(true);
+        if (status.tableName) {
+          setSelectedTable(status.tableName);
+        }
+        if (status.secondaryTableName) {
+          setSecondaryTableEnabled(true);
+          setSecondaryTable(status.secondaryTableName);
+        }
+      } catch {
+        // No session (or status unavailable) — keep the stopped default.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   // Load initial table data
   useEffect(() => {
     loadAvailableTables();
@@ -353,10 +394,18 @@ export function AutoTune({ tableName: initialTableName = '', onClose, isConnecte
 
   useEffect(() => {
     if (!tableData || isRunning) return;
-    if (isMafChannelName(tableData.y_output_channel) && loadSource !== 'maf') {
+    // Auto-detect the load source from the selected table's Y-axis output
+    // channel when the user hasn't already picked one. TPS (Alpha-N / ITB) is
+    // checked first because a TPS channel name like "tps" would not otherwise
+    // match MAF and would silently stay on the wrong MAP source (issue #132).
+    const yChan = tableData.y_output_channel;
+    if (isTpsChannelName(yChan) && loadSource !== 'tps') {
+      setLoadSource('tps');
+      setLoadSourceHint('Throttle (TPS/Alpha-N) load axis detected.');
+    } else if (isMafChannelName(yChan) && loadSource !== 'maf') {
       setLoadSource('maf');
     }
-  }, [isMafChannelName, isRunning, loadSource, tableData]);
+  }, [isMafChannelName, isTpsChannelName, isRunning, loadSource, tableData]);
 
   useEffect(() => {
     if (loadSource !== 'maf') {
@@ -584,6 +633,12 @@ export function AutoTune({ tableName: initialTableName = '', onClose, isConnecte
     return lookup;
   }, [heatmapData]);
 
+  // Highest hit count on the board, for normalizing the weighting heatmap.
+  const maxHits = useMemo(
+    () => heatmapData.reduce((m, e) => Math.max(m, e.hit_count), 0),
+    [heatmapData]
+  );
+
   // Get cell color based on heatmap mode
   const getCellColor = useCallback(
     (x: number, y: number, value: number) => {
@@ -594,15 +649,26 @@ export function AutoTune({ tableName: initialTableName = '', onClose, isConnecte
         return 'var(--cell-locked)';
       }
 
+      if (showHeatmap === 'weighting') {
+        // hit_weighting accumulates 1.0 per accepted sample, so the previous
+        // min(1, hit_weighting) saturated after a single hit and every visited
+        // cell rendered the same colour regardless of count. Colour by hit
+        // count on a log scale against the busiest cell, interpolating the
+        // same yellow->blue ramp the legend shows (hsl(60,80%,30%) ->
+        // hsl(240,80%,50%) in RGB, matching the CSS gradient). Unhit cells go
+        // neutral — the VE-value gradient here read as hit intensity.
+        const hits = entry?.hit_count ?? 0;
+        if (hits <= 0 || maxHits <= 0) {
+          return 'var(--cell-neutral)';
+        }
+        const t = Math.log1p(hits) / Math.log1p(maxHits);
+        const lerp = (a: number, b: number) => Math.round(a + (b - a) * t);
+        return `rgb(${lerp(138, 26)}, ${lerp(138, 26)}, ${lerp(15, 230)})`;
+      }
+
       if (!entry || showHeatmap === 'none') {
         // Default value-based coloring using centralized heatmap utility
         return valueToHeatmapColor(value, 0, 100, 'tunerstudio');
-      }
-
-      if (showHeatmap === 'weighting') {
-        // Coverage/weighting heatmap using centralized utility
-        const w = Math.min(1, entry.hit_weighting);
-        return valueToHeatmapColor(w, 0, 1, 'tunerstudio');
       }
 
       if (showHeatmap === 'change') {
@@ -621,7 +687,7 @@ export function AutoTune({ tableName: initialTableName = '', onClose, isConnecte
 
       return 'var(--cell-default)';
     },
-    [heatmapLookup, showHeatmap, lockedCells, authority.max_change_per_cell]
+    [heatmapLookup, showHeatmap, lockedCells, authority.max_change_per_cell, maxHits]
   );
 
   // Stats
@@ -893,6 +959,7 @@ export function AutoTune({ tableName: initialTableName = '', onClose, isConnecte
               >
                 <option value="map">MAP (Speed Density)</option>
                 <option value="maf">MAF</option>
+                <option value="tps">TPS (Alpha-N / ITB)</option>
               </select>
             </div>
             {loadSourceHint && <div className="autotune-hint">{loadSourceHint}</div>}

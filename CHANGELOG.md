@@ -90,6 +90,50 @@ WYSIWYG, and the TunerStudio-format backend modernized. Net −500 lines.
 - Half-built multi-cluster support (`additional_clusters` was never populated
   by the parser nor serialized by the writer — unreachable data).
 
+### 2026-08-13 — std_injection panel synthesis & offline constant reads
+
+#### Fixed
+- **`reqFuel` (and all injection constants) missing from the Engine Constants
+  dialog** (Issue #152) — the Speeduino/MS2/MS3 `engine_constants` dialog nests
+  a built-in TunerStudio panel via `panel = std_injection`. `std_injection` is
+  not a `dialog =` defined in any INI; it renders `reqFuel`, `divider`,
+  `alternate`, `injType`, `nCylinders`, `nInjectors`, `injOpen` from
+  `[Constants]`. LibreTune's `buildStdPlaceholderDefinition` was pre-empting
+  resolution of `std_injection` with a single placeholder `Label`, so the
+  entire panel collapsed to one line of text and every constant in it
+  (including `reqFuel`) was invisible. This was not a tune-import bug — the
+  MSQ constants parsed and applied fine; only the UI was stubbed out.
+  - Added `EcuDefinition::std_panel_definition(name)` (core), which synthesizes
+    a real `DialogDefinition` from the candidate constants actually present in
+    the loaded INI (missing candidates are skipped, so the same panel adapts
+    across Speeduino/MS2/MS3 despite naming differences). `get_dialog_definition`
+    consults it after the real-dialog lookup.
+  - Extended to `std_ms3Rtc` (Speeduino RTC panel) → surfaces `rtc_trim`.
+  - Frontend: removed the pre-emptive `std_injection` placeholder;
+    `buildStdPlaceholderDefinition` is now the *final* fallback for genuinely
+    unknown `std_*` panels (e.g. `std_ms2gentherm`).
+  - Drive-by: `std_panel_definition` previously hardcoded
+    `title: "Injection Setup"` for all panels; refactored to a per-panel
+    `(title, candidates)` tuple so `std_ms3Rtc` is correctly titled.
+  - Validated against a 687-file ECU corpus (rusEFI/epicEFI/FOME/Speeduino/
+    MS2/MS3/MShift): 100% parse success; `reqFuel` present in every affected
+    platform.
+
+- **Every constant displayed `0` offline for `<pageData>`-format MSQs** —
+  `get_constant_value`'s offline branch read *only* from `tune.constants`
+  (named `<constant>` XML tags) and returned `0` when not found by name. But
+  most MSQs (and every "Use LibreTune Settings" save) store data as raw
+  `<pageData>` blobs, for which `tune.constants` is empty. The decoded data
+  was sitting in the `TuneCache` the whole time, but the offline branch
+  refused to fall back to it. A second instance of the same bug existed for
+  bits constants (no cache fallback at all when offline).
+  - Scalar path: fall through to the cache instead of returning `0.0`.
+  - Bits path: added a cache fallback that extracts the packed bit field from
+    the decoded page bytes.
+  - This makes `get_constant_value` consistent with the canonical helper
+    `read_constant_from_cache_or_tune` (CSV export / pin conflicts already did
+    it correctly).
+
 ### 2026-08-01 — Table editing operations restored
 
 #### Fixed

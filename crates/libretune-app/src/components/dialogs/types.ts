@@ -123,21 +123,13 @@ export function isIncompleteNumericInput(value: string): boolean {
 
 /// Synthetic placeholder definitions for `std_*` panel names that LibreTune
 /// doesn't ship — surfaces a friendly Label component instead of an error.
+///
+/// NOTE: this is a *fallback*, not a pre-emptive override. Panels like
+/// `std_injection` are synthesized on the backend (`get_dialog_definition` →
+/// `EcuDefinition::std_panel_definition`) from the INI's real constants, so
+/// they must be allowed to reach that lookup. Only standard panels the
+/// backend could not resolve (e.g. `std_ms2gentherm`, `std_tpscal`) land here.
 export function buildStdPlaceholderDefinition(name: string): DialogDefinition | null {
-  if (name === 'std_injection') {
-    return {
-      name,
-      title: 'Injection Setup',
-      components: [
-        {
-          type: 'Label',
-          text:
-            'This dashboard references the standard "std_injection" panel. LibreTune does not bundle that legacy panel, but you can configure injectors via the Engine Constants and Injector Characteristics dialogs.',
-        },
-      ],
-    };
-  }
-
   if (name.startsWith('std_')) {
     return {
       name,

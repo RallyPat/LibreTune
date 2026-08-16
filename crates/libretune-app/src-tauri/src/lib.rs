@@ -52,7 +52,8 @@ use commands::annotations::{
 use commands::apply_base_map::apply_base_map;
 use commands::autotune_misc::{
     burn_autotune_recommendations, get_autotune_heatmap, get_autotune_recommendations,
-    lock_autotune_cells, send_autotune_recommendations, stop_autotune, unlock_autotune_cells,
+    get_autotune_status, lock_autotune_cells, send_autotune_recommendations, stop_autotune,
+    unlock_autotune_cells,
 };
 use commands::available_inis::get_available_inis;
 use commands::base_map::generate_base_map;
@@ -290,6 +291,7 @@ pub fn run() {
             get_all_constant_values,
             start_autotune,
             stop_autotune,
+            get_autotune_status,
             get_autotune_recommendations,
             get_autotune_heatmap,
             send_autotune_recommendations,

@@ -325,6 +325,19 @@ What follows is a high-level pointer to the most recent cleanup pass.
 - See the `2026-08-14 – 2026-08-16 — Dashboard system refactor` CHANGELOG
   block for the full breakdown.
 
+### std_* panel synthesis & offline constant reads (Aug 2026)
+
+- **`std_injection` panel now synthesized (Issue #152)** — built-in
+  `std_*` panels referenced via `panel = std_*` are no longer stubbed with a
+  placeholder; `EcuDefinition::std_panel_definition` rebuilds them from the
+  constants present in the loaded INI (`std_injection` → injection constants
+  incl. `reqFuel`; `std_ms3Rtc` → `rtc_trim`). Validated against a 687-file
+  ECU corpus.
+- **Offline constant reads now fall back to the cache** — `get_constant_value`
+  returned `0` for `<pageData>`-format MSQs; now falls back to the
+  `TuneCache` (decoded page bytes) like the canonical helper does.
+- See the `2026-08-13` CHANGELOG block for details.
+
 ### UI / menu pass (Jul 2026)
 
 - **Menu i18n (Issue #72)** — all File/Edit/View/Tools menu items and toolbar

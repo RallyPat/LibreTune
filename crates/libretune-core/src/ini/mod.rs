@@ -25,6 +25,9 @@ pub use error::IniError;
 pub use gauges::{parse_gauge_line, GaugeConfig};
 pub use inc_tables::{IncTable, IncTableCache};
 pub use output_channels::OutputChannel;
+/// Seed preprocessor symbols (e.g. `CELSIUS`) applied to every parse — see
+/// [`parser::set_default_symbols`].
+pub use parser::set_default_symbols;
 pub use tables::{CurveDefinition, TableDefinition, TableRole, TableType};
 pub use types::*;
 
@@ -315,6 +318,73 @@ impl EcuDefinition {
         }
     }
 
+    /// Synthesize a [`DialogDefinition`] for a built-in TunerStudio `std_*`
+    /// panel name that the INI references via `panel = std_injection` (or
+    /// similar) but does not itself define as a `dialog = ...`.
+    ///
+    /// These are standard panels that TunerStudio ships natively. LibreTune
+    /// does not carry TunerStudio's implementation, so we rebuild them from
+    /// the constants actually present in the loaded INI. Only constants that
+    /// exist in `[Constants]` are emitted, so the same panel adapts across
+    /// Speeduino / MegaSquirt / MS2 / MS3 despite small naming differences.
+    ///
+    /// Returns `None` for names we do not synthesize, so the caller can fall
+    /// back to a friendly placeholder (or an error).
+    pub fn std_panel_definition(&self, name: &str) -> Option<DialogDefinition> {
+        // (constant name, human label). Ordered to match the layout a user
+        // expects in the corresponding TunerStudio standard panel.
+        let (title, candidates): (&str, &[(&str, &str)]) = match name {
+            "std_injection" => (
+                "Injection Setup",
+                &[
+                    ("reqFuel", "Required Fuel"),
+                    ("nCylinders", "Number of Cylinders"),
+                    ("injType", "Injector Type"),
+                    ("divider", "Injector Divider"),
+                    ("alternate", "Injection Timing"),
+                    ("nInjectors", "Number of Injectors"),
+                    ("injOpen", "Injector Open Time"),
+                ],
+            ),
+            // MS3-style real-time-clock panel, referenced by Speeduino as
+            // `panel = std_ms3Rtc {rtc_mode}`. The native TunerStudio panel
+            // also offers a "set clock to PC time" action; we surface the
+            // editable calibration constant (rtc_trim) instead. rtc_mode is
+            // intentionally omitted — it is the panel's own enable gate and
+            // is already rendered as a field in the enclosing dialog.
+            "std_ms3Rtc" => ("Real Time Clock", &[("rtc_trim", "RTC Trim (ppm)")]),
+            _ => return None,
+        };
+
+        // Build a Field component for every candidate that exists as a
+        // constant in this definition. Skipping missing ones keeps the panel
+        // correct per-ECU without erroring on optional fields.
+        let mut components: Vec<DialogComponent> = Vec::new();
+        for (const_name, label) in candidates {
+            if self.constants.contains_key(*const_name) {
+                components.push(DialogComponent::Field {
+                    label: (*label).to_string(),
+                    name: (*const_name).to_string(),
+                    visibility_condition: None,
+                    enabled_condition: None,
+                });
+            }
+        }
+
+        // If none of the expected constants are present this almost certainly
+        // is not the panel we think it is — bail out so the caller shows the
+        // generic placeholder instead of an empty dialog.
+        if components.is_empty() {
+            return None;
+        }
+
+        Some(DialogDefinition {
+            name: name.to_string(),
+            title: title.to_string(),
+            components,
+        })
+    }
+
     /// Get a curve definition by name or map_name
     /// Similar to get_table_by_name_or_map for consistent lookup patterns
     pub fn get_curve_by_name_or_map(&self, name_or_map: &str) -> Option<&CurveDefinition> {
@@ -517,5 +587,112 @@ mod tests {
         let def = EcuDefinition::default();
         assert_eq!(def.query_command, "Q");
         assert!(def.constants.is_empty());
+    }
+
+    /// Helper: build a minimal `Constant` with just a name (enough for the
+    /// std-panel synthesizer, which only checks for key presence).
+    fn scalar_const(name: &str) -> Constant {
+        Constant::new(name, 0, 0, DataType::U08)
+    }
+
+    #[test]
+    fn std_panel_injection_synthesizes_from_constants() {
+        // Mimic a Speeduino-like [Constants] block: a subset of the candidate
+        // names exists, the rest (nInjectors) is absent.
+        let mut def = EcuDefinition::default();
+        for n in [
+            "reqFuel",
+            "divider",
+            "alternate",
+            "injOpen",
+            "nCylinders",
+            "injType",
+        ] {
+            def.constants.insert(n.to_string(), scalar_const(n));
+        }
+
+        let d = def
+            .std_panel_definition("std_injection")
+            .expect("std_injection should synthesize");
+
+        assert_eq!(d.name, "std_injection");
+        // nInjectors was not in constants, so it must be dropped. Every other
+        // candidate should be present in declaration order.
+        let field_names: Vec<String> = d
+            .components
+            .iter()
+            .filter_map(|c| match c {
+                DialogComponent::Field { name, .. } => Some(name.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            field_names,
+            vec![
+                "reqFuel".to_string(),
+                "nCylinders".to_string(),
+                "injType".to_string(),
+                "divider".to_string(),
+                "alternate".to_string(),
+                "injOpen".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn std_panel_injection_none_when_no_candidates_present() {
+        // Constants exist, but none of the injection candidates — bail out so
+        // the caller shows the generic placeholder instead of an empty dialog.
+        let mut def = EcuDefinition::default();
+        def.constants
+            .insert("unrelatedConst".to_string(), scalar_const("unrelatedConst"));
+        assert!(def.std_panel_definition("std_injection").is_none());
+    }
+
+    #[test]
+    fn std_panel_unknown_name_returns_none() {
+        // Only std_injection / std_ms3Rtc are synthesized today; other std_*
+        // names (calibration tables, wizards) fall through to the generic
+        // placeholder path.
+        let mut def = EcuDefinition::default();
+        def.constants
+            .insert("reqFuel".to_string(), scalar_const("reqFuel"));
+        assert!(def.std_panel_definition("std_ms2gentherm").is_none());
+    }
+
+    #[test]
+    fn std_panel_ms3rtc_synthesizes_trim() {
+        // Speeduino references `panel = std_ms3Rtc {rtc_mode}` inside its
+        // rtc_settings dialog. The panel surfaces the rtc_trim calibration
+        // constant (rtc_mode is the enclosing dialog's own enable field).
+        let mut def = EcuDefinition::default();
+        def.constants
+            .insert("rtc_trim".to_string(), scalar_const("rtc_trim"));
+
+        let d = def
+            .std_panel_definition("std_ms3Rtc")
+            .expect("std_ms3Rtc should synthesize when rtc_trim exists");
+
+        assert_eq!(d.name, "std_ms3Rtc");
+        assert_eq!(d.title, "Real Time Clock");
+        let field_names: Vec<String> = d
+            .components
+            .iter()
+            .filter_map(|c| match c {
+                DialogComponent::Field { name, .. } => Some(name.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(field_names, vec!["rtc_trim".to_string()]);
+    }
+
+    #[test]
+    fn std_panel_ms3rtc_none_without_trim() {
+        // MS3 itself does not define rtc_trim and does not reference the panel
+        // via `panel = std_ms3Rtc`; if somehow requested it should bail out.
+        let mut def = EcuDefinition::default();
+        def.constants
+            .insert("rtc_mode".to_string(), scalar_const("rtc_mode"));
+        assert!(def.std_panel_definition("std_ms3Rtc").is_none());
     }
 }

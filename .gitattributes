@@ -1,0 +1,18 @@
+# Force LF line endings for files that MUST be LF to execute correctly:
+# Git shell hooks and POSIX shell scripts break under CRLF (the shebang line
+# `#!/usr/bin/env bash\r` is not found, producing `$'\r': command not found`).
+# This overrides per-user core.autocrlf=true on Windows so the pre-commit
+# hook works cross-platform.
+.githooks/* text eol=lf
+*.sh        text eol=lf
+
+# Normal source: let git's default / autocrlf handle these.
+*.rs    text
+*.ts    text
+*.tsx   text
+*.js    text
+*.json  text
+*.toml  text
+*.md    text
+*.yml   text
+*.yaml  text

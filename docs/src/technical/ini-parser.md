@@ -176,8 +176,22 @@ pub enum MenuItem {
 **Special Targets**:
 - `std_separator` - Horizontal line
 - `std_realtime` - Opens dashboard
+- `std_port_edit` - Opens I/O port editor
 - Table names - Opens table editor
 - Dialog names - Opens settings dialog
+
+**Built-in `std_*` panels** referenced via `panel = std_*` inside a `dialog`
+are not defined as a `dialog =` anywhere in the INI — they are TunerStudio
+standard panels. LibreTune synthesizes them on the fly from the constants
+actually present in `[Constants]` (`EcuDefinition::std_panel_definition`):
+- `std_injection` - Required Fuel / injection constants (`reqFuel`,
+  `nCylinders`, `injType`, `divider`, `alternate`, `nInjectors`, `injOpen`).
+  Missing candidates are skipped, so the same panel adapts across
+  Speeduino/MS2/MS3 despite small naming differences.
+- `std_ms3Rtc` - Real Time Clock (`rtc_trim`); gated by `{rtc_mode}` in the
+  enclosing dialog.
+Other `std_*` panels the synthesizer does not handle (e.g. `std_ms2gentherm`,
+`std_ms3SdConsole`) fall back to a friendly placeholder Label.
 
 **Keyboard Shortcuts**: `&` prefix marks the hotkey character
 

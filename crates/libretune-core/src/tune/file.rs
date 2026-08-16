@@ -949,8 +949,20 @@ impl TuneFile {
             xml.push_str("  </page>\n");
         }
 
-        // Add page data if present (raw binary page data)
-        for (page_num, data) in &self.pages {
+        // Add page data if present (raw binary page data).
+        //
+        // Iterate in page order rather than `HashMap` order: Rust randomises
+        // hash iteration per process, so emitting directly from the map wrote
+        // the `<pageData>` blocks in a different order on every save. An
+        // unchanged tune then serialised to a different file each time, which
+        // made the git history unusable (every commit showed the whole file as
+        // modified) and left the working tree dirty immediately after a
+        // checkout — the constants and pcVariables sections below were already
+        // sorted for the same reason.
+        let mut page_nums: Vec<&u8> = self.pages.keys().collect();
+        page_nums.sort();
+        for page_num in page_nums {
+            let data = &self.pages[page_num];
             // Encode as hex for binary page data
             let hex: String = data.iter().map(|b| format!("{:02x}", b)).collect();
             xml.push_str(&format!(
@@ -1207,6 +1219,57 @@ impl Default for TuneFile {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Serializing the same tune twice must produce identical bytes.
+    ///
+    /// `pages` is a `HashMap` and Rust randomises hash iteration per process,
+    /// so emitting `<pageData>` straight from the map reordered the blocks on
+    /// every save: an unchanged tune serialised differently each time, every
+    /// git commit showed the whole file as modified, and a checkout was dirty
+    /// the moment the tune was reloaded. Enough pages are used here that a
+    /// regression is caught rather than passing by luck.
+    #[test]
+    fn test_save_is_deterministic_across_repeated_writes() {
+        let mut tune = TuneFile::new("speeduino 202501");
+        for page in 0u8..12 {
+            tune.pages.insert(page, vec![page; 32]);
+        }
+        tune.set_constant("reqFuel", TuneValue::Scalar(12.5));
+        tune.set_constant("stoich", TuneValue::Scalar(14.7));
+
+        let dir = std::env::temp_dir().join(format!("lt_determinism_{}", std::process::id()));
+        let _ = fs::create_dir_all(&dir);
+
+        let mut bytes: Vec<Vec<u8>> = Vec::new();
+        for i in 0..3 {
+            let p = dir.join(format!("t{}.msq", i));
+            tune.save(&p).expect("save");
+            bytes.push(fs::read(&p).expect("read"));
+        }
+
+        assert_eq!(bytes[0], bytes[1], "two saves of the same tune differ");
+        assert_eq!(bytes[1], bytes[2], "three saves of the same tune differ");
+
+        // And the page blocks must come out in page order, not hash order.
+        let text = String::from_utf8_lossy(&bytes[0]).to_string();
+        let order: Vec<u8> = text
+            .match_indices("<pageData page=\"")
+            .filter_map(|(i, m)| {
+                text[i + m.len()..]
+                    .split('"')
+                    .next()
+                    .and_then(|s| s.parse::<u8>().ok())
+            })
+            .collect();
+        let mut sorted = order.clone();
+        sorted.sort();
+        assert_eq!(
+            order, sorted,
+            "pageData blocks are not written in page order"
+        );
+
+        let _ = fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn test_tune_file_creation() {

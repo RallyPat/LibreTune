@@ -186,7 +186,8 @@ pub async fn get_constant_value(
         return Ok(constant.min);
     }
 
-    // When offline, ALWAYS read from TuneFile (MSQ file) - no cache fallback
+    // When offline, read the named constant from the TuneFile (MSQ) first —
+    // MSQs that store values as `<constant>` tags carry them here.
     if conn.is_none() {
         if let Some(tune) = tune_guard.as_ref() {
             if let Some(tune_value) = tune.constants.get(&name) {
@@ -249,17 +250,19 @@ pub async fn get_constant_value(
                     }
                 }
             } else {
-                // Constant not in TuneFile - return 0 (or default)
+                // Constant not in TuneFile by name. Many MSQs (and "Use
+                // LibreTune Settings" saves) store data as raw `<pageData>`
+                // blobs rather than named `<constant>` tags, so
+                // `tune.constants` is empty. Fall through to the cache below,
+                // which holds the decoded page bytes — do NOT return 0 here.
                 eprintln!(
-                    "[DEBUG] get_constant_value: Constant '{}' not found in TuneFile, returning 0",
+                    "[DEBUG] get_constant_value: '{}' not in TuneFile by name; trying cache",
                     name
                 );
-                return Ok(0.0);
             }
         } else {
-            // No tune file loaded - return 0
-            eprintln!("[DEBUG] get_constant_value: No TuneFile loaded, returning 0");
-            return Ok(0.0);
+            // No tune file loaded — fall through to cache (offline reads of a
+            // freshly-synced ECU keep data only in the cache).
         }
     }
 
@@ -334,8 +337,49 @@ pub async fn get_constant_value(
             }
         }
 
+        // Offline (or ECU read failed): read the packed bits from the cache,
+        // which holds the decoded page bytes (from MSQ <pageData> or an ECU
+        // sync). Without this, every bits constant displayed 0 offline when
+        // the MSQ stored <pageData> instead of named <constant> tags.
+        if let Some(cache) = cache_guard.as_ref() {
+            if let Some(raw_data) =
+                cache.read_bytes(constant.page, read_offset, bytes_needed as u16)
+            {
+                if raw_data.is_empty() {
+                    return Ok(0.0);
+                }
+                let first_byte = raw_data[0];
+                let bits_in_first_byte = (8 - bit_in_byte).min(bit_size);
+                let mask_first = if bits_in_first_byte >= 8 {
+                    0xFF
+                } else {
+                    (1u8 << bits_in_first_byte) - 1
+                };
+                let mut bit_val = ((first_byte >> bit_in_byte) & mask_first) as u32;
+                if bits_remaining_after_first_byte > 0 && raw_data.len() > 1 {
+                    let mut bits_collected = bits_in_first_byte;
+                    for byte in raw_data.iter().skip(1) {
+                        let remaining_bits = bit_size - bits_collected;
+                        if remaining_bits == 0 {
+                            break;
+                        }
+                        let bits_from_this_byte = remaining_bits.min(8);
+                        let mask = if bits_from_this_byte >= 8 {
+                            0xFF
+                        } else {
+                            (1u8 << bits_from_this_byte) - 1
+                        };
+                        let val_from_byte = (*byte & mask) as u32;
+                        bit_val |= val_from_byte << bits_collected;
+                        bits_collected += bits_from_this_byte;
+                    }
+                }
+                return Ok(bit_val as f64);
+            }
+        }
+
         eprintln!(
-            "[DEBUG] get_constant_value: Could not read bits constant '{}' from ECU, returning 0",
+            "[DEBUG] get_constant_value: Could not read bits constant '{}' from ECU or cache, returning 0",
             name
         );
         return Ok(0.0);

@@ -1,7 +1,10 @@
 //! start_autotune command and read_axis_bins helper (extracted from lib.rs).
 
 use crate::read_raw_value;
-use crate::state::{is_maf_channel_name, AppState, AutoTuneConfig, AutoTuneLoadSource, AxisHint};
+use crate::state::{
+    is_maf_channel_name, is_tps_channel_name, AppState, AutoTuneConfig, AutoTuneLoadSource,
+    AxisHint,
+};
 use libretune_core::autotune::{
     AutoTuneAuthorityLimits, AutoTuneFilters, AutoTuneReferenceTables, AutoTuneSettings,
 };
@@ -47,9 +50,17 @@ pub async fn start_autotune(
     // Find the table and extract bins
     let (x_bins, y_bins) = if let Some(table) = def.get_table_by_name_or_map(&table_name) {
         let y_output_channel = table.y_output_channel.clone();
+        // Auto-detect the load source from the table's Y-axis output channel
+        // when the caller left it at the default (MAP). This is what makes
+        // TPS/Alpha-N (ITB) tunes work out of the box: a VE table whose Y axis
+        // is a throttle channel is treated as a TPS load, so live data is
+        // attributed to the correct cells instead of being dropped or matched
+        // against the wrong axis (issue #132).
         if resolved_load_source == AutoTuneLoadSource::Map {
             if let Some(ref channel) = y_output_channel {
-                if is_maf_channel_name(channel) {
+                if is_tps_channel_name(channel) {
+                    resolved_load_source = AutoTuneLoadSource::Tps;
+                } else if is_maf_channel_name(channel) {
                     resolved_load_source = AutoTuneLoadSource::Maf;
                 }
             }
@@ -79,6 +90,10 @@ pub async fn start_autotune(
                 vec![0.0, 25.0, 50.0, 75.0, 100.0, 150.0, 200.0, 250.0, 300.0]
             }
             AutoTuneLoadSource::Map => vec![20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0, 100.0],
+            // Alpha-N / ITB: the load axis is throttle opening, 0–100 %.
+            AutoTuneLoadSource::Tps => {
+                vec![0.0, 10.0, 20.0, 30.0, 40.0, 50.0, 65.0, 80.0, 100.0]
+            }
         };
 
         (
@@ -237,6 +252,10 @@ pub(crate) fn read_axis_bins(
                 .collect(),
             AxisHint::Load(AutoTuneLoadSource::Map) => (0..size)
                 .map(|i| 20.0 + (i as f64 * 80.0 / steps))
+                .collect(),
+            // Alpha-N / ITB: throttle opening 0–100 %.
+            AxisHint::Load(AutoTuneLoadSource::Tps) => (0..size)
+                .map(|i| 0.0 + (i as f64 * 100.0 / steps))
                 .collect(),
             AxisHint::Unknown => {
                 if size > 8 {

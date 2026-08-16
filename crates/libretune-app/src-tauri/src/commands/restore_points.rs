@@ -1,8 +1,6 @@
 //! Restore point management commands.
 
 use crate::state::AppState;
-use libretune_core::tune::TuneCache;
-use tauri::Emitter;
 
 /// Info about a restore point
 #[derive(Debug, Clone, serde::Serialize)]
@@ -90,91 +88,59 @@ pub async fn list_restore_points(
 }
 
 /// Load a restore point as the current tune
+///
+/// Delegates to `load_tune`, the canonical tune-apply pipeline. This command
+/// previously carried a stripped-down copy of that pipeline which (a) had no
+/// `Bits` branch and discarded every enum/bits constant via `_ => {}` — after
+/// a bad burn, "restore" reported success while every enum setting sat at INI
+/// defaults — and (b) never updated `state.current_tune`, so every read path
+/// kept serving the pre-restore tune and the next save wrote the old tune
+/// back. Observed live against a bench ECU (ledger R8). Routing through
+/// `load_tune` gives restore the same semantics as loading any tune: full
+/// constant application including bits, state + cache + CurrentTune.msq all
+/// updated, `tune:loaded` emitted.
 #[tauri::command]
 pub async fn load_restore_point(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
     filename: String,
 ) -> Result<(), String> {
-    let mut proj_guard = state.current_project.lock().await;
-    let project = proj_guard
-        .as_mut()
-        .ok_or_else(|| "No project open".to_string())?;
+    // Resolve the restore point path, then release the project lock before
+    // delegating — load_tune takes the same lock to persist CurrentTune.msq.
+    let restore_path = {
+        let proj_guard = state.current_project.lock().await;
+        let project = proj_guard
+            .as_ref()
+            .ok_or_else(|| "No project open".to_string())?;
+        let path = project.restore_points_dir().join(&filename);
+        if !path.exists() {
+            return Err(format!("Restore point not found: {}", filename));
+        }
+        path
+    };
 
-    project
-        .load_restore_point(&filename)
-        .map_err(|e| format!("Failed to load restore point: {}", e))?;
+    crate::commands::load_tune::load_tune(
+        state.clone(),
+        app,
+        restore_path.to_string_lossy().to_string(),
+    )
+    .await?;
 
-    // Reload the tune into cache
-    if let Some(ref tune) = project.current_tune {
-        let def_guard = state.definition.lock().await;
-        if let Some(ref def) = *def_guard {
-            let cache = TuneCache::from_definition(def);
-            let mut cache_guard = state.tune_cache.lock().await;
-            *cache_guard = Some(cache);
-
-            if let Some(cache) = cache_guard.as_mut() {
-                // Load page data
-                for (page_num, page_data) in &tune.pages {
-                    cache.load_page(*page_num, page_data.clone());
-                }
-
-                // Apply constants
-                use libretune_core::tune::TuneValue;
-                for (name, tune_value) in &tune.constants {
-                    if let Some(constant) = def.constants.get(name) {
-                        if constant.is_pc_variable {
-                            if let TuneValue::Scalar(v) = tune_value {
-                                cache.local_values.insert(name.clone(), *v);
-                            }
-                            continue;
-                        }
-
-                        let length = constant.size_bytes() as u16;
-                        if length == 0 {
-                            continue;
-                        }
-
-                        let element_size = constant.data_type.size_bytes();
-                        let element_count = constant.shape.element_count();
-                        let mut raw_data = vec![0u8; length as usize];
-
-                        match tune_value {
-                            TuneValue::Scalar(v) => {
-                                let raw_val = constant.display_to_raw(*v);
-                                constant.data_type.write_to_bytes(
-                                    &mut raw_data,
-                                    0,
-                                    raw_val,
-                                    def.endianness,
-                                );
-                                let _ =
-                                    cache.write_bytes(constant.page, constant.offset, &raw_data);
-                            }
-                            TuneValue::Array(arr) => {
-                                for (i, val) in arr.iter().take(element_count).enumerate() {
-                                    let raw_val = constant.display_to_raw(*val);
-                                    let offset = i * element_size;
-                                    constant.data_type.write_to_bytes(
-                                        &mut raw_data,
-                                        offset,
-                                        raw_val,
-                                        def.endianness,
-                                    );
-                                }
-                                let _ =
-                                    cache.write_bytes(constant.page, constant.offset, &raw_data);
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-            }
+    // Keep the in-memory project's tune in sync with what was just loaded, so
+    // project-level flows (save_tune_to_project, use_project_tune) see the
+    // restored tune rather than the pre-restore one.
+    let restored = state.current_tune.lock().await.clone();
+    if let Some(tune) = restored {
+        let mut proj_guard = state.current_project.lock().await;
+        if let Some(project) = proj_guard.as_mut() {
+            project.current_tune = Some(tune);
         }
     }
 
-    // Notify UI
-    let _ = app.emit("tune:loaded", "restore_point");
+    // A restored tune differs from what the ECU is running until the user
+    // writes/burns it; load_tune resets tune_modified to false, which would
+    // hide that.
+    *state.tune_modified.lock().await = true;
 
     Ok(())
 }

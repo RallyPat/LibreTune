@@ -61,10 +61,22 @@ pub async fn get_dialog_definition(
 ) -> Result<DialogDefinition, String> {
     let def_guard = state.definition.lock().await;
     let def = def_guard.as_ref().ok_or("Definition not loaded")?;
-    def.dialogs
-        .get(&name)
-        .cloned()
-        .ok_or_else(|| format!("Dialog {} not found", name))
+
+    // First try a real `dialog = name` defined in the INI.
+    if let Some(defn) = def.dialogs.get(&name) {
+        return Ok(defn.clone());
+    }
+
+    // Then synthesize the built-in TunerStudio `std_*` panels (e.g.
+    // std_injection) from the constants actually present in this INI. These
+    // panels are referenced via `panel = std_injection` but never defined as
+    // a dialog; without this the Engine Constants dialog renders a placeholder
+    // instead of reqFuel/divider/alternate/etc. (issue #152).
+    if let Some(defn) = def.std_panel_definition(&name) {
+        return Ok(defn);
+    }
+
+    Err(format!("Dialog {} not found", name))
 }
 
 /// Retrieves an indicator panel definition from the INI file.

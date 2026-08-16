@@ -395,6 +395,31 @@ impl AutoTuneState {
         self.total_samples
     }
 
+    /// Which filter rejected a sample, for the diagnostic log. Mirrors the
+    /// order of the checks in `passes_filters`.
+    fn rejection_reason(point: &VEDataPoint, filters: &AutoTuneFilters) -> &'static str {
+        if point.rpm < filters.min_rpm || point.rpm > filters.max_rpm {
+            return "rpm out of range";
+        }
+        if point.clt < filters.min_clt {
+            return "clt below min_clt";
+        }
+        let bound = |s: &Option<String>| s.as_deref().and_then(|v| v.trim().parse::<f64>().ok());
+        if bound(&filters.min_y_axis).is_some_and(|b| point.load < b) {
+            return "load below min_y_axis";
+        }
+        if bound(&filters.max_y_axis).is_some_and(|b| point.load > b) {
+            return "load above max_y_axis";
+        }
+        if point.tps_rate.abs() > filters.max_tps_rate {
+            return "tps_rate above max_tps_rate";
+        }
+        if filters.exclude_accel_enrich && point.accel_enrich_active == Some(true) {
+            return "accel enrichment active";
+        }
+        "custom_filter"
+    }
+
     pub fn add_data_point(
         &mut self,
         point: VEDataPoint,
@@ -428,14 +453,24 @@ impl AutoTuneState {
             static REJECTS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
             let n = REJECTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             if n < 5 || n.is_multiple_of(100) {
+                // Name the specific filter. Previously the line printed only
+                // rpm/clt/tps_rate, so a rejection by load bounds or accel
+                // enrichment showed every printed value passing while samples
+                // still vanished — an hour of misdiagnosis on real hardware.
                 tracing::debug!(
+                    reason = Self::rejection_reason(&point, filters),
                     rpm = point.rpm,
                     clt = point.clt,
+                    load = point.load,
                     tps_rate = point.tps_rate,
+                    accel_enrich_active = ?point.accel_enrich_active,
                     min_rpm = filters.min_rpm,
                     max_rpm = filters.max_rpm,
                     min_clt = filters.min_clt,
+                    min_y_axis = ?filters.min_y_axis,
+                    max_y_axis = ?filters.max_y_axis,
                     max_tps_rate = filters.max_tps_rate,
+                    exclude_accel_enrich = filters.exclude_accel_enrich,
                     rejected_so_far = n + 1,
                     "AutoTune: sample rejected by filters"
                 );
@@ -832,6 +867,73 @@ mod tests {
     #![allow(clippy::field_reassign_with_default)]
     use super::*;
 
+    /// The accel-enrich filter must only reject when the flag is known-true.
+    /// An unknown flag (None — e.g. an ECU that publishes no boolean AE
+    /// channel) must not reject: treating unknown as active silently discarded
+    /// 100% of samples on Speeduino, whose `accelEnrich` channel is a
+    /// percentage (100 = no enrichment) and was misread as a boolean.
+    #[test]
+    fn accel_filter_rejects_only_known_active() {
+        let state = AutoTuneState::default();
+        let filters = AutoTuneFilters {
+            min_rpm: 0.0,
+            min_clt: -100.0,
+            max_tps_rate: 1000.0,
+            exclude_accel_enrich: true,
+            ..Default::default()
+        };
+        let mut point = VEDataPoint::default();
+        point.rpm = 2000.0;
+        point.clt = 80.0;
+
+        point.accel_enrich_active = Some(true);
+        assert!(
+            !state.passes_filters(&point, &filters),
+            "known-active must reject"
+        );
+        assert_eq!(
+            AutoTuneState::rejection_reason(&point, &filters),
+            "accel enrichment active"
+        );
+
+        point.accel_enrich_active = Some(false);
+        assert!(
+            state.passes_filters(&point, &filters),
+            "known-inactive must pass"
+        );
+
+        point.accel_enrich_active = None;
+        assert!(state.passes_filters(&point, &filters), "unknown must pass");
+    }
+
+    /// The rejection log's reason must name the filter that actually fired —
+    /// rpm/clt looking fine while samples vanish cost an hour on real hardware.
+    #[test]
+    fn rejection_reason_names_the_failing_filter() {
+        let filters = AutoTuneFilters::default(); // min_rpm 1000, min_clt 160
+        let mut point = VEDataPoint::default();
+
+        point.rpm = 500.0;
+        assert_eq!(
+            AutoTuneState::rejection_reason(&point, &filters),
+            "rpm out of range"
+        );
+
+        point.rpm = 2000.0;
+        point.clt = 100.0;
+        assert_eq!(
+            AutoTuneState::rejection_reason(&point, &filters),
+            "clt below min_clt"
+        );
+
+        point.clt = 180.0;
+        point.tps_rate = 50.0;
+        assert_eq!(
+            AutoTuneState::rejection_reason(&point, &filters),
+            "tps_rate above max_tps_rate"
+        );
+    }
+
     /// Captures `tracing` event messages into a shared Vec so a test can assert
     /// that a specific diagnostic actually fired (the whole point of D9: these
     /// drop paths used to be silent).
@@ -1017,5 +1119,60 @@ mod tests {
         };
 
         assert!(!state.passes_filters(&point, &filters));
+    }
+
+    /// Regression test for issue #132: on an Alpha-N / ITB tune the VE table's
+    /// load (Y) axis is throttle position, not manifold pressure. The caller
+    /// (realtime_stream) must therefore set `VEDataPoint.load = tps` so samples
+    /// are attributed to the correct cell. This test fixes the contract: a
+    /// point with `load = 75` against TPS bins `[0, 25, 50, 75, 100]` lands in
+    /// Y cell 3, regardless of `map`/`maf` (which are irrelevant for Alpha-N).
+    #[test]
+    fn tps_load_axis_attributes_to_correct_cell() {
+        let mut state = AutoTuneState::new();
+        // Disable strict lambda-delay matching: the point of this test is the
+        // load-axis attribution, not exhaust-transport correlation. With strict
+        // off, the current cell is used as the fallback when no delayed match
+        // exists.
+        state.set_strict_lambda_match(false);
+        state.start();
+
+        let settings = AutoTuneSettings::default(); // lambda_delay_ms = 0 (auto curve)
+        let mut filters = AutoTuneFilters::default();
+        filters.min_clt = 0.0; // accept the sample regardless of warm-up state
+        let authority = AutoTuneAuthorityLimits::default();
+
+        // X = rpm bins, Y = throttle-position bins (0–100 %), as an Alpha-N
+        // VE table would define them.
+        let x_bins = vec![1000.0, 2000.0, 3000.0, 4000.0];
+        let y_bins = vec![0.0, 25.0, 50.0, 75.0, 100.0];
+
+        // Engine at 3000 rpm, 75 % throttle. MAP is meaningless for Alpha-N
+        // (set to 0 to prove it isn't used); `load` carries the TPS value.
+        let point = VEDataPoint {
+            rpm: 3000.0,
+            map: 0.0,   // intentionally zero — Alpha-N ignores MAP
+            maf: 0.0,   // no MAF either
+            load: 75.0, // <- the throttle value the caller put here
+            afr: 14.7,
+            ve: 80.0,
+            clt: 85.0,
+            tps: 75.0,
+            tps_rate: 0.0,
+            accel_enrich_active: Some(false),
+            timestamp_ms: 1000,
+            ..Default::default()
+        };
+
+        state.add_data_point(point, &x_bins, &y_bins, &settings, &filters, &authority);
+
+        let recs = state.get_recommendations();
+        assert_eq!(recs.len(), 1, "exactly one cell should have been hit");
+
+        let r = &recs[0];
+        // rpm 3000 -> X bin index 2 ; throttle 75 % -> Y bin index 3.
+        assert_eq!(r.cell_x, 2, "rpm 3000 should map to X bin 2");
+        assert_eq!(r.cell_y, 3, "75%% throttle should map to Y bin 3");
+        assert!(r.hit_count >= 1);
     }
 }

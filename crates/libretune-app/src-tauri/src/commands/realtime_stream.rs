@@ -247,6 +247,21 @@ pub(crate) async fn feed_autotune_data(
         .copied()
         .unwrap_or(0.0);
 
+    // TPS is read here (before load_value) so a TPS/Alpha-N load source can use
+    // it as the load axis. It is also reused below for transient (tps_rate)
+    // detection, so this is the single source of truth for the throttle value.
+    let tps = data
+        .get("tps")
+        .or_else(|| data.get("TPS"))
+        .or_else(|| data.get("tpsValue"))
+        .copied()
+        .unwrap_or(0.0);
+
+    // The load value selects which Y-axis (load) cell a sample is attributed
+    // to. For MAP (speed-density) it's manifold pressure; for MAF it's mass
+    // airflow; for TPS (Alpha-N / ITB) it's throttle opening %. Using the wrong
+    // source here mismatches live data against the table's Y bins — the root
+    // cause of "AutoTune isn't working" on TPS-based tunes (issue #132).
     let load_value = match config.load_source {
         AutoTuneLoadSource::Map => map,
         AutoTuneLoadSource::Maf => {
@@ -256,6 +271,7 @@ pub(crate) async fn feed_autotune_data(
                 map
             }
         }
+        AutoTuneLoadSource::Tps => tps,
     };
 
     let afr = data
@@ -283,12 +299,7 @@ pub(crate) async fn feed_autotune_data(
         .copied()
         .unwrap_or(0.0);
 
-    let tps = data
-        .get("tps")
-        .or_else(|| data.get("TPS"))
-        .or_else(|| data.get("tpsValue"))
-        .copied()
-        .unwrap_or(0.0);
+    // `tps` was read above (before load_value) so a TPS load source can use it.
 
     // Calculate TPS rate (%/sec) based on time delta
     let tps_rate =
@@ -307,11 +318,24 @@ pub(crate) async fn feed_autotune_data(
     config.last_tps = Some(tps);
     config.last_timestamp_ms = Some(current_time_ms);
 
-    // Check for accel enrichment flag
+    // Whether accel enrichment is *active*, which only a boolean channel can
+    // answer. Speeduino publishes tpsaccaen / mapaccaen for exactly this.
+    //
+    // Deliberately excludes `accelEnrich` / `tpsAE`: those carry the enrichment
+    // *amount* as a percentage multiplier where 100 means "no enrichment"
+    // (Speeduino's own gauge spans 50-150%). Treating that as a flag via
+    // "> 0.5" made the neutral value read as permanently active, so with the
+    // default exclude_accel_enrich filter AutoTune rejected 100% of samples
+    // forever on every Speeduino — silently, because this filter is not part
+    // of the rejection log line.
+    //
+    // When no boolean channel exists this stays None, and the filter below
+    // treats unknown as "do not reject": an undeterminable flag must not
+    // silently discard every sample.
     let accel_enrich_active = data
-        .get("accelEnrich")
-        .or_else(|| data.get("accelEnrichActive"))
-        .or_else(|| data.get("tpsAE"))
+        .get("accelEnrichActive")
+        .or_else(|| data.get("tpsaccaen"))
+        .or_else(|| data.get("mapaccaen"))
         .map(|v| *v > 0.5);
 
     // Create the data point

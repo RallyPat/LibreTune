@@ -134,3 +134,152 @@ pub(crate) fn read_constant_from_cache(
     }
     0.0
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use libretune_core::ini::{Constant, DataType, EcuDefinition, Endianness, Shape};
+    use libretune_core::tune::{TuneCache, TuneFile};
+
+    /// Reproduce the issue behind the offline constant read bug: an MSQ that
+    /// stores its data as `<pageData>` blobs has an EMPTY `tune.constants` map.
+    /// The value lives only in the decoded cache bytes. Reading such a
+    /// constant must fall back to the cache, not return 0.
+    #[test]
+    fn cache_fallback_when_named_constant_absent() {
+        // reqFuel = scalar, U08, offset 24, "ms", scale 0.1 (Speeduino-like).
+        // A raw byte of 126 -> display 12.6 ms.
+        let req_fuel = Constant {
+            name: "reqFuel".to_string(),
+            label: None,
+            page: 0,
+            offset: 24,
+            data_type: DataType::U08,
+            endianness_override: None,
+            shape: Shape::Scalar,
+            bit_position: None,
+            bit_size: None,
+            display_offset: 0,
+            units: "ms".to_string(),
+            scale: 0.1,
+            translate: 0.0,
+            min: 0.0,
+            max: 25.5,
+            digits: 1,
+            help: None,
+            visibility_condition: None,
+            bit_options: Vec::new(),
+            is_pc_variable: false,
+            dynamic_size: None,
+        };
+
+        // Build a cache with a single page, load raw bytes, write reqFuel=126.
+        let mut def = EcuDefinition::default();
+        def.page_sizes = vec![64];
+        def.n_pages = 1;
+        let mut cache = TuneCache::from_definition(&def);
+        cache.load_page(0, vec![0u8; 64]);
+        assert!(cache.write_bytes(0, 24, &[126]));
+
+        // TuneFile with NO named constants (the <pageData>-only MSQ case).
+        let tune = TuneFile::new("test");
+
+        let val = read_constant_from_cache_or_tune(
+            "reqFuel",
+            &req_fuel,
+            Endianness::Little,
+            Some(&tune),
+            Some(&cache),
+        );
+        assert!(
+            (val - 12.6).abs() < 1e-9,
+            "expected reqFuel=12.6 ms from cache fallback, got {val}"
+        );
+    }
+
+    /// Same scenario but for a bits constant: packed value lives in cache
+    /// bytes, not in `tune.constants`. Must extract the bit field, not 0.
+    #[test]
+    fn cache_fallback_for_bits_constant() {
+        // nCylinders = bits, U08, offset 36, [4:7] (Speeduino-like). A byte
+        // value of 0b0101_0000 -> bits [4:7] = 0b0101 = 5 (index).
+        let n_cyl = Constant {
+            name: "nCylinders".to_string(),
+            label: None,
+            page: 0,
+            offset: 36,
+            data_type: DataType::Bits,
+            endianness_override: None,
+            shape: Shape::Scalar,
+            bit_position: Some(4),
+            bit_size: Some(4),
+            display_offset: 0,
+            units: String::new(),
+            scale: 1.0,
+            translate: 0.0,
+            min: 0.0,
+            max: 15.0,
+            digits: 0,
+            help: None,
+            visibility_condition: None,
+            bit_options: vec![
+                "INVALID", "1", "2", "3", "4", "5", "6", "INVALID", "8", "INVALID", "INVALID",
+                "INVALID", "INVALID", "INVALID", "INVALID", "INVALID",
+            ]
+            .into_iter()
+            .map(String::from)
+            .collect(),
+            is_pc_variable: false,
+            dynamic_size: None,
+        };
+
+        let mut def = EcuDefinition::default();
+        def.page_sizes = vec![64];
+        def.n_pages = 1;
+        let mut cache = TuneCache::from_definition(&def);
+        cache.load_page(0, vec![0u8; 64]);
+        // 0b0101_0000: bits [4:7] = 0101 = 5
+        assert!(cache.write_bytes(0, 36, &[0b0101_0000]));
+
+        let tune = TuneFile::new("test");
+
+        let val = read_constant_from_cache_or_tune(
+            "nCylinders",
+            &n_cyl,
+            Endianness::Little,
+            Some(&tune),
+            Some(&cache),
+        );
+        assert_eq!(val, 5.0, "expected bits[4:7]=5 from cache fallback");
+    }
+
+    /// Named constant in `tune.constants` takes priority over cache (so an
+    /// MSQ that DOES store `<constant>` tags is honored).
+    #[test]
+    fn named_constant_takes_priority_over_cache() {
+        let req_fuel = Constant::new("reqFuel", 0, 24, DataType::U08);
+        let mut def = EcuDefinition::default();
+        def.page_sizes = vec![64];
+        def.n_pages = 1;
+        let mut cache = TuneCache::from_definition(&def);
+        cache.load_page(0, vec![0u8; 64]);
+
+        let mut tune = TuneFile::new("test");
+        tune.constants.insert(
+            "reqFuel".to_string(),
+            libretune_core::tune::TuneValue::Scalar(9.5),
+        );
+
+        let val = read_constant_from_cache_or_tune(
+            "reqFuel",
+            &req_fuel,
+            Endianness::Little,
+            Some(&tune),
+            Some(&cache),
+        );
+        assert!(
+            (val - 9.5).abs() < 1e-9,
+            "named constant should win, expected 9.5 got {val}"
+        );
+    }
+}

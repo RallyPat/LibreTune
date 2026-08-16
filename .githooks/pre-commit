@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# Pre-commit hook: enforce `cargo fmt --all -- --check` (the exact command the
+# CI "Format Check" job runs in .github/workflows/ci.yml).
+#
+# This blocks any commit that contains Rust code not formatted by rustfmt, so
+# formatting failures never make it as far as a pushed PR.
+#
+# To install (one-time, per clone):
+#   git config core.hooksPath .githooks
+#   # or run the cross-platform helper:
+#   #   ./scripts/setup-git-hooks.ps1   (Windows PowerShell)
+#   #   ./scripts/setup-git-hooks.sh    (macOS/Linux/Git Bash)
+#
+# To bypass just once (e.g. a WIP commit you intend to format later):
+#   git commit --no-verify
+
+set -euo pipefail
+
+# Only run if there is staged Rust. Cheap way to skip commits that touch no .rs.
+if ! git diff --cached --name-only --diff-filter=ACMR | grep -qE '\.rs$'; then
+  exit 0
+fi
+
+# Run from the repo root regardless of where the user invoked git from.
+repo_root="$(git rev-parse --show-toplevel)"
+cd "$repo_root"
+
+if ! cargo fmt --all -- --check >/dev/null 2>&1; then
+  echo "---------------------------------------------------------------" >&2
+  echo "❌ cargo fmt --check failed — this is the same check CI runs." >&2
+  echo "" >&2
+  echo "   Run to fix:" >&2
+  echo "       cargo fmt --all" >&2
+  echo "   then re-stage and commit again:" >&2
+  echo "       git add -u && git commit" >&2
+  echo "" >&2
+  echo "   (Preview the diff first: cargo fmt --all -- --check)" >&2
+  echo "   (Skip once with: git commit --no-verify)" >&2
+  echo "---------------------------------------------------------------" >&2
+  # Show the actual diff so the failure is self-explanatory.
+  cargo fmt --all -- --check >&2 || true
+  exit 1
+fi
+
+exit 0

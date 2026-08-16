@@ -116,13 +116,37 @@ datalogs/
             std::fs::write(&gitignore_path, gitignore_content).ok();
         }
 
-        Ok(Self { repo })
+        let vc = Self { repo };
+        vc.disable_eol_conversion();
+        Ok(vc)
     }
 
     /// Open an existing git repository in the project folder
     pub fn open(project_path: &Path) -> Result<Self, GitError> {
         let repo = Repository::open(project_path)?;
-        Ok(Self { repo })
+        let vc = Self { repo };
+        // Also applied on open so repositories created before this fix are
+        // repaired the next time the project is used.
+        vc.disable_eol_conversion();
+        Ok(vc)
+    }
+
+    /// Turn off git's end-of-line conversion for this repository.
+    ///
+    /// On Windows, `core.autocrlf` defaults to true: git stores LF and
+    /// rewrites files to CRLF on checkout. Every file in a project repo is
+    /// machine-generated with LF line endings, so after "Restore tune to this
+    /// version" checked out a CRLF copy, the very next save rewrote it as LF
+    /// and the tree showed as modified without any real change — which in turn
+    /// made the SAFE checkout strategy silently skip the *next* restore. A
+    /// repo-local `core.autocrlf=false` overrides the user's global setting
+    /// for this repo only, so checkouts reproduce the committed bytes exactly.
+    /// Best-effort: a failure here degrades to the pre-fix behaviour rather
+    /// than breaking init/open.
+    fn disable_eol_conversion(&self) {
+        if let Ok(mut config) = self.repo.config() {
+            let _ = config.set_bool("core.autocrlf", false);
+        }
     }
 
     /// Check if a project folder has a git repository
@@ -267,14 +291,36 @@ datalogs/
 
     /// Checkout a specific commit (detached HEAD)
     pub fn checkout_commit(&self, sha: &str) -> Result<(), GitError> {
+        self.ensure_clean_for_checkout()?;
         let obj = self.repo.revparse_single(sha)?;
         self.repo.checkout_tree(&obj, None)?;
         self.repo.set_head_detached(obj.id())?;
         Ok(())
     }
 
+    /// Refuse a checkout when the working tree has uncommitted changes.
+    ///
+    /// `checkout_tree` runs libgit2's default SAFE strategy, which skips files
+    /// that differ locally — and returns `Ok` when it does. Without this guard
+    /// a restore over unsaved changes silently left the old tune in place while
+    /// reporting success, and the caller then reloaded and displayed the
+    /// *unrestored* file as though the restore had worked. Failing loudly lets
+    /// the caller tell the user to save or discard first.
+    fn ensure_clean_for_checkout(&self) -> Result<(), GitError> {
+        if self.has_changes()? {
+            return Err(GitError::from_str(
+                "The project has uncommitted changes. Save or discard them before \
+                 restoring a previous version, otherwise the restore would be \
+                 silently skipped.",
+            ));
+        }
+        Ok(())
+    }
+
     /// Checkout a branch
     pub fn checkout_branch(&self, branch_name: &str) -> Result<(), GitError> {
+        // Same SAFE-strategy silent-skip hazard as checkout_commit.
+        self.ensure_clean_for_checkout()?;
         let branch = self.repo.find_branch(branch_name, BranchType::Local)?;
         let refname = branch
             .get()
@@ -392,6 +438,69 @@ datalogs/
 mod tests {
     use super::*;
     use tempfile::TempDir;
+
+    /// Restoring a version must reproduce the committed bytes exactly, keep
+    /// the tree clean, and stay repeatable. With the user's global
+    /// `core.autocrlf=true` (the Windows default) checkout used to rewrite LF
+    /// as CRLF; the next save wrote LF back, the tree showed modified, and —
+    /// because SAFE checkout skips modified files while returning Ok — every
+    /// restore after the first silently did nothing.
+    #[test]
+    fn test_checkout_restores_exact_bytes_and_stays_repeatable() {
+        let temp_dir = TempDir::new().unwrap();
+        let path = temp_dir.path();
+        let vc = VersionControl::init(path).unwrap();
+
+        // Repo-local EOL conversion must be off regardless of global config.
+        let cfg = vc.repo.config().unwrap();
+        assert!(
+            !cfg.get_bool("core.autocrlf").unwrap_or(true),
+            "init must set repo-local core.autocrlf=false"
+        );
+
+        let f = path.join("CurrentTune.msq");
+        let version_a = b"<msq>\n<constant name=\"reqFuel\">12.5</constant>\n</msq>\n";
+        std::fs::write(&f, version_a).unwrap();
+        vc.commit("A").unwrap();
+        let sha_a = vc.get_history(10).unwrap()[0].sha.clone();
+
+        std::fs::write(
+            &f,
+            b"<msq>\n<constant name=\"reqFuel\">20</constant>\n</msq>\n",
+        )
+        .unwrap();
+        vc.commit("B").unwrap();
+
+        // First restore: exact bytes, clean tree.
+        vc.checkout_commit(&sha_a).unwrap();
+        assert_eq!(
+            std::fs::read(&f).unwrap(),
+            version_a,
+            "checkout must reproduce the committed bytes (no EOL rewriting)"
+        );
+        assert!(
+            !vc.has_changes().unwrap(),
+            "tree must be clean after checkout"
+        );
+
+        // Rewriting identical bytes (a reload's save-back) must not dirty it,
+        // and a second restore must still work.
+        std::fs::write(&f, version_a).unwrap();
+        assert!(!vc.has_changes().unwrap());
+        vc.checkout_commit(&sha_a)
+            .expect("second restore must succeed");
+
+        // Genuine unsaved edits must refuse loudly, not silently skip.
+        std::fs::write(&f, b"edited").unwrap();
+        let err = vc
+            .checkout_commit(&sha_a)
+            .expect_err("checkout over unsaved changes must fail, not silently skip");
+        assert!(
+            err.message().contains("uncommitted"),
+            "error should tell the user why: {}",
+            err.message()
+        );
+    }
 
     #[test]
     fn test_init_and_commit() {

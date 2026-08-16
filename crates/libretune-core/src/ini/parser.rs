@@ -48,13 +48,41 @@ struct IncludeContext {
     pub defined_symbols: HashSet<String>,
 }
 
+/// Preprocessor symbols every parse starts with, on top of anything the INI
+/// `#set`s itself.
+///
+/// TunerStudio seeds these from the project's `ecuSettings` line
+/// (`ecuSettings=AFR|CELSIUS|…`), which is how an INI's `#if CELSIUS` blocks
+/// select metric units. Nothing carried that into LibreTune, so the `#else`
+/// arm always won and every temperature came out in Fahrenheit while wearing
+/// the INI's generic "TEMP" label — a 23 °C cold start read 73 on the gauge.
+/// The host application sets this from its own units preference.
+static DEFAULT_SYMBOLS: std::sync::RwLock<Option<HashSet<String>>> = std::sync::RwLock::new(None);
+
+/// Replace the preprocessor symbols seeded into every subsequent parse.
+/// Call before loading a definition; affects parses started after it returns.
+pub fn set_default_symbols<I: IntoIterator<Item = String>>(symbols: I) {
+    let set: HashSet<String> = symbols.into_iter().collect();
+    if let Ok(mut guard) = DEFAULT_SYMBOLS.write() {
+        *guard = Some(set);
+    }
+}
+
+fn default_symbols() -> HashSet<String> {
+    DEFAULT_SYMBOLS
+        .read()
+        .ok()
+        .and_then(|g| g.clone())
+        .unwrap_or_default()
+}
+
 impl IncludeContext {
     fn new(base_path: Option<&Path>) -> Self {
         Self {
             base_dir: base_path.and_then(|p| p.parent().map(|d| d.to_path_buf())),
             included_files: HashSet::new(),
             depth: 0,
-            defined_symbols: HashSet::new(),
+            defined_symbols: default_symbols(),
         }
     }
 
@@ -542,6 +570,19 @@ fn merge_definitions(target: &mut EcuDefinition, source: EcuDefinition) {
 /// Note: '#' is handled at the line level for preprocessor directives
 /// Special case: Don't strip semicolons in field names before '=' (for help text syntax)
 fn strip_comment(line: &str) -> String {
+    // A line whose first non-whitespace character is ';' is a comment in its
+    // entirety, including commented-out properties like ";name = value".
+    // The help-text branch below intentionally keeps semicolons that appear
+    // before '=', but that syntax is "fieldname;+help" — it always has a field
+    // name in front. Without this guard a commented-out property survives
+    // stripping and is parsed as a real entry whose name is the empty string
+    // (extract_help_text slices [..0]). In the stock Speeduino INI that turns
+    // 148 commented-out lines into live properties, and writes a junk
+    // <entry name=""/> into every saved tune's constant manifest.
+    if line.trim_start().starts_with(';') {
+        return String::new();
+    }
+
     // First pass: Check if line contains '=' (outside quotes)
     // This allows us to distinguish between properties (key=val) and other lines (headers, directives)
     let mut has_equals = false;
@@ -3168,6 +3209,47 @@ fn parse_constants_extensions_entry(def: &mut EcuDefinition, key: &str, value: &
 mod tests {
     use super::*;
 
+    /// An INI picks metric units with `#if CELSIUS`. TunerStudio defines that
+    /// from the project's `ecuSettings`; nothing carried it into LibreTune, so
+    /// the Fahrenheit `#else` arm always won and a 23 degC cold start read 73
+    /// on the gauge under a generic "TEMP" label.
+    #[test]
+    fn celsius_symbol_selects_the_metric_branch() {
+        let ini = concat!(
+            "[Constants]
+",
+            "page = 1
+",
+            "#if CELSIUS
+",
+            "tempTest = scalar, U08, 0, \"C\", 1.0, -40, -40, 102.0, 0
+",
+            "#else
+",
+            "tempTest = scalar, U08, 0, \"F\", 1.8, -22.23, -40, 215.0, 0
+",
+            "#endif
+"
+        );
+
+        set_default_symbols(Vec::<String>::new());
+        let f = parse_ini(ini).expect("parses");
+        assert_eq!(
+            f.constants.get("tempTest").map(|c| c.units.as_str()),
+            Some("F"),
+            "without the symbol the Fahrenheit branch is taken"
+        );
+
+        set_default_symbols(vec!["CELSIUS".to_string()]);
+        let c = parse_ini(ini).expect("parses");
+        assert_eq!(
+            c.constants.get("tempTest").map(|c| c.units.as_str()),
+            Some("C"),
+            "seeding CELSIUS must select the metric branch"
+        );
+        set_default_symbols(Vec::<String>::new());
+    }
+
     #[test]
     fn test_strip_comment() {
         // Comments after equals sign
@@ -3738,6 +3820,41 @@ indicator = { (tps > tpsflood) && (rpm < crankRPM) }, "FLOOD OFF", "FLOOD CLEAR"
         let (name, help) = extract_help_text("  field_name  ;  +  Help text with spaces  ");
         assert_eq!(name, "field_name");
         assert_eq!(help, Some("Help text with spaces".to_string()));
+    }
+
+    #[test]
+    fn test_commented_out_property_is_not_a_property() {
+        // A commented-out property must be stripped entirely. The stock
+        // Speeduino INI carries a disabled alternative for fuelLoadBins; before
+        // this was handled, the leading ';' was preserved (because the line
+        // contains '=') and the entry parsed with an empty name.
+        assert_eq!(
+            strip_comment(
+                "      ;fuelLoadBins = array,  U08,   272, [  16], \"kPa\", 2.0, 0.0, 0.0, 511.0, 0"
+            ),
+            ""
+        );
+
+        // Documentation/template comments in INI headers are also properties
+        // syntactically, and must stay comments.
+        assert_eq!(
+            strip_comment("   ; keyword = referenceName, DisplayName"),
+            ""
+        );
+        assert_eq!(strip_comment(";settingOption = BOOSTPSI, \"PSI\""), "");
+
+        // Help-text syntax always has a field name before the ';', so it is
+        // unaffected: the semicolon before '=' is still preserved.
+        assert_eq!(
+            strip_comment("bias_resistor;+Pull-up resistor = 4700"),
+            "bias_resistor;+Pull-up resistor = 4700"
+        );
+
+        // Trailing comments after a value are still stripped as before.
+        assert_eq!(
+            strip_comment("someField = 42 ; trailing note").trim(),
+            "someField = 42"
+        );
     }
 }
 

@@ -70,6 +70,38 @@ mod tests {
 /// Recommendations remain available until explicitly cleared.
 ///
 /// Returns: Nothing on success
+/// Whether an AutoTune session is live, and against which tables.
+///
+/// The session runs in the backend and survives the AutoTune view unmounting
+/// (e.g. switching to the dashboard and back). The view calls this on mount to
+/// re-attach instead of assuming no session exists.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AutotuneStatus {
+    pub running: bool,
+    pub table_name: Option<String>,
+    pub secondary_table_name: Option<String>,
+}
+
+#[tauri::command]
+pub async fn get_autotune_status(
+    state: tauri::State<'_, AppState>,
+) -> Result<AutotuneStatus, String> {
+    let config_guard = state.autotune_config.lock().await;
+    Ok(match config_guard.as_ref() {
+        Some(config) => AutotuneStatus {
+            running: true,
+            table_name: Some(config.table_name.clone()),
+            secondary_table_name: config.secondary_table_name.clone(),
+        },
+        None => AutotuneStatus {
+            running: false,
+            table_name: None,
+            secondary_table_name: None,
+        },
+    })
+}
+
 #[tauri::command]
 pub async fn stop_autotune(state: tauri::State<'_, AppState>) -> Result<(), String> {
     let mut guard = state.autotune_state.lock().await;
@@ -269,18 +301,28 @@ pub async fn send_autotune_recommendations(
 
     let raw_data = conn.read_memory(params).map_err(|e| e.to_string())?;
 
-    // Convert to display values
+    // Decode the table the ECU actually returned. A cell that will not decode
+    // used to become 0.0, and since the whole array is written back below, that
+    // put a zero-fuel cell into a live VE table - the engine leans out wherever
+    // the tune passes through it. A short read is the realistic way to get
+    // here, and it silently affects every cell after the truncation point.
+    //
+    // There is no safe value to substitute, so refuse the apply instead.
     let mut values: Vec<f64> = Vec::with_capacity(element_count);
     for i in 0..element_count {
         let offset = i * element_size;
-        if let Some(raw_val) = constant
+        let raw_val = constant
             .data_type
             .read_from_bytes(&raw_data, offset, endianness)
-        {
-            values.push(constant.raw_to_display(raw_val));
-        } else {
-            values.push(0.0);
-        }
+            .ok_or_else(|| {
+                format!(
+                    "Refusing to apply: cell {i} of {element_count} could not be read back from \
+                     the ECU ({} bytes returned for a {length}-byte table). Applying would write \
+                     a zero into a live fuel table. Re-sync the ECU and try again.",
+                    raw_data.len()
+                )
+            })?;
+        values.push(constant.raw_to_display(raw_val));
     }
 
     // Apply recommendations

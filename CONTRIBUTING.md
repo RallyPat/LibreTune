@@ -18,22 +18,38 @@ Thank you for your interest in contributing to LibreTune! This document provides
    cd LibreTune
    ```
 
-2. Install frontend dependencies:
+2. **Enable the pre-commit format hook (recommended):** This runs the same
+   `cargo fmt --check` that CI enforces on every commit, so formatting
+   failures never reach a PR. One-time setup, per clone:
+   ```bash
+   # Windows PowerShell:
+   pwsh ./scripts/setup-git-hooks.ps1
+   # macOS / Linux / Git Bash:
+   ./scripts/setup-git-hooks.sh
+   ```
+   (What it does: `git config core.hooksPath .githooks`. The hook lives in
+   `.githooks/pre-commit`. Skip it once with `git commit --no-verify`.)
+
+3. Install frontend dependencies:
    ```bash
    cd crates/libretune-app
    npm install
    ```
 
-3. Build the core library:
+4. Build the core library:
    ```bash
    cargo build -p libretune-core
    ```
 
-4. Run in development mode:
+5. Run in development mode:
    ```bash
    cd crates/libretune-app
    npm run tauri dev
    ```
+
+> **Formatting:** Rust code must pass `cargo fmt --all -- --check` (the CI
+> "Format Check" job). Run `cargo fmt --all` to auto-format before committing.
+> The hook above does this automatically.
 
 ## Project Structure
 
