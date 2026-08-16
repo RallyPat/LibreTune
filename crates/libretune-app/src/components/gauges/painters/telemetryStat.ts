@@ -56,7 +56,7 @@ export const telemetryStatPainter: Painter = (pctx) => {
     // value right" layout caps the value font at a fraction of the tile's
     // HEIGHT — the smaller dimension of these wide, short telemetry tiles —
     // which left the values unreadable no matter how much width was spare.
-    const labelSize = Math.max(9, height * 0.22 * fontScale);
+    const labelSize = Math.max(11, height * 0.31 * fontScale);
     ctx.fillStyle = tsColorToHex(config.trim_color);
     ctx.font = getFontSpec(labelSize, { bold: true });
     ctx.textAlign = 'left';
