@@ -201,8 +201,23 @@ pub struct EcuDefinition {
     /// Port editor configurations
     pub port_editors: HashMap<String, PortEditorConfig>,
 
-    /// Reference tables
+    /// Reference tables (sensor calibration spaces), keyed by block name.
     pub reference_tables: HashMap<String, ReferenceTable>,
+
+    /// `[ReferenceTables] tableWriteCommand` — the command template for a
+    /// calibration write, e.g. Speeduino's `"t\$tsCanId%2i%2o%2c%v"`.
+    ///
+    /// Worth keeping verbatim because it is the INI's own statement of the
+    /// wire layout, and it is where the `t` command's surprising byte order
+    /// comes from: `%2i`/`%2o`/`%2c` are TunerStudio's *big-endian* two-byte
+    /// fields, whereas the page commands (`M`, `p`) use little-endian ones.
+    pub table_write_command: Option<String>,
+
+    /// `[ReferenceTables] tableBlockingFactor` — the maximum calibration
+    /// chunk size in bytes (256 on a stock Speeduino, 64 on STM32 or in
+    /// COMMS_COMPAT builds). The INI declares this so clients need not
+    /// hardcode the chunking.
+    pub table_blocking_factor: Option<usize>,
 
     /// FTP browser configurations
     pub ftp_browsers: HashMap<String, FTPBrowserConfig>,
@@ -782,6 +797,8 @@ impl Default for EcuDefinition {
             diagnostic_loggers: Vec::new(),
             port_editors: HashMap::new(),
             reference_tables: HashMap::new(),
+            table_write_command: None,
+            table_blocking_factor: None,
             ftp_browsers: HashMap::new(),
             datalog_views: HashMap::new(),
             key_actions: Vec::new(),

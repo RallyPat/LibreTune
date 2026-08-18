@@ -1248,18 +1248,114 @@ pub struct PortEditorConfig {
     pub enable_condition: Option<String>,
 }
 
-/// Reference table definition
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ReferenceTable {
-    /// Table name
-    pub name: String,
-    /// Display label
+/// One selectable curve in a [`ReferenceTable`] — either a closed-form
+/// expression over `adcValue`, or a hand-off to an interactive generator.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum CalibrationSolution {
+    /// `solution = "14Point7", { 10.0001 + (adcValue * 0.0097752) }` — the
+    /// braced expression, evaluated per ADC count to build the table.
+    Expression { expression: String },
+    /// `solution = "Custom Linear WB", linearGenerator` — the named generator
+    /// collects its inputs from the user instead.
+    Generator { generator: String },
+}
+
+/// A `tableGenerator` line: an interactive way to produce a calibration curve.
+///
+/// The trailing axis hints are only present on `linearGenerator`
+/// (`tableGenerator = linearGenerator, "Custom Linear WB", "Volts", "AFR", 1,
+/// 4, 9.7, 18.7`) and give the editor its default two points.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CalibrationGenerator {
+    /// Generator kind, e.g. `linearGenerator`, `thermGenerator`,
+    /// `fileBrowseGenerator`.
+    pub kind: String,
+    /// Display label.
     pub label: String,
-    /// Referenced table name
-    pub table_name: String,
-    /// Enable condition
+    /// X axis units, if declared.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub enable_condition: Option<String>,
+    pub x_units: Option<String>,
+    /// Y axis units, if declared.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub y_units: Option<String>,
+    /// Default axis bounds `(x_low, x_high, y_low, y_high)`, if declared.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bounds: Option<(f64, f64, f64, f64)>,
+}
+
+/// A `thermOption` preset: a bias resistor plus three
+/// (temperature, resistance) points to fit Steinhart–Hart through.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ThermistorOption {
+    /// Sensor name, e.g. `"Mazda"`.
+    pub name: String,
+    /// Bias resistor value in ohms.
+    pub bias_resistor: f64,
+    /// Three `(temperature °C, resistance Ω)` calibration points.
+    pub points: [(f64, f64); 3],
+}
+
+/// One `tableIdentifier` entry: the firmware table id plus its label.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CalibrationTableIdentifier {
+    /// Firmware calibration table id (`000` CLT, `001` IAT, `002` O2).
+    pub id: u8,
+    /// Display label, e.g. `"Coolant Temperature Sensor"`.
+    pub label: String,
+    /// Optional `tableLimits` for this id: `(min, max, default)` in the
+    /// table's own units. Values outside the range fall back to the default.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limits: Option<(f64, f64, f64)>,
+}
+
+/// A `referenceTable` block — the INI's description of a sensor calibration
+/// space that lives *outside* the tune pages (thermistor curves, wideband AFR
+/// transfer function).
+///
+/// This is a multi-line block: a `referenceTable = name, "Label"` header
+/// followed by indented properties, in the style of `[TableEditor]` /
+/// `[CurveEditor]`. It is the sole INI-side description of what the `t`
+/// calibration command should carry, so it is parsed generically rather than
+/// hardcoding the two Speeduino tables.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ReferenceTable {
+    /// Block name, e.g. `std_ms2geno2`.
+    pub name: String,
+    /// Menu label, e.g. `"Calibrate AFR Table..."`.
+    pub label: String,
+    /// `topicHelp` URL, if declared.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub topic_help: Option<String>,
+    /// Firmware table ids this block can write, in declaration order.
+    pub identifiers: Vec<CalibrationTableIdentifier>,
+    /// `adcCount`: number of entries in the table (32 thermistor, 1024 O2).
+    pub adc_count: usize,
+    /// `bytesPerAdc`: wire width of each entry (2 = i16, 1 = u8).
+    pub bytes_per_adc: u8,
+    /// `scale`: multiply the engineering value by this before sending.
+    pub scale: f64,
+    /// Interactive generators offered for this table.
+    pub generators: Vec<CalibrationGenerator>,
+    /// Thermistor presets (`thermOption`), empty for the O2 table.
+    pub therm_options: Vec<ThermistorOption>,
+    /// Label for the solutions dropdown, if declared.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub solutions_label: Option<String>,
+    /// Selectable presets, in declaration order.
+    pub solutions: Vec<(String, CalibrationSolution)>,
+}
+
+impl ReferenceTable {
+    /// Total wire size of one table in this block.
+    pub fn wire_bytes(&self) -> usize {
+        self.adc_count * self.bytes_per_adc as usize
+    }
+
+    /// Whether this block declares the given firmware table id.
+    pub fn has_identifier(&self, id: u8) -> bool {
+        self.identifiers.iter().any(|i| i.id == id)
+    }
 }
 
 /// FTP browser configuration

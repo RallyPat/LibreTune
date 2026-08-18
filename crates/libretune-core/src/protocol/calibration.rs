@@ -5,21 +5,52 @@
 //! reach them. They are written through a dedicated `t` command instead,
 //! verified against the firmware source at tag 202501
 //! (`speeduino/comms_legacy.cpp receiveCalibration()` and
-//! `speeduino/comms.cpp` case `'t'`):
+//! `speeduino/comms.cpp` case `'t'`).
+//!
+//! Everything here is pinned to **202501**, which is the tag this project
+//! targets, and master has since diverged in ways that matter:
+//!
+//! * At 202501 the table ids are plain macros (`CLT_CALIBRATION_PAGE` 0,
+//!   `IAT_CALIBRATION_PAGE` 1, `O2_CALIBRATION_PAGE` 2). The
+//!   `SensorCalibrationTable` enum, and the `saveCalibrationTable` /
+//!   `saveCalibrationCrc` names, are post-202501 additions; at this tag the
+//!   functions are `writeCalibrationPage` / `storeCalibrationCRC32` and the
+//!   O2 handler is `loadO2CalibrationChunk`. The *values* 0/1/2 are the same
+//!   either way, which is all we depend on.
+//! * At 202501 the legacy `'t'` command still writes. Firmware newer than
+//!   202501 makes legacy comms read-only — it consumes the command and the
+//!   data and writes nothing, with no error — so a legacy-protocol
+//!   calibration write against newer firmware silently does nothing. There is
+//!   no ACK on that path to detect it with; see
+//!   `Connection::write_calibration_legacy` for how that is surfaced.
+//!
+//! The two protocols:
 //!
 //! * **Legacy protocol** — `'t'`, one table-id byte, then the raw data
 //!   stream. No header beyond the id, no length field, **no ACK**: the
 //!   firmware blocks in `receiveCalibration()` until it has consumed exactly
 //!   the table's byte count, then writes EEPROM.
 //! * **Modern (CRC envelope) protocol** — one `'t'` frame per chunk with a
-//!   7-byte header: `['t', canId, tableId, offset_hi, offset_lo, len_hi,
+//!   7-byte header: `['t', id_hi, tableId, offset_hi, offset_lo, len_hi,
 //!   len_lo]` followed by `len` data bytes. Offset and length are
 //!   **big-endian** here (`word(payload[3], payload[4])`), unlike the `'M'`
-//!   page-write command whose fields are little-endian — a real quirk of the
-//!   firmware, not a typo. Each chunk is ACKed with a return-code envelope.
-//!   The O2 table must arrive as 4×256-byte chunks (EEPROM burn triggers on
-//!   `offset >= 1023`); temperature tables as a single 64-byte chunk (any
-//!   other length is rejected with `SERIAL_RC_RANGE_ERR`).
+//!   page-write and `'p'` page-read commands, which build the same kind of
+//!   word as `word(payload[4], payload[3])` — little-endian. That asymmetry
+//!   is real and deliberate: the INI's own command template,
+//!   `tableWriteCommand = "t\$tsCanId%2i%2o%2c%v"`, uses TunerStudio's
+//!   big-endian `%2x` fields, and the table id is likewise a two-byte
+//!   big-endian field whose low byte lands at `payload[2]` (which is all the
+//!   firmware reads). Each chunk is ACKed with a return-code envelope.
+//!
+//!   The O2 table is sent as 4×256-byte chunks: the firmware burns EEPROM
+//!   only once the running offset reaches 1023, and its subsample guard is
+//!   chunk-relative (`x % 32`) while the destination index is absolute
+//!   (`offset / 32`), so chunks must start on multiples of 32 or values land
+//!   in the wrong slots. Note the firmware does *not* validate the O2 chunk
+//!   length — 256 is convention (and the INI's `tableBlockingFactor`), not
+//!   something the ECU will reject you for getting wrong. Temperature tables
+//!   go as a single 64-byte chunk; that length *is* checked, and anything
+//!   else is rejected with `SERIAL_RC_RANGE_ERR`.
 //!
 //! Data formats (both protocols):
 //!
@@ -33,7 +64,11 @@
 
 use crc32fast::Hasher;
 
-/// Which calibration table a `t` command targets (firmware table ids).
+/// Which calibration table a `t` command targets.
+///
+/// The discriminants are the firmware's table ids. At 202501 those are
+/// `#define`s in `globals.h`, not an enum — the `SensorCalibrationTable` enum
+/// with the same values appears only after this tag.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum CalibrationTable {
@@ -46,7 +81,8 @@ pub enum CalibrationTable {
 }
 
 impl CalibrationTable {
-    /// Firmware table id (`CLT_CALIBRATION_PAGE` = 0, `IAT` = 1, `O2` = 2).
+    /// Firmware table id (`CLT_CALIBRATION_PAGE` 0, `IAT_CALIBRATION_PAGE` 1,
+    /// `O2_CALIBRATION_PAGE` 2).
     pub fn id(self) -> u8 {
         match self {
             CalibrationTable::Clt => 0,

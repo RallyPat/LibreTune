@@ -35,6 +35,10 @@ struct SimState {
     raw: std::collections::HashMap<u8, Vec<u8>>,
     /// Offsets seen in modern 't' chunks, in arrival order.
     modern_chunk_offsets: Vec<u16>,
+    /// The verbatim 7-byte header of every modern 't' frame, in arrival
+    /// order. Captured before any decoding so the endianness tests can assert
+    /// on the actual bytes rather than on the sim's interpretation of them.
+    modern_headers: Vec<[u8; 7]>,
 }
 
 /// Firmware `receiveCalibration()` temperature math, reproduced exactly:
@@ -133,10 +137,20 @@ fn run_modern_sim(mut stream: TcpStream, state: Arc<Mutex<SimState>>) {
                 let offset = u16::from_be_bytes([payload[3], payload[4]]);
                 let length = u16::from_be_bytes([payload[5], payload[6]]) as usize;
                 let data = &payload[7..];
-                assert_eq!(data.len(), length, "sim: length field vs data mismatch");
 
                 let mut st = state.lock().unwrap();
+                st.modern_headers
+                    .push(payload[..7].try_into().expect("7-byte header"));
                 st.modern_chunk_offsets.push(offset);
+                if data.len() != length {
+                    // A byte-order regression lands here. Reply with a range
+                    // error instead of panicking in the sim thread, so the
+                    // client fails cleanly and the test reports the mismatch
+                    // rather than hanging on a dead connection.
+                    drop(st);
+                    send(&mut stream, &[0x84u8]);
+                    continue;
+                }
                 if table_id == 2 {
                     // loadO2CalibrationChunk(): every 32nd value kept.
                     let raw = st.raw.entry(table_id).or_default();
@@ -338,4 +352,107 @@ fn modern_o2_calibration_goes_out_as_four_256_byte_chunks() {
     );
     assert_eq!(st.o2_values.len(), 32);
     assert_eq!(st.o2_values[0], 97);
+}
+
+// ---------------------------------------------------------------------------
+// Endianness traps
+//
+// `'t'` builds its offset and length words as `word(payload[3], payload[4])` —
+// big-endian — while `'M'` and `'p'` in the same firmware file use
+// `word(payload[4], payload[3])`, little-endian. Nothing about the code makes
+// that asymmetry obvious, so it is the single most likely thing to be
+// "corrected" into a shared helper by a later change.
+//
+// The INI says the same thing independently: Speeduino's
+// `tableWriteCommand = "t\$tsCanId%2i%2o%2c%v"` uses TunerStudio's `%2x`
+// fields, which are big-endian.
+//
+// These assert the literal header bytes, so reintroducing the swap fails here
+// with a byte-level diff rather than as a timeout or a CRC mismatch further
+// downstream.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn o2_chunk_headers_are_byte_for_byte_big_endian() {
+    let (mut conn, state) = connect(true);
+    conn.write_o2_calibration(&spartan_offset_curve())
+        .expect("modern O2 write");
+
+    let st = state.lock().unwrap();
+    // ['t', canId/id-high, tableId, offset_hi, offset_lo, len_hi, len_lo]
+    assert_eq!(
+        st.modern_headers,
+        vec![
+            [b't', 0x00, 0x02, 0x00, 0x00, 0x01, 0x00],
+            [b't', 0x00, 0x02, 0x01, 0x00, 0x01, 0x00],
+            [b't', 0x00, 0x02, 0x02, 0x00, 0x01, 0x00],
+            [b't', 0x00, 0x02, 0x03, 0x00, 0x01, 0x00],
+        ],
+        "offset and length must be big-endian: offset 256 is 01 00, not 00 01, \
+         and length 256 is 01 00, not 00 01"
+    );
+}
+
+#[test]
+fn temperature_chunk_header_is_big_endian() {
+    let (mut conn, state) = connect(true);
+    let bins = temperature_calibration_bins(true);
+    conn.write_temperature_calibration(CalibrationTable::Clt, &thermistor_curve(&bins))
+        .expect("modern CLT write");
+
+    let st = state.lock().unwrap();
+    // Length 64 is 0x0040: big-endian puts 0x00 first, little-endian 0x40.
+    assert_eq!(
+        st.modern_headers,
+        vec![[b't', 0x00, 0x00, 0x00, 0x00, 0x00, 0x40]],
+        "length 64 must be sent as 00 40"
+    );
+}
+
+#[test]
+fn a_little_endian_header_would_change_the_bytes_we_send() {
+    // Pins the asymmetry itself: if some future refactor routes `t` through
+    // the little-endian helper that `M`/`p` use, these two encodings stop
+    // differing and the tests above stop meaning anything. 256 and 64 are the
+    // two lengths the calibration path actually sends, and both are
+    // asymmetric under byte swapping.
+    for value in [256u16, 64] {
+        assert_ne!(
+            value.to_be_bytes(),
+            value.to_le_bytes(),
+            "{value} must distinguish the two byte orders for the trap to bite"
+        );
+    }
+}
+
+#[test]
+fn temperature_payload_stays_little_endian_inside_a_big_endian_header() {
+    // The trap has a second half that is easy to miss: the header fields are
+    // big-endian but the 32 i16 temperature *values* inside the payload are
+    // little-endian (`toTemperature(lo, hi)` reads payload[2x+7] as the low
+    // byte). Making the whole frame consistently big-endian would be wrong.
+    let (mut conn, state) = connect(true);
+    let bins = temperature_calibration_bins(true);
+    let mut temps = thermistor_curve(&bins);
+    // 100 °C = 212 °F = 2120 = 0x0848: both bytes non-zero and distinct, so
+    // a swapped encoding cannot coincidentally match.
+    temps[0] = 100.0;
+    conn.write_temperature_calibration(CalibrationTable::Clt, &temps)
+        .expect("modern CLT write");
+
+    let st = state.lock().unwrap();
+    let raw = &st.raw[&0];
+    let little = i16::from_le_bytes([raw[0], raw[1]]);
+    let big = i16::from_be_bytes([raw[0], raw[1]]);
+    assert!(
+        (little - 2120).abs() <= 18,
+        "first entry decoded little-endian is {little}, expected ~2120 (°F x 10)"
+    );
+    assert!(
+        (big - 2120).abs() > 18,
+        "big-endian decode of {raw:02x?} also gave ~2120 — the test cannot \
+         tell the two orders apart"
+    );
+    // And the firmware's own math must recover the requested temperature.
+    assert_eq!(firmware_stored_temperature(little), 140, "100 °C + 40 offset");
 }

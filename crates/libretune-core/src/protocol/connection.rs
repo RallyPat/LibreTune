@@ -2403,6 +2403,20 @@ impl Connection {
             table,
             wire.len()
         );
+        // The legacy path has no ACK and no read-back, so this is the one
+        // calibration write whose success we cannot confirm. On firmware
+        // newer than 202501 it is worse than unverified: legacy comms were
+        // made read-only, and the firmware consumes the command and the whole
+        // data stream while writing nothing at all, reporting no error. There
+        // is nothing on the wire to distinguish that from success, so say so
+        // rather than let the UI report a clean write.
+        tracing::warn!(
+            "calibration written over the legacy protocol: the ECU sends no \
+             acknowledgement and offers no read-back, so this write is \
+             unverified. Firmware newer than 202501 ignores legacy \
+             calibration writes entirely. Connect with the CRC protocol to \
+             get a verified write."
+        );
         self.send_raw_command_no_response(&[b't', table.id()])?;
 
         // Pace the data out in small chunks. The firmware blocks inside
