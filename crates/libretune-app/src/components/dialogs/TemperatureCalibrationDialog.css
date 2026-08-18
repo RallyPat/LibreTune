@@ -1,0 +1,45 @@
+/* TemperatureCalibrationDialog — ThermistorWizard host */
+
+.tempcal-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 560px;
+}
+
+.tempcal-sensor-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.tempcal-sensor-row label {
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.tempcal-sensor-row select {
+  padding: 6px 8px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-size: var(--font-size-sm);
+}
+
+.tempcal-offline {
+  font-size: var(--font-size-xs);
+  color: var(--state-warning-fg, var(--text-secondary));
+}
+
+.tempcal-writing {
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+}
+
+.tempcal-note {
+  margin: 0;
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+}

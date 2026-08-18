@@ -1,0 +1,97 @@
+/* AfrCalibrationDialog — wideband preset picker + curve preview */
+
+.afrcal-body {
+  min-width: 440px;
+  max-width: 560px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.afrcal-subtitle {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.afrcal-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.afrcal-field label {
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.afrcal-field input,
+.afrcal-field select {
+  padding: 6px 8px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-size: var(--font-size-sm);
+}
+
+.afrcal-field input:focus,
+.afrcal-field select:focus {
+  outline: none;
+  border-color: var(--border-focus, var(--accent-primary));
+}
+
+.afrcal-custom-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--space-2) var(--space-3);
+}
+
+.afrcal-hint {
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
+.afrcal-preview {
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  padding: var(--space-2);
+}
+
+.afrcal-preview svg {
+  display: block;
+  width: 100%;
+  height: 120px;
+}
+
+.afrcal-line {
+  stroke: var(--accent-primary);
+}
+
+.afrcal-endpoints {
+  display: flex;
+  justify-content: space-between;
+  margin-top: var(--space-1);
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.afrcal-warning {
+  margin: 0;
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+}
+
+.afrcal-error {
+  margin: 0;
+  padding: var(--space-1) var(--space-2);
+  background: var(--state-error-bg);
+  border: 1px solid var(--state-error-border);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  color: var(--text-primary);
+}

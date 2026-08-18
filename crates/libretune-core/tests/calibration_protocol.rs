@@ -19,9 +19,7 @@ use libretune_core::protocol::calibration::{
     calibration_crc32, firmware_stored_temperature, temperature_calibration_bins,
     O2_CALIBRATION_WIRE_BYTES, TEMP_CALIBRATION_POINTS,
 };
-use libretune_core::protocol::{
-    CalibrationTable, Connection, ConnectionConfig, ConnectionType,
-};
+use libretune_core::protocol::{CalibrationTable, Connection, ConnectionConfig, ConnectionType};
 
 const SIGNATURE: &str = "speeduino 202501";
 
@@ -319,10 +317,7 @@ fn modern_temperature_calibration_single_64_byte_chunk_verified_by_crc() {
     for (i, &stored) in values.iter().enumerate() {
         // The client encoded °F×10; the fixture applied the firmware's exact
         // conversion. Cross-check against the shared helper.
-        let wire = i16::from_le_bytes([
-            st.raw[&1][2 * i],
-            st.raw[&1][2 * i + 1],
-        ]);
+        let wire = i16::from_le_bytes([st.raw[&1][2 * i], st.raw[&1][2 * i + 1]]);
         assert_eq!(stored, firmware_stored_temperature(wire));
     }
 }

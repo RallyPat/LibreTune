@@ -31,14 +31,18 @@ interface DataPoint {
   resistance: number;  // Ohms
 }
 
-interface SteinhartCoefficients {
+export interface SteinhartCoefficients {
   a: number;
   b: number;
   c: number;
 }
 
 interface ThermistorWizardProps {
-  onComplete?: (coefficients: SteinhartCoefficients, lookupTable: number[][]) => void;
+  onComplete?: (
+    coefficients: SteinhartCoefficients,
+    lookupTable: number[][],
+    biasResistor: number,
+  ) => void;
   onCancel?: () => void;
   initialPoints?: DataPoint[];
   biasResistor?: number; // Pullup/pulldown resistor value for ADC calculation
@@ -87,7 +91,7 @@ function calculateSteinhartHart(points: DataPoint[]): SteinhartCoefficients | nu
 }
 
 // Calculate temperature from resistance using Steinhart-Hart
-function resistanceToTemperature(resistance: number, coeffs: SteinhartCoefficients): number {
+export function resistanceToTemperature(resistance: number, coeffs: SteinhartCoefficients): number {
   const lnR = Math.log(resistance);
   const invT = coeffs.a + coeffs.b * lnR + coeffs.c * Math.pow(lnR, 3);
   return toCelsius(1 / invT);
@@ -247,9 +251,9 @@ export default function ThermistorWizard({
   // Handle completion
   const handleComplete = useCallback(() => {
     if (coefficients) {
-      onComplete?.(coefficients, lookupTable);
+      onComplete?.(coefficients, lookupTable, biasResistorValue);
     }
-  }, [coefficients, lookupTable, onComplete]);
+  }, [coefficients, lookupTable, biasResistorValue, onComplete]);
 
   return (
     <div className="thermistor-wizard">

@@ -147,6 +147,9 @@ use commands::restore_points::{
     create_restore_point, delete_restore_point, list_restore_points, load_restore_point,
 };
 use commands::save_tune::{save_tune, save_tune_as};
+use commands::sensor_calibration::{
+    get_temperature_calibration_bins, write_afr_calibration, write_temperature_calibration,
+};
 use commands::settings::{
     get_settings, update_heatmap_custom_stops, update_setting, update_settings,
 };
@@ -377,6 +380,10 @@ pub fn run() {
             burn_to_ecu,
             check_pin_conflicts,
             execute_controller_command,
+            // Sensor calibration (Speeduino calibration space)
+            get_temperature_calibration_bins,
+            write_temperature_calibration,
+            write_afr_calibration,
             get_firmware_flasher_info,
             get_firmware_update_guidance,
             suggest_firmware_companion,
