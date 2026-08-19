@@ -86,6 +86,16 @@
   color: var(--text-secondary);
 }
 
+.afrcal-result {
+  margin: 0;
+  padding: var(--space-1) var(--space-2);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  color: var(--text-primary);
+}
+
 .afrcal-error {
   margin: 0;
   padding: var(--space-1) var(--space-2);

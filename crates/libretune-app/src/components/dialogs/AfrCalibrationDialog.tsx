@@ -3,19 +3,23 @@
  *
  * Builds the 1024-entry ADC→AFR transfer curve for Speeduino's O2
  * calibration space and writes it through the dedicated `t` calibration
- * command. Presets are the linear entries from the Speeduino INI's
- * `std_ms2geno2` reference table; the non-linear ones (`table(...)`
- * solutions) need TunerStudio's bundled .inc files and are omitted.
+ * command. Everything numeric happens on the backend: the preset list, the
+ * curve and the auto-calibration all come from the loaded INI via
+ * `list_calibration_presets` / `preview_afr_calibration`, so a different
+ * firmware — or a MegaSquirt INI — brings its own presets instead of a list
+ * hardcoded here.
  *
- * The ground-offset field exists for a real failure mode: a wideband whose
- * analog ground sits above ECU ground reads uniformly lean (e.g. a 14Point7
- * Spartan 2 grounded at the wrong point shows +0.125 V ≈ +0.25 AFR). The
- * offset shifts the curve so the ECU decodes the voltage it actually sees.
+ * "Detect from sensor power-on" is the thing TunerStudio cannot do. A
+ * 14Point7 Spartan 2 drives two known voltages for ~5 s each at power-on;
+ * recording the AFR channel across a sensor power cycle and handing it to
+ * `auto_calibrate_afr` recovers the wiring error (mostly ground offset) and
+ * fills the two-point editor with the corrected calibration.
  */
 
 import { useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Dialog, Button } from "../common";
+import { useRealtimeStore } from "../../stores/realtimeStore";
 import "./AfrCalibrationDialog.css";
 
 interface AfrCalibrationDialogProps {
@@ -25,27 +29,54 @@ interface AfrCalibrationDialogProps {
   showToast: (msg: string, kind?: "info" | "success" | "error" | "warning") => void;
 }
 
-/** Linear presets from the Speeduino INI std_ms2geno2 solutions list:
- *  AFR(adc) = afr0 + adc * slopePerAdc. */
-const PRESETS: { id: string; name: string; afr0: number; slopePerAdc: number }[] = [
-  { id: "14point7", name: "14Point7 (Spartan) 0–5 V = 10–20", afr0: 10.0001, slopePerAdc: 0.0097752 },
-  { id: "aem-4200", name: "AEM Linear 30-42xx", afr0: 9.72, slopePerAdc: 0.0096665 },
-  { id: "aem-2310", name: "AEM 30-2310 / 30-4900", afr0: 7.3125, slopePerAdc: 0.011608 },
-  { id: "autometer", name: "Autometer 0 V=10:1, 4 V=16:1", afr0: 10, slopePerAdc: 0.0073313783 },
-  { id: "afr500-916", name: "Ballenger AFR500 0 V=9:1, 5 V=16:1", afr0: 9, slopePerAdc: 0.00684262 },
-  { id: "afr500-620", name: "Ballenger AFR500 0 V=6:1, 5 V=20:1", afr0: 6, slopePerAdc: 0.01368524 },
-  { id: "daytona", name: "Daytona TwinTec", afr0: 10.01, slopePerAdc: 0.0097752 },
-  { id: "dynojet", name: "DynoJet Wideband Commander", afr0: 10, slopePerAdc: 0.00784325 },
-  { id: "fast", name: "F.A.S.T. Wideband", afr0: 9.6, slopePerAdc: 0.01357317 },
-  { id: "fueltech-gas", name: "Fueltech WB-O2 Nano (Gasoline)", afr0: 8.37391, slopePerAdc: 0.00796111 },
-  { id: "lc2", name: "Innovate LC-1 / LC-2 Default", afr0: 7.35, slopePerAdc: 0.01470186 },
-  { id: "plx", name: "Innovate / PLX 0–5 V = 10:1–20:1", afr0: 10, slopePerAdc: 0.0097752 },
-  { id: "ngk", name: "NGK Powerdex", afr0: 9, slopePerAdc: 0.0068359375 },
-  { id: "odg1", name: "ODG Wideband – Faixa 1", afr0: 8.347, slopePerAdc: 0.00795792 },
-  { id: "odg2", name: "ODG Wideband – Faixa 2", afr0: 9.1447, slopePerAdc: 0.01013714 },
-  { id: "techedge", name: "TechEdge Linear", afr0: 9, slopePerAdc: 0.0097752 },
-  { id: "zeitronix", name: "Zeitronix Linear Default", afr0: 9.6, slopePerAdc: 0.0097752 },
-];
+/** One `solution` from the INI's O2 reference table. */
+interface AfrPreset {
+  label: string;
+  expression: string | null;
+  generator: string | null;
+  usable: boolean;
+  note: string | null;
+}
+
+interface CalibrationPresets {
+  afr_label: string | null;
+  afr_presets: AfrPreset[];
+  /** `linearGenerator` bounds: (xLow, xHigh, yLow, yHigh) = volts/AFR. */
+  linear_defaults: [number, number, number, number] | null;
+}
+
+interface AfrCurve {
+  /** AFR at each of the 1024 ADC counts. */
+  afr: number[];
+  /** Sparse (volts, AFR) points for plotting. */
+  preview: [number, number][];
+  transfer_function: string;
+  clips: boolean;
+}
+
+interface AutoCalResult {
+  point1: [number, number];
+  point2: [number, number];
+  ground_offset_volts: number;
+  offset_consistency_volts: number;
+  description: string;
+}
+
+interface CalibrationWriteResult {
+  table: string;
+  verified: boolean;
+  verify_note: string | null;
+  transfer_function: string | null;
+}
+
+const CUSTOM = "custom";
+
+/** Seconds of live AFR recorded for the sensor's power-on self-test. The two
+ *  plateaus are ~5 s each; the rest is slack for reaching the key. */
+const CAPTURE_SECONDS = 20;
+
+/** Live channel carrying the wideband reading. */
+const AFR_CHANNEL = "afr";
 
 const STORAGE_KEY = "lt.afrCalibration";
 
@@ -55,7 +86,6 @@ interface StoredSettings {
   customAfr1: number;
   customV2: number;
   customAfr2: number;
-  groundOffsetMv: number;
 }
 
 function loadStored(): Partial<StoredSettings> {
@@ -66,77 +96,176 @@ function loadStored(): Partial<StoredSettings> {
   }
 }
 
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
 export default function AfrCalibrationDialog({
   isOpen,
   onClose,
   connected,
   showToast,
 }: AfrCalibrationDialogProps) {
-  const stored = useMemo(loadStored, [isOpen]);
-  const [presetId, setPresetId] = useState(stored.presetId ?? "14point7");
+  const stored = useMemo(loadStored, []);
+  const [presets, setPresets] = useState<AfrPreset[]>([]);
+  const [customLabel, setCustomLabel] = useState("Custom Linear WB");
+  // Empty until the INI's presets arrive, so the first preview is the one the
+  // user will actually see rather than a throwaway.
+  const [presetId, setPresetId] = useState(stored.presetId ?? "");
   const [customV1, setCustomV1] = useState(stored.customV1 ?? 0);
   const [customAfr1, setCustomAfr1] = useState(stored.customAfr1 ?? 10);
   const [customV2, setCustomV2] = useState(stored.customV2 ?? 5);
   const [customAfr2, setCustomAfr2] = useState(stored.customAfr2 ?? 20);
-  const [groundOffsetMv, setGroundOffsetMv] = useState(stored.groundOffsetMv ?? 0);
+  const [curve, setCurve] = useState<AfrCurve | null>(null);
+  const [autoCal, setAutoCal] = useState<AutoCalResult | null>(null);
+  const [captureLeft, setCaptureLeft] = useState(0);
   const [writing, setWriting] = useState(false);
+  const [writeResult, setWriteResult] = useState<CalibrationWriteResult | null>(null);
+  /** Command failures. Never swallowed: a dialog that reports success while
+   *  doing nothing is this project's worst failure mode. Kept apart from
+   *  `error` so a preview that succeeds cannot hide a preset list that did
+   *  not load. */
+  const [presetsError, setPresetsError] = useState<string | null>(null);
+  /** Last preview / auto-cal / write failure. */
+  const [error, setError] = useState<string | null>(null);
 
-  // Re-hydrate when the dialog reopens (stored recomputes on isOpen).
+  const isCustom = presetId === CUSTOM;
+
+  // The INI's own preset list. Presets that defer to an interactive editor
+  // are not selectable as presets — the linearGenerator one *is* the
+  // two-point editor below, and there is nothing else to point it at.
+  const selectable = useMemo(() => presets.filter((p) => !p.generator), [presets]);
+
   useEffect(() => {
     if (!isOpen) return;
-    const s = loadStored();
-    if (s.presetId) setPresetId(s.presetId);
-    if (s.customV1 !== undefined) setCustomV1(s.customV1);
-    if (s.customAfr1 !== undefined) setCustomAfr1(s.customAfr1);
-    if (s.customV2 !== undefined) setCustomV2(s.customV2);
-    if (s.customAfr2 !== undefined) setCustomAfr2(s.customAfr2);
-    if (s.groundOffsetMv !== undefined) setGroundOffsetMv(s.groundOffsetMv);
+    let live = true;
+    setWriteResult(null);
+    invoke<CalibrationPresets>("list_calibration_presets")
+      .then((p) => {
+        if (!live) return;
+        setPresets(p.afr_presets);
+        setPresetsError(null);
+        const gen = p.afr_presets.find((x) => x.generator === "linearGenerator");
+        if (gen) setCustomLabel(gen.label);
+        const s = loadStored();
+        if (p.linear_defaults && s.customV1 === undefined) {
+          const [xLow, xHigh, yLow, yHigh] = p.linear_defaults;
+          setCustomV1(xLow);
+          setCustomAfr1(yLow);
+          setCustomV2(xHigh);
+          setCustomAfr2(yHigh);
+        }
+        // A stored preset the current INI does not declare must not silently
+        // stay selected — it would preview and write something else.
+        setPresetId((cur) =>
+          cur === CUSTOM || p.afr_presets.some((x) => x.label === cur && x.usable)
+            ? cur
+            : (p.afr_presets.find((x) => x.usable && !x.generator)?.label ?? CUSTOM),
+        );
+      })
+      .catch((e) => {
+        if (!live) return;
+        setPresets([]);
+        setPresetId(CUSTOM);
+        setPresetsError(`Could not read the INI's calibration presets: ${e}`);
+      });
+    return () => {
+      live = false;
+    };
   }, [isOpen]);
 
-  const isCustom = presetId === "custom";
-  const customValid = !isCustom || Math.abs(customV2 - customV1) > 0.01;
-
-  /** AFR as a function of the voltage at the sensor's output pin. */
-  const afrOfVolts = useMemo(() => {
-    if (isCustom) {
-      const slope = (customAfr2 - customAfr1) / (customV2 - customV1 || 1);
-      return (v: number) => customAfr1 + (v - customV1) * slope;
-    }
-    const p = PRESETS.find((p) => p.id === presetId) ?? PRESETS[0];
-    // Preset formulas are per ADC count; 1 V = 1023/5 counts.
-    return (v: number) => p.afr0 + (v * 1023) / 5 * p.slopePerAdc;
-  }, [presetId, isCustom, customV1, customAfr1, customV2, customAfr2]);
-
-  /** The full 1024-entry curve, ground offset applied: the ECU's ADC sees
-   *  the sensor voltage plus the offset, so the AFR that voltage really
-   *  means is the curve evaluated at (measured − offset). */
-  const curve = useMemo(() => {
-    const offsetV = groundOffsetMv / 1000;
-    const out = new Array<number>(1024);
-    for (let adc = 0; adc < 1024; adc++) {
-      const measuredV = (adc * 5) / 1023;
-      const afr = afrOfVolts(measuredV - offsetV);
-      out[adc] = Math.min(25.5, Math.max(0, afr));
-    }
-    return out;
-  }, [afrOfVolts, groundOffsetMv]);
+  // Live preview. The curve is whatever the backend would actually write, so
+  // what is plotted and what is sent can never drift apart.
+  useEffect(() => {
+    if (!isOpen || !presetId) return;
+    let live = true;
+    const args = isCustom
+      ? { linear: [[customV1, customAfr1], [customV2, customAfr2]] }
+      : { preset: presetId };
+    invoke<AfrCurve>("preview_afr_calibration", args)
+      .then((c) => {
+        if (!live) return;
+        setCurve(c);
+        setError(null);
+      })
+      .catch((e) => {
+        if (!live) return;
+        setCurve(null);
+        setError(String(e));
+      });
+    return () => {
+      live = false;
+    };
+  }, [isOpen, presetId, isCustom, customV1, customAfr1, customV2, customAfr2]);
 
   const previewPath = useMemo(() => {
+    if (!curve) return "";
     const w = 360;
     const h = 120;
     const afrMin = 5;
     const afrMax = 26;
-    const pts: string[] = [];
-    for (let adc = 0; adc < 1024; adc += 16) {
-      const x = (adc / 1023) * w;
-      const y = h - ((curve[adc] - afrMin) / (afrMax - afrMin)) * h;
-      pts.push(`${x.toFixed(1)},${Math.min(h, Math.max(0, y)).toFixed(1)}`);
-    }
-    return pts.join(" ");
+    return curve.preview
+      .map(([volts, afr]) => {
+        const x = (volts / 5) * w;
+        const y = h - ((afr - afrMin) / (afrMax - afrMin)) * h;
+        return `${x.toFixed(1)},${Math.min(h, Math.max(0, y)).toFixed(1)}`;
+      })
+      .join(" ");
   }, [curve]);
 
+  /** Record the live AFR channel across a sensor power cycle and solve the
+   *  corrected two-point calibration from the startup plateaus. */
+  async function handleDetect() {
+    if (!curve) return;
+    setError(null);
+    setAutoCal(null);
+    const t0 = Date.now();
+    const samples: [number, number][] = [];
+    // Subscribe on the update timestamp, not on the AFR value: during a
+    // plateau the value is constant, and a value-keyed subscription would
+    // record one sample for the whole window instead of a flat run.
+    const unsubscribe = useRealtimeStore.subscribe(
+      (s) => s.lastUpdateTime,
+      () => {
+        const afr = useRealtimeStore.getState().channels[AFR_CHANNEL];
+        if (Number.isFinite(afr)) samples.push([(Date.now() - t0) / 1000, afr]);
+      },
+    );
+    try {
+      for (let left = CAPTURE_SECONDS; left > 0; left--) {
+        setCaptureLeft(left);
+        await sleep(1000);
+      }
+    } finally {
+      unsubscribe();
+      setCaptureLeft(0);
+    }
+    if (samples.length === 0) {
+      setError(
+        "No AFR samples arrived during the recording — the ECU was not " +
+          "streaming, or the log has no 'afr' channel.",
+      );
+      return;
+    }
+    try {
+      const result = await invoke<AutoCalResult>("auto_calibrate_afr", {
+        samples,
+        currentCurve: curve.afr,
+      });
+      setAutoCal(result);
+      setPresetId(CUSTOM);
+      setCustomV1(result.point1[0]);
+      setCustomAfr1(result.point1[1]);
+      setCustomV2(result.point2[0]);
+      setCustomAfr2(result.point2[1]);
+    } catch (e) {
+      setError(`Auto-calibration failed: ${e}`);
+    }
+  }
+
   async function handleWrite() {
+    if (!curve) return;
     setWriting(true);
+    setError(null);
+    setWriteResult(null);
     try {
       localStorage.setItem(
         STORAGE_KEY,
@@ -146,13 +275,21 @@ export default function AfrCalibrationDialog({
           customAfr1,
           customV2,
           customAfr2,
-          groundOffsetMv,
         } satisfies StoredSettings),
       );
-      await invoke("write_afr_calibration", { afrValues: curve });
-      showToast("AFR sensor calibration written to ECU", "success");
-      onClose();
+      const result = await invoke<CalibrationWriteResult>("write_afr_calibration", {
+        afrValues: curve.afr,
+        transferFunction: curve.transfer_function,
+      });
+      setWriteResult(result);
+      showToast(
+        result.verified
+          ? "AFR sensor calibration written and verified"
+          : "AFR sensor calibration written, but not verified",
+        result.verified ? "success" : "warning",
+      );
     } catch (e) {
+      setError(`Failed to write AFR calibration: ${e}`);
       showToast("Failed to write AFR calibration: " + e, "error");
     } finally {
       setWriting(false);
@@ -160,6 +297,7 @@ export default function AfrCalibrationDialog({
   }
 
   const fmt = (v: number) => v.toFixed(2);
+  const capturing = captureLeft > 0;
 
   return (
     <Dialog open={isOpen} onClose={onClose} title="Calibrate AFR Sensor" size="md">
@@ -171,14 +309,23 @@ export default function AfrCalibrationDialog({
         </p>
 
         <div className="afrcal-field">
-          <label>Wideband controller</label>
-          <select value={presetId} onChange={(e) => setPresetId(e.target.value)}>
-            {PRESETS.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
+          <label htmlFor="afrcal-preset">Wideband controller</label>
+          <select
+            id="afrcal-preset"
+            value={presetId}
+            onChange={(e) => setPresetId(e.target.value)}
+          >
+            {selectable.map((p) => (
+              <option
+                key={p.label}
+                value={p.label}
+                disabled={!p.usable}
+                title={p.note ?? undefined}
+              >
+                {p.usable ? p.label : `${p.label} (unavailable)`}
               </option>
             ))}
-            <option value="custom">Custom Linear WB…</option>
+            <option value={CUSTOM}>{customLabel}…</option>
           </select>
         </div>
 
@@ -224,33 +371,54 @@ export default function AfrCalibrationDialog({
         )}
 
         <div className="afrcal-field">
-          <label>
-            Ground offset (mV) — voltage the ECU reads <em>above</em> the
-            sensor's true output
-          </label>
-          <input
-            type="number"
-            step="5"
-            value={groundOffsetMv}
-            onChange={(e) => setGroundOffsetMv(parseFloat(e.target.value) || 0)}
-          />
+          <Button
+            variant="secondary"
+            onClick={handleDetect}
+            disabled={!connected || !curve || capturing || writing}
+          >
+            {capturing
+              ? `Recording… ${captureLeft}s — power-cycle the sensor now`
+              : "Detect from sensor power-on"}
+          </Button>
           <span className="afrcal-hint">
-            Non-zero only when the controller is grounded away from the ECU
-            ground point. Measure it by logging the controller's test/sequencer
-            plateaus, or fix the wiring and leave this at 0.
+            Records {CAPTURE_SECONDS}s of the live AFR channel. Start it, then
+            cycle power to the wideband: its two startup plateaus are
+            sensor-generated, so the difference between what it sent and what
+            the ECU read is the wiring error. Needs the ECU streaming.
           </span>
         </div>
+
+        {autoCal && (
+          <p className="afrcal-result">
+            {autoCal.description}
+            {Math.abs(autoCal.offset_consistency_volts) > 0.05 &&
+              " — the two plateaus disagree, so this is not a simple ground offset; check the fit before writing."}
+          </p>
+        )}
 
         <div className="afrcal-preview">
           <svg viewBox="0 0 360 120" preserveAspectRatio="none" aria-hidden>
             <polyline points={previewPath} fill="none" strokeWidth="2" className="afrcal-line" />
           </svg>
           <div className="afrcal-endpoints">
-            <span>0 V → {fmt(curve[0])}</span>
-            <span>2.5 V → {fmt(curve[512])}</span>
-            <span>5 V → {fmt(curve[1023])}</span>
+            {curve ? (
+              <>
+                <span>0 V → {fmt(curve.afr[0])}</span>
+                <span>2.5 V → {fmt(curve.afr[512])}</span>
+                <span>5 V → {fmt(curve.afr[1023])}</span>
+              </>
+            ) : (
+              <span>No curve.</span>
+            )}
           </div>
         </div>
+
+        {curve?.clips && (
+          <p className="afrcal-error">
+            This curve leaves the 0.0–25.5 AFR the wire format can carry; the
+            ends will be flat-topped in the ECU.
+          </p>
+        )}
 
         <p className="afrcal-warning">
           Write with the engine off. On the legacy serial protocol the ECU
@@ -258,18 +426,24 @@ export default function AfrCalibrationDialog({
           on the CRC protocol the write is verified automatically.
         </p>
         {!connected && <p className="afrcal-error">Not connected to an ECU.</p>}
-        {!customValid && (
-          <p className="afrcal-error">The two custom points need different voltages.</p>
+        {presetsError && <p className="afrcal-error">{presetsError}</p>}
+        {error && <p className="afrcal-error">{error}</p>}
+        {writeResult && (
+          <p className={writeResult.verified ? "afrcal-result" : "afrcal-error"}>
+            {writeResult.verified
+              ? `Written and verified by read-back${writeResult.transfer_function ? `: ${writeResult.transfer_function}` : ""}.`
+              : `Written, but NOT verified. ${writeResult.verify_note ?? ""}`}
+          </p>
         )}
       </Dialog.Body>
       <Dialog.Footer>
         <Button variant="secondary" onClick={onClose}>
-          Cancel
+          {writeResult ? "Close" : "Cancel"}
         </Button>
         <Button
           variant="primary"
           onClick={handleWrite}
-          disabled={!connected || writing || !customValid}
+          disabled={!connected || writing || capturing || !curve}
         >
           {writing ? "Writing…" : "Write Calibration"}
         </Button>
