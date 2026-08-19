@@ -42,6 +42,9 @@ interface ThermistorWizardProps {
     coefficients: SteinhartCoefficients,
     lookupTable: number[][],
     biasResistor: number,
+    /** The three (°C, Ω) points the fit was solved through, for a backend
+     *  that needs to redo the fit at the ECU's own ADC bins. */
+    fitPoints: [number, number][],
   ) => void;
   onCancel?: () => void;
   initialPoints?: DataPoint[];
@@ -54,25 +57,34 @@ const toKelvin = (celsius: number): number => celsius + 273.15;
 // Convert Kelvin to Celsius
 const toCelsius = (kelvin: number): number => kelvin - 273.15;
 
+/**
+ * The three (temperature °C, resistance Ω) points the fit is solved
+ * through — coldest, middle, hottest — for best accuracy across the range.
+ *
+ * Exported so a caller that hands the fit to a backend solves it through the
+ * same three points this wizard previewed.
+ */
+export function selectFitPoints(points: DataPoint[]): [number, number][] {
+  const sorted = [...points].sort((a, b) => a.temperature - b.temperature);
+  return [sorted[0], sorted[Math.floor(sorted.length / 2)], sorted[sorted.length - 1]]
+    .map((p) => [p.temperature, p.resistance] as [number, number]);
+}
+
 // Calculate Steinhart-Hart coefficients from 3 data points
 function calculateSteinhartHart(points: DataPoint[]): SteinhartCoefficients | null {
   if (points.length < 3) return null;
-  
-  // Use first, middle, and last points for best accuracy
-  const sortedPoints = [...points].sort((a, b) => a.temperature - b.temperature);
-  const p1 = sortedPoints[0];
-  const p2 = sortedPoints[Math.floor(sortedPoints.length / 2)];
-  const p3 = sortedPoints[sortedPoints.length - 1];
-  
+
+  const [[t1, r1], [t2, r2], [t3, r3]] = selectFitPoints(points);
+
   // Convert to Kelvin
-  const T1 = toKelvin(p1.temperature);
-  const T2 = toKelvin(p2.temperature);
-  const T3 = toKelvin(p3.temperature);
-  
+  const T1 = toKelvin(t1);
+  const T2 = toKelvin(t2);
+  const T3 = toKelvin(t3);
+
   // Natural log of resistances
-  const L1 = Math.log(p1.resistance);
-  const L2 = Math.log(p2.resistance);
-  const L3 = Math.log(p3.resistance);
+  const L1 = Math.log(r1);
+  const L2 = Math.log(r2);
+  const L3 = Math.log(r3);
   
   // Intermediate calculations
   const Y1 = 1 / T1;
@@ -251,9 +263,9 @@ export default function ThermistorWizard({
   // Handle completion
   const handleComplete = useCallback(() => {
     if (coefficients) {
-      onComplete?.(coefficients, lookupTable, biasResistorValue);
+      onComplete?.(coefficients, lookupTable, biasResistorValue, selectFitPoints(dataPoints));
     }
-  }, [coefficients, lookupTable, biasResistorValue, onComplete]);
+  }, [coefficients, lookupTable, biasResistorValue, dataPoints, onComplete]);
 
   return (
     <div className="thermistor-wizard">

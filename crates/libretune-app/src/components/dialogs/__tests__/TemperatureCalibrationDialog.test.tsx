@@ -4,58 +4,56 @@ import TemperatureCalibrationDialog from '../TemperatureCalibrationDialog';
 import { setupTauriMocks, tearDownTauriMocks } from '../../../test-utils/tauriMocks';
 import { invoke } from '@tauri-apps/api/core';
 
-const LEGACY_BINS = Array.from({ length: 32 }, (_, x) => x * 32);
+/** 32 temperatures, hot at ADC 0 (NTC on the bottom of the divider). */
+const CURVE = Array.from({ length: 32 }, (_, i) => 150 - i * 6);
 
-function writeCall(): { sensor: string; tempsC: number[] } | null {
-  const call = (invoke as any).mock.calls.find(
-    (c: any[]) => c[0] === 'write_temperature_calibration',
-  );
-  return call ? call[1] : null;
+function call(cmd: string): any | null {
+  const c = (invoke as any).mock.calls.find((x: any[]) => x[0] === cmd);
+  return c ? c[1] : null;
+}
+
+/** Walk the wizard: Data Entry → Curve Fit → Generate Table → apply. */
+function applyWizard() {
+  fireEvent.click(screen.getByRole('button', { name: /next/i }));
+  fireEvent.click(screen.getByRole('button', { name: /next/i }));
+  fireEvent.click(screen.getByRole('button', { name: /apply calibration/i }));
 }
 
 describe('TemperatureCalibrationDialog', () => {
   beforeEach(() => {
     setupTauriMocks({
-      get_temperature_calibration_bins: {
-        bins: LEGACY_BINS,
-        modern_protocol: false,
-        connected: true,
+      build_thermistor_curve: CURVE,
+      write_temperature_calibration: {
+        table: 'clt',
+        verified: true,
+        verify_note: null,
+        transfer_function: '-36.0–150.0 °C across 32 ADC bins',
       },
-      write_temperature_calibration: null,
     });
   });
 
   afterEach(() => tearDownTauriMocks());
 
-  it('fits the wizard defaults and writes 32 temperatures at the ECU bins', async () => {
+  it('fits on the backend at the ECU bins and writes the returned 32 points', async () => {
     render(
-      <TemperatureCalibrationDialog
-        isOpen
-        onClose={() => {}}
-        connected
-        showToast={vi.fn()}
-      />,
+      <TemperatureCalibrationDialog isOpen onClose={() => {}} connected showToast={vi.fn()} />,
     );
 
-    // Walk the wizard: Data Entry → Curve Fit → Generate Table.
-    fireEvent.click(screen.getByRole('button', { name: /next/i }));
-    fireEvent.click(screen.getByRole('button', { name: /next/i }));
-    fireEvent.click(screen.getByRole('button', { name: /apply calibration/i }));
+    applyWizard();
 
-    await waitFor(() => expect(writeCall()).not.toBeNull());
-    const { sensor, tempsC } = writeCall()!;
+    await waitFor(() => expect(call('build_thermistor_curve')).not.toBeNull());
+    const { biasResistor, points } = call('build_thermistor_curve');
+    expect(biasResistor).toBe(2490);
+    // The wizard's three defaults, coldest → hottest, as (°C, Ω).
+    expect(points).toEqual([[-40, 100000], [20, 2500], [100, 200]]);
+
+    await waitFor(() => expect(call('write_temperature_calibration')).not.toBeNull());
+    const { sensor, tempsC } = call('write_temperature_calibration');
     expect(sensor).toBe('clt');
-    expect(tempsC).toHaveLength(32);
+    // Written verbatim: the frontend does not re-derive what the backend fitted.
+    expect(tempsC).toEqual(CURVE);
 
-    // NTC on the bottom of the divider: low ADC = low resistance = hot.
-    expect(tempsC[0]).toBeGreaterThan(tempsC[31]);
-    expect(tempsC[0]).toBeGreaterThan(100);
-    expect(tempsC[31]).toBeLessThan(0);
-    for (const t of tempsC) {
-      expect(Number.isFinite(t)).toBe(true);
-      expect(t).toBeGreaterThanOrEqual(-60);
-      expect(t).toBeLessThanOrEqual(300);
-    }
+    expect(await screen.findByText(/verified by read-back/i)).toBeInTheDocument();
   });
 
   it('does not write when disconnected', async () => {
@@ -69,11 +67,26 @@ describe('TemperatureCalibrationDialog', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: /next/i }));
-    fireEvent.click(screen.getByRole('button', { name: /next/i }));
-    fireEvent.click(screen.getByRole('button', { name: /apply calibration/i }));
+    applyWizard();
 
     await waitFor(() => expect(showToast).toHaveBeenCalled());
-    expect(writeCall()).toBeNull();
+    expect(call('write_temperature_calibration')).toBeNull();
+    expect(screen.getByText(/not connected to an ECU/i)).toBeInTheDocument();
+  });
+
+  it('shows a backend failure in the dialog', async () => {
+    (invoke as any).mockImplementation((cmd: string) =>
+      cmd === 'build_thermistor_curve'
+        ? Promise.reject('the three thermistor points are collinear in log-resistance')
+        : Promise.resolve(),
+    );
+    render(
+      <TemperatureCalibrationDialog isOpen onClose={() => {}} connected showToast={vi.fn()} />,
+    );
+
+    applyWizard();
+
+    expect(await screen.findByText(/collinear in log-resistance/)).toBeInTheDocument();
+    expect(call('write_temperature_calibration')).toBeNull();
   });
 });

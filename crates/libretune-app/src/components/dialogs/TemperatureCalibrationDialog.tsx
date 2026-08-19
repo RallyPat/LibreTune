@@ -3,20 +3,17 @@
  * Thermistor Tables").
  *
  * Hosts the ThermistorWizard (Steinhart–Hart fit from datasheet points) and
- * turns its result into Speeduino's 32-point calibration curve: the fitted
- * sensor curve is sampled at the exact ADC bins the connected firmware will
- * assign (they differ between the legacy and CRC protocol paths), converted
- * through the ECU's bias-resistor divider, and written to the calibration
- * space with the dedicated `t` command.
+ * turns its result into Speeduino's 32-point calibration curve. The fit is
+ * redone on the backend by `build_thermistor_curve`, which samples it at the
+ * exact ADC bins the connected firmware will assign — the legacy and CRC
+ * protocol paths assign different bins, and a curve sampled at the wrong ones
+ * is written to the wrong ADC points.
  */
 
 import { useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Dialog } from "../common";
-import ThermistorWizard, {
-  resistanceToTemperature,
-  type SteinhartCoefficients,
-} from "../wizards/ThermistorWizard";
+import ThermistorWizard from "../wizards/ThermistorWizard";
 import "./TemperatureCalibrationDialog.css";
 
 interface TemperatureCalibrationDialogProps {
@@ -26,32 +23,14 @@ interface TemperatureCalibrationDialogProps {
   showToast: (msg: string, kind?: "info" | "success" | "error" | "warning") => void;
 }
 
-interface CalibrationBinsInfo {
-  bins: number[];
-  modern_protocol: boolean;
-  connected: boolean;
+interface CalibrationWriteResult {
+  table: string;
+  verified: boolean;
+  verify_note: string | null;
+  transfer_function: string | null;
 }
 
 type SensorKind = "clt" | "iat";
-
-/** Temperature at one ADC count, via the ECU's divider (pull-up bias to 5 V,
- *  thermistor to ground: ADC = 1023·R/(R+bias)) and the fitted curve. The
- *  Steinhart–Hart extrapolation degenerates toward 0 K at both extremes of
- *  the ADC range, so out-of-range results clamp to the hot end below
- *  mid-scale and the cold end above it. */
-function temperatureAtAdc(
-  adc: number,
-  bias: number,
-  coeffs: SteinhartCoefficients,
-): number {
-  const a = Math.min(1022, Math.max(1, adc));
-  const resistance = (bias * a) / (1023 - a);
-  const t = resistanceToTemperature(resistance, coeffs);
-  if (!Number.isFinite(t) || t < -60 || t > 300) {
-    return adc < 512 ? 300 : -60;
-  }
-  return t;
-}
 
 export default function TemperatureCalibrationDialog({
   isOpen,
@@ -61,27 +40,43 @@ export default function TemperatureCalibrationDialog({
 }: TemperatureCalibrationDialogProps) {
   const [sensor, setSensor] = useState<SensorKind>("clt");
   const [writing, setWriting] = useState(false);
+  const [writeResult, setWriteResult] = useState<CalibrationWriteResult | null>(null);
+  /** Last command failure. Shown in the dialog, never only toasted away. */
+  const [error, setError] = useState<string | null>(null);
 
   async function handleComplete(
-    coeffs: SteinhartCoefficients,
+    _coeffs: unknown,
     _lookupTable: number[][],
     biasResistor: number,
+    fitPoints: [number, number][],
   ) {
     if (!connected) {
+      setError("Not connected to an ECU — calibration not written.");
       showToast("Not connected to an ECU — calibration not written.", "warning");
       return;
     }
     setWriting(true);
+    setError(null);
+    setWriteResult(null);
     try {
-      const info = await invoke<CalibrationBinsInfo>("get_temperature_calibration_bins");
-      const tempsC = info.bins.map((adc) => temperatureAtAdc(adc, biasResistor, coeffs));
-      await invoke("write_temperature_calibration", { sensor, tempsC });
+      const tempsC = await invoke<number[]>("build_thermistor_curve", {
+        biasResistor,
+        points: fitPoints,
+      });
+      const result = await invoke<CalibrationWriteResult>("write_temperature_calibration", {
+        sensor,
+        tempsC,
+      });
+      setWriteResult(result);
+      const name = sensor === "clt" ? "Coolant" : "Intake air";
       showToast(
-        `${sensor === "clt" ? "Coolant" : "Intake air"} sensor calibration written to ECU`,
-        "success",
+        result.verified
+          ? `${name} sensor calibration written and verified`
+          : `${name} sensor calibration written, but not verified`,
+        result.verified ? "success" : "warning",
       );
-      onClose();
     } catch (e) {
+      setError(String(e));
       showToast("Failed to write calibration: " + e, "error");
     } finally {
       setWriting(false);
@@ -107,11 +102,18 @@ export default function TemperatureCalibrationDialog({
           {writing && <span className="tempcal-writing">Writing…</span>}
         </div>
         <ThermistorWizard onComplete={handleComplete} onCancel={onClose} />
+        {error && <p className="tempcal-error">{error}</p>}
+        {writeResult && (
+          <p className={writeResult.verified ? "tempcal-note" : "tempcal-error"}>
+            {writeResult.verified
+              ? `Written and verified by read-back${writeResult.transfer_function ? `: ${writeResult.transfer_function}` : ""}.`
+              : `Written, but NOT verified. ${writeResult.verify_note ?? ""}`}
+          </p>
+        )}
         <p className="tempcal-note">
-          "Apply Calibration" samples the fitted curve at the 32 ADC points the
-          connected ECU uses and writes them with the engine off. On the legacy
-          serial protocol there is no acknowledgement; verify the gauge reads
-          sensibly afterwards.
+          "Apply Calibration" refits the curve on the ECU's own 32 ADC points
+          and writes it with the engine off. On the legacy serial protocol
+          there is no read-back; verify the gauge reads sensibly afterwards.
         </p>
       </Dialog.Body>
     </Dialog>

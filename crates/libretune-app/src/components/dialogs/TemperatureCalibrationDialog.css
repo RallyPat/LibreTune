@@ -43,3 +43,13 @@
   font-size: var(--font-size-xs);
   color: var(--text-secondary);
 }
+
+.tempcal-error {
+  margin: 0;
+  padding: var(--space-1) var(--space-2);
+  background: var(--state-error-bg);
+  border: 1px solid var(--state-error-border);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  color: var(--text-primary);
+}
