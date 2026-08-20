@@ -55,7 +55,13 @@ function formatBinLabel(val: number): string {
   return val.toFixed(1);
 }
 
-/** How often to paint axis labels so they don't overlap (~36px apart). */
+/**
+ * How often to paint X-axis labels so a wide number doesn't bleed into the
+ * next column. Y-axis rows don't need this: each row label already sits in
+ * its own CSS Grid row, which never overlaps a neighboring row regardless of
+ * how short the row is — thinning it only hid real bin values for no reason
+ * (half the rows going blank on anything much past 12 bins).
+ */
 function axisLabelStep(count: number, cellPx: number): number {
   if (count <= 12) return 1;
   const maxLabels = Math.max(6, Math.floor((count * cellPx) / 36));
@@ -437,7 +443,6 @@ export default function TableGrid({
   const dataCol = fitPx ? `${fitPx.col}px` : compact ? '3.5rem' : '3rem';
   const colPx = fitPx?.col ?? (compact ? 56 : 48);
   const xLabelStep = axisLabelStep(x_size, colPx);
-  const yLabelStep = axisLabelStep(y_size, fitPx?.row ?? 32);
   const showCellNumbers = colPx >= 26;
   const cellDecimals = colPx < 34 ? 0 : 1;
   const gridTemplateColumns = `${axisCol} repeat(${x_size}, ${dataCol})`;
@@ -524,17 +529,13 @@ export default function TableGrid({
         ) : (
           <div
             key={`y-${y}`}
-            className={`axis-bin-label y-bin ${isYHeaderSelected ? 'selected' : ''}${
-              shouldShowAxisLabel(y, y_size, yLabelStep) ? '' : ' axis-bin-label--tick'
-            }`}
+            className={`axis-bin-label y-bin ${isYHeaderSelected ? 'selected' : ''}`}
             title={formatBinLabel(y_bins[y])}
             onMouseDown={e => handleHeaderMouseDown(e, 'y', y)}
             onMouseEnter={() => handleHeaderMouseEnter('y', y)}
             onDoubleClick={() => handleHeaderDoubleClick('y', y)}
           >
-            {shouldShowAxisLabel(y, y_size, yLabelStep)
-              ? formatBinLabel(y_bins[y])
-              : ''}
+            {formatBinLabel(y_bins[y])}
           </div>
         );
 
