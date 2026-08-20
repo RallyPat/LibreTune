@@ -62,6 +62,22 @@ export default function SignatureMismatchDialog({
   const [searchError, setSearchError] = useState<string | null>(null);
   const [browsing, setBrowsing] = useState(false);
 
+  // Auto-offer the online match on a genuine mismatch — TunerStudio does
+  // this automatically rather than requiring the user to dig for a
+  // "Search Online" button. Pre-fetches results as soon as a mismatch is
+  // reported (not just when the user opens the online tab), and jumps
+  // straight to that tab when there's no local match at all, since the
+  // local tab has nothing useful to show in that case. Still requires an
+  // explicit click to actually download anything (see handleDownload) —
+  // this only automates the *search*, never applies an INI on its own.
+  useEffect(() => {
+    if (!mismatchInfo) return;
+    if (mismatchInfo.matching_inis.length === 0) {
+      setShowOnlineSearch(true);
+    }
+    checkConnectivity();
+  }, [mismatchInfo?.ecu_signature]);
+
   // Check internet connectivity when online search is opened
   useEffect(() => {
     if (showOnlineSearch && hasInternet === null) {
