@@ -400,6 +400,7 @@ impl EcuDefinition {
             name: name.to_string(),
             title: title.to_string(),
             components,
+            layout_hint: None,
         })
     }
 

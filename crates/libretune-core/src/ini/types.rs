@@ -581,6 +581,14 @@ pub struct DialogDefinition {
     pub title: String,
     /// Components within the dialog
     pub components: Vec<DialogComponent>,
+    /// Layout hint from `dialog = name, "title", <hint>` (e.g. "xAxis" —
+    /// arrange top-level, unpositioned panels in a horizontal row instead
+    /// of the default vertical stack). Only "xAxis" is currently acted on
+    /// by the renderer; other values (seen in the wild: "border", used with
+    /// per-panel West/East/North/South/Center positions, which this app
+    /// already supports separately) are captured but not yet interpreted.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub layout_hint: Option<String>,
 }
 
 /// Components that can exist inside a dialog

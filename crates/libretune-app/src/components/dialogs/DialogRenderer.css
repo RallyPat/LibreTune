@@ -58,8 +58,26 @@
    sub-element into full width (multi-column split, embedded 2D table,
    hardware-test grid, wide command-button panel) needs the container to
    stay uncapped for that to actually reach full width. */
-.dialog-view .dialog-container:not(:has(.dialog-row-container)):not(:has(.nested-panel--multi)):not(:has(.table-editor-2d)):not(:has(.hardware-test-layout)):not(:has(.nested-panel--compact-commands)):not(:has(.curve-editor)) {
+.dialog-view .dialog-container:not(:has(.dialog-row-container)):not(:has(.nested-panel--multi)):not(:has(.table-editor-2d)):not(:has(.hardware-test-layout)):not(:has(.nested-panel--compact-commands)):not(:has(.curve-editor)):not(:has(.dialog-row-xaxis)) {
   max-width: 720px;
+}
+
+/* dialog = name, "title", xAxis — top-level unpositioned panels side by
+   side (TunerStudio's own layout for e.g. Short term fuel trim/Closed
+   loop: Bank 1 | Settings | Bank 2). Wraps instead of squeezing on a
+   narrow window, same responsive approach used elsewhere in this file. */
+.dialog-view .dialog-row-xaxis {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: start;
+  gap: 12px;
+  width: 100%;
+  container-type: inline-size;
+}
+
+.dialog-view .dialog-row-xaxis > * {
+  flex: 1 1 280px;
+  min-width: 0;
 }
 
 /* Multi-column layout support for dialogs with East/West positioned panels.
