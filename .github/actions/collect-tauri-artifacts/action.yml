@@ -1,0 +1,107 @@
+name: Collect Tauri artifacts
+description: Copy built Tauri bundles into a destination folder; fail if nothing found
+
+inputs:
+  platform:
+    description: linux | windows | macos
+    required: true
+  dest:
+    description: Destination directory (created if missing)
+    required: true
+  require_files:
+    description: If true, fail when no artifacts are copied
+    required: false
+    default: "true"
+
+runs:
+  using: composite
+  steps:
+    - name: Collect artifacts
+      shell: bash
+      run: |
+        set -euo pipefail
+        DEST="${{ inputs.dest }}"
+        PLATFORM="${{ inputs.platform }}"
+        mkdir -p "$DEST"
+        ROOT="${GITHUB_WORKSPACE:-$(pwd)}"
+        # Workspace Cargo.toml lives at repo root → bundles under $ROOT/target
+        # Older layouts sometimes wrote under crates/libretune-app/src-tauri/target
+        SEARCH_ROOTS=(
+          "$ROOT/target"
+          "$ROOT/crates/libretune-app/src-tauri/target"
+        )
+
+        copied=0
+        copy_glob() {
+          local pattern="$1"
+          local dest_name="${2:-}"
+          # nullglob-like: expand safely
+          shopt -s nullglob
+          local matches=($pattern)
+          shopt -u nullglob
+          local f
+          for f in "${matches[@]}"; do
+            if [ -f "$f" ]; then
+              if [ -n "$dest_name" ]; then
+                cp "$f" "$DEST/$dest_name"
+              else
+                cp "$f" "$DEST/$(basename "$f")"
+              fi
+              echo "copied: $f"
+              copied=$((copied + 1))
+            fi
+          done
+        }
+
+        case "$PLATFORM" in
+          linux)
+            for root in "${SEARCH_ROOTS[@]}"; do
+              copy_glob "$root/*/release/bundle/appimage/*.AppImage"
+              copy_glob "$root/*/release/bundle/deb/*.deb"
+              copy_glob "$root/*/release/bundle/rpm/*.rpm"
+            done
+            ;;
+          windows)
+            for root in "${SEARCH_ROOTS[@]}"; do
+              copy_glob "$root/*/release/bundle/nsis/*.exe"
+              copy_glob "$root/*/release/bundle/msi/*.msi"
+              # Portable / --no-bundle builds
+              if [ -f "$root/x86_64-pc-windows-msvc/release/libretune-app.exe" ]; then
+                cp "$root/x86_64-pc-windows-msvc/release/libretune-app.exe" \
+                  "$DEST/LibreTune-portable.exe"
+                echo "copied portable exe"
+                copied=$((copied + 1))
+              fi
+            done
+            ;;
+          macos)
+            for root in "${SEARCH_ROOTS[@]}"; do
+              copy_glob "$root/*/release/bundle/dmg/*.dmg"
+              shopt -s nullglob
+              apps=("$root"/*/release/bundle/macos/*.app)
+              shopt -u nullglob
+              for app in "${apps[@]+"${apps[@]}"}"; do
+                [ -d "$app" ] || continue
+                zip_name="$DEST/$(basename "$app" .app).zip"
+                abs_zip="$(cd "$(dirname "$zip_name")" && pwd)/$(basename "$zip_name")"
+                (
+                  cd "$(dirname "$app")"
+                  zip -r "$abs_zip" "$(basename "$app")"
+                )
+                echo "zipped: $app -> $zip_name"
+                copied=$((copied + 1))
+              done
+            done
+            ;;
+          *)
+            echo "Unknown platform: $PLATFORM"
+            exit 1
+            ;;
+        esac
+
+        echo "=== Artifacts in $DEST ==="
+        ls -lh "$DEST" || true
+        if [ "$copied" -eq 0 ] && [ "${{ inputs.require_files }}" = "true" ]; then
+          echo "ERROR: no Tauri artifacts found for platform=$PLATFORM"
+          exit 1
+        fi
