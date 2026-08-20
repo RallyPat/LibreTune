@@ -21,7 +21,26 @@ export function CommandButton({
   const [isExecuting, setIsExecuting] = useState(false);
   const [showWarning, setShowWarning] = useState(false);
   const [warningsDisabled, setWarningsDisabled] = useState(false);
+  const [displayLabel, setDisplayLabel] = useState(comp.label ?? '');
   const { showToast } = useToast();
+
+  // Many INI-defined "buttons" are actually live status readouts (no
+  // `command`, a label like "{ bitStringValue(stftStateList, 2) }"). Without
+  // this they rendered the raw braced expression text instead of the
+  // evaluated state — evaluate_string_expression passes plain labels through
+  // unchanged, so this is safe to run on every label.
+  useEffect(() => {
+    if (!comp.label) {
+      setDisplayLabel('');
+      return;
+    }
+    invoke<string>('evaluate_string_expression', { expression: comp.label, context })
+      .then(setDisplayLabel)
+      .catch((err) => {
+        console.error('Error evaluating command button label:', err);
+        setDisplayLabel(comp.label ?? '');
+      });
+  }, [comp.label, context]);
 
   // Load warning preference from localStorage
   useEffect(() => {
@@ -55,7 +74,7 @@ export function CommandButton({
         new Promise((_, reject) => setTimeout(() => reject(new Error('Command timed out')), timeoutMs)),
       ]);
 
-      showToast(`${comp.label ?? comp.command} sent to ECU`, 'success');
+      showToast(`${displayLabel || comp.command} sent to ECU`, 'success');
     } catch (err) {
       console.error('Command execution failed:', err);
       alert(`Command failed: ${err}`);
@@ -98,7 +117,7 @@ export function CommandButton({
           onClick={handleClick}
           disabled={!isEnabled || isExecuting}
         >
-          {isExecuting ? 'Executing...' : comp.label}
+          {isExecuting ? 'Executing...' : displayLabel}
         </button>
       </div>
 
