@@ -27,6 +27,9 @@ export interface DialogDefinition {
   name: string;
   title: string;
   components: DialogComponent[];
+  /** From `dialog = name, "title", <hint>` — "xAxis" arranges top-level,
+   * unpositioned panels in a horizontal row instead of stacking them. */
+  layout_hint?: string;
 }
 
 export interface Constant {

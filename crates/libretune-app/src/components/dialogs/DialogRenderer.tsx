@@ -111,6 +111,7 @@ export default function DialogRenderer({ definition, onBack, openTable, context,
           onOptimisticUpdate={onOptimisticUpdate}
           onFieldFocus={handleFieldFocus}
           showAllHelpIcons={showAllHelpIcons}
+          layoutHint={definition.layout_hint}
         />
       </div>
       

@@ -2368,10 +2368,20 @@ fn parse_user_defined_entry(
                     .map(|s| s.trim_matches('"').to_string())
                     .unwrap_or_else(|| name.clone());
 
+                // Format: dialog = name, "title" [, layoutHint] [, {condition}]
+                // layoutHint (e.g. "xAxis") is the first remaining part that
+                // isn't a braced condition.
+                let layout_hint = parts
+                    .iter()
+                    .skip(2)
+                    .find(|p| !p.trim().starts_with('{'))
+                    .map(|p| p.trim().to_string());
+
                 let dialog = DialogDefinition {
                     name: name.clone(),
                     title,
                     components: Vec::new(),
+                    layout_hint,
                 };
                 def.dialogs.insert(name.clone(), dialog);
                 *current_dialog = Some(name);
@@ -3579,6 +3589,31 @@ maxUnusedRuntimeRange = 42
             1,
             "only the field explicitly declared in this dialog should be on it"
         );
+    }
+
+    #[test]
+    fn dialog_captures_its_layout_hint() {
+        // TunerStudio's "Short term fuel trim/Closed loop" dialog uses
+        // exactly this: dialog = name, "title", xAxis to lay its child
+        // panels out in a row instead of stacking them.
+        let content = r#"
+[UserDefined]
+	dialog = fuelClosedLoopDialog, "Short term fuel trim/Closed loop", xAxis
+		panel = fuelClosedLoopBank1
+
+	dialog = plainDialog, "No hint"
+		field = "Label", someConstant
+"#;
+        let def = parse_ini(content).expect("Should parse successfully");
+
+        let with_hint = def
+            .dialogs
+            .get("fuelClosedLoopDialog")
+            .expect("dialog should exist");
+        assert_eq!(with_hint.layout_hint.as_deref(), Some("xAxis"));
+
+        let without_hint = def.dialogs.get("plainDialog").expect("dialog should exist");
+        assert_eq!(without_hint.layout_hint, None);
     }
 
     #[test]
