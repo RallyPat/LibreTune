@@ -2380,11 +2380,18 @@ fn parse_user_defined_entry(
             }
         }
         "indicatorpanel" => {
-            // Format: indicatorPanel = name, columns [, {visibility_condition}]
+            // Format: indicatorPanel = name [, columns] [, {visibility_condition}]
+            // `columns` is optional in the wild (e.g. rusEFI's
+            // fuelClosedLoopIndicatorsPanel omits it) — requiring it dropped
+            // the whole panel silently, which also left current_dialog
+            // pointing at whatever dialog was last opened (this arm only
+            // clears it inside the block below), so the indicator lines
+            // meant for this panel got misattributed there as bare
+            // single-indicator fields instead.
             let parts = split_ini_line(value);
-            if parts.len() >= 2 {
+            if !parts.is_empty() {
                 let name = parts[0].to_string();
-                let columns = parts[1].parse::<u8>().unwrap_or(2);
+                let columns = parts.get(1).and_then(|p| p.parse::<u8>().ok()).unwrap_or(2);
 
                 // Check for visibility condition (last part in braces)
                 let visibility_condition = parts
@@ -3526,6 +3533,52 @@ maxUnusedRuntimeRange = 42
 "#;
         let def = parse_ini(content).expect("Should parse successfully");
         assert_eq!(def.protocol.max_unused_runtime_range, 42);
+    }
+
+    #[test]
+    fn indicator_panel_without_a_columns_count_still_registers() {
+        // Verbatim shape from a real rusEFI INI: indicatorPanel omitting the
+        // `, columns` parameter (unlike its sibling panels, which all give
+        // one) used to be silently dropped entirely — `columns` was treated
+        // as required, not optional as its own doc comment claimed. Losing
+        // the panel also stranded its `indicator =` lines: with
+        // current_indicator_panel never set, they fell through to the
+        // "attach to current_dialog" fallback and landed as bare fields on
+        // whatever dialog was last opened, instead of on this panel.
+        let content = r#"
+[UserDefined]
+	dialog = someOtherDialog, "Unrelated"
+		field = "Unrelated field", someConstant
+
+	indicatorPanel = fuelClosedLoopIndicatorsPanel
+		indicator = { stftCorrectionState != 0 }, { Correction using bitStringValue(stftBinIdxList, stftCorrectionBinIdx) region }, { Not active: bitStringValue(stftStateList, stftCorrectionState) }, green, black, white, black
+		indicator = { isTuningNow }, "No tuning happening", "Tuning Detected", white, black, green, black
+"#;
+        let def = parse_ini(content).expect("Should parse successfully");
+
+        let panel = def
+            .indicator_panels
+            .get("fuelClosedLoopIndicatorsPanel")
+            .expect("panel should be registered even without an explicit columns count");
+        assert_eq!(panel.columns, 2, "missing columns should default to 2");
+        assert_eq!(panel.indicators.len(), 2);
+        assert_eq!(
+            panel.indicators[1].label_on, "Tuning Detected",
+            "indicator lines after a columns-less panel header must attach to that panel"
+        );
+
+        // The earlier dialog must not have picked up these indicators as
+        // stray fields — that was the visible symptom (they rendered as
+        // unstyled bullet rows with the raw, unevaluated expression text).
+        let other_dialog = def
+            .dialogs
+            .get("someOtherDialog")
+            .expect("dialog should exist");
+        assert_eq!(
+            other_dialog.components.len(),
+            1,
+            "only the field explicitly declared in this dialog should be on it"
+        );
     }
 
     #[test]
