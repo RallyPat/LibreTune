@@ -21,10 +21,30 @@ export function Indicator({
     }
   }, [comp.expression, context]);
 
+  // label_on/label_off can themselves be braced expressions (same pattern
+  // as IndicatorPanelRenderer's tiles) — evaluate the raw label rather than
+  // showing e.g. "{ bitStringValue(stftStateList, 2) }" verbatim.
+  const rawLabel = isOn ? comp.label_on : comp.label_off;
+  const [evaluatedLabel, setEvaluatedLabel] = useState(rawLabel);
+
+  useEffect(() => {
+    if (!rawLabel?.trim().startsWith('{')) {
+      setEvaluatedLabel(rawLabel);
+      return;
+    }
+    let cancelled = false;
+    invoke<string>('evaluate_string_expression', { expression: rawLabel, context })
+      .then((value) => { if (!cancelled) setEvaluatedLabel(value); })
+      .catch(() => { if (!cancelled) setEvaluatedLabel(rawLabel); });
+    return () => {
+      cancelled = true;
+    };
+  }, [rawLabel, context]);
+
   return (
     <div className="indicator-field">
       <div className={`indicator-light ${isOn ? 'on' : 'off'}`} />
-      <span className="indicator-label">{isOn ? comp.label_on : comp.label_off}</span>
+      <span className="indicator-label">{evaluatedLabel}</span>
     </div>
   );
 }
