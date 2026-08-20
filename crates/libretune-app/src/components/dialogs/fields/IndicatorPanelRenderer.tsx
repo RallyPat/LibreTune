@@ -1,4 +1,5 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { invoke } from '@tauri-apps/api/core';
 import { useShallow } from 'zustand/react/shallow';
 import { useRealtimeStore } from '../../../stores/realtimeStore';
 import {
@@ -72,6 +73,41 @@ export function IndicatorPanelRenderer({
     return values;
   }, [panel.indicators, realtimeSlice, context]);
 
+  // Some INIs (e.g. rusEFI's STFT status panels) give an indicator a braced
+  // expression as its label instead of a fixed string — "{
+  // bitStringValue(stftStateList, 2) }" is meant to show the live state
+  // name, not that literal text. Only the labels that are actually dynamic
+  // get sent for evaluation; the common case (a plain quoted label) never
+  // makes a round trip.
+  const dynamicLabels = useMemo(() => {
+    const set = new Set<string>();
+    for (const ind of panel.indicators) {
+      if (ind.label_off.trim().startsWith('{')) set.add(ind.label_off);
+      if (ind.label_on.trim().startsWith('{')) set.add(ind.label_on);
+    }
+    return Array.from(set);
+  }, [panel.indicators]);
+
+  const [evaluatedLabels, setEvaluatedLabels] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    if (dynamicLabels.length === 0) return;
+    let cancelled = false;
+    const mergedContext = { ...context, ...realtimeSlice };
+    Promise.all(
+      dynamicLabels.map((label) =>
+        invoke<string>('evaluate_string_expression', { expression: label, context: mergedContext })
+          .then((value): [string, string] => [label, value])
+          .catch(() => [label, label] as [string, string]),
+      ),
+    ).then((entries) => {
+      if (!cancelled) setEvaluatedLabels(Object.fromEntries(entries));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [dynamicLabels, context, realtimeSlice]);
+
   const statusTiles = useMemo(
     () => usesStatusTiles(panel.indicators),
     [panel.indicators],
@@ -95,7 +131,8 @@ export function IndicatorPanelRenderer({
       <div className="indicator-panel-grid" style={gridStyle}>
         {panel.indicators.map((ind, i) => {
           const isOn = indicatorValues[ind.expression] || false;
-          const label = isOn ? ind.label_on : ind.label_off;
+          const rawLabel = isOn ? ind.label_on : ind.label_off;
+          const label = evaluatedLabels[rawLabel] ?? rawLabel;
 
           if (statusTiles) {
             return (
