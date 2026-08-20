@@ -115,6 +115,32 @@ export default function DialogField({
     }
   }, [fieldEnabledCondition, constant?.visibility_condition, context, name, selectedBit, numValue, constant?.value_type]);
 
+  // Some INIs give a constant a braced expression as its units instead of a
+  // fixed string — rusEFI does this for every temperature field, e.g.
+  // "{ bitStringValue(unitsLabels, useMetricOnInterface) }" so the displayed
+  // unit follows the user's C/F preference. Evaluate it live rather than
+  // showing the literal expression text.
+  const [displayUnits, setDisplayUnits] = useState<string>('');
+
+  useEffect(() => {
+    const raw = constant?.units ?? '';
+    if (!raw.trim().startsWith('{')) {
+      setDisplayUnits(raw);
+      return;
+    }
+    let cancelled = false;
+    invoke<string>('evaluate_string_expression', { expression: raw, context })
+      .then((value) => {
+        if (!cancelled) setDisplayUnits(value);
+      })
+      .catch(() => {
+        if (!cancelled) setDisplayUnits(raw);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [constant?.units, context]);
+
   if (!constant) return <div className="field-loading">Loading {label}...</div>;
 
   // Always show field (don't hide based on condition) - condition controls enable/disable instead
@@ -252,7 +278,7 @@ export default function DialogField({
               disabled={true}
               style={{ opacity: 0.7 }}
             />
-            <span className="field-unit">{constant.units}</span>
+            <span className="field-unit">{displayUnits}</span>
           </div>
           <div style={{ color: 'orange', padding: '4px', fontSize: '0.85em' }}>
             Warning: No bit_options defined in INI for this constant
@@ -402,7 +428,7 @@ export default function DialogField({
             }
           }}
         />
-        <span className="field-unit">{constant.units}</span>
+        <span className="field-unit">{displayUnits}</span>
       </div>
     </div>
   );
