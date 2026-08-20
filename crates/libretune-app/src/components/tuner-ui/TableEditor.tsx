@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef, useEffect, KeyboardEvent, useMemo } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { open, save } from '@tauri-apps/plugin-dialog';
 import { useChannels } from '../../stores/realtimeStore';
 import { useHeatmapSettings } from '../../utils/useHeatmapSettings';
 import { contrastTextColor } from '../../utils/heatmapColors';
@@ -10,6 +11,7 @@ import TableToolbar from './table-editor/TableToolbar';
 import TableContextMenu from './table-editor/TableContextMenu';
 import GenerateTableDialog from '../dialogs/GenerateTableDialog';
 import { classifyGeneratableTable, generatableTableLabel } from '../../utils/tableGenerator';
+import { toTunerTableData, BackendTableData } from '../../types/app';
 
 export interface TableData {
   name: string;
@@ -133,7 +135,41 @@ export function TableEditor({
   // TunerStudio-style per-table generator (VE / ignition / AFR only).
   const generatableKind = useMemo(() => classifyGeneratableTable(data.name), [data.name]);
   const [showGenerateDialog, setShowGenerateDialog] = useState(false);
-  
+
+  // TunerStudio-compatible .table file import/export for this one table.
+  const handleExportTable = useCallback(async () => {
+    try {
+      const path = await save({
+        title: 'Save Table to File',
+        defaultPath: `${data.name}.table`,
+        filters: [{ name: 'TunerStudio Table', extensions: ['table'] }],
+      });
+      if (!path) return;
+      await invoke('export_table_to_file', { tableName: data.name, path });
+    } catch (err) {
+      alert(`Failed to save table: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }, [data.name]);
+
+  const handleImportTable = useCallback(async () => {
+    try {
+      const path = await open({
+        title: 'Load Table from File',
+        filters: [{ name: 'TunerStudio Table', extensions: ['table'] }],
+        multiple: false,
+        directory: false,
+      });
+      if (!path) return;
+      const result = await invoke<BackendTableData>('import_table_from_file', {
+        tableName: data.name,
+        path,
+      });
+      onChange(toTunerTableData(result));
+    } catch (err) {
+      alert(`Failed to load table: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }, [data.name, onChange]);
+
   // Store original data on first render
   useEffect(() => {
     if (!originalData) {
@@ -913,6 +949,8 @@ export function TableEditor({
         onToggle3D={() => setShow3D(!show3D)}
         onGenerate={generatableKind ? () => setShowGenerateDialog(true) : undefined}
         generatableLabel={generatableKind ? generatableTableLabel(generatableKind) : undefined}
+        onImportTable={handleImportTable}
+        onExportTable={handleExportTable}
       />
 
       {/* 3D View */}

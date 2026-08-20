@@ -154,6 +154,7 @@ use commands::start_autotune::start_autotune;
 use commands::sync_ecu_data::sync_ecu_data;
 use commands::system::{get_build_info, get_serial_ports};
 use commands::table_compare::compare_tables;
+use commands::table_file_io::{export_table_to_file, import_table_from_file};
 use commands::table_ops::{
     add_offset, fill_region, interpolate_cells, interpolate_linear, rebin_table, resize_table_size,
     scale_cells, set_cells_equal, smooth_table,
@@ -248,6 +249,8 @@ pub fn run() {
             stop_realtime_stream,
             get_table_data,
             get_table_info,
+            export_table_to_file,
+            import_table_from_file,
             get_curve_data,
             get_tables,
             get_curves,

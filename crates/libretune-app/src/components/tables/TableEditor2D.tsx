@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { open, save } from '@tauri-apps/plugin-dialog';
 import { ArrowLeft, Save, Zap, ExternalLink, AlertTriangle, Palette, MapPin, Crosshair, Box, Scaling } from 'lucide-react';
 import TableToolbar from './TableToolbar';
 import TableGrid, { SelectionRange } from './TableGrid';
@@ -690,6 +691,47 @@ export default function TableEditor2D({
     }
   };
 
+  // TunerStudio-compatible .table file import/export for this one table.
+  // import_table_from_file already writes the result to the tune/ECU cache
+  // on the backend; this just brings the local editor state (and undo
+  // stack) in sync with what was just written.
+  const handleExportTable = useCallback(async () => {
+    try {
+      const path = await save({
+        title: 'Save Table to File',
+        defaultPath: `${table_name}.table`,
+        filters: [{ name: 'TunerStudio Table', extensions: ['table'] }],
+      });
+      if (!path) return;
+      await invoke('export_table_to_file', { tableName: table_name, path });
+    } catch (err) {
+      showToast(`Failed to save table: ${err instanceof Error ? err.message : String(err)}`, 'error');
+    }
+  }, [table_name, showToast]);
+
+  const handleImportTable = useCallback(async () => {
+    try {
+      const path = await open({
+        title: 'Load Table from File',
+        filters: [{ name: 'TunerStudio Table', extensions: ['table'] }],
+        multiple: false,
+        directory: false,
+      });
+      if (!path) return;
+      const result = await invoke<BackendTableData>('import_table_from_file', {
+        tableName: table_name,
+        path,
+      });
+      setLocalXBins(result.x_bins);
+      setLocalYBins(result.y_bins);
+      setLocalZValues(result.z_values);
+      pushHistory(result.z_values, result.x_bins, result.y_bins);
+      onValuesChange?.(result.z_values);
+    } catch (err) {
+      showToast(`Failed to load table: ${err instanceof Error ? err.message : String(err)}`, 'error');
+    }
+  }, [table_name, showToast, pushHistory, onValuesChange]);
+
   const handleSetEqual = async () => {
     const values = selectedCellsCoords.map(([x, y]) => {
       return { x, y, value: localZValues[y][x] };
@@ -1314,6 +1356,8 @@ export default function TableEditor2D({
           onToggle3D={() => setShow3D(!show3D)}
           onGenerate={generatableKind ? () => setShowGenerateDialog(true) : undefined}
           generatableLabel={generatableKind ? generatableTableLabel(generatableKind) : undefined}
+          onImportTable={handleImportTable}
+          onExportTable={handleExportTable}
         />
       )}
 
