@@ -40,7 +40,9 @@ use std::sync::Mutex as StdMutex;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
 
-use libretune_core::autotune::delay_measure::{detect_delay, AfrSample, DelayTable};
+use libretune_core::autotune::delay_measure::{
+    detect_delay, AfrSample, DelayRejection, DelayTable,
+};
 
 use crate::state::AppState;
 
@@ -172,6 +174,29 @@ fn emit(app: &AppHandle, p: DelayTestProgress) {
     let _ = app.emit("afr_delay_test:progress", p);
 }
 
+/// Set while a run owns the WUE slot, so a second run cannot start.
+///
+/// The baseline is read from the tune cache, which the running test itself
+/// updates when it applies the enriched value. A second invocation starting
+/// mid-step therefore reads the ENRICHED value as its baseline, and every
+/// "restore" it performs writes that value back — leaving the engine
+/// permanently rich in RAM while reporting "WUE slot restored". The abort flag
+/// and the sample buffer are process-wide statics too, so concurrent runs
+/// would also abort each other and interleave their measurements.
+///
+/// The dialog disables its own button, but the command is reachable from a
+/// second window, a retry after a perceived hang, or a script.
+static RUNNING: AtomicBool = AtomicBool::new(false);
+
+/// Clears [`RUNNING`] however the run ends, including on an early `?` return.
+struct RunGuard;
+
+impl Drop for RunGuard {
+    fn drop(&mut self) {
+        RUNNING.store(false, Ordering::SeqCst);
+    }
+}
+
 /// Shared abort flag so [`abort_afr_delay_test`] can stop a run in progress.
 static ABORT: std::sync::OnceLock<Arc<AtomicBool>> = std::sync::OnceLock::new();
 
@@ -194,6 +219,10 @@ pub async fn abort_afr_delay_test() -> Result<(), String> {
 /// settle (up to 15 s combined — long enough that the Abort button appears
 /// dead, over an engine being held rich). Returns true if an abort was
 /// requested during (or before) the wait.
+///
+/// Used for the settle window when there is no AFR channel to sample: with
+/// channels present the settle is sampled instead, and `sample_window` runs
+/// the same per-tick abort check.
 async fn sleep_abortable(total_ms: u64) -> bool {
     const TICK_MS: u64 = 50;
     let mut remaining = total_ms;
@@ -453,6 +482,16 @@ pub async fn run_afr_delay_test(
     settle_ms: u64,
     repeats: u32,
 ) -> Result<String, String> {
+    // Refuse to start a second run: see RUNNING for why a concurrent one can
+    // leave the engine rich. Claim the slot before anything else touches the
+    // ECU, and release it on every exit path via the guard.
+    if RUNNING.swap(true, Ordering::SeqCst) {
+        return Err(
+            "An AFR delay test is already running. Stop it before starting another.".to_string(),
+        );
+    }
+    let _run_guard = RunGuard;
+
     // Enrichment only: take the magnitude, then clamp. A negative input cannot
     // survive this, so no combination of arguments leans the engine out.
     let step_percent = step_percent.abs().clamp(MIN_STEP_PERCENT, MAX_STEP_PERCENT);
@@ -726,8 +765,21 @@ pub async fn run_afr_delay_test(
             }
             Some(Err(rej)) => {
                 settling.rejection = Some(rej.label().to_string());
+                // "No response" and "still moving" both usually mean the hold
+                // was short relative to the transport delay at this operating
+                // point — the response simply had not arrived (or not finished
+                // arriving) before enrichment was removed. Sampling continues
+                // through the settle window below, so the next step's report
+                // can say so with a number instead of leaving the operator to
+                // guess which knob is wrong.
+                let hint = matches!(
+                    rej,
+                    DelayRejection::NoResponse | DelayRejection::ResponseNotSettled
+                )
+                .then(|| format!(" — try a hold longer than {} ms", hold_ms))
+                .unwrap_or_default();
                 settling.message = format!(
-                    "step {step}/{repeats}: no measurement ({}), settling",
+                    "step {step}/{repeats}: no measurement ({}{hint}), settling",
                     rej.label()
                 );
             }
@@ -737,8 +789,55 @@ pub async fn run_afr_delay_test(
         }
         emit(&app, settling);
 
-        if step < repeats && sleep_abortable(settle_ms).await {
-            break;
+        // Keep sampling through the settle window instead of sleeping through
+        // it. The mixture returning to baseline is the second half of the same
+        // event, and on a step whose delay approached the hold length the
+        // response is still arriving here — sampling is what lets the next
+        // report distinguish "the sensor saw nothing" from "the hold ended
+        // before the exhaust gas got here". The samples are appended to the
+        // step's trace so the UI overlay shows the full pulse.
+        if step < repeats && channels.is_none() {
+            // Nothing to sample without an AFR channel, so just wait — still
+            // abortable within a tick.
+            if sleep_abortable(settle_ms).await {
+                break;
+            }
+        } else if step < repeats {
+            let mut tail = StepSamples::default();
+            let aborted_in_settle = sample_window(
+                &state,
+                epoch,
+                channels.as_ref(),
+                settle_ms,
+                &mut tail,
+                &mut point,
+                None,
+            )
+            .await;
+            if !tail.afr.is_empty() {
+                let mut recovery = DelayTestProgress::plain(
+                    "settling",
+                    step,
+                    reported_total,
+                    baseline,
+                    baseline,
+                    format!("step {step}/{repeats} settled"),
+                );
+                recovery.trace = tail
+                    .afr
+                    .iter()
+                    .zip(tail.ctx.iter())
+                    .map(|(s, c)| TracePoint {
+                        t_ms: s.t_ms as i64 - anchor_ms as i64,
+                        afr: s.afr,
+                        pw: c.pw,
+                    })
+                    .collect();
+                emit(&app, recovery);
+            }
+            if aborted_in_settle {
+                break;
+            }
         }
     }
 

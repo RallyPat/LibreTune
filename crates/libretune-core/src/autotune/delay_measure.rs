@@ -23,12 +23,30 @@ pub struct AfrSample {
 /// A successful delay extraction for one enrichment step.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DelayMeasurement {
-    /// Milliseconds from the step anchor to the detected AFR response edge.
+    /// Milliseconds from the step anchor to half the settled excursion.
+    ///
+    /// A step response is the cumulative distribution of transit times, so its
+    /// half-height is the *median* transit — the transport delay. The leading
+    /// edge is only the fastest path through the manifold and sits in the
+    /// noise: on 80 real steps the fixed-threshold leading edge gave a median
+    /// of 268 ms and scattered 8-2117 ms, while half-excursion on the same
+    /// steps gave 435 ms with an IQR of +/-30 ms.
     pub delay_ms: f64,
-    /// AFR drop actually observed at detection relative to baseline.
+    /// Baseline minus the SETTLED AFR — the size of the step the engine
+    /// actually delivered, not the depth at the trigger.
+    ///
+    /// The trigger depth is ~the threshold by construction and carries no
+    /// information; the settled excursion is what a commanded-vs-delivered
+    /// comparison needs (a fuel step of x% should move AFR by a predictable
+    /// amount, and the shortfall is the injector/flow story).
     pub excursion: f64,
-    /// Pre-step baseline the edge was measured against.
+    /// Pre-step baseline the response was measured against.
     pub baseline_afr: f64,
+    /// Milliseconds to the first sustained crossing of the noise threshold.
+    ///
+    /// Kept for comparison with historical numbers, which were all measured
+    /// this way. Biased short; do not use it as the delay.
+    pub leading_edge_ms: f64,
 }
 
 /// Why a step produced no measurement — surfaced to the UI so a silent
@@ -49,6 +67,11 @@ pub enum DelayRejection {
     /// or the mixture was drifting for reasons of its own. An effect cannot
     /// precede its cause, so there is no transport delay to report here.
     ResponsePrecedesStep,
+    /// AFR responded but was still moving when the hold ended, so there is no
+    /// settled level to take half of. Almost always the hold is short relative
+    /// to the transport delay at this operating point — the fix is a longer
+    /// hold, not a different threshold.
+    ResponseNotSettled,
 }
 
 impl DelayRejection {
@@ -59,6 +82,7 @@ impl DelayRejection {
             DelayRejection::UnstableBaseline => "baseline unstable — hold steadier",
             DelayRejection::NoResponse => "no AFR response detected",
             DelayRejection::ResponsePrecedesStep => "AFR already moving at the step",
+            DelayRejection::ResponseNotSettled => "still moving at end of hold — use a longer hold",
         }
     }
 }
@@ -74,6 +98,55 @@ const MIN_EXCURSION_AFR: f64 = 0.15;
 /// An edge only counts when the crossing is sustained for this many samples,
 /// so a single noise spike cannot fake a response.
 const SUSTAIN_SAMPLES: usize = 2;
+/// Tail of the hold window used to estimate the settled AFR, as a fraction of
+/// the window's duration.
+const PLATEAU_TAIL_FRAC: f64 = 0.30;
+/// The plateau must be flatter than this (MAD, AFR points) to count as
+/// settled. Looser than the baseline limit: a warm plateau under enrichment is
+/// noisier than an idle baseline, but a trace still in transit is far noisier
+/// than either.
+const MAX_PLATEAU_MAD: f64 = 0.30;
+
+/// First sustained crossing below `level`, interpolated across the crossing.
+///
+/// Returns (crossing_ms, sample_at_crossing). Reporting the sample time alone
+/// biases every measurement late by up to a full interval — 31 ms average at
+/// the ~16 Hz these logs actually run at, a large share of a high-flow delay.
+fn first_crossing(post: &[AfrSample], level: f64) -> Option<(f64, AfrSample)> {
+    let mut run = 0usize;
+    let mut edge: Option<AfrSample> = None;
+    let mut before_edge: Option<AfrSample> = None;
+    let mut prev: Option<AfrSample> = None;
+    for s in post {
+        if s.afr < level {
+            run += 1;
+            if run == 1 {
+                edge = Some(*s);
+                before_edge = prev;
+            }
+            if run >= SUSTAIN_SAMPLES {
+                let e = edge.expect("run >= 1 implies edge set");
+                let crossing_ms = match before_edge {
+                    Some(b) if b.afr > e.afr && b.t_ms < e.t_ms => {
+                        let span = (e.t_ms - b.t_ms) as f64;
+                        let frac = ((b.afr - level) / (b.afr - e.afr)).clamp(0.0, 1.0);
+                        b.t_ms as f64 + span * frac
+                    }
+                    // No usable prior sample (the crossing is the first sample
+                    // after the anchor): fall back to the sample's own time.
+                    _ => e.t_ms as f64,
+                };
+                return Some((crossing_ms, e));
+            }
+        } else {
+            run = 0;
+            edge = None;
+            before_edge = None;
+        }
+        prev = Some(*s);
+    }
+    None
+}
 
 fn median(values: &mut [f64]) -> f64 {
     values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
@@ -114,70 +187,66 @@ pub fn detect_delay(
     }
 
     let threshold = (K_MAD * scatter).max(MIN_EXCURSION_AFR);
-    let trigger = baseline - threshold;
 
-    let mut run = 0usize;
-    let mut edge: Option<&AfrSample> = None;
-    // Sample immediately before the crossing, for sub-sample interpolation.
-    let mut before_edge: Option<&AfrSample> = None;
-    let mut prev: Option<&AfrSample> = None;
-    for s in post {
-        if s.afr < trigger {
-            run += 1;
-            if run == 1 {
-                edge = Some(s);
-                before_edge = prev;
-            }
-            if run >= SUSTAIN_SAMPLES {
-                let e = edge.expect("run >= 1 implies edge set");
+    // 1. Did anything happen at all? The noise-threshold crossing answers that
+    //    and gives the historical leading-edge figure for comparison.
+    let (leading_ms, _) =
+        first_crossing(post, baseline - threshold).ok_or(DelayRejection::NoResponse)?;
 
-                // The crossing happened somewhere between the last sample above
-                // the trigger and this first one below it, not exactly when the
-                // sample landed. Reporting the sample time alone biases every
-                // measurement late by half a sample interval on average — 31 ms
-                // at the ~16 Hz these logs actually run at, which is a large
-                // share of a high-flow delay. Interpolate linearly across the
-                // crossing instead.
-                let crossing_ms = match before_edge {
-                    Some(b) if b.afr > e.afr && b.t_ms < e.t_ms => {
-                        let span = (e.t_ms - b.t_ms) as f64;
-                        let frac = ((b.afr - trigger) / (b.afr - e.afr)).clamp(0.0, 1.0);
-                        b.t_ms as f64 + span * frac
-                    }
-                    // No usable prior sample (the crossing is the first sample
-                    // after the anchor): fall back to the sample's own time.
-                    _ => e.t_ms as f64,
-                };
-                // A crossing at or before the anchor is not a fast delay, it
-                // is a measurement of something that started earlier. Clamping
-                // it to zero used to record it as a valid 0 ms sample: on a
-                // 52-minute drive three such samples landed in two rpm/load
-                // bins and pulled both means to exactly 0.
-                //
-                // Zero is worse than a missing value, because this figure feeds
-                // AutoTune's historical-point lookup - a 0 ms delay makes it
-                // test the CURRENT sample for fuel cut, which is exactly the
-                // test that misses the tail of a cut still in the exhaust.
-                if crossing_ms <= anchor_ms as f64 {
-                    return Err(DelayRejection::ResponsePrecedesStep);
-                }
-                let delay_ms = crossing_ms - anchor_ms as f64;
-
-                return Ok(DelayMeasurement {
-                    delay_ms,
-                    excursion: baseline - e.afr,
-                    baseline_afr: baseline,
-                });
-            }
-        } else {
-            run = 0;
-            edge = None;
-            before_edge = None;
-        }
-        prev = Some(s);
+    // A crossing at or before the anchor is not a fast delay, it is a
+    // measurement of something that started earlier. Clamping it to zero used
+    // to record it as a valid 0 ms sample: on a 52-minute drive three such
+    // samples landed in two rpm/load bins and pulled both means to exactly 0.
+    //
+    // Zero is worse than a missing value, because this figure feeds AutoTune's
+    // historical-point lookup — a 0 ms delay makes it test the CURRENT sample
+    // for fuel cut, which is exactly the test that misses the tail of a cut
+    // still in the exhaust.
+    if leading_ms <= anchor_ms as f64 {
+        return Err(DelayRejection::ResponsePrecedesStep);
     }
 
-    Err(DelayRejection::NoResponse)
+    // 2. Where did it settle? The tail of the hold window is the plateau, and
+    //    it is only a plateau if it has stopped moving.
+    let (first_t, last_t) = (
+        post.first().map(|s| s.t_ms).unwrap_or(0) as f64,
+        post.last().map(|s| s.t_ms).unwrap_or(0) as f64,
+    );
+    let tail_start = last_t - (last_t - first_t) * PLATEAU_TAIL_FRAC;
+    let mut tail: Vec<f64> = post
+        .iter()
+        .filter(|s| s.t_ms as f64 >= tail_start)
+        .map(|s| s.afr)
+        .collect();
+    if tail.len() < MIN_BASELINE_SAMPLES {
+        return Err(DelayRejection::ResponseNotSettled);
+    }
+    let plateau = median(&mut tail);
+    if mad(&tail, plateau) > MAX_PLATEAU_MAD {
+        return Err(DelayRejection::ResponseNotSettled);
+    }
+
+    let excursion = baseline - plateau;
+    // The plateau has to be a real step, not the threshold scraped by noise.
+    if excursion < threshold {
+        return Err(DelayRejection::NoResponse);
+    }
+
+    // 3. The delay is where the response reaches half its settled size. A step
+    //    response is the CDF of transit times, so the half-height is the
+    //    median transit; the leading edge is only the fastest path.
+    let (half_ms, _) = first_crossing(post, baseline - excursion / 2.0)
+        .ok_or(DelayRejection::ResponseNotSettled)?;
+    if half_ms <= anchor_ms as f64 {
+        return Err(DelayRejection::ResponsePrecedesStep);
+    }
+
+    Ok(DelayMeasurement {
+        delay_ms: half_ms - anchor_ms as f64,
+        excursion,
+        baseline_afr: baseline,
+        leading_edge_ms: leading_ms - anchor_ms as f64,
+    })
 }
 
 /// Fixed coarse grid for aggregating measurements by operating point.
@@ -274,16 +343,28 @@ mod tests {
     /// close to where the AFR genuinely passed the trigger.
     #[test]
     fn crossing_is_interpolated_between_samples() {
-        // Baseline 14.70, MAD ~0 so the trigger is baseline - MIN_EXCURSION_AFR.
         let pre = trace(&[(0, 14.70), (60, 14.70), (120, 14.70), (180, 14.70)]);
-        // AFR is still at baseline at 240, then well past the trigger at 300:
-        // the true crossing lies between, nearer 300 the deeper the last sample.
-        let post = trace(&[(240, 14.70), (300, 14.30), (360, 14.10), (420, 14.05)]);
+        // Settles to 13.70, so the half level is 14.20 — crossed somewhere
+        // inside the 240-300 gap, nearer 300 the deeper the later sample.
+        let post = trace(&[
+            (240, 14.70),
+            (300, 14.10),
+            (360, 13.85),
+            (420, 13.72),
+            (480, 13.70),
+            (540, 13.70),
+            (600, 13.70),
+            (660, 13.70),
+            (720, 13.70),
+            (780, 13.70),
+            (840, 13.70),
+            (900, 13.70),
+        ]);
 
         let m = detect_delay(240, &pre, &post).expect("should measure");
         assert!(
             m.delay_ms > 0.0 && m.delay_ms < 60.0,
-            "interpolated crossing {:.0} ms must fall inside the 240-300 ms sample gap",
+            "interpolated crossing {:.0} ms must fall inside the 240-300 ms gap",
             m.delay_ms
         );
         // Reporting the raw sample time would have given exactly 60 ms.
@@ -327,22 +408,34 @@ mod tests {
             (120, 14.7),
             (160, 14.69),
         ]);
+        // Baseline 14.70 settling to 13.70: a 1.00 AFR step, so the delay is
+        // where the trace passes 14.20 — not where it first leaves the noise.
         let post = trace(&[
-            (200, 14.7),
-            (240, 14.71),
-            (280, 14.69),
-            (320, 14.68),
-            (380, 14.2), // edge
-            (420, 13.9),
-            (460, 13.7),
+            (200, 14.70),
+            (240, 14.70),
+            (280, 14.70),
+            (320, 14.60),
+            (360, 14.40),
+            (400, 14.15),
+            (440, 13.95),
+            (480, 13.80),
+            (520, 13.72),
+            (560, 13.70),
+            (600, 13.70),
+            (640, 13.70),
+            (680, 13.70),
         ]);
         let m = detect_delay(200, &pre, &post).expect("clean step must measure");
         assert!(
-            (m.delay_ms - 136.25).abs() < 0.5,
-            "interpolated crossing, got {}",
+            (m.delay_ms - 192.0).abs() < 1.0,
+            "half-excursion crossing, got {}",
             m.delay_ms
         );
-        assert!(m.excursion > 0.4);
+        assert!(
+            (m.excursion - 1.00).abs() < 0.05,
+            "excursion must be the SETTLED step, got {}",
+            m.excursion
+        );
         assert!((m.baseline_afr - 14.7).abs() < 0.05);
     }
 
@@ -369,18 +462,34 @@ mod tests {
     #[test]
     fn edge_anchors_at_the_sustained_run() {
         let pre = trace(&[(0, 14.7), (40, 14.7), (80, 14.7), (120, 14.7)]);
+        // A one-sample spike must not start the response; the real edge does.
         let post = trace(&[
             (200, 14.7),
             (240, 13.9), // spike, run resets after
             (280, 14.7),
-            (320, 14.0), // real edge starts
-            (360, 13.8),
+            (320, 14.3),
+            (360, 14.0),
+            (400, 13.85),
+            (440, 13.75),
+            (480, 13.70),
+            (520, 13.70),
+            (560, 13.70),
+            (600, 13.70),
         ]);
         let m = detect_delay(200, &pre, &post).expect("must measure");
+        // Had the lone spike at 240 ms started the run, the interpolated
+        // crossing would land ~7 ms after the anchor. The real edge begins at
+        // 320 ms, so both figures must be far past that.
         assert!(
-            (m.delay_ms - 88.6).abs() < 0.5,
-            "must anchor on the sustained run, got {}",
-            m.delay_ms
+            m.leading_edge_ms > 50.0,
+            "the leading edge must ignore the spike, got {}",
+            m.leading_edge_ms
+        );
+        assert!(
+            m.delay_ms >= m.leading_edge_ms,
+            "half-excursion {} cannot precede the leading edge {}",
+            m.delay_ms,
+            m.leading_edge_ms
         );
     }
 
@@ -439,5 +548,57 @@ mod tests {
         let top = &t.cells[LOAD_EDGES.len()][RPM_EDGES.len()];
         assert_eq!(top.n, 1);
         assert!((top.mean_ms - 90.0).abs() < 1e-9);
+    }
+    /// The whole point of the change: a step response is the CDF of transit
+    /// times, so its half-height is the median transit. The leading edge is
+    /// the fastest path and always arrives earlier — on real data it read
+    /// 268 ms median against 435 ms for half-excursion, and scattered
+    /// 8-2117 ms against an IQR of +/-30 ms.
+    #[test]
+    fn half_excursion_is_later_than_the_leading_edge() {
+        let pre = trace(&[(0, 14.70), (40, 14.70), (80, 14.70), (120, 14.70)]);
+        let post = trace(&[
+            (200, 14.70),
+            (240, 14.60),
+            (280, 14.45),
+            (320, 14.25),
+            (360, 14.05),
+            (400, 13.90),
+            (440, 13.78),
+            (480, 13.72),
+            (520, 13.70),
+            (560, 13.70),
+            (600, 13.70),
+            (640, 13.70),
+        ]);
+        let m = detect_delay(200, &pre, &post).expect("must measure");
+        assert!(
+            m.delay_ms > m.leading_edge_ms,
+            "half-excursion {:.0} must be later than leading edge {:.0}",
+            m.delay_ms,
+            m.leading_edge_ms
+        );
+    }
+
+    /// A hold shorter than the transport delay leaves the trace still falling
+    /// when enrichment ends. There is no settled level to halve, so the honest
+    /// answer is a rejection naming the cause — not a number biased by however
+    /// far the response happened to get.
+    #[test]
+    fn still_moving_at_end_of_hold_is_rejected() {
+        let pre = trace(&[(0, 14.7), (40, 14.7), (80, 14.7), (120, 14.7)]);
+        let post = trace(&[
+            (200, 14.70),
+            (240, 14.60),
+            (280, 14.35),
+            (320, 14.05),
+            (360, 13.75),
+            (400, 13.45),
+            (440, 13.15),
+        ]);
+        assert_eq!(
+            detect_delay(200, &pre, &post),
+            Err(DelayRejection::ResponseNotSettled)
+        );
     }
 }
