@@ -759,6 +759,13 @@ export function TableEditor({
         handleCellDoubleClick(row, col);
         break;
     }
+    // Keep handled keys (notably "/") from also reaching document-level
+    // shortcuts like Sidebar's "/ focuses search" — preventDefault alone
+    // doesn't stop native bubbling, so search was stealing focus right
+    // after an interpolate, breaking arrow-key navigation in the table.
+    if (e.defaultPrevented) {
+      e.stopPropagation();
+    }
   }, [
     selection, editingCell, data, finishEdit, getSelectedCells, setEqual,
     adjustValues, scaleValues, interpolate, interpolateHorizontal, interpolateVertical,
