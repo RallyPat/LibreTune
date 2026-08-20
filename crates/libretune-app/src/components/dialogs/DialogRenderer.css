@@ -109,6 +109,15 @@
   }
 }
 
+/* A settings panel nested inside an xAxis row (three-way split) only ever
+   gets ~1/3 of the dialog's width — nowhere near enough for the two-column
+   field grid's 220px-per-column minimum without wrapping/overlapping long
+   labels ("Detect Tuning and Suspend"). Force single column here regardless
+   of exact pixel width; TunerStudio renders these same panels as one column. */
+.dialog-view .dialog-row-xaxis .panel-content--multi {
+  grid-template-columns: 1fr;
+}
+
 .dialog-view .dialog-row-container--settings-split {
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
 }
