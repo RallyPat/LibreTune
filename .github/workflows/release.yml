@@ -3,16 +3,22 @@ name: Release
 on:
   push:
     tags:
-      - 'v*'  # Trigger on version tags like v1.0.0
-  workflow_dispatch:  # Allow manual triggering
+      - "v*"
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 env:
   CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
 
 jobs:
   create-release:
     name: Create Release
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
       tag_name: ${{ steps.get_version.outputs.VERSION || 'manual' }}
     steps:
@@ -23,34 +29,27 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         run: |
           VERSION=${GITHUB_REF#refs/tags/}
-          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          echo "VERSION=$VERSION" >> "$GITHUB_OUTPUT"
 
   build-linux:
     name: Build Linux
     needs: create-release
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v5
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+      - uses: ./.github/actions/setup-rust
+        with:
+          cache_key: release-linux
 
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
-            libappindicator3-dev \
-            librsvg2-dev \
-            patchelf \
-            libgtk-3-dev \
-            libudev-dev
+      - uses: ./.github/actions/setup-linux-deps
 
       - name: Setup Node.js
         uses: actions/setup-node@v5
         with:
-          node-version: '24'
-          cache: 'npm'
+          node-version: "24"
+          cache: npm
           cache-dependency-path: crates/libretune-app/package-lock.json
 
       - name: Install frontend dependencies
@@ -61,59 +60,36 @@ jobs:
         working-directory: crates/libretune-app
         run: npx tauri build --target x86_64-unknown-linux-gnu
 
-      - name: Prepare artifacts directory
-        working-directory: crates/libretune-app
-        run: |
-          mkdir -p artifacts/linux
-
-      - name: Copy Linux artifacts
-        working-directory: crates/libretune-app
-        run: |
-          # Copy AppImage if it exists (check both possible locations)
-          if [ -d "../../target/x86_64-unknown-linux-gnu/release/bundle/appimage" ]; then
-            cp ../../target/x86_64-unknown-linux-gnu/release/bundle/appimage/*.AppImage artifacts/linux/ 2>/dev/null || true
-          elif [ -d "src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/appimage" ]; then
-            cp src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/appimage/*.AppImage artifacts/linux/ 2>/dev/null || true
-          fi
-          # Copy DEB if it exists
-          if [ -d "../../target/x86_64-unknown-linux-gnu/release/bundle/deb" ]; then
-            cp ../../target/x86_64-unknown-linux-gnu/release/bundle/deb/*.deb artifacts/linux/ 2>/dev/null || true
-          elif [ -d "src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/deb" ]; then
-            cp src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/deb/*.deb artifacts/linux/ 2>/dev/null || true
-          fi
-          # Copy RPM if it exists
-          if [ -d "../../target/x86_64-unknown-linux-gnu/release/bundle/rpm" ]; then
-            cp ../../target/x86_64-unknown-linux-gnu/release/bundle/rpm/*.rpm artifacts/linux/ 2>/dev/null || true
-          elif [ -d "src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/rpm" ]; then
-            cp src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/rpm/*.rpm artifacts/linux/ 2>/dev/null || true
-          fi
-          # List what we found
-          echo "=== Artifacts copied ==="
-          ls -lh artifacts/linux/ || echo "No artifacts found"
+      - uses: ./.github/actions/collect-tauri-artifacts
+        with:
+          platform: linux
+          dest: crates/libretune-app/artifacts/linux
 
       - name: Upload Linux artifacts
         uses: actions/upload-artifact@v6
         with:
           name: linux-x86_64
           path: crates/libretune-app/artifacts/linux/*
-          if-no-files-found: warn
+          if-no-files-found: error
           retention-days: 30
 
   build-windows:
     name: Build Windows
     needs: create-release
     runs-on: windows-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v5
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+      - uses: ./.github/actions/setup-rust
+        with:
+          cache_key: release-windows
 
       - name: Setup Node.js
         uses: actions/setup-node@v5
         with:
-          node-version: '24'
-          cache: 'npm'
+          node-version: "24"
+          cache: npm
           cache-dependency-path: crates/libretune-app/package-lock.json
 
       - name: Install frontend dependencies
@@ -124,56 +100,36 @@ jobs:
         working-directory: crates/libretune-app
         run: npx tauri build --target x86_64-pc-windows-msvc
 
-      - name: Prepare artifacts directory
-        working-directory: crates/libretune-app
-        run: |
-          mkdir artifacts\windows
-
-      - name: Copy Windows artifacts
-        working-directory: crates/libretune-app
-        shell: cmd
-        run: |
-          REM Copy NSIS installer if it exists (check workspace root first, then local)
-          if exist "..\..\target\x86_64-pc-windows-msvc\release\bundle\nsis" (
-            for %%f in ("..\..\target\x86_64-pc-windows-msvc\release\bundle\nsis\*.exe") do copy "%%f" "artifacts\windows\" >nul 2>&1
-          )
-          if exist "src-tauri\target\x86_64-pc-windows-msvc\release\bundle\nsis" (
-            for %%f in ("src-tauri\target\x86_64-pc-windows-msvc\release\bundle\nsis\*.exe") do copy "%%f" "artifacts\windows\" >nul 2>&1
-          )
-          REM Copy MSI installer if it exists
-          if exist "..\..\target\x86_64-pc-windows-msvc\release\bundle\msi" (
-            for %%f in ("..\..\target\x86_64-pc-windows-msvc\release\bundle\msi\*.msi") do copy "%%f" "artifacts\windows\" >nul 2>&1
-          )
-          if exist "src-tauri\target\x86_64-pc-windows-msvc\release\bundle\msi" (
-            for %%f in ("src-tauri\target\x86_64-pc-windows-msvc\release\bundle\msi\*.msi") do copy "%%f" "artifacts\windows\" >nul 2>&1
-          )
-          REM List what we found
-          echo === Artifacts copied ===
-          dir artifacts\windows\ || echo No artifacts found
+      - uses: ./.github/actions/collect-tauri-artifacts
+        with:
+          platform: windows
+          dest: crates/libretune-app/artifacts/windows
 
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v6
         with:
           name: windows-x86_64
           path: crates/libretune-app/artifacts/windows/*
-          if-no-files-found: warn
+          if-no-files-found: error
           retention-days: 30
 
   build-macos:
     name: Build macOS
     needs: create-release
     runs-on: macos-latest
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v5
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+      - uses: ./.github/actions/setup-rust
+        with:
+          cache_key: release-macos
 
       - name: Setup Node.js
         uses: actions/setup-node@v5
         with:
-          node-version: '24'
-          cache: 'npm'
+          node-version: "24"
+          cache: npm
           cache-dependency-path: crates/libretune-app/package-lock.json
 
       - name: Install frontend dependencies
@@ -193,90 +149,44 @@ jobs:
         working-directory: crates/libretune-app
         run: npx tauri build --target x86_64-apple-darwin
 
-      - name: Prepare artifacts directory
-        working-directory: crates/libretune-app
-        run: |
-          mkdir -p artifacts/macos
-
-      - name: Copy and package macOS artifacts
-        working-directory: crates/libretune-app
-        run: |
-          # Copy DMG files (check workspace root first, then local)
-          for dmg in ../../target/*/release/bundle/dmg/*.dmg; do
-            if [ -f "$dmg" ]; then
-              cp "$dmg" "artifacts/macos/$(basename "$dmg")"
-            fi
-          done
-          # Also check local src-tauri/target
-          for dmg in src-tauri/target/*/release/bundle/dmg/*.dmg; do
-            if [ -f "$dmg" ]; then
-              cp "$dmg" "artifacts/macos/$(basename "$dmg")"
-            fi
-          done
-          # Zip .app bundles to preserve permissions (check workspace root first)
-          for app_bundle in ../../target/*/release/bundle/macos/*.app; do
-            if [ -d "$app_bundle" ]; then
-              zip_name="artifacts/macos/$(basename "$app_bundle" .app).zip"
-              # Ensure artifacts directory exists (we're in crates/libretune-app)
-              mkdir -p artifacts/macos
-              echo "Zipping $app_bundle to $zip_name"
-              # Use absolute path for zip output to avoid path issues after cd
-              abs_zip_path="$(pwd)/$zip_name"
-              cd "$(dirname "$app_bundle")"
-              zip -r "$abs_zip_path" "$(basename "$app_bundle")"
-              cd - > /dev/null
-            fi
-          done
-          # Also check local src-tauri/target
-          for app_bundle in src-tauri/target/*/release/bundle/macos/*.app; do
-            if [ -d "$app_bundle" ]; then
-              zip_name="artifacts/macos/$(basename "$app_bundle" .app).zip"
-              # Ensure artifacts directory exists (we're in crates/libretune-app)
-              mkdir -p artifacts/macos
-              echo "Zipping $app_bundle to $zip_name"
-              # Use absolute path for zip output to avoid path issues after cd
-              abs_zip_path="$(pwd)/$zip_name"
-              cd "$(dirname "$app_bundle")"
-              zip -r "$abs_zip_path" "$(basename "$app_bundle")"
-              cd - > /dev/null
-            fi
-          done
-          # List what we found
-          echo "=== Artifacts copied ==="
-          ls -lh artifacts/macos/ || echo "No artifacts found"
+      - uses: ./.github/actions/collect-tauri-artifacts
+        with:
+          platform: macos
+          dest: crates/libretune-app/artifacts/macos
 
       - name: Upload macOS artifacts
         uses: actions/upload-artifact@v6
         with:
           name: macos-universal
           path: crates/libretune-app/artifacts/macos/*
-          if-no-files-found: warn
+          if-no-files-found: error
           retention-days: 30
 
   upload-release:
     name: Upload Release Assets
     needs: [create-release, build-linux, build-windows, build-macos]
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Download all artifacts
         uses: actions/download-artifact@v6
         with:
           path: artifacts
-          pattern: '*'
+          pattern: "*"
           merge-multiple: false
 
       - name: Get tag name
         id: tag
         run: |
           if [[ "${{ github.ref }}" == refs/tags/* ]]; then
-            echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+            echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
           else
-            echo "tag=manual-$(date +%Y%m%d-%H%M%S)" >> $GITHUB_OUTPUT
+            echo "tag=manual-$(date +%Y%m%d-%H%M%S)" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Create Release (only for tags)
         if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.tag.outputs.tag }}
           name: Release ${{ steps.tag.outputs.tag }}
@@ -287,13 +197,15 @@ jobs:
           draft: false
           prerelease: false
           generate_release_notes: true
+          fail_on_unmatched_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      
+
       - name: Upload artifacts (manual build)
-        if: "!startsWith(github.ref, 'refs/tags/')"
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
         uses: actions/upload-artifact@v6
         with:
           name: build-artifacts
           path: artifacts/**
+          if-no-files-found: error
           retention-days: 7
