@@ -122,7 +122,7 @@ export function IndicatorPanelRenderer({
     return {
       display: 'grid',
       gridTemplateColumns: `repeat(${columnCount}, minmax(0, 1fr))`,
-      gap: '8px',
+      gap: '6px',
     };
   }, [statusTiles, columns, panel.indicators.length]);
 

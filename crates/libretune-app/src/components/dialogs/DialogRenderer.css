@@ -584,13 +584,13 @@
 .dialog-view .indicator-tile {
   position: relative;
   display: flex;
-  flex-direction: column;
-  justify-content: flex-end;
+  flex-direction: row;
+  justify-content: center;
   align-items: center;
-  min-height: 108px;
-  padding: 10px 8px;
+  min-height: 30px;
+  padding: 6px 8px;
   border: 1px solid rgba(0, 0, 0, 0.12);
-  border-radius: 12px;
+  border-radius: 4px;
   box-sizing: border-box;
   text-align: center;
   overflow: hidden;
