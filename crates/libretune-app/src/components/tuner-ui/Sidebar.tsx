@@ -14,6 +14,8 @@ interface SidebarProps {
   searchIndex?: Record<string, string[]>;
   /** Current project name for display in header */
   projectName?: string;
+  /** id of the currently open tab/dialog — highlighted in the tree so it's clear what's open */
+  activeItemId?: string | null;
 }
 
 /** Recursively filter tree nodes by search query, preserving parent folders when children match */
@@ -100,7 +102,7 @@ function highlightMatch(label: string, query: string): React.ReactNode {
   );
 }
 
-export function Sidebar({ items, width, onResize, onItemSelect, searchIndex, projectName }: SidebarProps) {
+export function Sidebar({ items, width, onResize, onItemSelect, searchIndex, projectName, activeItemId }: SidebarProps) {
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [searchQuery, setSearchQuery] = useState('');
   const [savedExpandedIds, setSavedExpandedIds] = useState<Set<string> | null>(null);
@@ -364,6 +366,7 @@ export function Sidebar({ items, width, onResize, onItemSelect, searchIndex, pro
               onItemDoubleClick={handleDoubleClick}
               level={0}
               searchQuery={searchQuery}
+              activeItemId={activeItemId}
             />
           </>
         )}
@@ -384,6 +387,7 @@ interface TreeViewProps {
   onItemDoubleClick: (item: SidebarNode) => void;
   level: number;
   searchQuery?: string;
+  activeItemId?: string | null;
 }
 
 function TreeView({
@@ -393,6 +397,7 @@ function TreeView({
   onItemDoubleClick,
   level,
   searchQuery = '',
+  activeItemId,
 }: TreeViewProps) {
   return (
     <ul className="tree-list" role="tree">
@@ -400,11 +405,13 @@ function TreeView({
         const hasChildren = item.children && item.children.length > 0;
         const isExpanded = expandedIds.has(item.id);
         const isDisabled = item.disabled === true;
+        const isSelected = !hasChildren && item.id === activeItemId;
 
         return (
           <li key={item.id} className="tree-item" role="treeitem">
             <div
-              className={`tree-item-row ${isDisabled ? 'tree-item-disabled' : ''}`}
+              className={`tree-item-row ${isDisabled ? 'tree-item-disabled' : ''} ${isSelected ? 'selected' : ''}`}
+              aria-selected={isSelected}
               style={{ paddingLeft: level * 16 + 8 }}
               draggable={!hasChildren}
               onDragStart={(e) => {
@@ -446,6 +453,7 @@ function TreeView({
                 onItemDoubleClick={onItemDoubleClick}
                 level={level + 1}
                 searchQuery={searchQuery}
+                activeItemId={activeItemId}
               />
             )}
           </li>

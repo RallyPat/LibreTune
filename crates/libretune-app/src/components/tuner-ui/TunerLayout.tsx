@@ -166,6 +166,7 @@ export function TunerLayout({
             onItemSelect={onSidebarItemSelect}
             searchIndex={searchIndex}
             projectName={projectName}
+            activeItemId={activeTabId}
           />
         )}
         
