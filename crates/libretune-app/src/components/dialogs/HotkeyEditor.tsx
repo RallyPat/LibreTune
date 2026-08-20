@@ -206,26 +206,41 @@ export default function HotkeyEditor({ onClose, onSave, bindings: initialBinding
   useEffect(() => {
     if (initialBindings && Object.keys(initialBindings).length > 0) {
       setHotkeys((prev) => {
-        const updated = { ...prev };
+        let changed = false;
+        const updated: Record<string, HotkeyEntry> = { ...prev };
         Object.entries(initialBindings).forEach(([action, binding]) => {
-          if (updated[action]) {
-            updated[action].currentBinding = binding;
+          const entry = updated[action];
+          if (entry && entry.currentBinding !== binding) {
+            updated[action] = { ...entry, currentBinding: binding };
+            changed = true;
           }
         });
-        return updated;
+        // Return the SAME reference when nothing changed so React bails out
+        // instead of re-rendering. Returning a fresh-but-equal object here
+        // fed the onChange <-> bindings-prop feedback loop below and produced
+        // "Maximum update depth exceeded".
+        return changed ? updated : prev;
       });
     }
   }, [initialBindings]);
 
-  // Notify parent of changes
-  useEffect(() => {
-    if (onChange && Object.keys(hotkeys).length > 0) {
-      const bindings: Record<string, string> = Object.fromEntries(
-        Object.entries(hotkeys).map(([id, entry]) => [id, entry.currentBinding])
+  // Report the given entries to the parent as a flat bindings map.
+  // Called ONLY from user-action handlers (edit / reset / import) — never
+  // from an effect. An effect watching `hotkeys` used to call onChange on
+  // every change, including the ones caused by applying the `bindings` prop,
+  // which fed the parent <-> child setState loop ("Maximum update depth
+  // exceeded") whenever saved bindings differed from the defaults.
+  const notifyParent = useCallback(
+    (entries: Record<string, HotkeyEntry>) => {
+      if (!onChange) return;
+      onChange(
+        Object.fromEntries(
+          Object.entries(entries).map(([id, entry]) => [id, entry.currentBinding])
+        )
       );
-      onChange(bindings);
-    }
-  }, [hotkeys, onChange]);
+    },
+    [onChange]
+  );
 
   // Detect keybinding conflicts
   const detectConflicts = useCallback((updatedHotkeys: Record<string, HotkeyEntry>) => {
@@ -265,8 +280,9 @@ export default function HotkeyEditor({ onClose, onSave, bindings: initialBinding
       };
       setHotkeys(updated);
       detectConflicts(updated);
+      notifyParent(updated);
     },
-    [hotkeys, detectConflicts]
+    [hotkeys, detectConflicts, notifyParent]
   );
 
   // Reset to defaults
@@ -280,7 +296,8 @@ export default function HotkeyEditor({ onClose, onSave, bindings: initialBinding
     setHotkeys(reset);
     detectConflicts(reset);
     setConflictWarning(null);
-  }, [hotkeys, detectConflicts]);
+    notifyParent(reset);
+  }, [hotkeys, detectConflicts, notifyParent]);
 
   // Export bindings
   const handleExport = useCallback(async () => {
