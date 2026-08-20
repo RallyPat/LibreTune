@@ -338,6 +338,14 @@ pub(crate) async fn feed_autotune_data(
         .or_else(|| data.get("mapaccaen"))
         .map(|v| *v > 0.5);
 
+    // Overrun fuel cut. Same channel names the AFR delay test looks for, so
+    // both features agree about when the injectors are off. During a cut the
+    // wideband reads full lean and the sample says nothing about VE.
+    let fuel_cut_active = data
+        .get("DFCOOn")
+        .or_else(|| data.get("dfco"))
+        .map(|v| *v > 0.5);
+
     // Create the data point
     let data_point = VEDataPoint {
         rpm,
@@ -350,6 +358,7 @@ pub(crate) async fn feed_autotune_data(
         tps,
         tps_rate,
         accel_enrich_active,
+        fuel_cut_active,
         timestamp_ms: current_time_ms,
     };
 
