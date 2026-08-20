@@ -1,4 +1,4 @@
-import { Copy, Clipboard, Undo2, Redo2, Flame, Crosshair, Box, Wand2 } from 'lucide-react';
+import { Copy, Clipboard, Undo2, Redo2, Flame, Crosshair, Box, Wand2, Upload, Download } from 'lucide-react';
 import '../TableEditor.css';
 
 interface TableToolbarProps {
@@ -27,6 +27,9 @@ interface TableToolbarProps {
   /** Generate the whole table from engine specs (VE/ignition/AFR only). */
   onGenerate?: () => void;
   generatableLabel?: string;
+  /** TunerStudio-compatible per-table .table file import/export. */
+  onImportTable?: () => void;
+  onExportTable?: () => void;
 }
 
 export default function TableToolbar({
@@ -54,6 +57,8 @@ export default function TableToolbar({
   onToggle3D,
   onGenerate,
   generatableLabel,
+  onImportTable,
+  onExportTable,
 }: TableToolbarProps) {
   return (
     <div className="table-toolbar">
@@ -217,6 +222,32 @@ export default function TableToolbar({
           >
             <Wand2 size={14} /> Generate
           </button>
+        </>
+      )}
+
+      {(onImportTable || onExportTable) && (
+        <>
+          <div className="table-toolbar-separator" />
+          {onImportTable && (
+            <button
+              className="table-toolbar-btn"
+              onClick={onImportTable}
+              title="Load Table from File... (.table)"
+              aria-label="Load Table from File"
+            >
+              <Upload size={14} />
+            </button>
+          )}
+          {onExportTable && (
+            <button
+              className="table-toolbar-btn"
+              onClick={onExportTable}
+              title="Save Table to File... (.table)"
+              aria-label="Save Table to File"
+            >
+              <Download size={14} />
+            </button>
+          )}
         </>
       )}
     </div>

@@ -66,6 +66,7 @@ pub mod string_context;
 pub mod sync_ecu_data;
 pub mod system;
 pub mod table_compare;
+pub mod table_file_io;
 pub mod table_internals;
 pub mod table_ops;
 pub mod table_update;
