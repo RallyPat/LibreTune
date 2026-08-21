@@ -43,6 +43,10 @@ Public modules (post-Phase 7):
   validation, built-in templates).
 - `datalog` — Streaming log writer.
 - `demo` — Synthetic ECU for offline / demo mode.
+- `dynamic_table` — TunerStudio-style dynamically sized (resizable) tables:
+  resolves the active row/col counts from tune scalars, enforces the INI's
+  min/max and cell budget (`maximumElements`), and packs values row-major
+  with stride = current columns inside the fixed allocation.
 - `ecu` — `EcuMemory`, `Value`, page model.
 - `ini` — INI parser + `EcuDefinition` (`Constant`, `OutputChannel`,
   `TableDefinition`, etc.).
