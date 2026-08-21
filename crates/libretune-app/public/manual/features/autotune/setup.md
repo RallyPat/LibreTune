@@ -103,6 +103,14 @@ Engine exhaust takes time to reach the O2 sensor. AutoTune compensates:
 - **At redline**: ~50ms delay (fast exhaust flow)
 - LibreTune interpolates between these values
 
+The default curve tops out around 200 ms, but a real exhaust's dead time is
+commonly 400–1000 ms. For best results, measure your car with the
+[AFR Delay Test](../tools.md) (Tools → AFR Delay Test…) and enter the
+measured value as the fixed lambda delay in the AutoTune settings. A
+flow-scaled option is also available: it anchors the delay at idle/cruise
+and shortens it toward a floor as exhaust flow rises, modelling the physics
+(exhaust volume ÷ flow) instead of using one flat number.
+
 ## Best Practices
 
 1. **Start conservative** with low authority limits

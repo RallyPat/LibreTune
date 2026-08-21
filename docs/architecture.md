@@ -1,7 +1,9 @@
 # LibreTune Architecture
 
 This document describes module boundaries and the high-level shape of the
-LibreTune codebase, current as of the Phase 1–8 cleanup pass (April 2026).
+LibreTune codebase. It was originally written at the Phase 1–8 cleanup pass
+(April 2026) and is updated as the codebase evolves (last reviewed August
+2026).
 
 ## Workspace layout
 
@@ -28,8 +30,12 @@ Pure domain logic, no UI, no Tauri, no async runtime in the public API.
 Public modules (post-Phase 7):
 
 - `action_scripting` — Lua-driven controller-command scripts.
+- `agent`, `llm` — AI-assistant orchestrator (tools, context, safety tiers)
+  and the LLM `Provider` trait with native OpenAI/Anthropic/Google
+  implementations over reqwest.
 - `autotune` — VE / AFR / dwell adaptation algorithms; recommendations and
-  authority limits live in `autotune/anomaly.rs` and friends.
+  authority limits live in `autotune/anomaly.rs`, the AFR transport-delay
+  step test in `autotune/delay_measure.rs`.
 - `basemap` — Built-in base-map generation logic.
 - `dash` — TunerStudio-compatible `.dash` / `.gauge` XML format and the
   single canonical dashboard runtime model (`DashFile`, `GaugeCluster`,
@@ -40,18 +46,27 @@ Public modules (post-Phase 7):
 - `ecu` — `EcuMemory`, `Value`, page model.
 - `ini` — INI parser + `EcuDefinition` (`Constant`, `OutputChannel`,
   `TableDefinition`, etc.).
+- `lua` — Sandboxed Lua scripting runtime (used by `action_scripting` and
+  the Lua console/scripting features).
+- `pin_conflict` — Pin conflict scan and gating rules (a switched-off
+  feature does not claim its pin; 'Board Default' is not a pin).
 - `plugin_api`, `plugin_system` — WASM plugin host + plugin-facing API.
   (The legacy Java plugin host has been removed; see Phase 3 in the
   changelog.)
+- `port_editor` — Port/pin assignment model behind the hardware
+  configuration UI.
 - `project` — Project model, repository, online-INI repository.
 - `protocol` — `Connection`, `ConnectionState`, transport abstractions
   (Serial, TCP, in-process simulator).
 - `realtime` — `Evaluator` derived-channel transform (raw output channels +
   `EcuDefinition` → computed channels). Pure transform; not part of the
   streaming/transport stack.
+- `table_file` — TunerStudio `.table` single-table XML reader/writer
+  (per-table import/export).
 - `table_ops` — Table re-binning, smoothing, interpolation, scaling,
   cell-equalize. Pure value-in / value-out helpers.
 - `tune` — `TuneFile`, `TuneCache`, `PageState`, migration.
+- `tune_view` — `.tuneView` format support for TunerStudio project import.
 - `unit_conversion` — Unit conversions used by both UI and analysis.
 
 The `prelude` module re-exports the most commonly used types so callers
@@ -67,7 +82,7 @@ glue:
 - A few shared helpers retained at crate root.
 - `tauri::generate_handler![…]` listing every command.
 
-All command bodies live under `src-tauri/src/commands/` (72 files). Each
+All command bodies live under `src-tauri/src/commands/` (~80 files). Each
 file owns a coherent slice of functionality, e.g.:
 
 - `connection.rs`, `metrics.rs`, `realtime_get.rs` — connection lifecycle
@@ -76,8 +91,11 @@ file owns a coherent slice of functionality, e.g.:
   templates, and import.
 - `tune_io.rs`, `tune_info.rs`, `tune_misc.rs`, `tune_health.rs`,
   `tune_migration.rs` — tune persistence, diffing, migration.
-- `table_ops.rs`, `table_compare.rs`, `csv_io.rs` — table editing
-  Tauri wrappers.
+- `table_ops.rs`, `table_compare.rs`, `csv_io.rs`, `table_file_io.rs` —
+  table editing Tauri wrappers (including per-table `.table` file
+  import/export).
+- `pin_conflicts.rs` — pre-burn pin conflict scan with feature-enable
+  gating.
 - `autotune_*.rs`, `base_map.rs`, `adaptive_timing.rs` — tuning
   primitives.
 - `settings.rs`, `hotkeys.rs`, `restore_points.rs` — user-facing settings

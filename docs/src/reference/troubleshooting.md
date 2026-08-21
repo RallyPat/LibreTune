@@ -134,6 +134,23 @@ off every animation frame.
 4. Confirm wideband is working
 5. Review filter settings
 
+### Recommendations Never Accumulate
+
+**Symptoms**: AutoTune runs and data flows, but hit counts stay at zero or
+climb far slower than the session length suggests.
+
+**Solutions**:
+1. This was a fixed bug — on real hardware the delayed-sample match window
+   was too tight for the stream's actual cadence and silently dropped a
+   third to a half of all samples. Update to a current nightly.
+2. Samples taken during **overrun fuel cut** (lift-off) and **railed wideband
+   readings** (below ~10 or above ~19.5 AFR — sensor at a stop, unpowered
+   heater, or a cut still washing out) are excluded by design; each rejection
+   is named in the diagnostic log, so check which filter is dropping your
+   samples.
+3. If the wideband reads railed while the engine runs, fix the sensor/heater
+   first — those readings carry no mixture information.
+
 ### Erratic Recommendations
 
 **Symptoms**: Values jumping around

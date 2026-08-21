@@ -25,17 +25,28 @@ pub struct VEDataPoint {
     pub tps: f64,              // Throttle position (0-100%)
     pub tps_rate: f64,         // TPS change rate (%/sec)
     pub accel_enrich_active: Option<bool>,  // ECU acceleration enrichment flag
+    pub fuel_cut_active: Option<bool>,      // Overrun fuel-cut flag (DFCOOn/dfco channels)
     pub timestamp_ms: u64,     // Timestamp for correlation
 }
 ```
 
-**Data Collection Rate**: 100ms (10 Hz) from realtime stream
+**Data Collection Rate**: follows the realtime stream (10 Hz nominal, but
+111–200 ms is common on real hardware where single-shot reads contend with
+the realtime poll for the connection lock).
 
 ### 2. Lambda Delay Compensation
 
 The AFR sensor reading at time T corresponds to fuel injected at time T-Δ, where Δ is the lambda delay.
 
-**Delay Calculation** (RPM-dependent):
+**Delay resolution order** (first match wins):
+
+1. **Fixed measured delay** — `lambda_delay_ms > 0` in settings. This is
+   where a value from the [AFR Delay Test](../features/tools.md) belongs:
+   real exhausts commonly measure 400–1000 ms, far beyond the RPM curve.
+2. **Per-cell delay table** — `reference_tables.lambda_delay_table`
+   (`[row][col]` matching the VE table layout), when present.
+3. **RPM-based fallback curve** (default when nothing is configured):
+
 ```
 delay_ms = 200 - (150 * (rpm - 800) / (6000 - 800))
 ```
@@ -55,11 +66,36 @@ fn get_lambda_delay_ms(rpm: f64) -> u64 {
 }
 ```
 
+**Flow-scaled delay option**: when `lambda_delay_flow_scaled` is set,
+`lambda_delay_ms` anchors the low-flow (idle/cruise) end of a generated
+per-cell table that scales delay down toward `lambda_delay_floor_ms`
+(high-flow asymptote, default 120 ms) as exhaust flow — approximated by
+rpm·load·VE — rises. Transport delay ≈ exhaust-plumbing volume / flow, so
+this models the physics directly instead of using one flat number.
+
+**Correlation buffer sizing** follows whichever delay is in use: the buffer
+holds at least `configured delay + 500 ms` margin, never shrinking below the
+historical 500 ms, so a long measured delay is never starved of history.
+
 **Data Point Correlation**:
 1. Current AFR reading is buffered
 2. Historical data point is found: `timestamp_now - delay_ms`
-3. Historical RPM/MAP determines which VE cell to update
-4. Current AFR is used for correction calculation
+3. The match window is **0.6× the stream's measured mean sample gap**
+   (floored at the historical 50 ms) — with samples every T ms the nearest
+   one to any target is at most T/2 away, so a fixed 50 ms window used to
+   reject a third to a half of all samples on real hardware
+4. Historical RPM/MAP determines which VE cell to update
+5. Current AFR is used for correction calculation
+
+**Samples that carry no mixture information are rejected outright** (each
+with a named reason in the diagnostic log):
+- **Overrun fuel cut** (`fuel_cut_active == true`): injectors off, wideband
+  pinned lean — each such sample would otherwise demand maximum enrichment
+  in exactly the low-load cells every lift passes through.
+- **Railed wideband** (`afr < 10.0 || afr > 19.5`): no running engine
+  sustains those readings — it's the sensor at a stop, an unpowered heater,
+  or a cut still washing out. Also covers fuel cut on ECUs that expose no
+  DFCO channel.
 
 ### 3. Transient Filtering
 

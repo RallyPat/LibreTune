@@ -268,6 +268,74 @@ Action Manager captures:
 
 ---
 
+## AFR Delay Test
+
+Automated measurement of your exhaust's transport delay — how long a fuelling
+change takes to show up at the wideband. AutoTune needs this value (its
+"lambda delay") to compare the AFR it reads against the fuel that was actually
+injected at that moment; guessing it too low is a classic cause of
+recommendations that oscillate.
+
+### Overview
+
+The test:
+
+1. Steps one byte of live tune memory — the warm-plateau warmup-enrichment
+   slot — a configurable amount **richer** for a timed hold.
+2. Records the AFR trace through the step and the recovery.
+3. Reports the time from the step to **half the settled excursion** (the
+   median transit time — the transport delay), not the noisy leading edge.
+4. Repeats, accumulating each measurement into an **rpm × load delay map**.
+
+### Opening the AFR Delay Test
+
+1. Connect to the ECU and open a project
+2. **Go to** Tools → **AFR Delay Test…**
+
+### Settings
+
+| Setting | Range | Meaning |
+|---------|-------|---------|
+| Step size | 3–20 % | How much richer the enrichment step makes the mixture |
+| Hold | 500–5000 ms | How long the step is held before restore |
+| Settle | 500–10000 ms | Recovery window sampled after the restore |
+| Repeats | 1–200 steps | Fixed number of steps (single operating point) |
+| Run until stopped | — | Continuous mode; keep driving and let the map fill |
+
+A single step cannot be timed accurately — the step-to-step scatter is larger
+than the response — so the reading only means something once several traces
+are stacked. The overlay draws every step's trace so you can see the scatter
+yourself.
+
+### The Delay Map
+
+Each successful step lands in a bin of the rpm × load table (mean delay and
+sample count per cell). **Run until stopped** is the most useful mode: start
+it before a drive and every steady operating point you pass through adds a
+measurement, so the map fills where you actually drive.
+
+### Safety
+
+- The step can only make the mixture **richer**, never leaner.
+- Changes are written to **live memory only** — nothing is burned, and
+  cycling the key restores the stored tune.
+- The stepped WUE slot is restored after every step and on Stop.
+- The test never touches the throttle — hold the engine steady yourself.
+
+### Interpreting Results
+
+- **"No measurement"** reasons are surfaced per step: an unstable baseline
+  (you moved the throttle), no response (step too small for the noise), or
+  the response not settling within the hold — the dialog will suggest a
+  longer hold when that's the problem.
+- When the map has enough coverage, take a representative value and enter it
+  as AutoTune's fixed lambda delay (see
+  [Setting Up AutoTune](./autotune/setup.md#lambda-delay-compensation)) — the
+  RPM-based default curve tops out around 200 ms, far short of a real
+  exhaust's dead time, which commonly measures 400–1000 ms.
+
+---
+
 ## Reset to Defaults
 
 Quickly reset tune to factory defaults for a clean start.

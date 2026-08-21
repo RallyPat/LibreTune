@@ -7,7 +7,7 @@ Thank you for your interest in contributing to LibreTune!
 ### Prerequisites
 
 - [Rust](https://rustup.rs/) (stable toolchain)
-- [Node.js](https://nodejs.org/) 18+ and npm
+- [Node.js](https://nodejs.org/) 20+ (required by Vite 7) and npm
 - [Tauri CLI](https://tauri.app/start/prerequisites/)
 
 ### Clone the Repository
