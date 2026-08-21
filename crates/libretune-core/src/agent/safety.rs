@@ -89,6 +89,24 @@ pub fn clamp_table_edit(
         }
     }
 
+    // 3. Absolute rails, last so nothing above can escape them. The two limits
+    // above are both relative to `current_value`, so they bound one edit
+    // against wherever the table already sits and cannot stop a series of
+    // edits from walking a cell anywhere at all.
+    let railed = limits.clamp_to_rails(clamped);
+    if railed != clamped {
+        reason = Some(format!(
+            "value {:.2} outside the allowed range {:.2}..={:.2}",
+            clamped,
+            limits.min_cell_value.min(limits.max_cell_value),
+            limits.min_cell_value.max(limits.max_cell_value)
+        ));
+        if clamped_from.is_none() {
+            clamped_from = Some(new_value);
+        }
+        clamped = railed;
+    }
+
     if clamped_from.is_some() {
         ClampResult {
             action: Action::TableEdit {
@@ -122,6 +140,7 @@ mod tests {
         AutoTuneAuthorityLimits {
             max_cell_value_change: 5.0,
             max_cell_percentage_change: 10.0,
+            ..Default::default()
         }
     }
 
@@ -161,6 +180,7 @@ mod tests {
         let lim = AutoTuneAuthorityLimits {
             max_cell_value_change: 100.0,
             max_cell_percentage_change: 10.0,
+            ..Default::default()
         };
         let r = clamp_table_edit(
             Action::TableEdit {
@@ -191,5 +211,66 @@ mod tests {
         let action = Action::Pause { duration_ms: 100 };
         let r = clamp_table_edit(action, &limits(), None);
         assert!(r.clamped_from.is_none());
+    }
+}
+
+#[cfg(test)]
+mod rail_tests {
+    use super::*;
+    use crate::action_scripting::Action;
+    use crate::autotune::AutoTuneAuthorityLimits;
+
+    fn railed(lo: f64, hi: f64) -> AutoTuneAuthorityLimits {
+        AutoTuneAuthorityLimits {
+            // Wide relative limits so only the rails can bite.
+            max_cell_value_change: 1000.0,
+            max_cell_percentage_change: 1000.0,
+            min_cell_value: lo,
+            max_cell_value: hi,
+        }
+    }
+
+    fn edit(new_value: f64) -> Action {
+        Action::TableEdit {
+            table_name: "veTable1Tbl".to_string(),
+            x_index: 0,
+            y_index: 0,
+            new_value,
+            old_value: None,
+        }
+    }
+
+    fn value_of(a: &Action) -> f64 {
+        match a {
+            Action::TableEdit { new_value, .. } => *new_value,
+            _ => panic!("not a table edit"),
+        }
+    }
+
+    /// The agent path enforces the same authority policy as a live session. If
+    /// the rails only reach one of the two, the other can still write past them.
+    #[test]
+    fn the_agent_path_is_railed_too() {
+        let r = clamp_table_edit(edit(400.0), &railed(0.0, 120.0), Some(100.0));
+        assert_eq!(value_of(&r.action), 120.0, "ceiling must apply to agent edits");
+        assert!(r.clamped_from.is_some(), "clamping must be reported, not silent");
+        assert!(
+            r.reason.as_deref().unwrap_or("").contains("outside the allowed range"),
+            "reason should name the rail, got {:?}",
+            r.reason
+        );
+    }
+
+    #[test]
+    fn the_agent_path_floor_applies() {
+        let r = clamp_table_edit(edit(-50.0), &railed(10.0, 255.0), Some(100.0));
+        assert_eq!(value_of(&r.action), 10.0);
+    }
+
+    #[test]
+    fn an_in_range_edit_is_untouched() {
+        let r = clamp_table_edit(edit(105.0), &railed(0.0, 255.0), Some(100.0));
+        assert_eq!(value_of(&r.action), 105.0);
+        assert!(r.clamped_from.is_none(), "no clamp should be reported");
     }
 }
