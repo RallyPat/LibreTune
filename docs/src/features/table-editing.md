@@ -88,6 +88,29 @@ Changes the axis values and interpolates Z values automatically. Useful for adju
 - `Ctrl+V` - Paste values
 - `Ctrl+Shift+V` - Paste with options (add, multiply, etc.)
 
+## Table File Import/Export (.table)
+
+Individual tables can be saved to and loaded from TunerStudio-compatible
+`.table` files — handy for sharing a single table (a VE table, an ignition
+map, injector dead-times) between projects or with other tuners, without
+touching the rest of the tune.
+
+- **Save Table to File** — the download icon in the table toolbar writes the
+  table's current X/Y axis bins and value grid to a `.table` file.
+- **Load Table from File** — the upload icon reads a `.table` file back into
+  the open table, replacing its axis bins and values.
+
+Notes:
+
+- `.table` files interoperate with TunerStudio's "Save Table to File" /
+  "Load Table from File".
+- The file's dimensions must match the table's **current** size exactly.
+  Unlike TunerStudio, LibreTune does not resample a mismatched grid onto the
+  table's axes — resize (re-bin) the table first if the sizes differ, so a
+  file can never silently apply at the wrong scale.
+- Importing overwrites the table's axis bins and values; the rest of the tune
+  is untouched. Burn to ECU when you're happy with the result.
+
 ## Undo/Redo
 
 - `Ctrl+Z` - Undo last change

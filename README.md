@@ -32,13 +32,13 @@ Full-featured 2D grid editor with 3D surface visualization, keyboard navigation,
 Import existing .dash files or build layouts from scratch with 13 gauge types (analog dials, bar gauges, sweep gauges, digital readouts, line graphs, histograms, tachometers, and more). Drag-and-drop designer mode with three default dashboards included.
 
 ### AutoTune
-Live fuel table recommendations based on AFR targets with heat map visualization, cell locking, authority limits, transient filtering, and lambda delay compensation.
+Live fuel table recommendations based on AFR targets with heat map visualization, cell locking, authority limits, transient filtering, lambda delay compensation (fixed, flow-scaled, or measured via the built-in AFR Delay Test), and fuel-cut / railed-sensor exclusion.
 
 ### Diagnostics & Logging
 Data logger with configurable sample rates, playback controls, CSV import/export, math channels, and alert rules. Tooth logger and composite logger for trigger pattern analysis. Text-based ECU console for rusEFI/FOME/epicEFI.
 
 ### Data Management
-Project-based workflow with restore points, Git-based tune versioning, CSV export/import, TunerStudio project import, INI version tracking with automatic tune migration, and change annotations. Online INI search from Speeduino and rusEFI GitHub repos.
+Project-based workflow with restore points, Git-based tune versioning, CSV export/import, TunerStudio-compatible per-table `.table` import/export, TunerStudio project import, INI version tracking with automatic tune migration, and change annotations. Online INI search from Speeduino, rusEFI, and FOME GitHub repos, offered automatically on ECU signature mismatch.
 
 ### Additional
 - **AI Assistant**: Bring-your-own-LLM co-pilot (OpenAI / Anthropic / Google / local Ollama) that reads your tables, diagnoses problems, and *proposes* validated, authority-clamped changes for explicit review — nothing burns automatically. Docked side panel, pop-out-able.
@@ -168,7 +168,7 @@ libretune/
 │       │   └── stores/         # State stores
 │       └── src-tauri/          # Tauri backend (Rust)
 │           └── src/
-│               ├── commands/   # Tauri commands (~70 sub-modules)
+│               ├── commands/   # Tauri commands (~80 topic modules)
 │               └── state.rs    # Shared AppState
 ├── docs/                       # User manual (mdBook) + architecture.md
 ├── scripts/                    # Build and development scripts

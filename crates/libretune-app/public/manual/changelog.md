@@ -44,8 +44,10 @@ All notable changes to LibreTune will be documented in this file.
 - FOME fast comms with intelligent fallback for optimized console communication
 - Dashboard tab protection (cannot be accidentally closed; recoverable via View → Dashboard)
 - Configurable status bar channels (Settings → Status Bar Channels, max 8)
-- INI signature mismatch dialog with local and online INI search
-- Online INI repository search from Speeduino and rusEFI GitHub repos
+- INI signature mismatch dialog with local and online INI search (the online search now runs automatically when a mismatch is reported; downloading still requires an explicit click)
+- Online INI repository search from Speeduino, rusEFI, and FOME GitHub repos
+- Per-table `.table` file import/export (TunerStudio-compatible "Save/Load Table to File" from the table toolbar)
+- AFR Delay Test (Tools → AFR Delay Test…) — automated exhaust transport-delay measurement that steps fuel and reports the delay to enter as AutoTune's lambda delay
 - Resilient ECU sync with partial failure handling and status bar indicator
 - CSV export/import for tune data
 - Reset tune to defaults
@@ -69,6 +71,14 @@ All notable changes to LibreTune will be documented in this file.
 - Java/JVM plugin system UI (deprecated; see DEPRECATION_NOTICE.md)
 
 ### Fixed
+- AutoTune no longer drops a third to a half of its samples on real hardware (delayed-sample match window now follows the stream's cadence), and excludes overrun fuel-cut and railed wideband readings
+- AFR delay test reports the median (half-excursion) transport delay instead of the noisy leading edge, refuses to run twice concurrently, and draws the settle/recovery window
+- Pin conflict scan ignores pins held only by switched-off features, treats "Board Default" as unassigned, and no longer blocks loading a tune
+- Dialog rendering fidelity: fields with an enable condition are disabled (not hidden), command-button / indicator-panel labels and dynamic units are evaluated instead of showing raw expressions, indicator panels without an explicit column count render correctly
+- Sidebar highlights the currently open item in the project tree
+- Table editor: Interpolate shortcut no longer steals focus to the search box; Y-axis labels visible on tables with more than 12 rows
+- Dashboard drag-and-drop works inside the Tauri webview
+- Settings dialog HotkeyEditor infinite re-render loop
 - Table operations (scale, smooth, interpolate, set equal, rebin) now properly connected to backend
 - AutoTune table lookup for rusEFI/epicEFI INIs (veTable1Map → veTable1Tbl resolution)
 - Realtime stream lock contention from get_all_constant_values blocking serial connection

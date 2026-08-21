@@ -72,10 +72,11 @@ LibreTune includes common INI files:
 Search GitHub repositories:
 1. Speeduino official repo
 2. rusEFI official repo
-3. Auto-download matching INI
+3. FOME official repo
+4. Auto-download matching INI
 
 ### Manual Import
-1. **File → Import ECU Definition**
+1. **Settings → ECU Definitions → Import**
 2. Select your INI file
 3. Added to local repository
 

@@ -1,14 +1,62 @@
+# libretune-app — Notes for AI Agents
 
-### Enhanced Table Context Menu - Completed Feb 9, 2026
-- **Feature**: Rich context menu for 2D table editor with advanced operations
-- **UI Implementation** (`TableContextMenu.tsx`):
-  - Added specialized input interface for Scale/Offset operations
-  - Input mode tabs (Scale vs Offset) with sensible defaults
-  - Grouped operations into logical sections with icons
-  - Added new tools: Interpolate Horizontal/Vertical, Fill Right/Down, Nudge
-- **Logic Integration** (`TableEditor2D.tsx`):
-  - Implemented handlers for `add_offset`, `interpolate_linear`, `fill_region`
-  - Wired interactions to new backend commands
-- **Styling** (`TableComponents.css`):
-  - Added CSS for tabbed inputs, action buttons, and icons
-- **Status**: Backend tests passed, Frontend typecheck passed
+App-level companion to the root [AGENTS.md](../../AGENTS.md). See that file
+for project-wide conventions (backend-first, legal distinction, git rules).
+This file tracks app-crate specifics.
+
+## Crate layout
+
+- `src/` — React + Vite frontend (TypeScript)
+  - `components/` — UI: `common/` (shared Dialog/Button/FormField/EmptyState
+    primitives), `dialogs/` (INI-driven `DialogRenderer` + per-feature
+    dialogs), `dashboards/`, `gauges/`, `tables/`, `curves/`, `tuner-ui/`
+    (layout chrome), `hardware/` (port editor), `agent/` (AI panel)
+  - `contexts/` — cross-cutting providers (loading, toast, unit prefs)
+  - `hooks/`, `stores/` (Zustand realtime store), `services/`, `menus/`,
+    `i18n/` (en + pt-BR), `utils/`, `types/`, `themes/`
+- `src-tauri/` — Tauri host
+  - `src/lib.rs` — glue only: AppState + `invoke_handler!` manifest
+  - `src/commands/` — one module per topic (~80 files); add new commands
+    there and register them in `lib.rs`
+
+## Commands (npm)
+
+- `npm run dev` — Vite dev server (docs sync runs first)
+- `npm run tauri dev` — full Tauri app
+- `npm run build` — production bundle (docs sync runs first)
+- `npm run test:run` — Vitest
+- `npm run typecheck` — `tsc --noEmit` (there is no ESLint script)
+
+## Docs sync
+
+`public/manual/` is a generated copy of the mdBook manual (`docs/src/`),
+refreshed by `npm run docs:sync` (runs automatically on `dev`/`build`).
+Never edit `public/manual/` by hand — edit `docs/src/` and re-run the sync.
+
+## Frontend conventions
+
+- Realtime data arrives via `realtime:update` Tauri events →
+  `useRealtimeStream` → `stores/realtimeStore.ts`; components subscribe
+  per-channel (`useChannelValue` / `useChannels`) instead of polling.
+- TypeScript interfaces mirror the Rust command payloads.
+- All dialogs use the shared `Dialog` / `Button` / `FormField` primitives
+  from `components/common/`; avoid re-creating per-dialog overlays.
+- UI chrome text (menus, toolbar tooltips) goes through `t()` from
+  `src/i18n/`; INI-derived labels and channel names pass through verbatim.
+
+## Recent app-side work (Aug 2026)
+
+- Per-table `.table` import/export toolbar buttons (`TableEditor2D.tsx`,
+  `tuner-ui/TableEditor.tsx` → `commands/table_file_io.rs`)
+- Signature-mismatch dialog auto-searches online INI sources
+  (`dialogs/SignatureMismatchDialog.tsx`)
+- Dialog fidelity pass: enable-condition fields disabled not hidden,
+  command-button/indicatorPanel labels + dynamic units evaluated
+  (`dialogs/fields/*`, `dialogs/PanelComponents.tsx`)
+- AFR Delay Test dialog + trace overlay (`dialogs/AfrDelayTestDialog.tsx`,
+  `dialogs/DelayTraceOverlay.tsx`)
+- HotkeyEditor re-render loop fix + regression test
+  (`dialogs/__tests__/HotkeyEditor.test.tsx`)
+
+Detailed history: [CHANGELOG.md](../../CHANGELOG.md).
+
