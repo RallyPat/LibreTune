@@ -52,11 +52,14 @@ Target AFR: 14.7 (gasoline stoich)
 Algorithm: Simple (recommended for beginners)
 ```
 
-**Load Source (MAP vs MAF)**
+**Load Source (MAP vs MAF vs TPS)**
 - **MAP (Speed Density)**: Default for VE tables
 - **MAF**: Use for mass-airflow based tables
-- If the table load axis reports MAF, AutoTune auto-switches to **MAF**
+- **TPS (Alpha-N / ITB)**: Use when the VE table's load axis is throttle position — individual-throttle-body (ITB) / Alpha-N setups
+- If the table load axis reports a throttle channel, AutoTune auto-switches to **TPS**; if it reports MAF, to **MAF**
+- On Speeduino the load-axis channel is named `fuelLoad` regardless of fuel algorithm, so AutoTune also reads the **Control Algorithm** constant (Engine Constants → Injection Setup): `TPS` selects the throttle load source automatically. Setting that constant to `MAP`/`TPS` also re-scales the load axis immediately (0–100 % in Alpha-N mode)
 - If no MAF channel is detected, AutoTune falls back to **MAP** and shows a hint
+- Selecting a load source never changes the axis values you see — bins always come from your tune. It only controls which live channel is used to attribute data to cells
 
 **Step 4: Set Authority Limits**
 For your FIRST session ever with this tune:
@@ -73,6 +76,11 @@ Default filters work for most cases. Only adjust if:
 - Your car idles rough: Raise Min RPM to 1200
 - You're tuning a diesel: Adjust temp filters significantly
 - You do a track day: Lower Min TPS to 0 for coast-down testing
+- ITB / Alpha-N setup: The default Max TPS Rate (50 %/s) already accounts for fast individual throttles; genuine accel transients are still excluded separately
+
+**While running — the sample indicator**
+
+While the session runs, a small indicator under the title row shows how many samples passed the filters and, when data is being rejected, which filter is eating it (most frequent reason first; hover for the full tally). **If AutoTune looks like nothing is happening, check this first** — `0 samples accepted` with rejections counting up means the filters (usually Min CLT while warming up, or Max TPS Rate) are discarding everything.
 
 **Step 6: Click Start**
 - AutoTune begins listening to wideband sensor
@@ -294,6 +302,22 @@ Compare before/after values
 4. Loosen filters: Lower Min RPM, Min TPS
 5. Verify ECU is receiving AFR channel
 ```
+
+**Check the sample indicator first.** While running, the indicator under the
+title row (e.g. `132 samples accepted · 400× clt below min_clt · …`, hover for
+the full tally) says exactly which filter is discarding your data:
+
+| Rejection reason | Meaning | Fix |
+|---|---|---|
+| `clt below min_clt` | Engine still warming up | Wait for full operating temp, or lower Min CLT |
+| `tps_rate above max_tps_rate` | Throttle moving too fast | Raise Max TPS Rate (ITBs need 50+ %/s) |
+| `rpm out of range` | Outside Min/Max RPM window | Adjust the RPM filter bounds |
+| `afr at sensor rail` | Wideband railed (< 10.0 or > 19.5) | Fix the sensor / its wiring; a cut or dead sensor reads full lean |
+| `overrun fuel cut` | Deceleration fuel cut active | Normal — keep out of the table on purpose |
+| `accel enrichment active` | Acceleration enrichment engaged | Normal — transient data is not VE data |
+
+If the indicator shows samples accepted but the heat map stays empty, the
+engine has not crossed those cells yet — keep driving.
 
 ### All Cells Show Blue (Very Lean)
 

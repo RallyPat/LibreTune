@@ -81,6 +81,20 @@ pub struct AutotuneStatus {
     pub running: bool,
     pub table_name: Option<String>,
     pub secondary_table_name: Option<String>,
+    /// Samples that passed the filters this session. When this stays at 0
+    /// while the stream runs, the session looks dead — pair it with
+    /// `rejections` to say why (issue #132).
+    pub accepted_samples: u64,
+    /// Filter rejections this session, most frequent reason first.
+    pub rejections: Vec<AutotuneRejectionCount>,
+}
+
+/// One row of the rejection tally exposed by [`AutotuneStatus`].
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AutotuneRejectionCount {
+    pub reason: String,
+    pub count: u64,
 }
 
 #[tauri::command]
@@ -88,16 +102,32 @@ pub async fn get_autotune_status(
     state: tauri::State<'_, AppState>,
 ) -> Result<AutotuneStatus, String> {
     let config_guard = state.autotune_config.lock().await;
+    // Sample tallies come from the live state, not the config, so the
+    // indicator keeps updating while the session runs.
+    let state_guard = state.autotune_state.lock().await;
+    let rejections = state_guard
+        .rejection_counts()
+        .into_iter()
+        .map(|(reason, count)| AutotuneRejectionCount {
+            reason: reason.to_string(),
+            count,
+        })
+        .collect();
+    let accepted_samples = state_guard.total_samples();
     Ok(match config_guard.as_ref() {
         Some(config) => AutotuneStatus {
             running: true,
             table_name: Some(config.table_name.clone()),
             secondary_table_name: config.secondary_table_name.clone(),
+            accepted_samples,
+            rejections,
         },
         None => AutotuneStatus {
             running: false,
             table_name: None,
             secondary_table_name: None,
+            accepted_samples,
+            rejections,
         },
     })
 }

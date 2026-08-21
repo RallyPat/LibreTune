@@ -40,12 +40,12 @@ The project aims to provide professional ECU tuning workflow and functionality w
   - `TableEditor2D.tsx` - Main 2D table editor with toolbar
   - `TableEditor3D.tsx` - 3D visualization (canvas-based)
 - Backend: `crates/libretune-core/src/table_ops.rs`
-- Features: Set Equal, Increase/Decrease, Scale, Interpolate, Smooth, Re-bin, Copy/Paste, History Trail, Follow Mode
+- Features: Set Equal, Increase/Decrease, Scale, Interpolate, Smooth, Re-bin, Copy/Paste, History Trail, Follow Mode, per-table `.table` file import/export (TunerStudio-compatible; core reader/writer in `crates/libretune-core/src/table_file.rs`, commands in `commands/table_file_io.rs`)
 
 ### 2. AutoTune
 - Location: `crates/libretune-app/src/components/tuner-ui/AutoTune.tsx`
-- Backend: `crates/libretune-core/src/autotune.rs`
-- Features: Auto-tuning with recommendations, heat maps, cell locking, filters, authority limits
+- Backend: `crates/libretune-core/src/autotune/` (mod.rs, anomaly.rs, predictor.rs, health.rs, delay_measure.rs)
+- Features: Auto-tuning with recommendations, heat maps, cell locking, filters, authority limits, lambda-delay compensation (fixed / flow-scaled / per-cell), fuel-cut and railed-sensor exclusion, AFR Delay Test (Tools menu; `delay_measure.rs` + `commands/afr_delay_test.rs`)
 - **Documentation** (Feb 3, 2026):
   - Created comprehensive usage guide: `docs/src/features/autotune/usage-guide.md`
   - Added step-by-step workflow (Setup → Driving → Review → Apply)
@@ -173,7 +173,7 @@ The project aims to provide professional ECU tuning workflow and functionality w
 
 ### Backend (Rust)
 ```bash
-cd /home/pat/.gemini/antigravity/scratch/libretune
+# from the repository root
 cargo build -p libretune-core
 cargo test -p libretune-core
 cargo clippy -p libretune-core
@@ -183,10 +183,10 @@ cargo clippy -p libretune-core
 ```bash
 cd crates/libretune-app
 npm install
-npm run dev        # Development mode
+npm run dev        # Development mode (Vite only)
 npm run tauri dev  # Full Tauri app
 npm run build       # Production build
-npm run lint       # ESLint
+npm run test:run    # Vitest (frontend tests)
 npm run typecheck  # TypeScript checking
 ```
 
@@ -208,7 +208,7 @@ async fn command_name(param: Type) -> Result<ReturnType, String> {
 
 ## Component State Management
 - Use React hooks (useState, useEffect, useMemo)
-- Realtime data via `get_realtime_data()` command (100ms polling)
+- Realtime data via event-based streaming: backend emits `realtime:update` events → `useRealtimeStream` → Zustand store (`stores/realtimeStore.ts`); components subscribe per-channel (`useChannelValue` / `useChannels`)
 - Table data fetched on-demand via `get_table_data()`
 
 ## Tuning Best Practices (for AI agents)
@@ -289,7 +289,7 @@ Based on analysis of common ECU tuning software patterns:
 [x] Composite logger (Speeduino/rusEFI/MS2) - Backend + CompositeLoggerView.tsx
 [x] Action Engine Enforcement (validation against INI) - COMPLETED Feb 8, 2026
 [x] Math Channels / Expression Engine - Backend COMPLETED Feb 8, 2026
-[ ] rusEFI console support (text-based command interface) - COMPLETED Feb 1-2, 2026
+[x] rusEFI console support (text-based command interface) - COMPLETED Feb 1-2, 2026
   - [x] ECU type detection (Speeduino, RusEFI, FOME, epicEFI, MS2, MS3)
   - [x] Console command pass-through protocol (Step 3 - connection.rs)
   - [x] FOME fast comms with intelligent fallback (Step 5 - settings)
@@ -301,6 +301,30 @@ Based on analysis of common ECU tuning software patterns:
 
 Detailed session-by-session history has moved to [CHANGELOG.md](CHANGELOG.md).
 What follows is a high-level pointer to the most recent cleanup pass.
+
+### Dialog fidelity, `.table` IO, pin gating & AutoTune sampling (Aug 2026)
+
+- **Per-table `.table` import/export** — TunerStudio-compatible
+  single-table save/load (`table_file.rs` + `commands/table_file_io.rs`,
+  toolbar buttons in both table editors). Import requires exact dimension
+  match (no silent resampling).
+- **Auto online INI search on signature mismatch** — the mismatch dialog
+  searches online sources (Speeduino/rusEFI/FOME) automatically; downloads
+  remain explicit.
+- **AutoTune sample integrity** — match window follows stream cadence
+  (was dropping ⅓–½ of samples on real hardware); overrun fuel-cut and
+  railed wideband readings excluded with named rejection reasons.
+- **AFR delay test measures half-excursion (median) delay** — plus
+  settle-window sampling, an in-progress guard, and recovery traces drawn.
+- **Pin lint gating** — switched-off features don't claim pins, 'Board
+  Default' is not a pin, loading a tune isn't blocked by pin lint
+  (`commands/pin_conflicts.rs`).
+- **Dialog rendering fidelity** — enable-condition fields disabled not
+  hidden; command-button / indicatorPanel labels and dynamic units
+  evaluated; indicatorPanel without `columns` renders; xAxis layout hint
+  respected.
+- **CI modernized** — lean gated flow with reusable composite actions.
+- See the `2026-08-20` CHANGELOG block for details.
 
 ### std_* panel synthesis & offline constant reads (Aug 2026)
 
@@ -339,7 +363,8 @@ language. See `CHANGELOG.md` for full per-phase details.
   dialogs migrated; CSS hex sweep tokenized; lucide-react adopted; pop-out
   window theme parity.
 - **Phase 5**: `lib.rs` reduced from 14,475 → 419 lines; 72 command modules
-  under `crates/libretune-app/src-tauri/src/commands/`.
+  under `crates/libretune-app/src-tauri/src/commands/` (the count has since
+  grown to ~80).
 - **Phase 6**: Folder reorg (`src/contexts/` for cross-cutting providers);
   `DialogRenderer.tsx` split into `dialogs/types.ts` and `dialogs/fields/`.
 - **Phase 7**: `dashboard.rs` centralized under `dash/layout.rs`; default

@@ -128,7 +128,12 @@ impl Default for AutoTuneFilters {
             max_y_axis: None,
             min_clt: 160.0,
             custom_filter: None,
-            max_tps_rate: 10.0,         // 10%/sec threshold
+            // 50 %/s: brisk-but-deliberate throttle use. The old 10 %/s
+            // default rejected nearly everything on individual-throttle-body
+            // (Alpha-N) engines, whose throttles snap far faster than a
+            // single-plenum setup — AutoTune looked dead (issue #132). Genuine
+            // accel transients are still caught by `exclude_accel_enrich`.
+            max_tps_rate: 50.0,
             exclude_accel_enrich: true, // Exclude accel enrichment by default
         }
     }
@@ -166,6 +171,12 @@ pub struct AutoTuneState {
     // Total number of samples that passed filters (denominator for
     // hit_percentage). See bug #16.
     total_samples: u64,
+    // Per-reason counts of samples rejected by the filters. Surface these in
+    // the UI (issue #132): a session that accepts nothing looks exactly like
+    // a broken one, and the counts say which filter is eating the data
+    // (a warm-up CLT below min_clt and a tip-in TPS rate above max_tps_rate
+    // are the usual culprits).
+    rejected_by_reason: HashMap<&'static str, u64>,
 }
 
 impl Default for AutoTuneState {
@@ -179,6 +190,7 @@ impl Default for AutoTuneState {
             reference_tables: AutoTuneReferenceTables::default(),
             strict_lambda_match: true, // Safe default: drop unmatched samples
             total_samples: 0,
+            rejected_by_reason: HashMap::new(),
         }
     }
 }
@@ -247,6 +259,7 @@ impl AutoTuneState {
         self.recommendations.clear();
         self.data_buffer.clear();
         self.total_samples = 0;
+        self.rejected_by_reason.clear();
     }
 
     pub fn stop(&mut self) {
@@ -447,6 +460,20 @@ impl AutoTuneState {
         self.total_samples
     }
 
+    /// Per-reason counts of filter-rejected samples this session, most
+    /// frequent first. Empty when nothing has been rejected. Lets the UI say
+    /// *why* a session is not accumulating data instead of looking dead
+    /// (issue #132).
+    pub fn rejection_counts(&self) -> Vec<(&'static str, u64)> {
+        let mut counts: Vec<(&'static str, u64)> = self
+            .rejected_by_reason
+            .iter()
+            .map(|(k, v)| (*k, *v))
+            .collect();
+        counts.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(b.0)));
+        counts
+    }
+
     /// Which filter rejected a sample, for the diagnostic log. Mirrors the
     /// order of the checks in `passes_filters`.
     fn rejection_reason(point: &VEDataPoint, filters: &AutoTuneFilters) -> &'static str {
@@ -504,6 +531,10 @@ impl AutoTuneState {
         self.prune_data_buffer(point.timestamp_ms);
 
         if !self.passes_filters(&point, filters) {
+            // Count per reason for the UI's rejection indicator (issue #132):
+            // a session that accepts nothing looks exactly like a broken one.
+            let reason = Self::rejection_reason(&point, filters);
+            *self.rejected_by_reason.entry(reason).or_insert(0) += 1;
             // Throttled so a full drive doesn't flood the log, but enough to
             // show *why* AutoTune "does nothing": compare these against the
             // active filter thresholds (a warm-up CLT below min_clt and a
@@ -516,7 +547,7 @@ impl AutoTuneState {
                 // enrichment showed every printed value passing while samples
                 // still vanished — an hour of misdiagnosis on real hardware.
                 tracing::debug!(
-                    reason = Self::rejection_reason(&point, filters),
+                    reason = reason,
                     rpm = point.rpm,
                     clt = point.clt,
                     load = point.load,
@@ -944,11 +975,6 @@ mod tests {
     use super::*;
 
     /// The accel-enrich filter must only reject when the flag is known-true.
-    /// An unknown flag (None — e.g. an ECU that publishes no boolean AE
-    /// channel) must not reject: treating unknown as active silently discarded
-    /// 100% of samples on Speeduino, whose `accelEnrich` channel is a
-    /// percentage (100 = no enrichment) and was misread as a boolean.
-    #[test]
     /// During overrun the injectors are off: the wideband reads full lean
     /// while rpm, load, CLT and a steady closed throttle all pass. Left in,
     /// each such sample asks for the authority-limit maximum enrichment in
@@ -1061,6 +1087,15 @@ mod tests {
         );
     }
 
+    /// The accel-enrich filter must only reject when the flag is known-true.
+    /// An unknown flag (None — e.g. an ECU that publishes no boolean AE
+    /// channel) must not reject: treating unknown as active silently discarded
+    /// 100% of samples on Speeduino, whose `accelEnrich` channel is a
+    /// percentage (100 = no enrichment) and was misread as a boolean.
+    /// (The `#[test]` for this function was previously stranded on the wrong
+    /// doc comment above `fuel_cut_samples_are_rejected`, so this test never
+    /// ran.)
+    #[test]
     fn accel_filter_rejects_only_known_active() {
         let state = AutoTuneState::default();
         let filters = AutoTuneFilters {
@@ -1115,11 +1150,99 @@ mod tests {
         );
 
         point.clt = 180.0;
-        point.tps_rate = 50.0;
+        point.tps_rate = 80.0;
         assert_eq!(
             AutoTuneState::rejection_reason(&point, &filters),
             "tps_rate above max_tps_rate"
         );
+    }
+
+    /// The default transient threshold must stay ITB-friendly: the old
+    /// 10 %/s rejected nearly every sample on individual-throttle-body
+    /// (Alpha-N) engines, whose throttles snap far faster than a
+    /// single-plenum setup — AutoTune looked dead (issue #132). A point at
+    /// 50 %/s (deliberate-but-brisk throttle use) must pass by default.
+    #[test]
+    fn default_tps_rate_is_itb_friendly() {
+        assert_eq!(AutoTuneFilters::default().max_tps_rate, 50.0);
+
+        let mut point = VEDataPoint::default();
+        point.rpm = 2000.0;
+        point.clt = 180.0;
+        point.tps_rate = 50.0;
+        assert!(
+            AutoTuneState::default().passes_filters(&point, &AutoTuneFilters::default()),
+            "50 %/s throttle movement must not be rejected by default"
+        );
+    }
+
+    /// Rejected samples must be counted per reason so the UI can say *why* a
+    /// session is not accumulating data instead of looking dead (issue #132).
+    #[test]
+    fn rejected_samples_are_counted_per_reason() {
+        let mut state = AutoTuneState::default();
+        state.start();
+
+        let filters = AutoTuneFilters {
+            min_rpm: 1000.0,
+            min_clt: 160.0,
+            max_tps_rate: 50.0,
+            ..Default::default()
+        };
+
+        let mut cold = VEDataPoint::default();
+        cold.rpm = 2000.0;
+        cold.clt = 100.0; // below min_clt
+
+        let mut fast_throttle = VEDataPoint::default();
+        fast_throttle.rpm = 2000.0;
+        fast_throttle.clt = 180.0;
+        fast_throttle.tps_rate = 80.0; // above max_tps_rate
+
+        let mut good = VEDataPoint::default();
+        good.rpm = 2000.0;
+        good.clt = 180.0;
+        good.afr = 14.7;
+        good.ve = 50.0;
+
+        // Bins for a 1-cell table; attribution is not what's under test.
+        let bins_x = [1000.0];
+        let bins_y = [50.0];
+        let settings = AutoTuneSettings::default();
+        let authority = AutoTuneAuthorityLimits::default();
+
+        state.add_data_point(
+            cold.clone(),
+            &bins_x,
+            &bins_y,
+            &settings,
+            &filters,
+            &authority,
+        );
+        state.add_data_point(cold, &bins_x, &bins_y, &settings, &filters, &authority);
+        state.add_data_point(
+            fast_throttle,
+            &bins_x,
+            &bins_y,
+            &settings,
+            &filters,
+            &authority,
+        );
+        state.add_data_point(good, &bins_x, &bins_y, &settings, &filters, &authority);
+
+        let counts = state.rejection_counts();
+        assert_eq!(
+            counts[0],
+            ("clt below min_clt", 2),
+            "sorted most frequent first"
+        );
+        assert_eq!(counts[1], ("tps_rate above max_tps_rate", 1));
+        assert_eq!(state.total_samples(), 1, "accepted sample is counted too");
+
+        // Restarting the session clears the tallies.
+        state.start();
+        assert!(state.rejection_counts().is_empty());
+        assert_eq!(state.total_samples(), 0);
     }
 
     /// Captures `tracing` event messages into a shared Vec so a test can assert

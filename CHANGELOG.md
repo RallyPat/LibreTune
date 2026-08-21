@@ -53,6 +53,140 @@ unfiltered ~100 ms string-context build server-side.
   the pre-fix code: (1) a re-entered cell fades from its newest visit, and
   (2) same-cell realtime ticks no longer queue an extra render.
 
+### 2026-08-21 — Alpha-N / ITB: Control Algorithm field, AutoTune auto-detect, rejection indicator
+
+Closes the remaining gaps from #132 (the PR #162 follow-up): an ITB/Alpha-N
+user could not select the fuel algorithm anywhere, AutoTune could not
+auto-detect a TPS load source on Speeduino, changing the algorithm did not
+re-scale the load axis, and a filter-rejected session was indistinguishable
+from a broken one.
+
+#### Added
+- **Control Algorithm selector in Engine Constants.** The Speeduino `algorithm`
+  constant (MAP / TPS / IMAP-EMAP) is carried by TunerStudio's built-in
+  `std_injection` panel and never declared as an INI dialog field, so it was
+  unreachable in LibreTune's entire UI. `EcuDefinition::std_panel_definition`
+  now synthesizes it first (plus `twoStroke` / `engineType`, which the INI
+  also never declares), rendered as a dropdown; MS2/MS3 (Alpha-N = 1 there
+  too) gain it for free via the existing per-INI candidate skipping.
+- **Changing the fuel algorithm now re-scales load axes immediately.**
+  `update_constant` re-runs the expression-scale resolution when the edited
+  constant feeds a scale/translate expression — directly or through an
+  output-channel helper (`algorithm` → `fuelLoadRes` → the VE load-axis
+  scale, detected by the new `EcuDefinition::constant_feeds_dynamic_scale`).
+  When scales actually change, `tune:loaded` ("scales-resolved") refreshes
+  open tables and dialogs. Previously the axis kept the old factor until the
+  next full sync.
+- **AutoTune auto-detects TPS load on Speeduino.** The VE load-axis channel is
+  named `fuelLoad` regardless of fuel algorithm, so PR #162's channel-name
+  detection could never fire. `start_autotune` (and the AutoTune view's
+  auto-detect) now fall back to the `algorithm` constant: 1 = TPS/Alpha-N
+  selects the throttle load source. A manual choice in the dropdown is never
+  overridden (new `manualLoadSourceRef` guard on both detection effects).
+- **Rejection indicator.** `AutoTuneState` counts rejected samples per filter
+  reason; `get_autotune_status` exposes accepted/rejected tallies and the
+  AutoTune header shows them while running (warning-styled when nothing gets
+  through, hover for the full tally). A session that accepts everything no
+  longer looks identical to one whose filters discard every sample.
+
+#### Changed
+- **`max_tps_rate` default 10 → 50 %/s** (core + AutoTune view). Individual
+  throttle bodies snap far faster than 10 %/s, so the old default rejected
+  nearly every sample on Alpha-N cars and AutoTune looked dead. Genuine accel
+  transients are still caught by `exclude_accel_enrich`. Existing persisted
+  settings keep their stored value.
+### 2026-08-20 — Dialog fidelity pass, `.table` file IO, pin-lint gating & AutoTune sample integrity
+
+#### Added
+- **Per-table `.table` file import/export (TunerStudio-compatible)** — the
+  single-table "Save Table to File" / "Load Table from File" workflow, next to
+  CSV (whole-tune) IO. New core reader/writer `crates/libretune-core/src/table_file.rs`
+  for the `<tableData>` XML format (verified against real TunerStudio-exported
+  files), plus `export_table_to_file` / `import_table_from_file` commands
+  (`commands/table_file_io.rs`) and toolbar buttons in both table editors.
+  Import requires the file's dimensions to match the table's current size
+  exactly — unlike TunerStudio it does not silently resample a mismatched
+  grid onto the table's axes.
+- **Online INI search runs automatically on signature mismatch** — the
+  Signature Mismatch dialog now kicks off the online search (Speeduino /
+  rusEFI / FOME sources) as soon as a mismatch is reported, keyed off the ECU
+  signature so it re-runs per mismatch, and jumps straight to the online tab
+  when there is no local match to show. Only the *search* is automated —
+  applying an INI still requires an explicit Download click.
+- **AFR Delay Test (Tools → AFR Delay Test…)** — automated exhaust
+  transport-delay measurement (shipped Aug 6, hardened in this pass; see
+  Fixed below). Steps fuel through `wueRates[9]`, overlays the sampled
+  pulse/AFR traces, and reports the measured delay so it can be entered as
+  AutoTune's `lambda_delay_ms`. Runs until stopped so a whole drive fills
+  the RPM/load map.
+- **INI `xAxis` layout hint respected for top-level panels** — dialog
+  panels carrying the INI's xAxis layout hint now lay their field grid out
+  accordingly instead of ignoring it.
+
+#### Fixed
+- **AutoTune dropped a third to a half of all samples in strict mode** — the
+  delayed-sample match window was a fixed 50 ms while real hardware samples
+  every 111–200 ms (single-shot reads contend with the realtime poll for the
+  connection lock), so good matches were rejected. The tolerance now follows
+  the stream's measured cadence (0.6× the mean sample gap, floored at the
+  historical 50 ms). This was the "AutoTune runs but recommendations never
+  accumulate" symptom.
+- **Overrun fuel-cut and railed wideband readings polluted AutoTune** —
+  samples taken during fuel cut (injectors off, wideband pinned lean) asked
+  for maximum enrichment in exactly the low-load cells every lift passes
+  through; readings below ~10 or above ~19.5 AFR are a sensor at a stop, not
+  a mixture. Both are now excluded, with named `rejection_reason`s in the
+  diagnostic log. `VEDataPoint::default()` now uses 14.7 rather than a
+  physically impossible 0.0 AFR.
+- **AFR delay test measured the leading edge, not the delay** — a step
+  response is the cumulative distribution of transit times, so its
+  half-height is the *median* transit (the transport delay); the leading
+  edge is just the fastest path through the manifold and sits in the noise
+  (median 268 ms scattering 8–2117 ms vs. 435 ms ± 30 ms IQR for
+  half-excursion on the same 80 steps). `detect_delay` now reports the
+  half-excursion crossing, keeps the old figure as `leading_edge_ms`,
+  rejects unsettled traces (`ResponseNotSettled`) with a "hold longer than
+  N ms" hint, samples the settle window so recovery traces are drawn, and
+  guards against concurrent runs (a second start mid-step previously read
+  the enriched value as its baseline and could leave the engine rich in RAM).
+- **Pin lint: a switched-off feature no longer claims its pin** — the
+  pre-burn conflict scan counted every pin selector in the INI, enabled or
+  not, so a bone-stock Speeduino tune raised an eight-line conflict warning
+  on every burn (sixteen Auxin selectors on two analog pins, knock_pin on
+  ignBypassPin with detection off, …). A pin field whose INI enable
+  condition evaluates false now drops out of the scan and out of the
+  assignment-denial check; unparseable conditions stay in the scan (a missed
+  conflict is worse than a spurious one). Also: `'Board Default'` is not a
+  pin, and loading a tune is no longer blocked by pin lint. Both behaviours
+  are pinned by tests.
+- **Dialog fields with only an enable condition were hidden instead of
+  disabled**, command-button and indicatorPanel labels showed raw
+  `{expression}` text instead of the evaluated result, dynamic units showed
+  the raw expression, `indicatorPanel` without an explicit `columns` count
+  was dropped entirely, indicator tiles overflowed their text, and the
+  two-column field grid inside `xAxis` rows collapsed into one column — all
+  fixed to match TunerStudio rendering.
+- **Sidebar now highlights the currently open item** in the project tree.
+- **Table editor**: the Interpolate shortcut (`/`) no longer steals focus
+  to the search box; Y-axis bin labels are no longer hidden on tables with
+  more than 12 rows.
+- **Dashboard drag-and-drop works in the Tauri webview** — Tauri's native
+  drag-drop handler was swallowing the HTML5 DnD events the gauge designer
+  relies on; it is now disabled for the webview.
+- **HotkeyEditor infinite re-render loop** in the Settings dialog (PR #230,
+  with a new regression test).
+- **INI parser**: expression-valued `scale`/`translate` are now resolved
+  instead of silently falling back to 1.0; the two `DEFAULT_SYMBOLS` parser
+  tests are serialized (they shared a process-global symbol table and
+  flaked under parallel execution).
+
+#### Changed
+- **CI modernized** — the flaky legacy pipelines were replaced with a lean
+  gated flow: reusable composite actions
+  (`.github/actions/setup-rust`, `setup-linux-deps`,
+  `collect-tauri-artifacts`) shared across `ci.yml` / `nightly.yml` /
+  `release.yml`, plus a new `.cargo/audit.toml` gating `cargo audit`.
+
 ### 2026-08-18 — Spark generator: combustion chamber & boost (psi)
 
 #### Added

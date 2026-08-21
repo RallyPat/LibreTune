@@ -59,6 +59,22 @@ Pin colors indicate:
 - Displays number of conflicts (if any)
 - Maximum 3 warnings shown; click to expand
 
+### Conflict Detection Rules
+
+The pre-burn pin conflict scan follows these rules:
+
+- **A switched-off feature does not claim its pin.** Many INI pin fields
+  declare the condition under which they apply (e.g. the knock pin only
+  matters when knock detection is enabled). When that condition evaluates
+  false, the pin is treated as unassigned — it neither raises a conflict nor
+  blocks another function from using the pin. An unparseable condition keeps
+  the pin in the scan, because a missed conflict is worse than a spurious
+  one.
+- **"Board Default" is not a pin.** Selectors left on the board-default
+  value don't participate in conflict checks.
+- **Loading a tune is never blocked by pin lint.** Conflicts warn before a
+  burn; they don't stop you opening someone else's tune.
+
 ## Common Configurations
 
 ### 4-Cylinder Engine (Speeduino)

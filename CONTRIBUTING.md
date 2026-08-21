@@ -7,7 +7,7 @@ Thank you for your interest in contributing to LibreTune! This document provides
 ### Prerequisites
 
 - **Rust 1.75+** - Install via [rustup](https://rustup.rs)
-- **Node.js 18+** - For the Tauri frontend
+- **Node.js 20+** - For the Tauri frontend
 - **npm** - Comes with Node.js
 
 ### Development Setup

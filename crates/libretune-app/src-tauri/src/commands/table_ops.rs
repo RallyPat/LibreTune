@@ -151,8 +151,8 @@ pub async fn resize_table_size(
         }
     }
 
-    update_constant(state.clone(), cols_const, new_cols as f64).await?;
-    update_constant(state.clone(), rows_const, new_rows as f64).await?;
+    update_constant(state.clone(), app.clone(), cols_const, new_cols as f64).await?;
+    update_constant(state.clone(), app.clone(), rows_const, new_rows as f64).await?;
 
     let connected = state.connection.lock().await.is_some();
     if connected {

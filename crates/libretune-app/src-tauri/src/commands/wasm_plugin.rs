@@ -246,6 +246,7 @@ async fn build_plugin_data_snapshot(state: &tauri::State<'_, AppState>) -> Plugi
 #[tauri::command]
 pub async fn execute_wasm_plugin(
     name: String,
+    app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> Result<WasmPluginExecutionResult, String> {
     let snapshot = build_plugin_data_snapshot(&state).await;
@@ -266,6 +267,7 @@ pub async fn execute_wasm_plugin(
             } => {
                 match crate::commands::constant_update::update_constant(
                     state.clone(),
+                    app.clone(),
                     const_name.clone(),
                     value,
                 )
