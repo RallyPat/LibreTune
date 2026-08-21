@@ -163,6 +163,22 @@ export default function TableGrid({
     return { x: xPos, y: yPos };
   }, [showLiveCursor, liveCursorX, liveCursorY, x_bins, y_bins]);
 
+  // Min/max of the Z grid, computed once per data change. Scanning the whole
+  // grid inside getCellColor flattened every value on each call (per cell per
+  // render) — the same render storm that froze the tab-based table editor
+  // with a live stream running (issue #132).
+  const zBounds = useMemo(() => {
+    let min = Infinity;
+    let max = -Infinity;
+    for (const row of z_values) {
+      for (const v of row) {
+        if (v < min) min = v;
+        if (v > max) max = v;
+      }
+    }
+    return { min, max };
+  }, [z_values]);
+
   const getCellColor = useCallback((value: number, x: number, y: number) => {
     const cellKey = `${x},${y}`;
     const isLocked = lockedCells?.has(cellKey);
@@ -175,15 +191,12 @@ export default function TableGrid({
       return { background: 'var(--surface)' };
     }
 
-    const minVal = Math.min(...z_values.flat());
-    const maxVal = Math.max(...z_values.flat());
-
-    if (minVal === maxVal) return { background: 'var(--surface)' };
+    if (zBounds.min === zBounds.max) return { background: 'var(--surface)' };
 
     // Use centralized heatmap utility
-    const color = valueToHeatmapColor(value, minVal, maxVal, heatmapScheme);
+    const color = valueToHeatmapColor(value, zBounds.min, zBounds.max, heatmapScheme);
     return { background: color, color: contrastTextColor(color) };
-  }, [lockedCells, showColorShade, z_values, heatmapScheme]);
+  }, [lockedCells, showColorShade, zBounds, heatmapScheme]);
 
   const handleKeyDown = (e: KeyboardEvent, x: number, y: number) => {
     if (e.key === 'Enter' && editingCell) {
