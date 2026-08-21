@@ -79,6 +79,110 @@ describe('AutoTune connection awareness', () => {
   });
 });
 
+// Speeduino names its VE load-axis output channel `fuelLoad` regardless of
+// the fuel algorithm, so channel-name detection can never fire on a real
+// Speeduino tune. The `algorithm` constant must fill the gap: 1 = TPS /
+// Alpha-N (issue #132 — an ITB user's tune silently stayed on the MAP load
+// source and AutoTune attributed samples to the wrong cells).
+describe('AutoTune Alpha-N detection via fuel algorithm', () => {
+  const loadSourceSelect = async () => {
+    const label = await screen.findByText('Load Source:');
+    const select = label.parentElement?.querySelector('select');
+    if (!select) throw new Error('load source select not found next to its label');
+    return select as HTMLSelectElement;
+  };
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+    (invoke as unknown as any).mockImplementation((cmd: string, args: any) => {
+      if (cmd === 'get_ve_analyze_config') return Promise.resolve(null);
+      if (cmd === 'get_tables')
+        return Promise.resolve([{ name: 'veTable1Tbl', title: 'VE Table' }]);
+      if (cmd === 'get_table_data')
+        return Promise.resolve({ ...TABLE_DATA, y_output_channel: 'fuelLoad' });
+      if (cmd === 'get_available_channels') return Promise.resolve([]);
+      if (cmd === 'get_constant_value' && args?.name === 'algorithm')
+        return Promise.resolve(1);
+      return Promise.resolve();
+    });
+  });
+
+  it('selects the TPS load source when the algorithm constant is Alpha-N', async () => {
+    render(
+      <ToastProvider>
+        <AutoTune tableName="veTable1Tbl" isConnected />
+      </ToastProvider>
+    );
+
+    await waitFor(() =>
+      expect(screen.getByText(/Fuel algorithm is TPS/)).toBeInTheDocument()
+    );
+    expect((await loadSourceSelect()).value).toBe('tps');
+  });
+
+  it('stays on MAP when the algorithm constant is speed density', async () => {
+    (invoke as unknown as any).mockImplementation((cmd: string, args: any) => {
+      if (cmd === 'get_ve_analyze_config') return Promise.resolve(null);
+      if (cmd === 'get_tables')
+        return Promise.resolve([{ name: 'veTable1Tbl', title: 'VE Table' }]);
+      if (cmd === 'get_table_data')
+        return Promise.resolve({ ...TABLE_DATA, y_output_channel: 'fuelLoad' });
+      if (cmd === 'get_available_channels') return Promise.resolve([]);
+      if (cmd === 'get_constant_value' && args?.name === 'algorithm')
+        return Promise.resolve(0);
+      return Promise.resolve();
+    });
+
+    render(
+      <ToastProvider>
+        <AutoTune tableName="veTable1Tbl" isConnected />
+      </ToastProvider>
+    );
+
+    // Give the async detection a chance to (wrongly) fire, then confirm it
+    // did not.
+    await waitFor(() =>
+      expect((invoke as unknown as any).mock.calls).toContainEqual(
+        ['get_constant_value', { name: 'algorithm' }],
+      ),
+    );
+    expect((await loadSourceSelect()).value).toBe('map');
+  });
+
+  it('does not override a manual load source choice', async () => {
+    // A MAF channel must exist, or the (pre-existing) MAF-verify effect would
+    // demote the manual choice to MAP — a different behavior than the one
+    // under test here.
+    (invoke as unknown as any).mockImplementation((cmd: string, args: any) => {
+      if (cmd === 'get_ve_analyze_config') return Promise.resolve(null);
+      if (cmd === 'get_tables')
+        return Promise.resolve([{ name: 'veTable1Tbl', title: 'VE Table' }]);
+      if (cmd === 'get_table_data')
+        return Promise.resolve({ ...TABLE_DATA, y_output_channel: 'fuelLoad' });
+      if (cmd === 'get_available_channels')
+        return Promise.resolve([{ name: 'maf', label: 'Mass Air Flow' }]);
+      if (cmd === 'get_constant_value' && args?.name === 'algorithm')
+        return Promise.resolve(1);
+      return Promise.resolve();
+    });
+
+    render(
+      <ToastProvider>
+        <AutoTune tableName="veTable1Tbl" isConnected />
+      </ToastProvider>
+    );
+
+    const select = await loadSourceSelect();
+    // Manually pick MAF; algorithm-based detection must respect that.
+    await userEvent.selectOptions(select, 'maf');
+    expect(select.value).toBe('maf');
+
+    await new Promise((r) => setTimeout(r, 50));
+    expect(select.value).toBe('maf');
+    expect(screen.queryByText(/Fuel algorithm is TPS/)).not.toBeInTheDocument();
+  });
+});
+
 // The lambda delay is a measured per-engine fact (about 470 ms at idle on the
 // reference NA6), not view state. It used to reset on every launch, and the
 // default of 0 does not mean "no delay" - it means "fall back to the built-in

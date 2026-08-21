@@ -161,6 +161,16 @@ pub fn is_tps_channel_name(name: &str) -> bool {
         || lower.contains("throttle")
 }
 
+/// Whether a decoded `algorithm` constant value selects a throttle-position
+/// (Alpha-N) fuel load. Speeduino names its VE load-axis output channel
+/// `fuelLoad` no matter which fuel algorithm is active, so channel-name
+/// detection cannot distinguish a MAP tune from an Alpha-N / ITB one. The
+/// `algorithm` bits constant is authoritative instead: bit 1 is TPS on
+/// Speeduino (`$loadSourceNames`) and Alpha-N on MS2/MS3. See issue #132.
+pub fn algorithm_selects_tps_load(algorithm_value: f64) -> bool {
+    algorithm_value == 1.0
+}
+
 /// AutoTune configuration stored when tuning session starts
 #[derive(Clone)]
 pub struct AutoTuneConfig {
@@ -238,7 +248,7 @@ pub struct AppState {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_maf_channel_name, is_tps_channel_name};
+    use super::{algorithm_selects_tps_load, is_maf_channel_name, is_tps_channel_name};
 
     #[test]
     fn detects_tps_load_channels() {
@@ -272,6 +282,19 @@ mod tests {
         // and vice-versa, so auto-detection picks the right load source.
         assert!(is_maf_channel_name("maf") && !is_tps_channel_name("maf"));
         assert!(is_tps_channel_name("tps") && !is_maf_channel_name("tps"));
+    }
+
+    #[test]
+    fn algorithm_value_selects_tps_only_on_alpha_n() {
+        // Speeduino $loadSourceNames: 0 = MAP, 1 = TPS, 2 = IMAP/EMAP (then
+        // INVALID fillers). MS2/MS3: 0 = Speed Density, 1 = Alpha-N, 2 = MAF.
+        // Only 1 means a throttle-position load in both.
+        assert!(!algorithm_selects_tps_load(0.0), "0 = MAP / speed density");
+        assert!(algorithm_selects_tps_load(1.0), "1 = TPS / Alpha-N");
+        assert!(
+            !algorithm_selects_tps_load(2.0),
+            "2 = IMAP-EMAP / MAF, not TPS"
+        );
     }
 }
 

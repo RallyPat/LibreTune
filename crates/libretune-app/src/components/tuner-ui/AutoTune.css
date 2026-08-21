@@ -74,6 +74,37 @@
   font-weight: bold;
 }
 
+/* Sample/rejection indicator (issue #132): says why a session is not
+   accumulating data instead of looking dead. Neutral when data flows;
+   warning-tinted when every sample is filtered out. */
+.autotune-sample-stats {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 4px 10px;
+  border-radius: 4px;
+  border: 1px solid var(--border-default);
+  background: var(--bg-primary);
+  font-size: 12px;
+  color: var(--text-secondary);
+  cursor: default;
+  margin-top: 6px;
+  width: fit-content;
+}
+
+.autotune-sample-stats-warning {
+  border-color: var(--error);
+  color: var(--text-primary);
+}
+
+.autotune-sample-accepted {
+  font-weight: 600;
+}
+
+.autotune-sample-rejected {
+  color: var(--text-secondary);
+}
+
 .autotune-table-selector {
   padding: 6px 12px;
   border: 1px solid var(--border-default);

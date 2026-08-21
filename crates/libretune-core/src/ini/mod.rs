@@ -352,11 +352,23 @@ impl EcuDefinition {
         // (constant name, human label). Ordered to match the layout a user
         // expects in the corresponding TunerStudio standard panel.
         let (title, candidates): (&str, &[(&str, &str)]) = match name {
+            // TunerStudio's native panel also carries the fuel `algorithm`
+            // selector ("Control Algorithm": MAP / TPS / IMAP-EMAP). The
+            // Speeduino INI never declares it as a dialog field — it is only
+            // reachable through this panel — so omitting it left Alpha-N (ITB)
+            // users with no way to see or change the fuel algorithm, and kept
+            // the VE table's load-axis scale (fuelLoadRes) stuck on its MAP
+            // resolution (issue #132). twoStroke / engineType ride along for
+            // the same reason: TS lists them in Engine Constants but the INI
+            // defines no field for them either.
             "std_injection" => (
                 "Injection Setup",
                 &[
+                    ("algorithm", "Control Algorithm"),
                     ("reqFuel", "Required Fuel"),
                     ("nCylinders", "Number of Cylinders"),
+                    ("twoStroke", "Engine Stroke"),
+                    ("engineType", "Engine Type"),
                     ("injType", "Injector Type"),
                     ("divider", "Injector Divider"),
                     ("alternate", "Injection Timing"),
@@ -463,6 +475,58 @@ impl EcuDefinition {
         }
 
         format!("{:016x}", hasher.finish())
+    }
+
+    /// Whether the constant `name` feeds any `{expression}`-valued scale or
+    /// translate field, either directly or through an output-channel helper.
+    ///
+    /// Speeduino's load axes scale by `{fuelLoadRes}`, whose value is the
+    /// output-channel expression `((algorithm == 0) || (algorithm == 2)) ?
+    /// 2.000 : 0.500` — so the `algorithm` constant feeds every load axis
+    /// even though no scale expression mentions it by name. Used to decide
+    /// whether an edit must re-run [`Self::resolve_dynamic_scales`]:
+    /// switching the fuel algorithm (e.g. MAP → TPS for Alpha-N/ITB setups)
+    /// has to re-scale the VE table's load axis immediately (issue #132).
+    pub fn constant_feeds_dynamic_scale(&self, name: &str) -> bool {
+        // Identifiers reachable from any scale/translate expression.
+        let mut frontier: Vec<String> = self
+            .constants
+            .values()
+            .filter_map(|c| c.scale_expr.as_ref().or(c.translate_expr.as_ref()))
+            .flat_map(|e| expression::identifiers(e).into_iter())
+            .collect();
+        if frontier.iter().any(|i| i == name) {
+            return true; // direct mention
+        }
+
+        // Follow output-channel helper expressions (fuelLoadRes → algorithm).
+        // Bounded depth: these chains are short in practice, and
+        // resolve_dynamic_scales itself only unfolds two helper passes.
+        let mut seen: std::collections::HashSet<String> = frontier.iter().cloned().collect();
+        for _ in 0..3 {
+            let mut next: Vec<String> = Vec::new();
+            for ident in &frontier {
+                let Some(channel) = self.output_channels.get(ident) else {
+                    continue;
+                };
+                let Some(expr) = channel.expression.as_ref() else {
+                    continue;
+                };
+                for id in expression::identifiers(expr) {
+                    if id == name {
+                        return true;
+                    }
+                    if seen.insert(id.clone()) {
+                        next.push(id);
+                    }
+                }
+            }
+            if next.is_empty() {
+                break;
+            }
+            frontier = next;
+        }
+        false
     }
 
     /// Resolve `scale`/`translate` fields that the INI expresses as
@@ -730,6 +794,59 @@ mod tests {
         assert_eq!(constants::deferred_expr("{}"), None);
     }
 
+    /// The real Speeduino dependency chain: the VE load-axis scale expression
+    /// names the `fuelLoadRes` output-channel helper, and only that helper's
+    /// expression mentions `algorithm`. Detection must follow the chain or
+    /// editing `algorithm` would not re-resolve the axis scale (issue #132).
+    #[test]
+    fn constant_feeds_dynamic_scale_follows_helper_chain() {
+        let mut def = EcuDefinition::default();
+
+        let mut bins = Constant::new("fuelLoadBins", 1, 272, DataType::U08);
+        bins.scale_expr = Some("fuelLoadRes".to_string());
+        def.constants.insert(bins.name.clone(), bins);
+
+        def.output_channels.insert(
+            "fuelLoadRes".to_string(),
+            OutputChannel {
+                name: "fuelLoadRes".to_string(),
+                expression: Some(
+                    "((algorithm == 0) || (algorithm == 2)) ? 2.000 : 0.500".to_string(),
+                ),
+                ..Default::default()
+            },
+        );
+
+        assert!(def.constant_feeds_dynamic_scale("algorithm"));
+        assert!(!def.constant_feeds_dynamic_scale("rpm"));
+        // `fuelLoadRes` is named directly by the scale expression.
+        assert!(def.constant_feeds_dynamic_scale("fuelLoadRes"));
+    }
+
+    /// A constant named directly inside a scale/translate expression is the
+    /// simple (no-helper) case.
+    #[test]
+    fn constant_feeds_dynamic_scale_direct_mention() {
+        let mut def = EcuDefinition::default();
+        let mut bins = Constant::new("someBins", 1, 0, DataType::U08);
+        bins.translate_expr = Some("mapOffset * 2".to_string());
+        def.constants.insert(bins.name.clone(), bins);
+
+        assert!(def.constant_feeds_dynamic_scale("mapOffset"));
+        assert!(!def.constant_feeds_dynamic_scale("algorithm"));
+    }
+
+    /// INIs with no expression-valued scales must answer false for anything
+    /// without touching output channels.
+    #[test]
+    fn constant_feeds_dynamic_scale_without_dynamic_scales() {
+        let mut def = EcuDefinition::default();
+        def.constants
+            .insert("plain".to_string(), scalar_const("plain"));
+        assert!(!def.constant_feeds_dynamic_scale("plain"));
+        assert!(!def.constant_feeds_dynamic_scale("algorithm"));
+    }
+
     #[test]
     fn test_default_definition() {
         let def = EcuDefinition::default();
@@ -749,6 +866,7 @@ mod tests {
         // names exists, the rest (nInjectors) is absent.
         let mut def = EcuDefinition::default();
         for n in [
+            "algorithm",
             "reqFuel",
             "divider",
             "alternate",
@@ -765,7 +883,8 @@ mod tests {
 
         assert_eq!(d.name, "std_injection");
         // nInjectors was not in constants, so it must be dropped. Every other
-        // candidate should be present in declaration order.
+        // candidate should be present in declaration order — algorithm first,
+        // matching TunerStudio's native panel layout.
         let field_names: Vec<String> = d
             .components
             .iter()
@@ -777,6 +896,7 @@ mod tests {
         assert_eq!(
             field_names,
             vec![
+                "algorithm".to_string(),
                 "reqFuel".to_string(),
                 "nCylinders".to_string(),
                 "injType".to_string(),
@@ -785,6 +905,73 @@ mod tests {
                 "injOpen".to_string(),
             ]
         );
+    }
+
+    /// The fuel `algorithm` constant is a `bits` field whose options come from
+    /// a `#define` ($loadSourceNames). Options are resolved at parse time, so
+    /// the synthesized panel only needs to emit the field; the dialog renderer
+    /// turns it into a dropdown. This test pins the contract the renderer
+    /// relies on: the field is present and named `algorithm`.
+    #[test]
+    fn std_panel_injection_includes_algorithm_when_present() {
+        let mut def = EcuDefinition::default();
+        let mut algorithm = scalar_const("algorithm");
+        algorithm.data_type = DataType::Bits;
+        algorithm.bit_options = vec![
+            "MAP".to_string(),
+            "TPS".to_string(),
+            "IMAP/EMAP".to_string(),
+            "INVALID".to_string(),
+        ];
+        def.constants.insert("algorithm".to_string(), algorithm);
+
+        let d = def
+            .std_panel_definition("std_injection")
+            .expect("std_injection should synthesize");
+
+        let field = d
+            .components
+            .iter()
+            .find_map(|c| match c {
+                DialogComponent::Field { name, .. } if name == "algorithm" => Some(c),
+                _ => None,
+            })
+            .expect("algorithm field must be synthesized when the constant exists");
+        match field {
+            DialogComponent::Field { label, .. } => {
+                assert_eq!(label, "Control Algorithm");
+            }
+            _ => panic!("expected a Field component"),
+        }
+        // The bit options live on the constant itself (resolved from
+        // $loadSourceNames at parse time); the renderer reads them from there.
+        assert_eq!(
+            def.constants["algorithm"].bit_options,
+            vec![
+                "MAP".to_string(),
+                "TPS".to_string(),
+                "IMAP/EMAP".to_string(),
+                "INVALID".to_string()
+            ]
+        );
+    }
+
+    /// A definition without an `algorithm` constant (e.g. an INI that predates
+    /// it) must still synthesize the panel from the remaining candidates.
+    #[test]
+    fn std_panel_injection_without_algorithm_still_synthesizes() {
+        let mut def = EcuDefinition::default();
+        def.constants
+            .insert("reqFuel".to_string(), scalar_const("reqFuel"));
+
+        let d = def
+            .std_panel_definition("std_injection")
+            .expect("std_injection should synthesize from reqFuel alone");
+        assert!(!d.components.is_empty());
+        assert!(d.components.iter().all(|c| match c {
+            DialogComponent::Field { name, .. } => name != "algorithm",
+            _ => true,
+        }));
     }
 
     #[test]
