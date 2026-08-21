@@ -76,7 +76,14 @@ function median(xs: number[]): number {
 
 /** Median across traces on a fixed time grid, plus the 50% crossing. */
 function stack(traces: DelayTrace[]) {
-  const usable = traces.filter((t) => !t.unusable).map((t) => normalise(t.points));
+  // normalise() returns [] for a trace with no pre-anchor samples — which is
+  // every recovery trace captured during the settle window, since those begin
+  // after the step. They are already ignored by the median below, but counting
+  // them made the dialog claim twice as many traces as it actually drew.
+  const usable = traces
+    .filter((t) => !t.unusable)
+    .map((t) => normalise(t.points))
+    .filter((t) => t.length > 0);
   const grid: number[] = [];
   for (let t = T_MIN; t <= T_MAX; t += BIN) grid.push(t);
 
@@ -155,7 +162,7 @@ export const DelayTraceOverlay: React.FC<Props> = ({ traces }) => {
         <line x1={x(0)} y1={PAD.t} x2={x(0)} y2={H - PAD.b} className="delay-overlay-step" />
         <line x1={PAD.l} y1={y(0)} x2={W - PAD.r} y2={y(0)} className="delay-overlay-zero" />
 
-        {traces.map((t) => (
+        {traces.filter((t) => t.points.some((p) => p.tMs < 0)).map((t) => (
           <path
             key={t.step}
             d={path(normalise(t.points))}
