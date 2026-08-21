@@ -1,6 +1,6 @@
 //! TableData struct and internal table helpers (extracted from lib.rs).
 
-use crate::commands::string_context::{build_string_context, numeric_context_from_tune};
+use crate::commands::string_context::{build_string_context_filtered, numeric_context_from_tune};
 use crate::state::AppState;
 use libretune_core::dynamic_table::{self, TableSizeInfo};
 use libretune_core::ini::expression::evaluate_display_string;
@@ -226,7 +226,19 @@ pub(crate) async fn get_table_data_internal(
         None
     };
 
-    let string_ctx = build_string_context(state).await;
+    // Only the two axis-label display strings are evaluated here. The
+    // unfiltered context clone (~100 ms per call on a real Speeduino INI,
+    // while holding the definition/tune/project locks) made merely opening a
+    // table feel wedged with a live stream running (issue #132). Build only
+    // the entries the labels can reference instead.
+    let label_filter = {
+        let mut names = crate::commands::string_context::referenced_identifiers(&x_label);
+        names.extend(crate::commands::string_context::referenced_identifiers(
+            &y_label,
+        ));
+        names
+    };
+    let string_ctx = build_string_context_filtered(state, Some(&label_filter)).await;
     let numeric = {
         let tune = state.current_tune.lock().await;
         numeric_context_from_tune(tune.as_ref())

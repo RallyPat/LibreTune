@@ -218,55 +218,120 @@ export function TableEditor({
     return { row, col };
   }, [followMode, realtimeData, data.xOutputChannel, data.yOutputChannel, data.xAxis, data.yAxis, findNearestBinIndex]);
 
-  // Merge prop-passed livePosition with calculated one (calculated takes precedence when followMode is on)
-  const effectiveLivePosition = followMode ? calculatedLivePosition : livePosition;
+  // Merge prop-passed livePosition with calculated one (calculated takes
+  // precedence when followMode is on).
+  //
+  // Identity is stabilized against the previous cell: the raw memo produces a
+  // fresh {row, col} object on every realtime tick (~20 Hz), which re-fired
+  // the trail effect below and cascaded a state update + re-render even when
+  // the cursor stayed inside the same cell — a large slice of the
+  // "table open with live data freezes the window" storm (issue #132).
+  const livePosRef = useRef<CellPosition | null>(null);
+  const stableLivePosition = useMemo(() => {
+    const pos = calculatedLivePosition;
+    const last = livePosRef.current;
+    if (pos && last && pos.row === last.row && pos.col === last.col) {
+      return last;
+    }
+    livePosRef.current = pos;
+    return pos;
+  }, [calculatedLivePosition]);
+  const effectiveLivePosition = followMode ? stableLivePosition : livePosition;
 
   // Update history trail when live position changes
   useEffect(() => {
     if (!followMode || !effectiveLivePosition) return;
-    
+
     const now = Date.now();
     const newEntry = { row: effectiveLivePosition.row, col: effectiveLivePosition.col, time: now };
-    
+
     setHistoryTrail((prev) => {
-      // Remove old entries
-      const filtered = prev.filter((entry) => now - entry.time < TRAIL_DURATION_MS);
-      
-      // Only add if position changed from last entry
-      const last = filtered[filtered.length - 1];
+      // Oldest entry first: if it has not expired, nothing has.
+      const nothingExpired =
+        prev.length === 0 || now - prev[0].time < TRAIL_DURATION_MS;
+
+      // Same cell as the last entry: nothing to add. Return the previous
+      // array unchanged when nothing expired, so no re-render is queued.
+      const last = prev[prev.length - 1];
       if (last && last.row === newEntry.row && last.col === newEntry.col) {
-        return filtered;
+        return nothingExpired
+          ? prev
+          : prev.filter((e) => now - e.time < TRAIL_DURATION_MS);
       }
-      
-      return [...filtered, newEntry];
+
+      const base = nothingExpired
+        ? prev
+        : prev.filter((e) => now - e.time < TRAIL_DURATION_MS);
+      return [...base, newEntry];
     });
   }, [followMode, effectiveLivePosition, TRAIL_DURATION_MS]);
 
-  // Periodically clean up old trail entries
+  // Trail cells fade over TRAIL_DURATION_MS, so something must trigger a
+  // periodic re-render while entries exist: this is that tick (~5 Hz) plus
+  // expiry cleanup. It must also return the previous array when nothing
+  // expired, or it would queue a re-render of its own on every firing.
+  const trailActiveRef = useRef(false);
+  trailActiveRef.current = historyTrail.length > 0;
+  const [, setTrailFadeTick] = useState(0);
   useEffect(() => {
     if (!followMode) {
       setHistoryTrail([]);
       return;
     }
-    
+
     const interval = setInterval(() => {
       const now = Date.now();
-      setHistoryTrail((prev) => prev.filter((entry) => now - entry.time < TRAIL_DURATION_MS));
+      setHistoryTrail((prev) => {
+        const filtered = prev.filter((entry) => now - entry.time < TRAIL_DURATION_MS);
+        return filtered.length === prev.length ? prev : filtered;
+      });
+      if (trailActiveRef.current) {
+        setTrailFadeTick((t) => (t + 1) % 1_000_000);
+      }
     }, 200);
-    
+
     return () => clearInterval(interval);
   }, [followMode, TRAIL_DURATION_MS]);
+
+  // Min/max of the Z grid, computed once per data change. `data.min`/`max`
+  // are never populated today, so getValueColor used to flatten the whole
+  // grid (256 elements) on every call — called twice per cell per render at
+  // up to ~40 renders/sec while streaming, which saturated the UI thread
+  // (issue #132).
+  const zBounds = useMemo(() => {
+    if (data.min !== undefined && data.max !== undefined) {
+      return { min: data.min, max: data.max };
+    }
+    let min = Infinity;
+    let max = -Infinity;
+    for (const row of data.zValues) {
+      for (const v of row) {
+        if (v < min) min = v;
+        if (v > max) max = v;
+      }
+    }
+    return { min, max };
+  }, [data.min, data.max, data.zValues]);
+
+  // Trail lookup by cell — one Map build per trail change instead of a
+  // linear find() per cell per render. When a cell was re-entered (A→B→A)
+  // the Map keeps the newest entry, which is also the correct fade (find()
+  // returned the oldest and showed a freshly re-entered cell as faded).
+  const trailMap = useMemo(() => {
+    const m = new Map<string, { row: number; col: number; time: number }>();
+    for (const e of historyTrail) m.set(`${e.row},${e.col}`, e);
+    return m;
+  }, [historyTrail]);
 
   // Calculate color for value based on min/max
   const getValueColor = useCallback((value: number) => {
     if (!heatmapEnabled) return 'var(--table-cell-bg)';
 
-    const min = data.min ?? Math.min(...data.zValues.flat());
-    const max = data.max ?? Math.max(...data.zValues.flat());
+    const { min, max } = zBounds;
     if (min === max) return 'var(--table-cell-bg)';
 
     return getHeatmapColor(value, min, max, 'value');
-  }, [data.min, data.max, data.zValues, heatmapEnabled, getHeatmapColor]);
+  }, [heatmapEnabled, zBounds, getHeatmapColor]);
 
   // Get selected cells as array of positions
   const getSelectedCells = useCallback((): CellPosition[] => {
@@ -999,7 +1064,11 @@ export function TableEditor({
           </thead>
           <tbody>
             {/* Display order only — rowIndex stays in data space */}
-            {(yAxisBottom ? [...data.yAxis.keys()].reverse() : [...data.yAxis.keys()]).map((rowIndex) => (
+            {/* One timestamp per render: the fade refreshes when the trail
+                tick (or any other state change) re-renders the grid. */}
+            {(() => {
+              const renderNow = Date.now();
+              return (yAxisBottom ? [...data.yAxis.keys()].reverse() : [...data.yAxis.keys()]).map((rowIndex) => (
               <tr key={rowIndex}>
                 <th className="table-y-header">{data.yAxis[rowIndex]}</th>
                 {data.xAxis.map((_, colIndex) => {
@@ -1007,20 +1076,23 @@ export function TableEditor({
                   const isSelected = isCellSelected(rowIndex, colIndex);
                   const isEditing = editingCell?.row === rowIndex && editingCell?.col === colIndex;
                   const isLive = effectiveLivePosition?.row === rowIndex && effectiveLivePosition?.col === colIndex;
-                  
+
                   // Check if cell is in trail and calculate opacity
-                  const now = Date.now();
-                  const trailEntry = historyTrail.find((e) => e.row === rowIndex && e.col === colIndex);
-                  const trailOpacity = trailEntry ? Math.max(0, 1 - (now - trailEntry.time) / TRAIL_DURATION_MS) : 0;
+                  const trailEntry = trailMap.get(`${rowIndex},${colIndex}`);
+                  const trailOpacity = trailEntry ? Math.max(0, 1 - (renderNow - trailEntry.time) / TRAIL_DURATION_MS) : 0;
                   const isInTrail = trailOpacity > 0 && !isLive;
+
+                  // One color computation per cell (previously two: the
+                  // background and its contrast text each re-derived it).
+                  const cellColor = getValueColor(value);
 
                   return (
                     <td
                       key={colIndex}
                       className={`table-cell ${isSelected ? 'selected' : ''} ${isLive ? 'live' : ''} ${isInTrail ? 'trail' : ''}`}
                       style={{
-                        backgroundColor: getValueColor(value),
-                        color: contrastTextColor(getValueColor(value)),
+                        backgroundColor: cellColor,
+                        color: contrastTextColor(cellColor),
                         ...(isInTrail && { '--trail-opacity': trailOpacity } as React.CSSProperties)
                       }}
                       onMouseDown={(e) => handleCellMouseDown(rowIndex, colIndex, e)}
@@ -1043,7 +1115,8 @@ export function TableEditor({
                   );
                 })}
               </tr>
-            ))}
+              ));
+            })()}
           </tbody>
         </table>
       </div>

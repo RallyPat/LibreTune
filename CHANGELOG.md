@@ -13,6 +13,46 @@ relevant.
 
 ## [Unreleased]
 
+### 2026-08-21 — Fix: open-table render storm with live data (freeze on open)
+
+Opening the fuel table with a live stream froze the window (issue #132): the
+grid re-rendered at up to ~40 Hz and every one of the 256 cells re-derived
+the whole-grid min/max (flattened twice per cell, since `data.min`/`max` are
+never populated) plus regex color parsing per call — enough allocation and
+CPU to saturate the WebView main thread. Merely opening a table also paid an
+unfiltered ~100 ms string-context build server-side.
+
+#### Fixed
+- **Z min/max computed once per data change** (`tuner-ui/TableEditor.tsx`):
+  new `zBounds` memo replaces the per-cell `Math.min(...zValues.flat())` /
+  `Math.max(...)` scans; each cell's color is now derived once instead of
+  twice (background + contrast text both called `getValueColor`).
+- **Live-position identity stabilized.** The raw position memo produced a
+  fresh `{row, col}` object on every realtime tick, so the history-trail
+  effect re-fired per tick and queued a second render even when the cursor
+  stayed in the same cell — the render amplifier behind the storm.
+- **Trail state no longer churns.** The trail-append and cleanup paths return
+  the previous array when nothing changed (the old code always allocated a
+  new filtered array, forcing a re-render every 200 ms tick).
+- **Trail fade driven by a ~5 Hz tick that only runs while trail entries
+  exist**, instead of accidental re-renders.
+- **Per-cell trail lookup is a Map** built once per trail change instead of
+  `Array.find` per cell per render. Behavioral fix included: a re-entered
+  cell (A→B→A) now fades from its *newest* visit — `find()` returned the
+  oldest duplicate entry and showed a freshly re-entered cell as faded.
+- **Same fixes in the dialog-embedded grid** (`tables/TableGrid.tsx`
+  `getCellColor`): `zBounds` memo replaces per-cell whole-grid scans.
+- **`get_table_data` builds a filtered string context.** Only the two
+  axis-label display strings are evaluated, so `build_string_context_filtered`
+  is used with their referenced identifiers instead of the unfiltered
+  ~100 ms build (which also held the definition/tune/project locks), making
+  table-open visibly snappier against a live ECU.
+
+#### Tests
+- New `TableEditor.trail.test.tsx` regression tests, verified failing against
+  the pre-fix code: (1) a re-entered cell fades from its newest visit, and
+  (2) same-cell realtime ticks no longer queue an extra render.
+
 ### 2026-08-18 — Spark generator: combustion chamber & boost (psi)
 
 #### Added
