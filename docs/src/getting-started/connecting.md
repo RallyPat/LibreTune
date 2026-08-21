@@ -104,11 +104,16 @@ The status bar shows your connection state:
 If the ECU signature doesn't match your INI file:
 
 1. A dialog will appear with options:
-   - **Search local repository** for matching INI files
-   - **Search online** for INI files (Speeduino/rusEFI GitHub repos)
+   - **Local matches** — INI files from your local repository whose
+     signature matches the ECU
+   - **Online matches** — searched automatically (Speeduino / rusEFI / FOME
+     GitHub repositories) as soon as the mismatch is reported; shown first
+     when no local match exists
    - **Continue anyway** (advanced users only)
-
 2. Select a matching INI file to update your project
+
+Nothing is downloaded or applied until you explicitly click **Download** —
+only the search itself is automatic.
 
 ## Troubleshooting
 

@@ -13,6 +13,98 @@ relevant.
 
 ## [Unreleased]
 
+### 2026-08-20 — Dialog fidelity pass, `.table` file IO, pin-lint gating & AutoTune sample integrity
+
+#### Added
+- **Per-table `.table` file import/export (TunerStudio-compatible)** — the
+  single-table "Save Table to File" / "Load Table from File" workflow, next to
+  CSV (whole-tune) IO. New core reader/writer `crates/libretune-core/src/table_file.rs`
+  for the `<tableData>` XML format (verified against real TunerStudio-exported
+  files), plus `export_table_to_file` / `import_table_from_file` commands
+  (`commands/table_file_io.rs`) and toolbar buttons in both table editors.
+  Import requires the file's dimensions to match the table's current size
+  exactly — unlike TunerStudio it does not silently resample a mismatched
+  grid onto the table's axes.
+- **Online INI search runs automatically on signature mismatch** — the
+  Signature Mismatch dialog now kicks off the online search (Speeduino /
+  rusEFI / FOME sources) as soon as a mismatch is reported, keyed off the ECU
+  signature so it re-runs per mismatch, and jumps straight to the online tab
+  when there is no local match to show. Only the *search* is automated —
+  applying an INI still requires an explicit Download click.
+- **AFR Delay Test (Tools → AFR Delay Test…)** — automated exhaust
+  transport-delay measurement (shipped Aug 6, hardened in this pass; see
+  Fixed below). Steps fuel through `wueRates[9]`, overlays the sampled
+  pulse/AFR traces, and reports the measured delay so it can be entered as
+  AutoTune's `lambda_delay_ms`. Runs until stopped so a whole drive fills
+  the RPM/load map.
+- **INI `xAxis` layout hint respected for top-level panels** — dialog
+  panels carrying the INI's xAxis layout hint now lay their field grid out
+  accordingly instead of ignoring it.
+
+#### Fixed
+- **AutoTune dropped a third to a half of all samples in strict mode** — the
+  delayed-sample match window was a fixed 50 ms while real hardware samples
+  every 111–200 ms (single-shot reads contend with the realtime poll for the
+  connection lock), so good matches were rejected. The tolerance now follows
+  the stream's measured cadence (0.6× the mean sample gap, floored at the
+  historical 50 ms). This was the "AutoTune runs but recommendations never
+  accumulate" symptom.
+- **Overrun fuel-cut and railed wideband readings polluted AutoTune** —
+  samples taken during fuel cut (injectors off, wideband pinned lean) asked
+  for maximum enrichment in exactly the low-load cells every lift passes
+  through; readings below ~10 or above ~19.5 AFR are a sensor at a stop, not
+  a mixture. Both are now excluded, with named `rejection_reason`s in the
+  diagnostic log. `VEDataPoint::default()` now uses 14.7 rather than a
+  physically impossible 0.0 AFR.
+- **AFR delay test measured the leading edge, not the delay** — a step
+  response is the cumulative distribution of transit times, so its
+  half-height is the *median* transit (the transport delay); the leading
+  edge is just the fastest path through the manifold and sits in the noise
+  (median 268 ms scattering 8–2117 ms vs. 435 ms ± 30 ms IQR for
+  half-excursion on the same 80 steps). `detect_delay` now reports the
+  half-excursion crossing, keeps the old figure as `leading_edge_ms`,
+  rejects unsettled traces (`ResponseNotSettled`) with a "hold longer than
+  N ms" hint, samples the settle window so recovery traces are drawn, and
+  guards against concurrent runs (a second start mid-step previously read
+  the enriched value as its baseline and could leave the engine rich in RAM).
+- **Pin lint: a switched-off feature no longer claims its pin** — the
+  pre-burn conflict scan counted every pin selector in the INI, enabled or
+  not, so a bone-stock Speeduino tune raised an eight-line conflict warning
+  on every burn (sixteen Auxin selectors on two analog pins, knock_pin on
+  ignBypassPin with detection off, …). A pin field whose INI enable
+  condition evaluates false now drops out of the scan and out of the
+  assignment-denial check; unparseable conditions stay in the scan (a missed
+  conflict is worse than a spurious one). Also: `'Board Default'` is not a
+  pin, and loading a tune is no longer blocked by pin lint. Both behaviours
+  are pinned by tests.
+- **Dialog fields with only an enable condition were hidden instead of
+  disabled**, command-button and indicatorPanel labels showed raw
+  `{expression}` text instead of the evaluated result, dynamic units showed
+  the raw expression, `indicatorPanel` without an explicit `columns` count
+  was dropped entirely, indicator tiles overflowed their text, and the
+  two-column field grid inside `xAxis` rows collapsed into one column — all
+  fixed to match TunerStudio rendering.
+- **Sidebar now highlights the currently open item** in the project tree.
+- **Table editor**: the Interpolate shortcut (`/`) no longer steals focus
+  to the search box; Y-axis bin labels are no longer hidden on tables with
+  more than 12 rows.
+- **Dashboard drag-and-drop works in the Tauri webview** — Tauri's native
+  drag-drop handler was swallowing the HTML5 DnD events the gauge designer
+  relies on; it is now disabled for the webview.
+- **HotkeyEditor infinite re-render loop** in the Settings dialog (PR #230,
+  with a new regression test).
+- **INI parser**: expression-valued `scale`/`translate` are now resolved
+  instead of silently falling back to 1.0; the two `DEFAULT_SYMBOLS` parser
+  tests are serialized (they shared a process-global symbol table and
+  flaked under parallel execution).
+
+#### Changed
+- **CI modernized** — the flaky legacy pipelines were replaced with a lean
+  gated flow: reusable composite actions
+  (`.github/actions/setup-rust`, `setup-linux-deps`,
+  `collect-tauri-artifacts`) shared across `ci.yml` / `nightly.yml` /
+  `release.yml`, plus a new `.cargo/audit.toml` gating `cargo audit`.
+
 ### 2026-08-18 — Spark generator: combustion chamber & boost (psi)
 
 #### Added

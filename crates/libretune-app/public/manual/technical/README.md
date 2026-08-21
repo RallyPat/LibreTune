@@ -5,22 +5,20 @@ This section provides in-depth technical documentation for LibreTune's core algo
 ## Contents
 
 ### Algorithms
-- **[AutoTune Algorithm](./autotune-algorithm.md)** - Lambda delay compensation, transient filtering, hit weighting, and recommendation calculation
+- **[AutoTune Algorithm](./autotune-algorithm.md)** - Lambda delay compensation, transient and fuel-cut filtering, hit weighting, and recommendation calculation
 - **[Table Operations](./table-operations.md)** - Interpolation, smoothing, scaling, and re-binning algorithms
-- **[Gauge Rendering](./gauge-rendering.md)** - Canvas-based rendering techniques, color spaces, and visual effects
 
 ### Data Formats
 - **[INI Parser](./ini-parser.md)** - ECU definition file parsing, expression evaluation, and validation
-- **[MSQ File Format](./msq-format.md)** - Tune file structure, XML schema, and serialization
-- **[Dashboard Format](./dashboard-format.md)** - TunerStudio-compatible XML format for gauges and layouts
 
 ### Communication
 - **[ECU Protocol](./ecu-protocol.md)** - Binary and text-based communication protocols, command structure, and error handling
-- **[Realtime Streaming](./realtime-streaming.md)** - Event-based data streaming architecture and performance optimization
 
 ### Core Systems
 - **[Version Control](./version-control.md)** - Git integration, tune fingerprinting, and migration detection
 - **[Lua Scripting](./lua-scripting.md)** - Sandboxed runtime, API reference, and security model
+- **[Plugin System](./plugin-system.md)** - WASM plugin host, permissions, and sandboxing
+- **[Port Editor](./port-editor.md)** - Pin assignment UI and conflict detection rules
 - **[AI Assistant](./ai-assistant.md)** - Bring-your-own-LLM agent loop, provider trait, validation extensions
 
 ## Philosophy
@@ -39,16 +37,20 @@ LibreTune's technical implementation follows these principles:
 crates/
 ├── libretune-core/          # Pure Rust library (no UI dependencies)
 │   ├── src/
-│   │   ├── autotune.rs      # AutoTune algorithm implementation
-│   │   ├── ini/             # INI parser and data structures
-│   │   ├── protocol/        # ECU communication protocols
-│   │   ├── table_ops.rs     # Table manipulation algorithms
-│   │   ├── dash/            # Dashboard format parser/writer
-│   │   ├── project/         # Project and version control
-│   │   └── lua/             # Lua scripting runtime
-│   └── tests/               # Unit and integration tests
+│   │   ├── autotune/         # AutoTune algorithms (incl. delay_measure.rs,
+│   │   │                    # the AFR transport-delay step test)
+│   │   ├── ini/              # INI parser and data structures
+│   │   ├── protocol/         # ECU communication protocols
+│   │   ├── table_ops.rs      # Table manipulation algorithms
+│   │   ├── table_file.rs     # TunerStudio .table single-table IO
+│   │   ├── pin_conflict.rs   # Pin conflict scan & gating rules
+│   │   ├── dash/             # Dashboard format parser/writer
+│   │   ├── project/          # Project and version control
+│   │   └── lua/              # Lua scripting runtime
+│   └── tests/                # Unit and integration tests
 └── libretune-app/           # Tauri desktop application
-    ├── src-tauri/           # Rust backend (Tauri commands)
+    ├── src-tauri/           # Rust backend (Tauri commands, one module per
+    │   │                    # topic under src/commands/)
     └── src/                 # React frontend (TypeScript)
 ```
 
