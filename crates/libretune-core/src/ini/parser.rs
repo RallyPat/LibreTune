@@ -3278,12 +3278,19 @@ fn parse_constants_extensions_entry(def: &mut EcuDefinition, key: &str, value: &
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
 
     /// An INI picks metric units with `#if CELSIUS`. TunerStudio defines that
     /// from the project's `ecuSettings`; nothing carried it into LibreTune, so
     /// the Fahrenheit `#else` arm always won and a 23 degC cold start read 73
     /// on the gauge under a generic "TEMP" label.
+    ///
+    /// Serialized against [`a_definition_remembers_the_symbols_it_was_parsed_with`]:
+    /// both tests toggle the process-wide `DEFAULT_SYMBOLS` seed, and cargo
+    /// runs tests in parallel by default, so without this they can interleave
+    /// and flip each other's seed between `set_default_symbols` and `parse_ini`.
     #[test]
+    #[serial(default_symbols)]
     fn celsius_symbol_selects_the_metric_branch() {
         let ini = concat!(
             "[Constants]
@@ -3332,6 +3339,7 @@ mod tests {
     /// plausible. Keeping the answer on the definition also means this holds
     /// with other parses running concurrently.
     #[test]
+    #[serial(default_symbols)]
     fn a_definition_remembers_the_symbols_it_was_parsed_with() {
         let ini = "[Constants]
 page = 1

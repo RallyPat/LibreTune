@@ -74,6 +74,7 @@ encoding_rs = "0.8"
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }
+serial_test = "3.2.0"
 tempfile = "3.24.0"
 tokio = { workspace = true, features = ["test-util", "macros"] }
 tracing-subscriber = { workspace = true }
