@@ -13,6 +13,48 @@ relevant.
 
 ## [Unreleased]
 
+### 2026-08-21 — Alpha-N / ITB: Control Algorithm field, AutoTune auto-detect, rejection indicator
+
+Closes the remaining gaps from #132 (the PR #162 follow-up): an ITB/Alpha-N
+user could not select the fuel algorithm anywhere, AutoTune could not
+auto-detect a TPS load source on Speeduino, changing the algorithm did not
+re-scale the load axis, and a filter-rejected session was indistinguishable
+from a broken one.
+
+#### Added
+- **Control Algorithm selector in Engine Constants.** The Speeduino `algorithm`
+  constant (MAP / TPS / IMAP-EMAP) is carried by TunerStudio's built-in
+  `std_injection` panel and never declared as an INI dialog field, so it was
+  unreachable in LibreTune's entire UI. `EcuDefinition::std_panel_definition`
+  now synthesizes it first (plus `twoStroke` / `engineType`, which the INI
+  also never declares), rendered as a dropdown; MS2/MS3 (Alpha-N = 1 there
+  too) gain it for free via the existing per-INI candidate skipping.
+- **Changing the fuel algorithm now re-scales load axes immediately.**
+  `update_constant` re-runs the expression-scale resolution when the edited
+  constant feeds a scale/translate expression — directly or through an
+  output-channel helper (`algorithm` → `fuelLoadRes` → the VE load-axis
+  scale, detected by the new `EcuDefinition::constant_feeds_dynamic_scale`).
+  When scales actually change, `tune:loaded` ("scales-resolved") refreshes
+  open tables and dialogs. Previously the axis kept the old factor until the
+  next full sync.
+- **AutoTune auto-detects TPS load on Speeduino.** The VE load-axis channel is
+  named `fuelLoad` regardless of fuel algorithm, so PR #162's channel-name
+  detection could never fire. `start_autotune` (and the AutoTune view's
+  auto-detect) now fall back to the `algorithm` constant: 1 = TPS/Alpha-N
+  selects the throttle load source. A manual choice in the dropdown is never
+  overridden (new `manualLoadSourceRef` guard on both detection effects).
+- **Rejection indicator.** `AutoTuneState` counts rejected samples per filter
+  reason; `get_autotune_status` exposes accepted/rejected tallies and the
+  AutoTune header shows them while running (warning-styled when nothing gets
+  through, hover for the full tally). A session that accepts everything no
+  longer looks identical to one whose filters discard every sample.
+
+#### Changed
+- **`max_tps_rate` default 10 → 50 %/s** (core + AutoTune view). Individual
+  throttle bodies snap far faster than 10 %/s, so the old default rejected
+  nearly every sample on Alpha-N cars and AutoTune looked dead. Genuine accel
+  transients are still caught by `exclude_accel_enrich`. Existing persisted
+  settings keep their stored value.
 ### 2026-08-20 — Dialog fidelity pass, `.table` file IO, pin-lint gating & AutoTune sample integrity
 
 #### Added

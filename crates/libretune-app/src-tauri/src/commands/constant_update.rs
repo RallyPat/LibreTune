@@ -1,10 +1,60 @@
 //! Update constant value command.
 
 use crate::AppState;
+use tauri::Emitter;
 
 #[tauri::command]
 pub async fn update_constant(
     state: tauri::State<'_, AppState>,
+    app: tauri::AppHandle,
+    name: String,
+    value: f64,
+) -> Result<(), String> {
+    update_constant_internal(&state, name.clone(), value).await?;
+
+    // Re-resolve `{expression}`-valued scale/translate fields when the edited
+    // constant feeds one (Speeduino: `algorithm` → `fuelLoadRes` → the VE
+    // load-axis scale). Runs after the internal write has returned, so none
+    // of its guards are held here.
+    resolve_scales_if_needed(&app, &state, &name).await;
+
+    Ok(())
+}
+
+/// Re-resolve `{expression}`-valued scale/translate fields if the just-edited
+/// constant feeds one, and tell the frontend when scales actually changed.
+///
+/// Speeduino's load axes scale by `{fuelLoadRes}`, which is
+/// `((algorithm == 0) || (algorithm == 2)) ? 2.000 : 0.500`: switching the
+/// fuel algorithm (MAP → TPS for Alpha-N / ITB setups) must re-scale the VE
+/// table's load axis immediately, or tables keep rendering with the old
+/// factor until the next full sync (issue #132).
+///
+/// Must run with no guards held: `resolve_scales_from_tune` locks the
+/// definition and tune state itself.
+async fn resolve_scales_if_needed(app: &tauri::AppHandle, state: &AppState, name: &str) {
+    let feeds_dynamic_scale = {
+        let def_guard = state.definition.lock().await;
+        let Some(def) = def_guard.as_ref() else {
+            return;
+        };
+        def.constant_feeds_dynamic_scale(name)
+    };
+    if !feeds_dynamic_scale {
+        return;
+    }
+
+    let resolved = crate::commands::load_tune::resolve_scales_from_tune(state).await;
+    if resolved > 0 {
+        // Axis scales changed: open tables and dialogs must re-read their
+        // bins. `tune:loaded` is the established refresh signal (consumed by
+        // refreshOpenTabs in App.tsx and PanelComponents' reload tick).
+        let _ = app.emit("tune:loaded", "scales-resolved");
+    }
+}
+
+pub(crate) async fn update_constant_internal(
+    state: &AppState,
     name: String,
     value: f64,
 ) -> Result<(), String> {
@@ -29,7 +79,7 @@ pub async fn update_constant(
 
     // Block assigning a pin that another output already uses (rusEFI Settings Error).
     if constant.data_type == libretune_core::ini::DataType::Bits {
-        crate::commands::pin_conflicts::deny_if_pin_conflict(&state, &name, value).await?;
+        crate::commands::pin_conflicts::deny_if_pin_conflict(state, &name, value).await?;
     }
 
     let mut conn_guard = state.connection.lock().await;

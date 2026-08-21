@@ -28,7 +28,7 @@
  * @see {@link AutoTuneAuthorityLimits} for correction limits
  */
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { FolderOpen, Save, Square, Play, Upload, X, Lock, LockOpen } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { open, save } from '@tauri-apps/plugin-dialog';
@@ -152,6 +152,18 @@ interface ChannelInfo {
 }
 
 /**
+ * Live sample tallies for the rejection indicator (issue #132).
+ *
+ * A session that accepts nothing looks exactly like a broken one — the
+ * indicator surfaces how many samples passed the filters and, when data is
+ * being rejected, which filter is eating it (most frequent reason first).
+ */
+interface AutotuneSampleStats {
+  accepted: number;
+  rejections: { reason: string; count: number }[];
+}
+
+/**
  * Minimal table info for selection dropdown.
  */
 interface TableInfo {
@@ -231,6 +243,7 @@ export function AutoTune({ tableName: initialTableName = '', onClose, isConnecte
   const [tableData, setTableData] = useState<TableData | null>(null);
   const [_referenceData, setReferenceData] = useState<TableData | null>(null);
   const [heatmapData, setHeatmapData] = useState<HeatmapEntry[]>([]);
+  const [sampleStats, setSampleStats] = useState<AutotuneSampleStats | null>(null);
   const [veAnalyzeConfig, setVeAnalyzeConfig] = useState<VeAnalyzeConfig | null>(null);
   const [lockedCells, setLockedCells] = useState<Set<string>>(new Set());
   const [selectedCells, _setSelectedCells] = useState<Set<string>>(new Set());
@@ -239,6 +252,12 @@ export function AutoTune({ tableName: initialTableName = '', onClose, isConnecte
   const [error, setError] = useState<string | null>(null);
   const [loadSource, setLoadSource] = useState<AutoTuneLoadSource>('map');
   const [loadSourceHint, setLoadSourceHint] = useState<string | null>(null);
+  // Set the moment the user picks a load source themselves. Auto-detection
+  // (by Y-axis channel name or by the `algorithm` constant) must never fight
+  // an explicit choice — without this, a stale-closure check on `loadSource`
+  // lets async detection re-fire after e.g. the MAF-verify demotion and flip
+  // the dropdown back (issue #132).
+  const manualLoadSourceRef = useRef(false);
 
   // Settings state
   const [settings, setSettings] = useState<AutoTuneSettings>(() =>
@@ -259,7 +278,11 @@ export function AutoTune({ tableName: initialTableName = '', onClose, isConnecte
     max_tps: 100,
     min_clt: 60,
     custom_filter: '',
-    max_tps_rate: 10,
+    // 50 %/s — ITB/Alpha-N throttles move far faster than the old 10 %/s
+    // default allowed, which made AutoTune reject nearly every sample and
+    // look dead (issue #132). Accel transients are still filtered by
+    // exclude_accel_enrich.
+    max_tps_rate: 50,
     exclude_accel_enrich: true,
     require_steady_state: true,
     steady_state_rpm_delta: 50,
@@ -437,7 +460,7 @@ export function AutoTune({ tableName: initialTableName = '', onClose, isConnecte
   }, [activeTable]);
 
   useEffect(() => {
-    if (!tableData || isRunning) return;
+    if (!tableData || isRunning || manualLoadSourceRef.current) return;
     // Auto-detect the load source from the selected table's Y-axis output
     // channel when the user hasn't already picked one. TPS (Alpha-N / ITB) is
     // checked first because a TPS channel name like "tps" would not otherwise
@@ -449,6 +472,36 @@ export function AutoTune({ tableName: initialTableName = '', onClose, isConnecte
     } else if (isMafChannelName(yChan) && loadSource !== 'maf') {
       setLoadSource('maf');
     }
+  }, [isMafChannelName, isTpsChannelName, isRunning, loadSource, tableData]);
+
+  // Speeduino names its VE load-axis output channel `fuelLoad` regardless of
+  // the fuel algorithm, so channel-name detection (above) cannot fire there.
+  // The `algorithm` constant is authoritative instead: 1 = TPS / Alpha-N on
+  // Speeduino and MS2/MS3 alike. Only corrects the untouched MAP default so a
+  // deliberate manual choice is respected (issue #132).
+  useEffect(() => {
+    if (!tableData || isRunning || loadSource !== 'map' || manualLoadSourceRef.current) {
+      return;
+    }
+    const yChan = tableData.y_output_channel;
+    if (isTpsChannelName(yChan) || isMafChannelName(yChan)) {
+      return; // channel-name detection already decided
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const v = await invoke<number>('get_constant_value', { name: 'algorithm' });
+        if (!cancelled && v === 1 && loadSource === 'map') {
+          setLoadSource('tps');
+          setLoadSourceHint('Fuel algorithm is TPS (Alpha-N) — throttle load selected.');
+        }
+      } catch {
+        // No `algorithm` constant in this INI — nothing to detect.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [isMafChannelName, isTpsChannelName, isRunning, loadSource, tableData]);
 
   useEffect(() => {
@@ -503,6 +556,20 @@ export function AutoTune({ tableName: initialTableName = '', onClose, isConnecte
         setHeatmapData(data);
       } catch (e) {
         console.error('Failed to fetch heatmap:', e);
+      }
+      // Sample tallies ride the same poll: the rejection indicator must say
+      // *why* nothing accumulates while the user watches (issue #132).
+      try {
+        const status = await invoke<{
+          acceptedSamples: number;
+          rejections: { reason: string; count: number }[];
+        }>('get_autotune_status');
+        setSampleStats({
+          accepted: status.acceptedSamples ?? 0,
+          rejections: status.rejections ?? [],
+        });
+      } catch {
+        // Status is diagnostic; keep the last known tallies.
       }
     }, 500);
 
@@ -811,6 +878,40 @@ export function AutoTune({ tableName: initialTableName = '', onClose, isConnecte
             </div>
           </div>
         </div>
+        {/* Rejection indicator (issue #132): a session that accepts nothing
+            looks exactly like a broken one. Show what the filters are doing
+            while the session runs; highlight when nothing gets through. */}
+        {isRunning && sampleStats && (
+          <div
+            className={`autotune-sample-stats${
+              sampleStats.accepted === 0 && sampleStats.rejections.length > 0
+                ? ' autotune-sample-stats-warning'
+                : ''
+            }`}
+            title={
+              sampleStats.rejections.length > 0
+                ? `Rejected samples by reason:\n${sampleStats.rejections
+                    .map((r) => `${r.reason}: ${r.count}`)
+                    .join('\n')}`
+                : 'All samples passed the filters.'
+            }
+          >
+            <span className="autotune-sample-accepted">
+              {sampleStats.accepted} sample{sampleStats.accepted === 1 ? '' : 's'} accepted
+            </span>
+            {sampleStats.rejections.length > 0 && (
+              <span className="autotune-sample-rejected">
+                {sampleStats.rejections
+                  .slice(0, 2)
+                  .map((r) => `${r.count}× ${r.reason}`)
+                  .join(' · ')}
+                {sampleStats.rejections.length > 2
+                  ? ` · +${sampleStats.rejections.length - 2} more`
+                  : ''}
+              </span>
+            )}
+          </div>
+        )}
         <div className="autotune-controls">
           <button onClick={loadReferenceTable} title="Load reference table from CSV">
             <FolderOpen size={14} /> Load Ref
@@ -996,6 +1097,7 @@ export function AutoTune({ tableName: initialTableName = '', onClose, isConnecte
               <select
                 value={loadSource}
                 onChange={(e) => {
+                  manualLoadSourceRef.current = true;
                   setLoadSource(e.target.value as AutoTuneLoadSource);
                   setLoadSourceHint(null);
                 }}

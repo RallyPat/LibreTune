@@ -15,21 +15,23 @@ use tauri::Emitter;
 /// `algorithm` constant — unknowable while parsing the INI, so the field falls
 /// back to 1.0 and every load axis renders in raw storage units (8-50 instead
 /// of 16-100 kPa), which also mis-bins anything that looks a cell up by load.
-/// Run after the cache has been populated from the tune.
-pub(crate) async fn resolve_scales_from_tune(state: &AppState) {
+/// Run after the cache has been populated from the tune. Returns the number
+/// of scale/translate fields updated, so callers can refresh open tables only
+/// when something actually changed.
+pub(crate) async fn resolve_scales_from_tune(state: &AppState) -> usize {
     // Read values under an immutable borrow, then re-lock mutably to apply —
     // the definition mutex cannot be held both ways at once.
     let values = {
         let def_guard = state.definition.lock().await;
         let Some(def) = def_guard.as_ref() else {
-            return;
+            return 0;
         };
         if !def
             .constants
             .values()
             .any(|c| c.scale_expr.is_some() || c.translate_expr.is_some())
         {
-            return; // nothing deferred in this INI
+            return 0; // nothing deferred in this INI
         }
         let endianness = def.endianness;
         let cache_guard = state.tune_cache.lock().await;
@@ -59,6 +61,9 @@ pub(crate) async fn resolve_scales_from_tune(state: &AppState) {
                 n
             );
         }
+        n
+    } else {
+        0
     }
 }
 

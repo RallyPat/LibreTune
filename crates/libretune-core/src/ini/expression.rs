@@ -1159,6 +1159,33 @@ pub fn evaluate_simple(expr: &Expr, context: &HashMap<String, f64>) -> Result<Va
     evaluate(expr, context, None)
 }
 
+/// Identifiers an expression mentions.
+///
+/// A deliberately over-inclusive word scan: every bare word is returned,
+/// including function names and keywords, because a spurious extra name
+/// usually costs one map lookup while a missing one would silently change a
+/// dependency decision. Numeric literals (words starting with a digit) are
+/// dropped; a name cannot start with one.
+pub fn identifiers(expression: &str) -> std::collections::HashSet<String> {
+    let mut out = std::collections::HashSet::new();
+    let mut word = String::new();
+    let keep = |w: &str| w.starts_with(|c: char| c.is_alphabetic() || c == '_');
+    for ch in expression.chars() {
+        if ch.is_alphanumeric() || ch == '_' {
+            word.push(ch);
+        } else if !word.is_empty() {
+            let w = std::mem::take(&mut word);
+            if keep(&w) {
+                out.insert(w);
+            }
+        }
+    }
+    if !word.is_empty() && keep(&word) {
+        out.insert(word);
+    }
+    out
+}
+
 /// Resolve a display string that may be a braced INI expression.
 ///
 /// If `raw` trims to `{ ... }`, the inner expression is evaluated and stringified.

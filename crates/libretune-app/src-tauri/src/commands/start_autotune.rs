@@ -2,8 +2,8 @@
 
 use crate::read_raw_value;
 use crate::state::{
-    is_maf_channel_name, is_tps_channel_name, AppState, AutoTuneConfig, AutoTuneLoadSource,
-    AxisHint,
+    algorithm_selects_tps_load, is_maf_channel_name, is_tps_channel_name, AppState, AutoTuneConfig,
+    AutoTuneLoadSource, AxisHint,
 };
 use libretune_core::autotune::{
     AutoTuneAuthorityLimits, AutoTuneFilters, AutoTuneReferenceTables, AutoTuneSettings,
@@ -62,6 +62,29 @@ pub async fn start_autotune(
                     resolved_load_source = AutoTuneLoadSource::Tps;
                 } else if is_maf_channel_name(channel) {
                     resolved_load_source = AutoTuneLoadSource::Maf;
+                }
+            }
+            // Speeduino names its VE load-axis output channel `fuelLoad`
+            // regardless of the fuel algorithm, so channel-name detection
+            // cannot fire there. Fall back to the `algorithm` constant, which
+            // is authoritative: 1 = TPS / Alpha-N on Speeduino and MS2/MS3
+            // alike (issue #132).
+            if resolved_load_source == AutoTuneLoadSource::Map {
+                if let Some(algorithm) = def.constants.get("algorithm") {
+                    let value = crate::commands::constant_values::read_constant_from_cache_or_tune(
+                        "algorithm",
+                        algorithm,
+                        def.endianness,
+                        state.current_tune.lock().await.as_ref(),
+                        cache,
+                    );
+                    if algorithm_selects_tps_load(value) {
+                        tracing::info!(
+                            value,
+                            "start_autotune: algorithm constant selects TPS load"
+                        );
+                        resolved_load_source = AutoTuneLoadSource::Tps;
+                    }
                 }
             }
         }
