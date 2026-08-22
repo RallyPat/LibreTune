@@ -1600,7 +1600,10 @@ mod authority_rail_tests {
     fn the_ceiling_bounds_a_single_update() {
         // Relative clamps would allow 100 -> 120; the rail stops it at 110.
         let a = limits(50.0, 50.0, 0.0, 110.0);
-        assert_eq!(AutoTuneState::apply_authority_limits(100.0, 120.0, &a), 110.0);
+        assert_eq!(
+            AutoTuneState::apply_authority_limits(100.0, 120.0, &a),
+            110.0
+        );
     }
 
     #[test]

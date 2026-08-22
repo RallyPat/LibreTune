@@ -252,10 +252,20 @@ mod rail_tests {
     #[test]
     fn the_agent_path_is_railed_too() {
         let r = clamp_table_edit(edit(400.0), &railed(0.0, 120.0), Some(100.0));
-        assert_eq!(value_of(&r.action), 120.0, "ceiling must apply to agent edits");
-        assert!(r.clamped_from.is_some(), "clamping must be reported, not silent");
+        assert_eq!(
+            value_of(&r.action),
+            120.0,
+            "ceiling must apply to agent edits"
+        );
         assert!(
-            r.reason.as_deref().unwrap_or("").contains("outside the allowed range"),
+            r.clamped_from.is_some(),
+            "clamping must be reported, not silent"
+        );
+        assert!(
+            r.reason
+                .as_deref()
+                .unwrap_or("")
+                .contains("outside the allowed range"),
             "reason should name the rail, got {:?}",
             r.reason
         );

@@ -10,8 +10,7 @@ use libretune_core::ini::{set_default_symbols, EcuDefinition, TableRole};
 use std::path::PathBuf;
 
 fn demo_ini() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../libretune-app/src-tauri/resources/demo.ini")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../libretune-app/src-tauri/resources/demo.ini")
 }
 
 fn declared_target(def: &EcuDefinition) -> Vec<String> {
@@ -59,7 +58,9 @@ fn demo_ini_declares_the_right_target_on_both_arms() {
     let lambda = declared_target(&EcuDefinition::from_file(&path).expect("demo.ini parses"));
     set_default_symbols(Vec::<String>::new());
     assert!(
-        lambda.iter().any(|n| n.contains("lambda") || n.contains("Lambda")),
+        lambda
+            .iter()
+            .any(|n| n.contains("lambda") || n.contains("Lambda")),
         "under #if LAMBDA the declared target should be the lambda table, got {lambda:?}"
     );
 }

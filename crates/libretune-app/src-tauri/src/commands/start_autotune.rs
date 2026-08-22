@@ -407,7 +407,13 @@ fn resolve_reference_tables(
         def,
         cache,
         requested,
-        &["afrTable", "afr_target", "afrTarget", "targetAfr", "afrTable1"],
+        &[
+            "afrTable",
+            "afr_target",
+            "afrTarget",
+            "targetAfr",
+            "afrTable1",
+        ],
     )
     .unwrap_or_default();
 
@@ -671,7 +677,8 @@ mod target_afr_resolution_tests {
         assert_eq!(ini_declared_afr_target(&def), Some("afrTable1Tbl"));
 
         let cache = cache_with_rich_targets(&def);
-        let (tables, source) = resolve_reference_tables(&def, Some(&cache), "veTable1Tbl", None, None);
+        let (tables, source) =
+            resolve_reference_tables(&def, Some(&cache), "veTable1Tbl", None, None);
 
         assert_eq!(
             source,
@@ -680,7 +687,10 @@ mod target_afr_resolution_tests {
         );
         // The values must actually arrive, not just the name: a resolved-but-empty
         // table falls through to the flat target just as invisibly.
-        assert_eq!(tables.target_afr_table, vec![vec![13.0, 13.0], vec![13.0, 13.0]]);
+        assert_eq!(
+            tables.target_afr_table,
+            vec![vec![13.0, 13.0], vec![13.0, 13.0]]
+        );
     }
 
     #[test]
@@ -690,7 +700,8 @@ mod target_afr_resolution_tests {
         assert_eq!(ini_declared_afr_target(&def), None);
 
         let cache = cache_with_rich_targets(&def);
-        let (tables, source) = resolve_reference_tables(&def, Some(&cache), "veTable1Tbl", None, None);
+        let (tables, source) =
+            resolve_reference_tables(&def, Some(&cache), "veTable1Tbl", None, None);
         assert_eq!(source, TargetAfrSource::NameMatch);
         assert!(!tables.target_afr_table.is_empty());
     }
@@ -701,7 +712,8 @@ mod target_afr_resolution_tests {
         // INI could match a target of ~0.88 against a measured AFR of ~13.
         let def = def_with_afr_table("lambdaTable", TableRole::Other);
         let cache = cache_with_rich_targets(&def);
-        let (tables, source) = resolve_reference_tables(&def, Some(&cache), "veTable1Tbl", None, None);
+        let (tables, source) =
+            resolve_reference_tables(&def, Some(&cache), "veTable1Tbl", None, None);
 
         assert_eq!(source, TargetAfrSource::FlatSetting);
         assert!(
@@ -719,8 +731,12 @@ mod target_afr_resolution_tests {
         // and so would have passed while the units were mismatched.
         let def = def_with_afr_table("lambdaTable1Tbl", TableRole::AfrTarget);
         let cache = cache_with_rich_targets(&def);
-        let (tables, source) = resolve_reference_tables(&def, Some(&cache), "veTable1Tbl", None, None);
-        assert_eq!(source, TargetAfrSource::IniDeclared("lambdaTable1Tbl".to_string()));
+        let (tables, source) =
+            resolve_reference_tables(&def, Some(&cache), "veTable1Tbl", None, None);
+        assert_eq!(
+            source,
+            TargetAfrSource::IniDeclared("lambdaTable1Tbl".to_string())
+        );
         assert!(!tables.target_afr_table.is_empty());
     }
 
@@ -757,9 +773,17 @@ mod target_afr_resolution_tests {
     fn an_explicit_name_outranks_the_ini_declaration() {
         let def = def_with_afr_table("afrTable1Tbl", TableRole::AfrTarget);
         let cache = cache_with_rich_targets(&def);
-        let (_, source) =
-            resolve_reference_tables(&def, Some(&cache), "veTable1Tbl", Some("afrTable1Tbl"), None);
-        assert_eq!(source, TargetAfrSource::Explicit("afrTable1Tbl".to_string()));
+        let (_, source) = resolve_reference_tables(
+            &def,
+            Some(&cache),
+            "veTable1Tbl",
+            Some("afrTable1Tbl"),
+            None,
+        );
+        assert_eq!(
+            source,
+            TargetAfrSource::Explicit("afrTable1Tbl".to_string())
+        );
     }
 
     /// Give the definition a VE table so `resolve_reference_tables` can compare
@@ -801,7 +825,8 @@ mod target_afr_resolution_tests {
         let def = with_ve_table(def, 4, 4); // VE is 4x4, the target is 2x2
         let cache = cache_with_rich_targets(&def);
 
-        let (tables, source) = resolve_reference_tables(&def, Some(&cache), "veTable1Tbl", None, None);
+        let (tables, source) =
+            resolve_reference_tables(&def, Some(&cache), "veTable1Tbl", None, None);
         assert!(
             tables.target_afr_table.is_empty(),
             "a 2x2 target must not be applied to a 4x4 VE table"
@@ -815,9 +840,13 @@ mod target_afr_resolution_tests {
         let def = with_ve_table(def, 2, 2); // same shape as the target
         let cache = cache_with_rich_targets(&def);
 
-        let (tables, source) = resolve_reference_tables(&def, Some(&cache), "veTable1Tbl", None, None);
+        let (tables, source) =
+            resolve_reference_tables(&def, Some(&cache), "veTable1Tbl", None, None);
         assert_eq!(tables.target_afr_table.len(), 2);
-        assert_eq!(source, TargetAfrSource::IniDeclared("afrTable1Tbl".to_string()));
+        assert_eq!(
+            source,
+            TargetAfrSource::IniDeclared("afrTable1Tbl".to_string())
+        );
     }
 
     #[test]
@@ -835,7 +864,8 @@ mod target_afr_resolution_tests {
             "a partial read must fail, not return a zero-padded table: {z:?}"
         );
 
-        let (tables, source) = resolve_reference_tables(&def, Some(&cache), "veTable1Tbl", None, None);
+        let (tables, source) =
+            resolve_reference_tables(&def, Some(&cache), "veTable1Tbl", None, None);
         assert!(tables.target_afr_table.is_empty());
         assert_eq!(source, TargetAfrSource::FlatSetting);
     }
