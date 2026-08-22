@@ -2178,7 +2178,10 @@ impl Connection {
         } else {
             self.dirty_pages.iter().copied().collect()
         };
-        tracing::info!(?pages, "burn: committing every page written since the last burn");
+        tracing::info!(
+            ?pages,
+            "burn: committing every page written since the last burn"
+        );
         for page in pages {
             self.burn(BurnParams { can_id: 0, page })?;
         }
