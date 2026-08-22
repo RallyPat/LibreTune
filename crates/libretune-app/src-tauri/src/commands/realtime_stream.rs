@@ -470,7 +470,6 @@ pub(crate) async fn stop_streaming_on_definition_change(state: &AppState) {
 
 #[tauri::command]
 
-
 pub async fn start_realtime_stream(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,

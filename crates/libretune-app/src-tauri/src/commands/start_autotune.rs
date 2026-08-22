@@ -958,9 +958,14 @@ mod target_afr_resolution_tests {
             },
         );
         // Repeat: a HashMap scan would eventually disagree with itself.
-        let picks: std::collections::HashSet<_> =
-            (0..50).map(|_| ini_declared_afr_target(&def).unwrap().to_string()).collect();
-        assert_eq!(picks.len(), 1, "must pick the same table every time, got {picks:?}");
+        let picks: std::collections::HashSet<_> = (0..50)
+            .map(|_| ini_declared_afr_target(&def).unwrap().to_string())
+            .collect();
+        assert_eq!(
+            picks.len(),
+            1,
+            "must pick the same table every time, got {picks:?}"
+        );
     }
 
     /// When the INI names a primary, that outranks any role scan.
