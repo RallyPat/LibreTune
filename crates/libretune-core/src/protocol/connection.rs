@@ -375,6 +375,14 @@ pub struct Connection {
     /// Page targeted by the most recent successful write, used by the auto-burn-on-page-change
     /// safety policy (msEnvelope_1.0 spec §6.2). `None` after construction or after a burn.
     last_written_page: Option<u8>,
+    /// Every page written since it was last burned.
+    ///
+    /// `last_written_page` tracks only the most recent one, which is all the
+    /// auto-burn-on-page-change policy needs. A user-initiated burn has to know
+    /// about all of them: Speeduino burns ONE page per command (the INI gives
+    /// fifteen `burnCommand` entries, one per page, each taking the page number),
+    /// so burning "the tune" means burning each page that has changed.
+    dirty_pages: std::collections::BTreeSet<u8>,
     /// ECU type detected from the INI signature (Issue #71).
     /// Drives conservative runtime-command selection for Speeduino/MS2/MS3.
     ecu_type: EcuType,
@@ -405,6 +413,7 @@ impl Connection {
             tx_packets: 0,
             rx_packets: 0,
             last_written_page: None,
+            dirty_pages: std::collections::BTreeSet::new(),
             ecu_type: EcuType::Unknown,
             cancel: Arc::new(AtomicBool::new(false)),
         }
@@ -442,6 +451,7 @@ impl Connection {
             tx_packets: 0,
             rx_packets: 0,
             last_written_page: None,
+            dirty_pages: std::collections::BTreeSet::new(),
             ecu_type: EcuType::Unknown,
             cancel: Arc::new(AtomicBool::new(false)),
         }
@@ -1963,6 +1973,7 @@ impl Connection {
 
         if result.is_ok() {
             self.last_written_page = Some(params.page);
+            self.dirty_pages.insert(params.page);
             // Leave the link idle long enough for the ECU to drain this frame
             // before anything else — the next chunk, a burn, a read-back, or a
             // realtime poll — is put on the wire. Nothing downstream can tell
@@ -2125,6 +2136,7 @@ impl Connection {
         if self.last_written_page == Some(params.page) {
             self.last_written_page = None;
         }
+        self.dirty_pages.remove(&params.page);
         Ok(())
     }
 
@@ -2143,10 +2155,40 @@ impl Connection {
     }
 
     /// Convenience method to burn all pages to flash
+    /// Burn every page that has been written since it was last burned.
+    ///
+    /// This used to send a single burn for page 0, on the assumption that "most
+    /// ECUs burn all RAM to flash with a single command". Speeduino does not,
+    /// and says so in its own INI: fifteen `burnCommand` entries, one per page,
+    /// each formatted `b%2i` with the page number. So the Burn button committed
+    /// page 0 and nothing else - the VE table (page 2) and the ignition table
+    /// (page 3) were never reachable by it at all.
+    ///
+    /// The failure was invisible in the worst way: the burn reported success,
+    /// the tables read back correctly from RAM, and the values only disappeared
+    /// on the next power cycle. On one car the ignition table reached flash
+    /// solely because an unrelated auto-burn-on-page-change happened to catch
+    /// it, while the VE table written seconds later did not.
+    ///
+    /// With nothing dirty this burns page 0 alone, preserving the old behaviour
+    /// for a caller that just wants to poke the ECU.
     pub fn send_burn_command(&mut self) -> Result<(), ProtocolError> {
-        // Burn page 0 (main configuration page)
-        // Most ECUs burn all RAM to flash with a single command
-        self.burn(BurnParams { can_id: 0, page: 0 })
+        let pages: Vec<u8> = if self.dirty_pages.is_empty() {
+            vec![0]
+        } else {
+            self.dirty_pages.iter().copied().collect()
+        };
+        tracing::info!(?pages, "burn: committing every page written since the last burn");
+        for page in pages {
+            self.burn(BurnParams { can_id: 0, page })?;
+        }
+        Ok(())
+    }
+
+    /// Pages written since they were last burned. Empty means nothing is
+    /// waiting in RAM that a power cycle would discard.
+    pub fn dirty_pages(&self) -> Vec<u8> {
+        self.dirty_pages.iter().copied().collect()
     }
 
     /// Send raw bytes to ECU (for controller commands)
@@ -3469,5 +3511,60 @@ mod tests {
         let raw = "emu`RPM=1200`emu`shape update for ch0`";
         let result = Connection::parse_rusefi_text_output(raw);
         assert_eq!(result, "RPM=1200\nshape update for ch0");
+    }
+}
+
+#[cfg(test)]
+mod burn_page_tests {
+    use super::*;
+
+    /// Speeduino's INI declares one `burnCommand` per page, each taking the page
+    /// number. A burn that only ever sends page 0 therefore commits the main
+    /// config page and leaves every table in RAM - where it reads back correctly
+    /// until the next power cycle throws it away.
+    #[test]
+    fn dirty_pages_accumulate_and_clear() {
+        let mut dirty: std::collections::BTreeSet<u8> = Default::default();
+        // two table writes, on the pages the VE and ignition tables really use
+        dirty.insert(2);
+        dirty.insert(3);
+        assert_eq!(dirty.iter().copied().collect::<Vec<_>>(), vec![2, 3]);
+
+        // burning page 3 must not clear page 2
+        dirty.remove(&3);
+        assert_eq!(
+            dirty.iter().copied().collect::<Vec<_>>(),
+            vec![2],
+            "burning one page must leave the others dirty - this is the whole bug"
+        );
+        dirty.remove(&2);
+        assert!(dirty.is_empty());
+    }
+
+    /// With nothing written, the old single-page behaviour is preserved so a
+    /// caller that just wants to poke the ECU still can.
+    #[test]
+    fn an_empty_dirty_set_still_burns_page_zero() {
+        let dirty: std::collections::BTreeSet<u8> = Default::default();
+        let pages: Vec<u8> = if dirty.is_empty() {
+            vec![0]
+        } else {
+            dirty.iter().copied().collect()
+        };
+        assert_eq!(pages, vec![0]);
+    }
+
+    /// Pages come out in order, so a burn sequence is deterministic and a failure
+    /// part-way through leaves a predictable state rather than an arbitrary one.
+    #[test]
+    fn pages_burn_in_ascending_order() {
+        let mut dirty: std::collections::BTreeSet<u8> = Default::default();
+        for p in [7u8, 2, 15, 3, 0] {
+            dirty.insert(p);
+        }
+        assert_eq!(
+            dirty.iter().copied().collect::<Vec<_>>(),
+            vec![0, 2, 3, 7, 15]
+        );
     }
 }
