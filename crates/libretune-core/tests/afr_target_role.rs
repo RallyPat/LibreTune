@@ -25,45 +25,42 @@ fn declared_target(def: &EcuDefinition) -> Vec<String> {
     v
 }
 
+/// Both arms of `#if LAMBDA`, in ONE test on purpose.
+///
+/// `set_default_symbols` writes process-global state, and integration tests in
+/// a binary run in parallel by default. Two tests each setting it raced: this
+/// file passed under `--test-threads=1` and failed under a plain `cargo test`,
+/// which is what CI runs. One test means the two arms are sequential by
+/// construction rather than by a flag someone has to remember.
 #[test]
-fn a_real_ini_declares_an_afr_target_table() {
+fn demo_ini_declares_the_right_target_on_both_arms() {
     let path = demo_ini();
     if !path.exists() {
         eprintln!("demo.ini not present; skipping");
         return;
     }
+
     // The `#else` arm: an AFR-target project.
     set_default_symbols(Vec::<String>::new());
-    let def = EcuDefinition::from_file(&path).expect("demo.ini parses");
-
-    let targets = declared_target(&def);
+    let afr = declared_target(&EcuDefinition::from_file(&path).expect("demo.ini parses"));
     assert!(
-        !targets.is_empty(),
-        "a real INI must declare an AFR target; auto-discovery has nothing to \
-         consult otherwise and falls back to a flat target"
+        !afr.is_empty(),
+        "a real INI must declare an AFR target; auto-discovery has nothing to          consult otherwise and falls back to a flat target"
     );
     assert!(
-        targets.iter().any(|n| n.contains("afrTable")),
-        "the non-LAMBDA arm should declare the AFR table, got {targets:?}"
+        afr.iter().any(|n| n.contains("afrTable")),
+        "the non-LAMBDA arm should declare the AFR table, got {afr:?}"
     );
-}
 
-#[test]
-fn the_lambda_arm_declares_the_lambda_table() {
-    let path = demo_ini();
-    if !path.exists() {
-        return;
-    }
+    // The `#if LAMBDA` arm: the same declaration names the lambda table, whose
+    // values are lambda - which is why the target must be normalised before it
+    // reaches the correction.
     set_default_symbols(vec!["LAMBDA".to_string()]);
-    let def = EcuDefinition::from_file(&path).expect("demo.ini parses");
-    let targets = declared_target(&def);
-    set_default_symbols(Vec::<String>::new()); // don't leak into other tests
-
+    let lambda = declared_target(&EcuDefinition::from_file(&path).expect("demo.ini parses"));
+    set_default_symbols(Vec::<String>::new());
     assert!(
-        targets.iter().any(|n| n.contains("lambda") || n.contains("Lambda")),
-        "under #if LAMBDA the declared target should be the lambda table, got \
-         {targets:?} - and its values are lambda, which is why the target must \
-         be normalised before it reaches the correction"
+        lambda.iter().any(|n| n.contains("lambda") || n.contains("Lambda")),
+        "under #if LAMBDA the declared target should be the lambda table, got {lambda:?}"
     );
 }
 
