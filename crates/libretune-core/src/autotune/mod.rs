@@ -380,7 +380,15 @@ impl AutoTuneState {
             .lambda_delay_table
             .get(cell_y)
             .and_then(|row| row.get(cell_x))
-            .map(|&v| v.max(0.0) as u64)
+            // A zero cell means "no value here", not "no delay" - the same
+            // reading its AFR sibling `resolve_target_afr` already takes. It
+            // matters more here: a delay of 0 fails the `delay_ms > 0` check
+            // downstream, `historical_point` comes back None, and under strict
+            // matching the sample is dropped. That cell then accumulates
+            // nothing for the whole session, silently. Returning None instead
+            // sends it to the RPM curve, which is at least a number.
+            .filter(|&&v| v > 0.1)
+            .map(|&v| v as u64)
     }
 
     pub fn is_cell_locked(&self, x: usize, y: usize) -> bool {
