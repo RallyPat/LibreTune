@@ -228,13 +228,24 @@ pub(crate) async fn feed_autotune_data(
         .copied()
         .unwrap_or(0.0);
 
-    let map = data
+    // A missing MAP is not zero load - it is no load reading. On a speed-density
+    // tune the load axis IS manifold pressure, so a constant 0.0 files every
+    // sample into the lowest load row, and a whole session is spent correcting
+    // the idle corner with wide-open-throttle data. This is the same defect as
+    // the fabricated AFR and the zero VE; MAP was simply missed when those were
+    // fixed. Only fatal when MAP is actually the load axis - a TPS or MAF tune
+    // does not need it, so it is not dropped there.
+    let map_opt = data
         .get("map")
         .or_else(|| data.get("MAP"))
         .or_else(|| data.get("mapValue"))
         .or_else(|| data.get("fuelingLoad"))
-        .copied()
-        .unwrap_or(0.0);
+        .copied();
+    if map_opt.is_none() && config.load_source == AutoTuneLoadSource::Map {
+        missing_channel_warning("MAP");
+        return;
+    }
+    let map = map_opt.unwrap_or(0.0);
 
     let maf_value = data
         .get("maf")
@@ -250,12 +261,25 @@ pub(crate) async fn feed_autotune_data(
     // TPS is read here (before load_value) so a TPS/Alpha-N load source can use
     // it as the load axis. It is also reused below for transient (tps_rate)
     // detection, so this is the single source of truth for the throttle value.
-    let tps = data
+    // A missing TPS is not 0% throttle, it is no throttle reading - and the
+    // difference is the whole transient filter. `tps_rate` is computed from
+    // this, so a constant 0.0 makes the rate constant 0.0 too, and
+    // `max_tps_rate` can never fire: every tip-in and lift-off is then accepted
+    // as steady state, carrying accel enrichment and wall wetting into cells
+    // that never asked for it. Warn once and keep going, because unlike AFR and
+    // VE this does not corrupt the arithmetic - it only widens what gets in.
+    let tps = match data
         .get("tps")
         .or_else(|| data.get("TPS"))
         .or_else(|| data.get("tpsValue"))
         .copied()
-        .unwrap_or(0.0);
+    {
+        Some(v) => v,
+        None => {
+            missing_channel_warning("TPS");
+            0.0
+        }
+    };
 
     // The load value selects which Y-axis (load) cell a sample is attributed
     // to. For MAP (speed-density) it's manifold pressure; for MAF it's mass
@@ -274,22 +298,45 @@ pub(crate) async fn feed_autotune_data(
         AutoTuneLoadSource::Tps => tps,
     };
 
-    let afr = data
+    // No AFR channel means no measurement, and a sample without a measurement
+    // must be dropped rather than invented. The old fallback was 14.7, which is
+    // uniquely bad: it is a *physically valid* mixture, so it sails through the
+    // sensor-rail filter and looks like data. Against a 12.7 wide-open-throttle
+    // target that is a standing request for ~16% more fuel, derived from a
+    // reading that never happened.
+    //
+    // `lambda` is included alongside `lambda1` because `apply_channel_aliases`
+    // publishes the canonical name; looking only for `lambda1` sent a
+    // lambda-only INI to the fabricated default.
+    let Some(afr) = data
         .get("afr")
         .or_else(|| data.get("AFR"))
         .or_else(|| data.get("afr1"))
         .or_else(|| data.get("AFRValue"))
+        .or_else(|| data.get("lambda"))
         .or_else(|| data.get("lambda1"))
-        .map(|v| if *v < 2.0 { *v * 14.7 } else { *v }) // Convert lambda to AFR
-        .unwrap_or(14.7);
+        // Shared with the target side (`resolve_target_afr`) so a lambda target
+        // table and a lambda sensor reading cannot end up on different scales.
+        .map(|v| libretune_core::autotune::normalise_to_afr(*v))
+    else {
+        missing_channel_warning("AFR");
+        return;
+    };
 
-    let ve = data
+    // Same reasoning, sharper consequence: VE 0 proposes a zero-fuel cell, and
+    // the authority limits cannot catch it because a percentage of zero is
+    // zero. `send_autotune_recommendations` already refuses to write a zero for
+    // exactly this reason; the value should never reach it in the first place.
+    let Some(ve) = data
         .get("ve")
         .or_else(|| data.get("VE"))
         .or_else(|| data.get("veValue"))
         .or_else(|| data.get("VEtable"))
         .copied()
-        .unwrap_or(0.0);
+    else {
+        missing_channel_warning("VE");
+        return;
+    };
 
     let clt = data
         .get("clt")
@@ -422,6 +469,7 @@ pub(crate) async fn stop_streaming_on_definition_change(state: &AppState) {
 }
 
 #[tauri::command]
+
 pub async fn start_realtime_stream(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
@@ -1001,5 +1049,26 @@ mod stale_definition_guard_tests {
         // started, or already stopped).
         stop_streaming_on_definition_change(&state).await;
         assert!(state.streaming_task.lock().await.is_none());
+    }
+}
+
+/// Warn once per channel that AutoTune is dropping samples for want of it.
+///
+/// Once, not per sample: this runs at the realtime rate, and a warning that
+/// scrolls past thousands of times is one nobody reads. The condition is
+/// structural anyway - a channel the INI does not publish will not start
+/// appearing later in the session.
+fn missing_channel_warning(channel: &'static str) {
+    use std::sync::{Mutex, OnceLock};
+    static WARNED: OnceLock<Mutex<std::collections::HashSet<&'static str>>> = OnceLock::new();
+    let set = WARNED.get_or_init(|| Mutex::new(std::collections::HashSet::new()));
+    if let Ok(mut g) = set.lock() {
+        if g.insert(channel) {
+            tracing::warn!(
+                channel,
+                "AutoTune has no {} channel and is dropping every sample. Nothing                  will be learned this session - check the INI publishes it under a                  name the resolver knows.",
+                channel
+            );
+        }
     }
 }

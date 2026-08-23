@@ -1209,3 +1209,79 @@ body {
   color: var(--text-dim);
   font-family: 'Consolas', 'Monaco', monospace;
 }
+/* ---- Temperature units, asked once ------------------------------------
+   A project that declares no units silently renders Fahrenheit, and the
+   same channel drives AutoTune's coolant filter — so the wrong answer
+   quietly discards whole sessions. Modal because there is no sensible
+   default to fall back to: guessing is what caused the problem. */
+.units-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.65);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+}
+
+.units-dialog {
+  background: var(--panel-bg, #1e1e22);
+  color: var(--text, #e8e8ea);
+  border: 1px solid var(--border, #3a3a42);
+  border-radius: 8px;
+  width: min(560px, 92vw);
+  padding: 1.4rem 1.6rem;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55);
+}
+
+.units-dialog h2 {
+  margin: 0 0 0.75rem;
+  font-size: 1.1rem;
+}
+
+.units-dialog p {
+  margin: 0 0 0.7rem;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.units-why { opacity: 0.85; }
+
+.units-note {
+  font-size: 0.8rem;
+  opacity: 0.7;
+  margin-top: 0.9rem;
+  margin-bottom: 0;
+}
+
+.units-dialog code {
+  background: rgba(255, 255, 255, 0.08);
+  padding: 0.05rem 0.3rem;
+  border-radius: 3px;
+}
+
+.units-actions {
+  display: flex;
+  gap: 0.75rem;
+  margin: 1rem 0 0;
+}
+
+.units-actions button {
+  flex: 1;
+  padding: 0.6rem 1rem;
+  border-radius: 6px;
+  border: 1px solid var(--border, #3a3a42);
+  background: rgba(255, 255, 255, 0.06);
+  color: inherit;
+  font-size: 0.95rem;
+  cursor: pointer;
+}
+
+.units-actions button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.units-actions button:disabled {
+  opacity: 0.5;
+  cursor: progress;
+}

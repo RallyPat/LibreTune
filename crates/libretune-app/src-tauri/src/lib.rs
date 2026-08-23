@@ -187,7 +187,18 @@ pub fn run() {
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
     tracing_subscriber::fmt()
         .with_env_filter(filter)
-        .with_target(false)
+        // `fmt()` writes to STDOUT by default. Everything that captures this
+        // app's diagnostics redirects stderr, so without this line every
+        // `tracing::` event went to a stream nobody was reading - while the
+        // `eprintln!` calls still being migrated away kept landing in the file,
+        // making the log look healthy. A car session's entire AutoTune trail
+        // was lost that way, including the line naming which AFR target table
+        // had been resolved.
+        .with_writer(std::io::stderr)
+        // Keep the module path: with `RUST_LOG` filtering by target, a line
+        // that does not say where it came from cannot be traced back to the
+        // directive that did or did not select it.
+        .with_target(true)
         .init();
 
     tauri::Builder::default()
@@ -298,6 +309,8 @@ pub fn run() {
             start_autotune,
             stop_autotune,
             get_autotune_status,
+            commands::temperature_units::get_temperature_units_status,
+            commands::temperature_units::set_temperature_units,
             get_autotune_recommendations,
             get_autotune_heatmap,
             send_autotune_recommendations,

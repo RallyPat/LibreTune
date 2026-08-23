@@ -151,7 +151,9 @@ export default function TableEditor2D({
   const safeXBins = hasValidData ? x_bins : [0];
   const safeYBins = hasValidData ? y_bins : [0];
   
-  const [localZValues, setLocalZValues] = useState<number[][]>([...safeZValues]);
+  // Renamed: every mutation goes through the `setLocalZValues` wrapper defined
+  // below, which persists as well as sets. Nothing should call this directly.
+  const [localZValues, setLocalZValuesState] = useState<number[][]>([...safeZValues]);
   const [localXBins, setLocalXBins] = useState<number[]>([...safeXBins]);
   const [localYBins, setLocalYBins] = useState<number[]>([...safeYBins]);
   
@@ -279,6 +281,33 @@ export default function TableEditor2D({
       showToast(`${operation} failed: ${message}`, 'error');
     },
     [showToast]
+  );
+
+  /**
+   * Set the grid AND persist it. Every one of the seventeen mutation sites in
+   * this component calls this, so an operation cannot silently forget to save.
+   *
+   * It used to be a plain `useState` setter, and only the toolbar's "s" button
+   * pushed anything to the backend. The result: edits lived in component state
+   * alone, so switching tabs unmounted the grid and discarded them, and
+   * File -> Save As serialised the backend cache and wrote the pre-edit values
+   * with no warning. A real tuning session was lost that way twice - the table
+   * on screen and the table in the file simply disagreed.
+   *
+   * Persisting per edit writes the whole table each time, which is what undo
+   * and redo already did, so the cost is not new. If that ever matters on a
+   * slow link, debounce here rather than moving the call back out to the call
+   * sites, where the next new operation will forget it again.
+   */
+  const setLocalZValues = useCallback(
+    (values: number[][]) => {
+      setLocalZValuesState(values);
+      invoke('update_table_data', { tableName: table_name, zValues: values })
+        // Loudly. The previous `.then(() => {})` had no catch at all, so a
+        // rejected write left the grid showing values the ECU never received.
+        .catch((err) => handleOperationError('Saving table', err));
+    },
+    [table_name, handleOperationError]
   );
 
   useEffect(() => {
@@ -1088,13 +1117,9 @@ export default function TableEditor2D({
       });
 
       if (hasChanges) {
+        // setLocalZValues persists; no second write.
         setLocalZValues(newValues);
         pushHistory(newValues, localXBins, localYBins);
-        // Persist to backend without triggering n*m alerts
-        invoke('update_table_data', {
-          tableName: table_name,
-          zValues: newValues
-        });
         
         // Update selection to cover pasted area
         const endY = Math.min(startY + rows.length - 1, y_bins.length - 1);
@@ -1124,13 +1149,9 @@ export default function TableEditor2D({
       setHistoryIndex(prevIndex);
       onValuesChange?.(snapshot.z);
       
-      // Update backend
-      invoke('update_table_data', {
-        tableName: table_name,
-        zValues: snapshot.z,
-        // Backend update for axis not yet available via simple set command
-        // but local state is reverted
-      });
+      // The z values are persisted by setLocalZValues above. Axis bins are
+      // still local-only: there is no command to write them, so an undo that
+      // crosses a re-bin restores the grid but not the ECU's axes.
     }
   };
 
@@ -1147,10 +1168,6 @@ export default function TableEditor2D({
       setHistoryIndex(nextIndex);
       onValuesChange?.(snapshot.z);
 
-      invoke('update_table_data', {
-        tableName: table_name,
-        zValues: snapshot.z
-      });
     }
   };
 
@@ -1173,12 +1190,16 @@ export default function TableEditor2D({
     }
   };
 
+  /**
+   * Explicit re-send. Edits already persist as they are made, so this is now a
+   * "push it again" for when the ECU was offline at the time - not the only
+   * thing standing between a session's work and losing it, which is what it
+   * used to be.
+   */
   const handleSave = () => {
-    invoke('update_table_data', {
-      tableName: table_name,
-      zValues: localZValues
-    }).then(() => {
-    });
+    invoke('update_table_data', { tableName: table_name, zValues: localZValues })
+      .then(() => showToast('Table sent to the ECU', 'success'))
+      .catch((err) => handleOperationError('Saving table', err));
   };
 
   const handleRightClick = (e: React.MouseEvent, x: number, y: number, cell: HTMLElement) => {

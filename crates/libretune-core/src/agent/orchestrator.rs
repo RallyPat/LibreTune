@@ -482,6 +482,7 @@ mod tests {
         AutoTuneAuthorityLimits {
             max_cell_value_change: 5.0,
             max_cell_percentage_change: 10.0,
+            ..Default::default()
         }
     }
 
