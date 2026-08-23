@@ -1,7 +1,7 @@
 /** Tachometer — specialized RPM gauge with redline zone and chrome bezel. */
 
 import { tsColorToHex } from '../../dashboards/dashTypes';
-import { createMetallicGradient } from '../drawUtils';
+import { createMetallicGradient, steadyValueText } from '../drawUtils';
 import type { Painter } from './types';
 
 export const tachometerPainter: Painter = (pctx) => {
@@ -163,7 +163,13 @@ export const tachometerPainter: Painter = (pctx) => {
   ctx.font = getFontSpec(fontSize, { bold: true, monospace: true });
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText(value.toFixed(0), centerX, centerY + radius * 0.35);
+  ctx.fillText(
+    pctx.rightAlignValues
+      ? steadyValueText(value, 0, config.min, config.max)
+      : value.toFixed(0),
+    centerX,
+    centerY + radius * 0.35,
+  );
 
   // RPM label
   ctx.fillStyle = '#888888';

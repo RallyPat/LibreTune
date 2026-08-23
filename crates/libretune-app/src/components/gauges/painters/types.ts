@@ -43,6 +43,18 @@ export interface PainterContext {
   getFontSpec: (size: number, options?: { bold?: boolean; monospace?: boolean }) => string;
   getFontFamily: (preferMonospace?: boolean) => string;
   getEmbeddedImage: (name: string | null | undefined) => HTMLImageElement | null;
+  /**
+   * User setting (issue #82): right-align numeric value text in a fixed
+   * region so digit-count / sign changes don't shift glyphs ("jumping text").
+   * Painters that draw value text honor this; titles/units are unaffected.
+   */
+  rightAlignValues: boolean;
+  /**
+   * True while a transient-spike flash is active (issue #82): the raw
+   * channel value recently jumped far from the EMA-smoothed display value.
+   * Painters opt in by tinting the value readout (critical color).
+   */
+  spikeActive: boolean;
 }
 
 /** A self-contained painter: draws one frame from a `PainterContext`. */

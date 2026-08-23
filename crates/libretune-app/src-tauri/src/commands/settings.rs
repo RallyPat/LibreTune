@@ -28,6 +28,18 @@ fn apply_setting(settings: &mut Settings, key: &str, value: &str) -> Result<(), 
         "auto_sync_gauge_ranges" => {
             settings.auto_sync_gauge_ranges = value.parse().map_err(|_| "Invalid boolean value")?
         }
+        "dashboard_refresh_hz" => {
+            let hz: u32 = value.parse().map_err(|_| "Invalid number value")?;
+            // Whitelist: keeps the renderer's frame budget predictable.
+            match hz {
+                10 | 15 | 20 | 25 | 30 => settings.dashboard_refresh_hz = hz,
+                _ => return Err("dashboard_refresh_hz must be one of 10, 15, 20, 25, 30".into()),
+            }
+        }
+        "gauge_right_align_values" => {
+            settings.gauge_right_align_values =
+                value.parse().map_err(|_| "Invalid boolean value")?
+        }
         "indicator_column_count" => settings.indicator_column_count = value.to_string(),
         "indicator_fill_empty" => {
             settings.indicator_fill_empty = value.parse().map_err(|_| "Invalid boolean value")?

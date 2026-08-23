@@ -23,6 +23,14 @@ pub(crate) struct Settings {
     pub(crate) gauge_lock: bool, // Dashboard gauge lock in place
     #[serde(default = "default_true")]
     pub(crate) auto_sync_gauge_ranges: bool, // Auto-sync gauge ranges from INI
+    /// Dashboard gauge redraw cap in Hz (allowed: 10, 15, 20, 25, 30).
+    /// Lower values cut CPU/battery use on dashboards with many gauges.
+    #[serde(default = "default_dashboard_refresh_hz")]
+    pub(crate) dashboard_refresh_hz: u32,
+    /// Right-align gauge numeric value text in a fixed region so digit-count
+    /// and sign changes don't shift the layout ("jumping text" fix, issue #82).
+    #[serde(default)]
+    pub(crate) gauge_right_align_values: bool,
     #[serde(default)]
     pub(crate) indicator_column_count: String, // "auto" or number like "12"
     #[serde(default)]
@@ -199,6 +207,10 @@ fn default_trail_fade_sec() -> f64 {
     8.0
 }
 
+fn default_dashboard_refresh_hz() -> u32 {
+    30
+}
+
 fn default_true() -> bool {
     true
 }
@@ -329,6 +341,8 @@ fn default_settings() -> Settings {
         gauge_free_move: false,
         gauge_lock: false,
         auto_sync_gauge_ranges: default_true(),
+        dashboard_refresh_hz: default_dashboard_refresh_hz(),
+        gauge_right_align_values: false,
         indicator_column_count: String::new(),
         indicator_fill_empty: false,
         indicator_text_fit: String::new(),

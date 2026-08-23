@@ -1,7 +1,7 @@
 /** AnalogMovingBarGauge — sweeping needle with bar trail across a 140° arc. */
 
 import { tsColorToHex } from '../../dashboards/dashTypes';
-import { lightenColor, darkenColor, createMetallicGradient } from '../drawUtils';
+import { lightenColor, darkenColor, createMetallicGradient, steadyValueText } from '../drawUtils';
 import type { Painter } from './types';
 
 export const analogMovingBarGaugePainter: Painter = (pctx) => {
@@ -126,7 +126,13 @@ export const analogMovingBarGaugePainter: Painter = (pctx) => {
   ctx.font = getFontSpec(fontSize, { bold: true, monospace: true });
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText(value.toFixed(config.value_digits), centerX, centerY - radius * 0.35);
+  ctx.fillText(
+    pctx.rightAlignValues
+      ? steadyValueText(value, config.value_digits, config.min, config.max)
+      : value.toFixed(config.value_digits),
+    centerX,
+    centerY - radius * 0.35,
+  );
 
   // Units
   if (config.units) {

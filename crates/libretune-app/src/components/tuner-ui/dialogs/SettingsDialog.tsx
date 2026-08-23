@@ -87,6 +87,8 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
   const [gaugeFreeMove, setGaugeFreeMove] = useState(false);
   const [gaugeLock, setGaugeLock] = useState(false);
   const [autoSyncGaugeRanges, setAutoSyncGaugeRanges] = useState(true);
+  const [dashboardRefreshHz, setDashboardRefreshHz] = useState(30);
+  const [gaugeRightAlignValues, setGaugeRightAlignValues] = useState(false);
   
   // Version control settings
   const [autoCommitOnSave, setAutoCommitOnSave] = useState('never');
@@ -176,6 +178,8 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
         if (settings.gauge_free_move !== undefined) setGaugeFreeMove(!!settings.gauge_free_move);
         if (settings.gauge_lock !== undefined) setGaugeLock(!!settings.gauge_lock);
         if (settings.auto_sync_gauge_ranges !== undefined) setAutoSyncGaugeRanges(!!settings.auto_sync_gauge_ranges);
+        if (settings.dashboard_refresh_hz !== undefined) setDashboardRefreshHz(settings.dashboard_refresh_hz);
+        if (settings.gauge_right_align_values !== undefined) setGaugeRightAlignValues(!!settings.gauge_right_align_values);
         // Version control settings
         if (settings.auto_commit_on_save !== undefined) setAutoCommitOnSave(settings.auto_commit_on_save);
         if (settings.commit_message_format !== undefined) setCommitMessageFormat(settings.commit_message_format);
@@ -474,6 +478,8 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
         ['gauge_free_move', gaugeFreeMove.toString()],
         ['gauge_lock', gaugeLock.toString()],
         ['auto_sync_gauge_ranges', autoSyncGaugeRanges.toString()],
+        ['dashboard_refresh_hz', dashboardRefreshHz.toString()],
+        ['gauge_right_align_values', gaugeRightAlignValues.toString()],
         ['auto_commit_on_save', autoCommitOnSave],
         ['commit_message_format', commitMessageFormat],
         ['runtime_packet_mode', runtimePacketMode],
@@ -538,7 +544,7 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
       }
     }
     return errors;
-  }, [localTheme, localLanguage, localUnits, autoBurnOnClose, statusBarChannels, indicatorColumnCount, indicatorFillEmpty, indicatorTextFit, heatmapValueScheme, heatmapChangeScheme, heatmapCoverageScheme, gaugeSnapToGrid, gaugeFreeMove, gaugeLock, autoSyncGaugeRanges, autoCommitOnSave, commitMessageFormat, runtimePacketMode, aiProvider, aiBaseUrl, aiApiKey, aiModel, aiCapabilityTier, aiRiskAcked, aiEnabled, autoReconnectAfterControllerCommand, autoReconnectAfterFirmware, autoRecordEnabled, keyOnThresholdRpm, keyOffTimeoutSec, alertLargeChangeEnabled, alertLargeChangeAbs, alertLargeChangePercent, hotkeyBindings, autoConnect, currentProject, onThemeChange, onSettingsChange]);
+  }, [localTheme, localLanguage, localUnits, autoBurnOnClose, statusBarChannels, indicatorColumnCount, indicatorFillEmpty, indicatorTextFit, heatmapValueScheme, heatmapChangeScheme, heatmapCoverageScheme, gaugeSnapToGrid, gaugeFreeMove, gaugeLock, autoSyncGaugeRanges, dashboardRefreshHz, gaugeRightAlignValues, autoCommitOnSave, commitMessageFormat, runtimePacketMode, aiProvider, aiBaseUrl, aiApiKey, aiModel, aiCapabilityTier, aiRiskAcked, aiEnabled, autoReconnectAfterControllerCommand, autoReconnectAfterFirmware, autoRecordEnabled, keyOnThresholdRpm, keyOffTimeoutSec, alertLargeChangeEnabled, alertLargeChangeAbs, alertLargeChangePercent, hotkeyBindings, autoConnect, currentProject, onThemeChange, onSettingsChange]);
 
   // Windows-convention buttons:
   //  - Apply: save WITHOUT closing (so the user can verify it worked). The
@@ -943,6 +949,37 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
               Auto-sync gauge ranges from INI
             </label>
             <span className="dialog-form-note">Apply INI gauge min/max/units automatically when a project or INI changes</span>
+          </div>
+
+          <FormField
+            label="Gauge refresh rate"
+            help="Cap how often gauges redraw. Lower rates save CPU and battery (issue #82); 10–15 Hz still feels smooth on the road."
+          >
+            {(id) => (
+              <select
+                id={id}
+                value={dashboardRefreshHz}
+                onChange={(e) => setDashboardRefreshHz(Number(e.target.value))}
+              >
+                <option value={10}>10 Hz (battery saver)</option>
+                <option value={15}>15 Hz</option>
+                <option value={20}>20 Hz</option>
+                <option value={25}>25 Hz</option>
+                <option value={30}>30 Hz (default)</option>
+              </select>
+            )}
+          </FormField>
+
+          <div className="dialog-form-group">
+            <label>
+              <input
+                type="checkbox"
+                checked={gaugeRightAlignValues}
+                onChange={(e) => setGaugeRightAlignValues(e.target.checked)}
+              />
+              Right-align gauge values
+            </label>
+            <span className="dialog-form-note">Keep numeric values steady when digit count or sign changes (no jumping text)</span>
           </div>
 
           <h3 style={{ marginTop: '1.5rem', marginBottom: '0.5rem' }}>Version Control</h3>

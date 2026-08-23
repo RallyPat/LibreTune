@@ -3,6 +3,7 @@
 import { tsColorToHex } from '../../dashboards/dashTypes';
 import { roundRect, lightenColor, darkenColor } from '../drawUtils';
 import { getChannelHistoryBuffer } from '../../../stores/realtimeStore';
+import { emaStep, isSpike } from '../ema';
 import type { Painter } from './types';
 
 export const lineGraphPainter: Painter = (pctx) => {
@@ -61,19 +62,36 @@ export const lineGraphPainter: Painter = (pctx) => {
   // Read history imperatively from the non-reactive buffer — no React re-renders needed.
   const history = getChannelHistoryBuffer(config.output_channel);
   const points: { x: number; y: number }[] = [];
-
+  const spikePoints: { x: number; y: number }[] = [];
   if (history && history.length > 0) {
-    // Use actual history data
+    // EMA-smooth the trace (issue #82: raw samples at high stream rates look
+    // like an audio waveform). Samples far from the smoothed value are
+    // transient spikes — highlighted as dots below so short pulses that
+    // indicate problems stay visible (the issue's "peak detect" ask).
     const dataRange = config.max - config.min;
+    const SAMPLE_DT_MS = 100; // matches the default stream cadence
+    const TRACE_TAU_MS = 250; // ~3-sample smoothing horizon
+    const smoothed = new Array<number>(history.length);
+    let ema = history[0];
     for (let i = 0; i < history.length; i++) {
-      const t = i / (history.length - 1);
-      const historicalValue = history[i];
-      const historicalPercent = (historicalValue - config.min) / dataRange;
-      const clampedPercent = Math.max(0, Math.min(1, historicalPercent));
+      ema = i === 0 ? history[0] : emaStep(ema, history[i], SAMPLE_DT_MS, TRACE_TAU_MS);
+      smoothed[i] = ema;
+      if (i > 0 && isSpike(history[i], ema, config.min, config.max)) {
+        const t = i / (history.length - 1);
+        const rawPercent = Math.max(0, Math.min(1, (history[i] - config.min) / dataRange));
+        spikePoints.push({
+          x: padding + t * graphWidth,
+          y: graphY + graphHeight - rawPercent * graphHeight,
+        });
+      }
+    }
+    for (let i = 0; i < smoothed.length; i++) {
+      const t = i / (smoothed.length - 1);
+      const smoothedPercent = Math.max(0, Math.min(1, (smoothed[i] - config.min) / dataRange));
 
       points.push({
         x: padding + t * graphWidth,
-        y: graphY + graphHeight - clampedPercent * graphHeight,
+        y: graphY + graphHeight - smoothedPercent * graphHeight,
       });
     }
   } else {
@@ -123,6 +141,18 @@ export const lineGraphPainter: Painter = (pctx) => {
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
   ctx.stroke();
+
+  // Transient-spike dots (issue #82): raw samples that deviated sharply from
+  // the EMA-smoothed trace, drawn in the critical color at the raw position.
+  if (spikePoints.length > 0) {
+    const spikeColor = tsColorToHex(config.critical_color);
+    ctx.fillStyle = spikeColor;
+    for (const sp of spikePoints) {
+      ctx.beginPath();
+      ctx.arc(sp.x, sp.y, 2.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
 
   // Draw current value dot with glow
   const lastPoint = points[points.length - 1];

@@ -85,12 +85,21 @@ export const basicReadoutPainter: Painter = (pctx) => {
     ctx.shadowBlur = 8;
   }
 
-  ctx.fillStyle = tsColorToRgba(valueColor);
+  // Transient-spike flash (issue #82): tint the value in the critical
+  // color while a spike is active so short pulses stay visible.
+  ctx.fillStyle = tsColorToRgba(pctx.spikeActive ? config.critical_color : valueColor);
   // Use monospace or LCD-style font for values
   ctx.font = getFontSpec(valueFontSize, { bold: true, monospace: true });
-  ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText(valueText, width / 2, height / 2 + titleFontSize * 0.3);
+  if (pctx.rightAlignValues) {
+    // Fixed right edge — text grows leftward, so digit-count and sign
+    // changes don't shift the layout (issue #82 "jumping text").
+    ctx.textAlign = 'right';
+    ctx.fillText(valueText, width - padding - 6, height / 2 + titleFontSize * 0.3);
+  } else {
+    ctx.textAlign = 'center';
+    ctx.fillText(valueText, width / 2, height / 2 + titleFontSize * 0.3);
+  }
   ctx.shadowColor = 'transparent';
 
   // Units at bottom

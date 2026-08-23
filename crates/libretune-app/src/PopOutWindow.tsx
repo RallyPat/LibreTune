@@ -18,6 +18,7 @@ import TsDashboard from './components/dashboards/TsDashboard';
 import DialogRenderer, { DialogDefinition as RendererDialogDef } from './components/dialogs/DialogRenderer';
 import { AgentDock } from './components/agent/AgentDock';
 import { useRealtimeStore } from './stores/realtimeStore';
+import { initRenderSettings } from './components/gauges/renderSettings';
 import { ArrowLeftToLine, X } from 'lucide-react';
 import './styles';
 import './PopOutWindow.css';
@@ -67,6 +68,12 @@ export default function PopOutWindow() {
     console.log('[PopOutWindow] Component mounted');
     console.log('[PopOutWindow] hash:', window.location.hash);
     console.log('[PopOutWindow] href:', window.location.href);
+  }, []);
+
+  // Dashboard render settings (refresh-rate cap, right-aligned values) apply
+  // to gauges in pop-out windows too (issue #82).
+  useEffect(() => {
+    void initRenderSettings();
   }, []);
 
   // Track connection status so the popped-out dashboard behaves the same as

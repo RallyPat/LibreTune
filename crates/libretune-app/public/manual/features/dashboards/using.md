@@ -75,6 +75,40 @@ Pop out dashboards to separate monitors:
 
 > **Note**: The main Dashboard tab is protected and cannot be popped out or accidentally closed. To reopen it if missing, go to **View → Dashboard**.
 
+## Performance & Smoothing
+
+Dashboards redraw each gauge on a capped, phase-staggered timer instead of
+redrawing on every incoming sample. This keeps CPU (and laptop battery) use
+predictable even when the ECU streams faster than the display needs.
+
+### Gauge Refresh Rate
+
+**Settings → General → Dashboard → Gauge refresh rate** caps how often each
+gauge redraws:
+
+- **10 Hz (battery saver)** — street tuning on battery power
+- **15–25 Hz** — balanced
+- **30 Hz (default)** — smoothest motion
+
+Redraw timers are staggered so gauges don't all paint in the same frame, and
+needle motion uses a time-based EMA (exponential moving average), so motion
+looks identical at any refresh rate — only the step cadence changes.
+
+### Transient Spike Highlight
+
+Short pulses that would be smoothed away are not lost: when the raw value
+jumps far from the smoothed reading, the value readout briefly flashes in the
+critical color, and line graphs draw a colored dot at the raw position. This
+makes brief excursions (e.g. a lean spike) visible without making the trace
+look like an audio waveform.
+
+### Right-Align Gauge Values
+
+**Settings → General → Dashboard → Right-align gauge values** keeps numeric
+readouts steady when the digit count or sign changes (e.g. timing crossing
+0°). Digital and bar gauges anchor values to a fixed right edge; dial gauges
+pad values to a fixed width so they stay centered but never shift.
+
 ## Tips
 
 ### Reduce Clutter
