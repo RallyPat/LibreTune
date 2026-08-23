@@ -109,6 +109,22 @@ export default function HotkeyEditor({ onClose, onSave, bindings: initialBinding
         category: 'table',
         description: 'Interpolate between corner cells',
       },
+      'table.interpolateHorizontal': {
+        id: 'table.interpolateHorizontal',
+        action: 'Interpolate horizontally',
+        currentBinding: 'h',
+        defaultBinding: 'h',
+        category: 'table',
+        description: 'Interpolate each selected row between its end cells',
+      },
+      'table.interpolateVertical': {
+        id: 'table.interpolateVertical',
+        action: 'Interpolate vertically',
+        currentBinding: 'v',
+        defaultBinding: 'v',
+        category: 'table',
+        description: 'Interpolate each selected column between its end cells',
+      },
       'table.smooth': {
         id: 'table.smooth',
         action: 'Smooth cells',

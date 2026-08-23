@@ -90,6 +90,34 @@ describe('TableEditor2D table operations', () => {
     });
   });
 
+  it('interpolates horizontally on the H key', async () => {
+    renderEditor();
+    fireEvent.keyDown(document, { key: 'h' });
+
+    await waitFor(() => expect(lastTableOpCall().command).toBe('interpolate_linear'));
+    expect(lastTableOpCall().args).toEqual({
+      tableName: 'veTable1Tbl',
+      selectedCells: [[0, 0]],
+      axis: 'row',
+    });
+  });
+
+  it('interpolates vertically on the V key, but not with Ctrl held', async () => {
+    renderEditor();
+
+    // Ctrl+V must stay reserved for paste.
+    fireEvent.keyDown(document, { key: 'v', ctrlKey: true });
+    expect(invokeMock.mock.calls.some(([cmd]) => cmd === 'interpolate_linear')).toBe(false);
+
+    fireEvent.keyDown(document, { key: 'v' });
+    await waitFor(() => expect(lastTableOpCall().command).toBe('interpolate_linear'));
+    expect(lastTableOpCall().args).toEqual({
+      tableName: 'veTable1Tbl',
+      selectedCells: [[0, 0]],
+      axis: 'col',
+    });
+  });
+
   it('sends camelCase args for set equal', async () => {
     renderEditor();
     fireEvent.click(screen.getByTitle('Set Equal (=) - Set selected cells to average'));

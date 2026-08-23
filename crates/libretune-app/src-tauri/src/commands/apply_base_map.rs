@@ -2,10 +2,12 @@
 
 use crate::AppState;
 use libretune_core::tune::{TuneCache, TuneFile};
+use tauri::Emitter;
 
 #[tauri::command]
 pub async fn apply_base_map(
     state: tauri::State<'_, AppState>,
+    app: tauri::AppHandle,
     base_map: serde_json::Value,
 ) -> Result<serde_json::Value, String> {
     use libretune_core::basemap::generator::{
@@ -406,6 +408,10 @@ pub async fn apply_base_map(
 
     if applied.is_empty() {
         errors.push("No matching tables found in the loaded INI definition".to_string());
+    } else {
+        // Tell the frontend to re-fetch open tables/curves — `tune:loaded` is
+        // the established refresh signal (consumed by useTableCurveRefresh).
+        let _ = app.emit("tune:loaded", "base-map");
     }
 
     let mut result = serde_json::Map::new();

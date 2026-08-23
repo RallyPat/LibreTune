@@ -510,6 +510,8 @@ export default function TableEditor2D({
           'table.increaseMultiple': ['+'],
           'table.scale': ['*'],
           'table.interpolate': ['/'],
+          'table.interpolateHorizontal': ['h', 'H'],
+          'table.interpolateVertical': ['v', 'V'],
           'table.smooth': ['s', 'S'],
           'table.toggleFollowMode': ['f', 'F'],
           'table.jumpToActive': ['g', 'G'],
@@ -580,6 +582,17 @@ export default function TableEditor2D({
       if (matchesAction('table.interpolate') || e.key === '/') {
         e.preventDefault();
         handleInterpolate();
+        return;
+      }
+      if ((matchesAction('table.interpolateHorizontal') || ['h', 'H'].includes(e.key)) && !isCtrl) {
+        e.preventDefault();
+        handleInterpolateLinear('row');
+        return;
+      }
+      // V is guarded so Ctrl+V still reaches the paste handler below.
+      if ((matchesAction('table.interpolateVertical') || ['v', 'V'].includes(e.key)) && !isCtrl) {
+        e.preventDefault();
+        handleInterpolateLinear('col');
         return;
       }
       if ((matchesAction('table.smooth') || ['s', 'S'].includes(e.key)) && !isCtrl) {

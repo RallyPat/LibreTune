@@ -174,15 +174,16 @@ function AppContent() {
   const [onlineIniDialogOpen, setOnlineIniDialogOpen] = useState(false);
   const [connectEcuWizardOpen, setConnectEcuWizardOpen] = useState(false);
 
-  // Refresh the repository INI list whenever the New Project dialog opens.
-  // Removing a definition in Settings updates only that dialog's local copy,
-  // so without this the New Project picker would still show deleted INIs.
+  // Refresh the repository INI list whenever the New Project dialog or the
+  // Connect-ECU wizard opens. Removing a definition in Settings updates only
+  // the dialog's local copy, so without this the INI pickers would still show
+  // deleted INIs.
   useEffect(() => {
-    if (!newProjectDialogOpen) return;
+    if (!newProjectDialogOpen && !connectEcuWizardOpen) return;
     invoke<IniEntry[]>("list_repository_inis")
       .then(setRepositoryInis)
       .catch(() => {});
-  }, [newProjectDialogOpen]);
+  }, [newProjectDialogOpen, connectEcuWizardOpen]);
   const [baseMapDialogOpen, setBaseMapDialogOpen] = useState(false);
 
   // Connection state
