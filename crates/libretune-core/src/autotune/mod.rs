@@ -15,9 +15,11 @@
 
 pub mod accel_enrich;
 pub mod anomaly;
+pub mod declared_filters;
 pub mod delay_measure;
 pub mod health;
 pub mod predictor;
+pub mod preflight;
 
 use evalexpr::{eval_with_context, ContextWithMutableVariables, HashMapContext, Value};
 use serde::{Deserialize, Serialize};
@@ -70,6 +72,131 @@ pub struct AutoTuneSettings {
     /// sensor's own response floor, approached as flow rises. Only used when
     /// `lambda_delay_flow_scaled` is set.
     pub lambda_delay_floor_ms: f64,
+    /// How much a sample counts toward the cell it lands in.
+    pub hit_weighting: HitWeighting,
+    /// Accumulated weight at which a cell's recommendation carries full
+    /// authority. Below it the proposed change is scaled down in proportion.
+    ///
+    /// Commonly called `baseWeight`; 20.0 is the usual value
+    /// (`VeAnalyzePanel_<table>_baseWeight=20.0` in `project.properties`).
+    /// Without it, a cell that has seen one sample proposes as confidently as
+    /// one that has seen fifty - which is how a table ends up chasing single
+    /// readings. Set to 0 to disable the ramp.
+    pub base_weight: f64,
+    /// Smallest change worth making, in table units. Commonly called
+    /// `minChangeThreshold`, usually 1.0. Stops a cell twitching by a
+    /// fraction of a VE point every pass.
+    pub min_change: f64,
+}
+
+/// How much an accepted sample counts toward its cell's average.
+///
+/// Samples are attributed to the *nearest* bin, winner-takes-all. That is a
+/// reasonable place to put a sample and a poor description of what the ECU did
+/// with it: the ECU interpolates between cells, so a sample taken halfway
+/// between two rpm bins reflects both of them roughly equally. Counting it as
+/// a full vote for one drags that cell toward conditions it never ran at, and
+/// the effect is worst exactly where bins are widest — the top of the rpm axis.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum HitWeighting {
+    /// Every accepted sample counts fully. What AutoTune has always done, and
+    /// the default so existing sessions do not change under anyone.
+    #[default]
+    Uniform,
+    /// Weight by how close the sample sat to the cell's centre, falling to
+    /// zero at the neighbouring bin. A sample dead-centre counts 1.0; one
+    /// halfway to the next bin counts 0.5.
+    ///
+    /// This is the honest reading of a sample: it says how much of the
+    /// evidence really belongs to this cell rather than the one next door.
+    /// Established tools do something of this kind - a `weightThreshold` of 0.1
+    /// is only meaningful if samples carry fractional weight.
+    CellProximity,
+    /// Proximity, but squared: a sample halfway to the neighbour counts 0.25
+    /// rather than 0.5.
+    ///
+    /// For a table whose cells genuinely differ - a peaky VE curve, a sharp
+    /// torque step - linear proximity still lets a neighbour's conditions bleed
+    /// in noticeably. Squaring concentrates each cell's answer on the samples
+    /// actually taken near it, at the cost of needing more of them.
+    CellProximitySquared,
+    /// Nearest cell only, but a sample more than halfway toward its neighbour
+    /// is dropped rather than counted.
+    ///
+    /// A `weightThreshold` in spirit: refuse the ambiguous samples
+    /// instead of weighting them. Cleanest per-cell answer, and the slowest to
+    /// fill a map - worth it when a table is being characterised rather than
+    /// trimmed.
+    CellCentreOnly,
+}
+
+impl HitWeighting {
+    /// Weight for a sample at (`rpm`, `load`) landing in cell (`x`, `y`).
+    ///
+    /// Distance is measured against the gap to the *adjacent* bin on the side
+    /// the sample fell, not a fixed width, because the axes are not evenly
+    /// spaced — a Speeduino rpm axis is dense at idle and coarse at the top.
+    /// Using one width would over-weight the wide bins, which is the error
+    /// this setting exists to remove.
+    pub fn weight(
+        self,
+        rpm: f64,
+        load: f64,
+        x: usize,
+        y: usize,
+        x_bins: &[f64],
+        y_bins: &[f64],
+    ) -> f64 {
+        match self {
+            Self::Uniform => 1.0,
+            Self::CellProximity => axis_weight(rpm, x, x_bins) * axis_weight(load, y, y_bins),
+            Self::CellProximitySquared => {
+                let w = axis_weight(rpm, x, x_bins) * axis_weight(load, y, y_bins);
+                w * w
+            }
+            Self::CellCentreOnly => {
+                // Both axes must be within half a bin, or the sample belongs as
+                // much to a neighbour as to here and is not worth guessing over.
+                let wx = axis_weight(rpm, x, x_bins);
+                let wy = axis_weight(load, y, y_bins);
+                if wx >= 0.5 && wy >= 0.5 {
+                    1.0
+                } else {
+                    0.0
+                }
+            }
+        }
+    }
+}
+
+/// Fraction of a sample that belongs to `idx` on one axis: 1.0 at the bin
+/// centre, falling linearly to 0.0 at the neighbouring bin.
+fn axis_weight(value: f64, idx: usize, bins: &[f64]) -> f64 {
+    let Some(&centre) = bins.get(idx) else {
+        return 1.0;
+    };
+    let d = value - centre;
+    if d.abs() < f64::EPSILON {
+        return 1.0;
+    }
+    // Gap to the neighbour on the side the sample actually fell.
+    let neighbour = if d > 0.0 {
+        bins.get(idx + 1).copied()
+    } else {
+        idx.checked_sub(1).and_then(|i| bins.get(i).copied())
+    };
+    // At an edge bin there is no neighbour to share with, so the sample is
+    // wholly this cell's - clamping instead would silently discard the ends of
+    // the map, which are the cells with the least data to spare.
+    let Some(n) = neighbour else {
+        return 1.0;
+    };
+    let span = (n - centre).abs();
+    if span < f64::EPSILON {
+        return 1.0;
+    }
+    (1.0 - d.abs() / span).clamp(0.0, 1.0)
 }
 
 impl Default for AutoTuneSettings {
@@ -81,6 +208,11 @@ impl Default for AutoTuneSettings {
             lambda_delay_ms: 0.0,
             lambda_delay_flow_scaled: false,
             lambda_delay_floor_ms: 120.0,
+            hit_weighting: HitWeighting::default(),
+            // The values other popular tuning software uses, so a tuner arriving from
+            // one of those sees familiar behaviour rather than rediscovering them.
+            base_weight: 20.0,
+            min_change: 1.0,
         }
     }
 }
@@ -757,21 +889,53 @@ impl AutoTuneState {
         // Bug #5: maintain a cumulative moving average of the RAW required VE
         // in a dedicated field, so authority clamping does not bias the
         // running average. The clamped result is what gets displayed/applied.
-        current_recs.raw_required_cma = current_recs.raw_required_cma
-            + (required_ve - current_recs.raw_required_cma) / current_recs.hit_count as f64;
-
-        let clamped_ve = Self::apply_authority_limits(
-            current_recs.beginning_value,
-            current_recs.raw_required_cma,
-            authority,
+        //
+        // Weighted, so a sample that only half-belongs to this cell only half
+        // moves it. `hit_weighting` is the running total of weight and is what
+        // the incremental mean divides by; under `Uniform` every weight is 1.0
+        // and this reduces exactly to the old count-based average.
+        let hit_weight = settings.hit_weighting.weight(
+            cell_rpm,
+            cell_load,
+            cell_x_idx,
+            cell_y_idx,
+            table_x_bins,
+            table_y_bins,
         );
+        current_recs.hit_weighting += hit_weight;
+        let w_total = current_recs.hit_weighting.max(f64::MIN_POSITIVE);
+        current_recs.raw_required_cma = current_recs.raw_required_cma
+            + (required_ve - current_recs.raw_required_cma) * (hit_weight / w_total);
+
+        // Confidence ramp: a cell that has barely been visited proposes
+        // proportionally less of the change it thinks it wants. Without this a
+        // single sample carries the same authority as fifty, and the sparse
+        // cells - which are the high-load, high-rpm ones the engine passes
+        // through briefly - are exactly where a wrong answer costs most.
+        let confidence = if settings.base_weight > 0.0 {
+            (current_recs.hit_weighting / settings.base_weight).min(1.0)
+        } else {
+            1.0
+        };
+        let ramped = current_recs.beginning_value
+            + (current_recs.raw_required_cma - current_recs.beginning_value) * confidence;
+
+        let clamped_ve =
+            Self::apply_authority_limits(current_recs.beginning_value, ramped, authority);
+
+        // Below the change threshold, leave the cell alone rather than
+        // proposing a fraction of a VE point that will only be rounded away.
+        let clamped_ve = if (clamped_ve - current_recs.beginning_value).abs() < settings.min_change
+        {
+            current_recs.beginning_value
+        } else {
+            clamped_ve
+        };
 
         current_recs.recommended_value = clamped_ve;
         // Bug #16: store the actual Target AFR (not the measured AFR).
         current_recs.target_afr = target_afr;
 
-        let hit_weight = 1.0;
-        current_recs.hit_weighting += hit_weight;
         // Bug #16: realistic hit percentage based on total filtered samples.
         current_recs.hit_percentage = if self.total_samples > 0 {
             (current_recs.hit_count as f64 / self.total_samples as f64) * 100.0
@@ -918,7 +1082,7 @@ impl AutoTuneState {
         // exactly the low-load cells the car passes through on every lift, and
         // each one asks for the maximum enrichment the authority limit allows —
         // a required-VE of ve * (21/14.7) is +43%, clamped to +20%, over and
-        // over. TunerStudio's VE Analyze excludes overrun for the same reason.
+        // over. Established VE analysers exclude overrun for the same reason.
         if point.fuel_cut_active == Some(true) {
             return false;
         }
@@ -979,6 +1143,57 @@ impl AutoTuneState {
     pub fn get_recommendations(&self) -> Vec<AutoTuneRecommendation> {
         self.recommendations.values().cloned().collect()
     }
+}
+
+/// The VE table a session is proposing: current values with every accepted
+/// recommendation applied, and everything else left alone.
+///
+/// Kept separate from sending or burning so the result can be written to a file
+/// and applied later. A session's work currently lives only in memory, so
+/// closing the app throws away a whole drive's worth of collection.
+///
+/// Cells outside the table are skipped rather than panicking: a recommendation
+/// set can outlive the table it was computed against - a project reload, a
+/// different definition - and losing an entire export to one stale index would
+/// be a poor trade.
+pub fn proposed_ve_table(
+    current: &[Vec<f64>],
+    recommendations: &[AutoTuneRecommendation],
+) -> Vec<Vec<f64>> {
+    let mut out = current.to_vec();
+    for r in recommendations {
+        if let Some(cell) = out.get_mut(r.cell_y).and_then(|row| row.get_mut(r.cell_x)) {
+            *cell = r.recommended_value;
+        }
+    }
+    out
+}
+
+/// How many cells a proposal would actually change, and the largest delta.
+///
+/// The count matters because a recommendation equal to the current value is not
+/// a change - `min_change` and the confidence ramp both produce those
+/// deliberately - so a UI counting recommendations rather than changes
+/// overstates what a session achieved.
+pub fn proposal_summary(
+    current: &[Vec<f64>],
+    recommendations: &[AutoTuneRecommendation],
+) -> (usize, f64) {
+    let mut changed = 0usize;
+    let mut largest = 0.0f64;
+    for r in recommendations {
+        let Some(&now) = current.get(r.cell_y).and_then(|row| row.get(r.cell_x)) else {
+            continue;
+        };
+        let d = r.recommended_value - now;
+        if d.abs() > f64::EPSILON {
+            changed += 1;
+            if d.abs() > largest.abs() {
+                largest = d;
+            }
+        }
+    }
+    (changed, largest)
 }
 
 /// Build a per-cell lambda-delay table scaled by exhaust flow.
@@ -1666,5 +1881,322 @@ mod authority_rail_tests {
             "default ceiling must cover the full byte range, got {}",
             a.max_cell_value
         );
+    }
+}
+
+#[cfg(test)]
+mod hit_weighting_tests {
+    use super::*;
+
+    // A Speeduino rpm axis: dense at idle, coarse at the top. The uneven
+    // spacing is the whole reason weight is measured against the neighbouring
+    // bin rather than a fixed width.
+    const RPM: [f64; 5] = [800.0, 1200.0, 2000.0, 4000.0, 6500.0];
+    const LOAD: [f64; 4] = [30.0, 50.0, 70.0, 100.0];
+
+    #[test]
+    fn uniform_counts_every_sample_fully() {
+        let w = HitWeighting::Uniform;
+        assert_eq!(w.weight(1234.0, 41.0, 1, 0, &RPM, &LOAD), 1.0);
+        assert_eq!(w.weight(6499.0, 99.0, 4, 3, &RPM, &LOAD), 1.0);
+    }
+
+    #[test]
+    fn a_sample_on_the_bin_centre_counts_fully() {
+        let w = HitWeighting::CellProximity;
+        assert!((w.weight(2000.0, 50.0, 2, 1, &RPM, &LOAD) - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_sample_halfway_to_the_neighbour_counts_half() {
+        let w = HitWeighting::CellProximity;
+        // 3000 rpm is halfway from bin 2 (2000) to bin 3 (4000); load on centre.
+        let got = w.weight(3000.0, 50.0, 2, 1, &RPM, &LOAD);
+        assert!((got - 0.5).abs() < 1e-9, "expected 0.5, got {got}");
+    }
+
+    /// The point of measuring against the neighbour rather than a fixed width:
+    /// the same rpm offset means very different things at the two ends.
+    #[test]
+    fn the_same_offset_weighs_differently_on_a_wide_bin() {
+        let w = HitWeighting::CellProximity;
+        // +200 rpm off a narrow bin (800->1200, span 400) is half a bin.
+        let narrow = w.weight(1000.0, 50.0, 0, 1, &RPM, &LOAD);
+        // +200 rpm off a wide bin (4000->6500, span 2500) is a twelfth.
+        let wide = w.weight(4200.0, 50.0, 3, 1, &RPM, &LOAD);
+        assert!((narrow - 0.5).abs() < 1e-9, "narrow: {narrow}");
+        assert!(wide > 0.9, "wide bin should barely discount: {wide}");
+        assert!(wide > narrow);
+    }
+
+    #[test]
+    fn an_edge_bin_keeps_the_whole_sample() {
+        let w = HitWeighting::CellProximity;
+        // Below the first rpm bin there is no neighbour to share with. Docking
+        // it would quietly starve the ends of the map, which have least data.
+        assert_eq!(w.weight(600.0, 50.0, 0, 1, &RPM, &LOAD), 1.0);
+        assert_eq!(w.weight(7000.0, 50.0, 4, 1, &RPM, &LOAD), 1.0);
+    }
+
+    #[test]
+    fn both_axes_multiply() {
+        let w = HitWeighting::CellProximity;
+        // halfway on rpm (0.5) and halfway on load (0.5) -> 0.25
+        let got = w.weight(3000.0, 60.0, 2, 1, &RPM, &LOAD);
+        assert!((got - 0.25).abs() < 1e-9, "expected 0.25, got {got}");
+    }
+
+    /// The weight must reach the AVERAGE, not just accumulate as a counter.
+    /// A weighted incremental mean has to reproduce the plain mean when every
+    /// weight is 1.0, or switching to Uniform would silently change results.
+    #[test]
+    fn the_weighted_mean_reduces_to_the_plain_mean_under_uniform() {
+        let samples: [f64; 4] = [90.0, 100.0, 110.0, 95.0];
+        let (mut cma, mut wtot) = (samples[0], 0.0);
+        cma = samples[0];
+        for (i, x) in samples.iter().enumerate() {
+            let w = 1.0;
+            wtot += w;
+            if i == 0 {
+                cma = *x;
+                continue;
+            }
+            cma += (x - cma) * (w / wtot);
+        }
+        // Plain incremental mean over the same series, seeded the same way.
+        let (mut plain, mut n) = (samples[0], 1.0);
+        for x in samples.iter().skip(1) {
+            n += 1.0;
+            plain += (x - plain) / n;
+        }
+        assert!(
+            (cma - plain).abs() < 1e-9,
+            "weighted {cma} vs plain {plain}"
+        );
+    }
+
+    #[test]
+    fn a_half_weight_sample_moves_the_average_half_as_far() {
+        // Start at 100 with one full-weight sample, then add 200.
+        let full = {
+            let (mut cma, mut w) = (100.0_f64, 1.0_f64);
+            w += 1.0;
+            cma += (200.0 - cma) * (1.0 / w);
+            cma
+        };
+        let half = {
+            let (mut cma, mut w) = (100.0_f64, 1.0_f64);
+            w += 0.5;
+            cma += (200.0 - cma) * (0.5 / w);
+            cma
+        };
+        assert!((full - 150.0).abs() < 1e-9, "full: {full}");
+        assert!(half < full, "a half-weight sample must move it less");
+        assert!((half - 133.3333).abs() < 0.01, "half: {half}");
+    }
+}
+
+#[cfg(test)]
+mod confidence_ramp_tests {
+    use super::*;
+
+    fn settings(base: f64, min_change: f64) -> AutoTuneSettings {
+        AutoTuneSettings {
+            base_weight: base,
+            min_change,
+            ..Default::default()
+        }
+    }
+
+    /// The ramp is the piece established tools have and a plain average does not: a
+    /// cell that has seen one sample must not propose as confidently as one
+    /// that has seen fifty.
+    #[test]
+    fn a_sparse_cell_proposes_only_part_of_the_change() {
+        let s = settings(20.0, 0.0);
+        // Wants 100 -> 120, but only 5 of the 20 weight needed: a quarter.
+        let confidence = (5.0_f64 / s.base_weight).min(1.0);
+        let ramped = 100.0 + (120.0 - 100.0) * confidence;
+        assert!((ramped - 105.0).abs() < 1e-9, "got {ramped}");
+    }
+
+    #[test]
+    fn a_well_sampled_cell_proposes_all_of_it() {
+        let s = settings(20.0, 0.0);
+        let confidence = (25.0_f64 / s.base_weight).min(1.0);
+        assert_eq!(
+            confidence, 1.0,
+            "past base_weight the ramp must not exceed 1"
+        );
+        let ramped = 100.0 + (120.0 - 100.0) * confidence;
+        assert!((ramped - 120.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_zero_base_weight_disables_the_ramp() {
+        let s = settings(0.0, 0.0);
+        let confidence = if s.base_weight > 0.0 {
+            (1.0_f64 / s.base_weight).min(1.0)
+        } else {
+            1.0
+        };
+        assert_eq!(confidence, 1.0, "0 must mean 'off', not 'divide by zero'");
+    }
+
+    #[test]
+    fn a_change_below_the_threshold_is_not_proposed() {
+        let s = settings(0.0, 1.0);
+        let begin = 100.0_f64;
+        for proposed in [100.4_f64, 99.7, 100.0] {
+            let out = if (proposed - begin).abs() < s.min_change {
+                begin
+            } else {
+                proposed
+            };
+            assert_eq!(
+                out, begin,
+                "{proposed} is within the threshold, leave the cell alone"
+            );
+        }
+        let big = 102.0_f64;
+        let out = if (big - begin).abs() < s.min_change {
+            begin
+        } else {
+            big
+        };
+        assert_eq!(out, big, "a real change must still pass");
+    }
+
+    #[test]
+    fn the_shipped_defaults_match_convention() {
+        let d = AutoTuneSettings::default();
+        assert_eq!(d.base_weight, 20.0, "conventional baseWeight is 20.0");
+        assert_eq!(d.min_change, 1.0, "conventional minChangeThreshold is 1.0");
+    }
+}
+
+#[cfg(test)]
+mod proposal_export_tests {
+    use super::*;
+
+    fn rec(x: usize, y: usize, begin: f64, value: f64) -> AutoTuneRecommendation {
+        AutoTuneRecommendation {
+            cell_x: x,
+            cell_y: y,
+            beginning_value: begin,
+            recommended_value: value,
+            hit_count: 10,
+            hit_weighting: 10.0,
+            target_afr: 12.8,
+            hit_percentage: 5.0,
+            raw_required_cma: value,
+        }
+    }
+
+    fn table() -> Vec<Vec<f64>> {
+        vec![vec![40.0, 50.0], vec![90.0, 96.0]]
+    }
+
+    #[test]
+    fn only_recommended_cells_move() {
+        let t = table();
+        let out = proposed_ve_table(&t, &[rec(1, 1, 96.0, 102.0)]);
+        assert_eq!(out[1][1], 102.0, "the recommended cell takes its new value");
+        assert_eq!(out[0][0], 40.0, "everything else is untouched");
+        assert_eq!(out[1][0], 90.0);
+        assert_eq!(out[0][1], 50.0);
+    }
+
+    #[test]
+    fn a_stale_index_is_skipped_not_fatal() {
+        // A recommendation set can outlive the table it was computed against.
+        let t = table();
+        let out = proposed_ve_table(&t, &[rec(9, 9, 1.0, 2.0), rec(0, 0, 40.0, 44.0)]);
+        assert_eq!(out[0][0], 44.0, "the valid one still applies");
+        assert_eq!(out.len(), 2, "the table keeps its shape");
+    }
+
+    #[test]
+    fn the_summary_counts_changes_not_recommendations() {
+        let t = table();
+        // One real change, one recommendation that equals what is already there
+        // (which min_change and the confidence ramp both produce on purpose).
+        let recs = [rec(0, 0, 40.0, 40.0), rec(1, 1, 96.0, 102.0)];
+        let (changed, largest) = proposal_summary(&t, &recs);
+        assert_eq!(changed, 1, "a no-op recommendation is not a change");
+        assert!((largest - 6.0).abs() < 1e-9, "largest delta: {largest}");
+    }
+
+    #[test]
+    fn the_largest_delta_keeps_its_sign() {
+        let t = table();
+        let recs = [rec(0, 0, 40.0, 38.0), rec(1, 1, 96.0, 97.0)];
+        let (_, largest) = proposal_summary(&t, &recs);
+        assert!(
+            largest < 0.0,
+            "a fuel cut must not be reported as a gain: {largest}"
+        );
+        assert!((largest + 2.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn an_empty_proposal_changes_nothing() {
+        let t = table();
+        assert_eq!(proposed_ve_table(&t, &[]), t);
+        assert_eq!(proposal_summary(&t, &[]), (0, 0.0));
+    }
+}
+
+#[cfg(test)]
+mod weighting_approach_tests {
+    use super::*;
+
+    const RPM: [f64; 5] = [800.0, 1200.0, 2000.0, 4000.0, 6500.0];
+    const LOAD: [f64; 4] = [30.0, 50.0, 70.0, 100.0];
+
+    /// The four approaches must actually differ, or offering a choice is a lie.
+    #[test]
+    fn the_approaches_rank_as_described() {
+        // 3000 rpm is halfway from bin 2 (2000) to bin 3 (4000); load on centre.
+        let at = |w: HitWeighting| w.weight(3000.0, 50.0, 2, 1, &RPM, &LOAD);
+        assert_eq!(at(HitWeighting::Uniform), 1.0);
+        assert!((at(HitWeighting::CellProximity) - 0.5).abs() < 1e-9);
+        assert!((at(HitWeighting::CellProximitySquared) - 0.25).abs() < 1e-9);
+        // exactly halfway still counts under centre-only; past it does not
+        assert_eq!(at(HitWeighting::CellCentreOnly), 1.0);
+    }
+
+    #[test]
+    fn centre_only_drops_a_sample_past_the_halfway_point() {
+        let w = HitWeighting::CellCentreOnly;
+        // 3400 of the way from 2000 to 4000 is 70% - too far to claim.
+        assert_eq!(w.weight(3400.0, 50.0, 2, 1, &RPM, &LOAD), 0.0);
+        assert_eq!(w.weight(2200.0, 50.0, 2, 1, &RPM, &LOAD), 1.0);
+    }
+
+    #[test]
+    fn squared_is_always_at_or_below_linear() {
+        let lin = HitWeighting::CellProximity;
+        let sq = HitWeighting::CellProximitySquared;
+        for rpm in [2100.0, 2500.0, 3000.0, 3600.0, 3900.0] {
+            let a = lin.weight(rpm, 50.0, 2, 1, &RPM, &LOAD);
+            let b = sq.weight(rpm, 50.0, 2, 1, &RPM, &LOAD);
+            assert!(b <= a + 1e-12, "at {rpm}: squared {b} exceeded linear {a}");
+        }
+    }
+
+    #[test]
+    fn every_approach_counts_a_dead_centre_sample_fully() {
+        for w in [
+            HitWeighting::Uniform,
+            HitWeighting::CellProximity,
+            HitWeighting::CellProximitySquared,
+            HitWeighting::CellCentreOnly,
+        ] {
+            assert!(
+                (w.weight(2000.0, 50.0, 2, 1, &RPM, &LOAD) - 1.0).abs() < 1e-9,
+                "{w:?} discounted a sample taken exactly at the cell centre"
+            );
+        }
     }
 }

@@ -40,7 +40,16 @@ fn feed(
         p1,
         table_x,
         table_y,
-        &AutoTuneSettings::default(),
+        // These tests exercise the correction FORMULA, so the confidence ramp
+        // and the change threshold are switched off here. Left at their
+        // defaults (20.0 / 1.0) a three-sample cell correctly
+        // proposes almost nothing, which would make these read as failures
+        // when the thing they check is unaffected. The ramp has its own tests.
+        &AutoTuneSettings {
+            base_weight: 0.0,
+            min_change: 0.0,
+            ..Default::default()
+        },
         &AutoTuneFilters::default(),
         &Default::default(),
     );
@@ -267,4 +276,61 @@ fn y_axis_filter_rejects_out_of_bounds_load() {
     assert!(!state.passes_filters(&below, &filters));
     assert!(!state.passes_filters(&above, &filters));
     assert!(state.passes_filters(&inside, &filters));
+}
+
+/// The ramp is a real behaviour change, not a knob nobody feels: the same three
+/// samples that move a cell with the ramp off must move it less with the ramp
+/// at the conventional default.
+#[test]
+fn the_confidence_ramp_holds_a_sparse_cell_back() {
+    let table_x = vec![1000.0, 2000.0];
+    let table_y = vec![10.0, 20.0];
+
+    let run = |base_weight: f64, min_change: f64| {
+        let mut state = AutoTuneState::default();
+        state.start();
+        let mut ts = 0u64;
+        for afr in [13.0_f64, 12.5, 12.0] {
+            let p = VEDataPoint {
+                rpm: 1000.0,
+                map: 10.0,
+                load: 10.0,
+                afr,
+                ve: 50.0,
+                clt: 170.0,
+                tps: 30.0,
+                timestamp_ms: ts,
+                ..Default::default()
+            };
+            state.add_data_point(
+                p,
+                &table_x,
+                &table_y,
+                &AutoTuneSettings {
+                    base_weight,
+                    min_change,
+                    ..Default::default()
+                },
+                &AutoTuneFilters::default(),
+                &Default::default(),
+            );
+            ts += 200;
+        }
+        let recs = state.get_recommendations();
+        recs.first()
+            .map(|r| r.recommended_value)
+            .unwrap_or(f64::NAN)
+    };
+
+    let unramped = run(0.0, 0.0);
+    let ramped = run(20.0, 0.0);
+    assert!(
+        unramped < 50.0,
+        "richer than target must want less VE: {unramped}"
+    );
+    assert!(
+        ramped > unramped,
+        "three samples against a base weight of 20 should propose only part of          the change: ramped {ramped} vs unramped {unramped}"
+    );
+    assert!(ramped <= 50.0, "and never the wrong direction: {ramped}");
 }

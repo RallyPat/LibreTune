@@ -7,10 +7,13 @@
 pub mod adaptive_timing;
 pub mod afr_delay_test;
 pub mod agent;
+pub mod analyze_filters;
 pub mod annotations;
 pub mod app_settings;
 pub mod apply_base_map;
+pub mod autotune_export;
 pub mod autotune_misc;
+pub mod autotune_preflight;
 pub mod available_inis;
 pub mod base_map;
 pub mod cache_status;
