@@ -166,3 +166,25 @@
 .tooth-logger-empty p {
   margin: 0;
 }
+
+/* Capture duration and teeth-per-rev sit beside the capture button: both change
+   what a capture means, so they belong with the control that starts it. */
+.tl-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+  opacity: 0.9;
+  margin-right: 0.75rem;
+}
+
+.tl-field input {
+  width: 4.5rem;
+  padding: 0.2rem 0.35rem;
+  border-radius: 4px;
+  border: 1px solid var(--border, #3a3a42);
+  background: rgba(255, 255, 255, 0.07);
+  color: inherit;
+}
+
+.tl-field input:disabled { opacity: 0.5; }

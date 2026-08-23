@@ -30,6 +30,7 @@ pub mod debug_realtime;
 pub mod demo;
 pub mod diagnostic_loggers;
 pub mod dyno;
+pub mod file_io;
 pub mod find_inis;
 pub mod firmware_update;
 pub mod generate_table;

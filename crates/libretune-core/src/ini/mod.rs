@@ -10,6 +10,7 @@
 //! - Menu structure
 
 mod constants;
+pub mod diagnostic_logger;
 pub mod encoding;
 mod error;
 pub mod expression;
@@ -189,6 +190,13 @@ pub struct EcuDefinition {
 
     /// Logger definitions
     pub logger_definitions: HashMap<String, LoggerDefinition>,
+    /// Diagnostic loggers (tooth, composite) with the commands to drive them.
+    ///
+    /// Separate from `logger_definitions`, which describes `[Datalog]`-style
+    /// channel logging. These are blocks with their own start/stop/read
+    /// commands and record layout, and were not parsed at all - the app sent
+    /// invented command bytes instead.
+    pub diagnostic_loggers: Vec<crate::ini::diagnostic_logger::DiagnosticLogger>,
 
     /// Port editor configurations
     pub port_editors: HashMap<String, PortEditorConfig>,
@@ -736,6 +744,7 @@ impl Default for EcuDefinition {
             readout_panels: HashMap::new(),
             controller_commands: HashMap::new(),
             logger_definitions: HashMap::new(),
+            diagnostic_loggers: Vec::new(),
             port_editors: HashMap::new(),
             reference_tables: HashMap::new(),
             ftp_browsers: HashMap::new(),

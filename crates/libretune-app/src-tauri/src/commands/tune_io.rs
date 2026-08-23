@@ -170,7 +170,10 @@ fn resolve_command_bytes(
 }
 
 /// Parse a command string with hex escapes (\x00) and variable substitution ($tsCanId)
-fn parse_command_string(
+///
+/// Shared with the diagnostic loggers, whose start/stop/read commands use the
+/// same escaping - decoding them a second way is how they came to be invented.
+pub(crate) fn parse_command_string(
     def: &EcuDefinition,
     s: &str,
     current_values: &std::collections::HashMap<String, u8>,
