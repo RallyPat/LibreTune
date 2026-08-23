@@ -60,7 +60,10 @@ describe('AutoTune connection awareness', () => {
     expect(invoke).not.toHaveBeenCalledWith('start_autotune', expect.anything());
   });
 
-  it('enables Start and calls start_autotune when connected', async () => {
+  // Start no longer launches the session directly: it runs the preflight
+  // check first, because AutoTune will otherwise run a whole drive against a
+  // missing target table or a filter that rejects every sample and say nothing.
+  it('enables Start and runs the preflight check when connected', async () => {
     render(
       <ToastProvider>
         <AutoTune tableName="veTable1Tbl" isConnected={true} />
@@ -74,8 +77,13 @@ describe('AutoTune connection awareness', () => {
 
     await userEvent.click(startBtn);
     await waitFor(() =>
-      expect(invoke).toHaveBeenCalledWith('start_autotune', expect.objectContaining({ tableName: 'veTable1Tbl' }))
+      expect(invoke).toHaveBeenCalledWith(
+        'preflight_autotune',
+        expect.objectContaining({ tableName: 'veTable1Tbl' })
+      )
     );
+    // and NOT straight into the session
+    expect(invoke).not.toHaveBeenCalledWith('start_autotune', expect.anything());
   });
 });
 

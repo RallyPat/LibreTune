@@ -243,6 +243,15 @@ async fn sleep_abortable(total_ms: u64) -> bool {
 static DELAY_SAMPLES: std::sync::OnceLock<StdMutex<Vec<(f64, f64, f64)>>> =
     std::sync::OnceLock::new();
 
+/// A copy of every measurement taken this session, for callers that want to
+/// model the delay rather than read a binned table.
+pub(crate) fn delay_samples_snapshot() -> Vec<(f64, f64, f64)> {
+    delay_samples()
+        .lock()
+        .map(|g| g.clone())
+        .unwrap_or_default()
+}
+
 fn delay_samples() -> &'static StdMutex<Vec<(f64, f64, f64)>> {
     DELAY_SAMPLES.get_or_init(|| StdMutex::new(Vec::new()))
 }
