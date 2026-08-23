@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import { Dialog, Button } from "../common";
+import type { IniEntry } from "../../types/app";
 import {
   WizardTransport,
   WizardStep,
@@ -44,6 +45,8 @@ interface ResolvedIni {
 interface ConnectEcuWizardProps {
   isOpen: boolean;
   onClose: () => void;
+  /** Locally installed INI definitions, offered as a picker on the offline path. */
+  inis: IniEntry[];
   /** Mirrors New Project's creation flow (close prior project, load menus/tabs, toast). */
   onCreateProject: (name: string, iniId: string) => Promise<boolean>;
   /** Connects using the params this wizard already collected, reusing the
@@ -66,10 +69,10 @@ interface ConnectEcuWizardProps {
  * manual upload) → name the project, then create it. Reuses existing backend
  * commands (`get_serial_ports`, `connect_to_ecu`, `find_matching_inis`,
  * `search_online_inis` / `download_ini`, `import_ini`, `create_project`). The
- * offline path skips straight to naming and, since no INI is resolved there,
- * just closes on Finish — offline project creation stays on New Project.
+ * offline path skips straight to naming, where the user picks an installed INI
+ * by hand (same flow as New Project) and Finish creates the project.
  */
-export default function ConnectEcuWizard({ isOpen, onClose, onCreateProject, onConnect }: ConnectEcuWizardProps) {
+export default function ConnectEcuWizard({ isOpen, onClose, inis, onCreateProject, onConnect }: ConnectEcuWizardProps) {
   const [transport, setTransport] = useState<WizardTransport | null>(null);
   const [step, setStep] = useState<WizardStep>("transport");
   const [projectName, setProjectName] = useState("");
@@ -321,8 +324,9 @@ export default function ConnectEcuWizard({ isOpen, onClose, onCreateProject, onC
     onClose();
   }
 
-  /** Create the project from the resolved INI and close the wizard. Offline
-   * (no resolved INI) just closes — that path still goes through New Project. */
+  /** Create the project from the resolved INI and close the wizard. If no INI
+   * was resolved (only possible on the offline path when nothing is selected),
+   * Finish just closes without creating anything. */
   async function finishAndCreate() {
     if (!projectName.trim()) return;
     if (!resolvedIni) {
@@ -575,10 +579,43 @@ export default function ConnectEcuWizard({ isOpen, onClose, onCreateProject, onC
               <p style={{ opacity: 0.8, fontSize: 12, marginTop: "0.5rem" }}>
                 Using <b>{resolvedIni.name}</b> ({resolvedIni.source}).
               </p>
+            ) : transport === "offline" ? (
+              <div style={{ marginTop: "0.75rem" }}>
+                <label style={{ display: "block", marginBottom: "0.5rem" }}>ECU definition (INI)</label>
+                {inis.length === 0 ? (
+                  <p style={{ opacity: 0.7, fontSize: 12 }}>
+                    No definitions installed yet — add one via New Project → Browse or the
+                    online INI repository, then come back.
+                  </p>
+                ) : (
+                  <select
+                    value=""
+                    onChange={(e) => {
+                      const ini = inis.find((i) => i.id === e.target.value);
+                      if (ini) {
+                        setResolvedIni({ id: ini.id, path: ini.path, name: ini.name, source: "local" });
+                      }
+                    }}
+                    style={{ width: "100%" }}
+                    disabled={creating}
+                  >
+                    <option value="" disabled>
+                      Select a definition…
+                    </option>
+                    {inis.map((ini) => (
+                      <option key={ini.id} value={ini.id}>
+                        {ini.name}
+                      </option>
+                    ))}
+                  </select>
+                )}
+                <p style={{ opacity: 0.7, fontSize: 12, marginTop: "0.5rem" }}>
+                  Pick a definition to create the project; Finish without one just closes.
+                </p>
+              </div>
             ) : (
               <p style={{ opacity: 0.7, fontSize: 12, marginTop: "0.5rem" }}>
-                No ECU definition was resolved, so Finish will just close this wizard — pick one
-                from New Project instead (today's behaviour).
+                No ECU definition was resolved, so Finish will just close this wizard.
               </p>
             )}
             {createError && (
