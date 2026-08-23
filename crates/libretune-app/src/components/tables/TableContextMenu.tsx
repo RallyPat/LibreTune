@@ -208,10 +208,12 @@ export default function TableContextMenu({
         <div className="context-menu-item" onClick={() => { onInterpolateLinear('row'); onClose(); }}>
           <span className="icon"><MoveHorizontal size={14} /></span>
           <span>Interpolate Horizontal</span>
+          <span className="shortcut">H</span>
         </div>
         <div className="context-menu-item" onClick={() => { onInterpolateLinear('col'); onClose(); }}>
           <span className="icon"><MoveVertical size={14} /></span>
           <span>Interpolate Vertical</span>
+          <span className="shortcut">V</span>
         </div>
         <div className="context-menu-item" onClick={() => { onSmooth(); onClose(); }}>
           <span className="icon"><Waves size={14} /></span>
