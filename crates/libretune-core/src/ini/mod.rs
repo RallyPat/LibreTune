@@ -10,6 +10,7 @@
 //! - Menu structure
 
 mod constants;
+pub mod diagnostic_logger;
 pub mod encoding;
 mod error;
 pub mod expression;
@@ -107,6 +108,12 @@ pub struct EcuDefinition {
     /// Reading such a global is what let a units change relabel every gauge to
     /// degC while the arithmetic stayed Fahrenheit.
     pub active_symbols: std::collections::HashSet<String>,
+    /// Every symbol the INI tests in an `#if`, regardless of the arm taken.
+    ///
+    /// `active_symbols` says which way a conditional went; this says whether
+    /// the question was ever asked. An INI with no `#if CELSIUS` anywhere has
+    /// no temperature-unit choice to make, and prompting for one would be noise.
+    pub tested_symbols: std::collections::HashSet<String>,
 
     /// Endianness of ECU data
     pub endianness: Endianness,
@@ -183,6 +190,13 @@ pub struct EcuDefinition {
 
     /// Logger definitions
     pub logger_definitions: HashMap<String, LoggerDefinition>,
+    /// Diagnostic loggers (tooth, composite) with the commands to drive them.
+    ///
+    /// Separate from `logger_definitions`, which describes `[Datalog]`-style
+    /// channel logging. These are blocks with their own start/stop/read
+    /// commands and record layout, and were not parsed at all - the app sent
+    /// invented command bytes instead.
+    pub diagnostic_loggers: Vec<crate::ini::diagnostic_logger::DiagnosticLogger>,
 
     /// Port editor configurations
     pub port_editors: HashMap<String, PortEditorConfig>,
@@ -221,6 +235,11 @@ impl EcuDefinition {
     /// parsed, e.g. `CELSIUS`. See [`EcuDefinition::active_symbols`].
     pub fn symbol_is_active(&self, symbol: &str) -> bool {
         self.active_symbols.contains(symbol)
+    }
+
+    /// Whether the INI tests `symbol` in an `#if` at all.
+    pub fn tests_symbol(&self, symbol: &str) -> bool {
+        self.tested_symbols.contains(symbol)
     }
 
     /// Parse an ECU definition from an INI file
@@ -700,6 +719,7 @@ impl Default for EcuDefinition {
             ini_spec_version: "3.64".to_string(),
             defines: HashMap::new(),
             active_symbols: std::collections::HashSet::new(),
+            tested_symbols: std::collections::HashSet::new(),
             endianness: Endianness::default(),
             page_sizes: Vec::new(),
             n_pages: 0,
@@ -724,6 +744,7 @@ impl Default for EcuDefinition {
             readout_panels: HashMap::new(),
             controller_commands: HashMap::new(),
             logger_definitions: HashMap::new(),
+            diagnostic_loggers: Vec::new(),
             port_editors: HashMap::new(),
             reference_tables: HashMap::new(),
             ftp_browsers: HashMap::new(),

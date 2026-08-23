@@ -18,11 +18,51 @@ interface ToothLogEntry {
   crank_angle?: number;
 }
 
-interface ToothLogResult {
-  teeth: ToothLogEntry[];
-  capture_time_ms: number;
-  detected_rpm?: number;
-  teeth_per_rev?: number;
+/** A record as `start_tooth_capture` emits it: INI field names to scaled values. */
+/** Most recent records kept for display; a long capture exceeds any useful chart. */
+const MAX_POINTS = 20000;
+
+/**
+ * Map INI-named fields onto the view's entries.
+ *
+ * Different ECUs name the same thing differently - Speeduino's tooth logger
+ * declares `toothTime` in microseconds, while rusEFI's composite logger
+ * declares `time` in milliseconds and expects the per-tooth interval to be
+ * derived from consecutive values. Matching by name rather than position is
+ * what lets one view serve both.
+ */
+function toEntries(records: LoggerRecord[]): ToothLogEntry[] {
+  const out: ToothLogEntry[] = [];
+  let prevTime: number | null = null;
+  for (const r of records) {
+    const direct = r.fields.toothTime;
+    if (direct !== undefined) {
+      out.push({ tooth_number: r.index, tooth_time_us: direct });
+      continue;
+    }
+    // No direct interval: derive it from a running timestamp (ms -> us).
+    const t = r.fields.refTime ?? r.fields.time;
+    if (t === undefined) continue;
+    if (prevTime !== null) {
+      out.push({ tooth_number: r.index, tooth_time_us: (t - prevTime) * 1000 });
+    }
+    prevTime = t;
+  }
+  return out;
+}
+
+interface CaptureStatus {
+  logger: string;
+  records: number;
+  reads: number;
+  emptyReads: number;
+  running: boolean;
+  note: string | null;
+}
+
+interface LoggerRecord {
+  index: number;
+  fields: Record<string, number>;
 }
 
 interface ToothLoggerViewProps {
@@ -35,6 +75,8 @@ export const ToothLoggerView: React.FC<ToothLoggerViewProps> = ({ onClose }) => 
   const [detectedRpm, setDetectedRpm] = useState<number | null>(null);
   const [teethPerRev, setTeethPerRev] = useState<number>(36);
   const [error, setError] = useState<string | null>(null);
+  // Long enough to hold a gear and reach the rpm band under investigation.
+  const [captureSeconds, setCaptureSeconds] = useState<number>(20);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   // Listen for real-time tooth data
@@ -42,8 +84,19 @@ export const ToothLoggerView: React.FC<ToothLoggerViewProps> = ({ onClose }) => 
     let unlisten: (() => void) | null = null;
 
     const setupListener = async () => {
-      unlisten = await listen<ToothLogEntry[]>("tooth_logger:data", (event) => {
-        setLogData(event.payload);
+      // `tooth-log-records` streams batches while a capture runs. Records
+      // carry the field names the INI declares (`toothTime` on Speeduino,
+      // `time` on rusEFI), so the mapping is by name rather than by position.
+      unlisten = await listen<LoggerRecord[]>("tooth-log-records", (event) => {
+        const mapped = toEntries(event.payload);
+        // APPEND. Batches arrive throughout the capture; replacing would show
+        // only the last 256 records and hide everything that came before.
+        setLogData((prev) => {
+          const next = prev.concat(mapped);
+          // Cap the view. A minute at 4500 rpm is on the order of a hundred
+          // thousand teeth, which no canvas needs and no browser enjoys.
+          return next.length > MAX_POINTS ? next.slice(-MAX_POINTS) : next;
+        });
       });
     };
 
@@ -53,6 +106,24 @@ export const ToothLoggerView: React.FC<ToothLoggerViewProps> = ({ onClose }) => 
       if (unlisten) unlisten();
     };
   }, []);
+
+  // RPM from the teeth themselves. The old code took it from the single-shot
+  // reply, so it was one number for one buffer; derived here it tracks the
+  // whole capture, which is the point of capturing continuously.
+  useEffect(() => {
+    if (logData.length < teethPerRev) {
+      setDetectedRpm(null);
+      return;
+    }
+    const recent = logData.slice(-teethPerRev);
+    const totalUs = recent.reduce((a, e) => a + e.tooth_time_us, 0);
+    if (totalUs <= 0) {
+      setDetectedRpm(null);
+      return;
+    }
+    // One revolution is teethPerRev teeth; 60e6 us per minute.
+    setDetectedRpm(60_000_000 / totalUs);
+  }, [logData, teethPerRev]);
 
   // Draw tooth timing chart
   useEffect(() => {
@@ -179,24 +250,34 @@ export const ToothLoggerView: React.FC<ToothLoggerViewProps> = ({ onClose }) => 
   const handleCapture = useCallback(async () => {
     setIsCapturing(true);
     setError(null);
+    setLogData([]);
 
     try {
-      const result = await invoke<ToothLogResult>("start_tooth_logger");
-      setLogData(result.teeth);
-      setDetectedRpm(result.detected_rpm || null);
-      setTeethPerRev(result.teeth_per_rev || 36);
+      // Runs until stopped, or the limit. The ECU's buffer holds 127 records;
+      // it refills between reads, so a capture is as long as you let it be -
+      // the old single-read call mistook one bufferful for the hardware limit.
+      const status = await invoke<CaptureStatus>("start_tooth_capture", {
+        maxSeconds: captureSeconds,
+      });
+      if (status.note) setError(status.note);
+      if (status.records === 0) {
+        setError(
+          status.note ??
+            "No records captured. The logger needs the engine turning."
+        );
+      }
     } catch (err) {
       setError(String(err));
     } finally {
       setIsCapturing(false);
     }
-  }, []);
+  }, [captureSeconds]);
 
   const handleStop = useCallback(async () => {
     try {
-      await invoke("stop_tooth_logger");
+      await invoke("stop_tooth_capture");
     } catch (err) {
-      console.error("Failed to stop tooth logger:", err);
+      console.error("Failed to stop tooth capture:", err);
     }
     setIsCapturing(false);
   }, []);
@@ -249,6 +330,32 @@ export const ToothLoggerView: React.FC<ToothLoggerViewProps> = ({ onClose }) => 
       <div className="tooth-logger-header">
         <h2>Tooth Logger</h2>
         <div className="tooth-logger-controls">
+          <label className="tl-field" title="How long to keep reading. The ECU refills its buffer, so this is a real duration, not a buffer size.">
+            for
+            <input
+              type="number"
+              min={1}
+              max={600}
+              value={captureSeconds}
+              disabled={isCapturing}
+              onChange={(e) =>
+                setCaptureSeconds(Math.max(1, parseInt(e.target.value, 10) || 1))
+              }
+            />
+            s
+          </label>
+          <label className="tl-field" title="Teeth per crank revolution, used to derive rpm from the tooth intervals.">
+            teeth/rev
+            <input
+              type="number"
+              min={1}
+              max={360}
+              value={teethPerRev}
+              onChange={(e) =>
+                setTeethPerRev(Math.max(1, parseInt(e.target.value, 10) || 1))
+              }
+            />
+          </label>
           <button
             className={`capture-btn ${isCapturing ? "capturing" : ""}`}
             onClick={isCapturing ? handleStop : handleCapture}

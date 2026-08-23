@@ -46,6 +46,10 @@ struct IncludeContext {
     depth: usize,
     /// Symbols defined via #set directive (shared across includes)
     pub defined_symbols: HashSet<String>,
+    /// Every symbol this INI actually tests in an `#if`, whether or not it was
+    /// defined. Lets a caller ask "does this file care about CELSIUS?" without
+    /// re-reading it - and so avoids prompting for a unit an INI never uses.
+    pub tested_symbols: HashSet<String>,
 }
 
 /// Preprocessor symbols every parse starts with, on top of anything the INI
@@ -83,6 +87,7 @@ impl IncludeContext {
             included_files: HashSet::new(),
             depth: 0,
             defined_symbols: default_symbols(),
+            tested_symbols: HashSet::new(),
         }
     }
 
@@ -107,6 +112,7 @@ pub fn parse_ini(content: &str) -> Result<EcuDefinition, IniError> {
     let mut ctx = IncludeContext::new(None);
     let mut def = parse_ini_internal(content, &mut ctx)?;
     def.active_symbols = ctx.defined_symbols.clone();
+    def.tested_symbols = ctx.tested_symbols.clone();
     Ok(def)
 }
 
@@ -122,6 +128,7 @@ pub fn parse_ini_from_path(path: &Path) -> Result<EcuDefinition, IniError> {
     // `#if` this parse took, including any the INI `#set` itself.
     let mut def = parse_ini_internal(&content, &mut ctx)?;
     def.active_symbols = ctx.defined_symbols.clone();
+    def.tested_symbols = ctx.tested_symbols.clone();
     Ok(def)
 }
 
@@ -142,6 +149,9 @@ fn read_ini_file(path: &Path) -> Result<String, IniError> {
 /// Internal parsing function that handles #include directives
 fn parse_ini_internal(content: &str, ctx: &mut IncludeContext) -> Result<EcuDefinition, IniError> {
     let mut definition = EcuDefinition::default();
+    // Raw `[LoggerDefinition]` lines, kept so the diagnostic loggers can be
+    // parsed as blocks after the line-at-a-time pass finishes.
+    let mut logger_section_lines: Vec<String> = Vec::new();
     let mut current_section = String::new();
     let mut state = ParserState {
         current_page: 0,
@@ -201,6 +211,7 @@ fn parse_ini_internal(content: &str, ctx: &mut IncludeContext) -> Result<EcuDefi
         if let Some(stripped) = line.strip_prefix("#if ") {
             let symbol = stripped.trim();
             let is_defined = ctx.defined_symbols.contains(symbol);
+            ctx.tested_symbols.insert(symbol.to_string());
             tracing::debug!("preprocessor: #if {} -> {}", symbol, is_defined);
             condition_stack.push(is_defined);
             i += 1;
@@ -387,7 +398,13 @@ fn parse_ini_internal(content: &str, ctx: &mut IncludeContext) -> Result<EcuDefi
                 "settingcontexthelp" => parse_setting_context_help(&mut definition, key, value),
                 "frontpage" => parse_frontpage_entry(&mut definition, key, value),
                 "controllercommands" => parse_controller_command_entry(&mut definition, key, value),
-                "loggerdefinition" => parse_logger_definition_entry(&mut definition, key, value),
+                "loggerdefinition" => {
+                    // Keep the raw line too: diagnostic loggers are BLOCKS
+                    // (a `loggerDef` opens one, indented keys follow), which
+                    // the line-at-a-time dispatch cannot represent.
+                    logger_section_lines.push(line.to_string());
+                    parse_logger_definition_entry(&mut definition, key, value)
+                }
                 "porteditor" => parse_port_editor_entry(&mut definition, key, value),
                 "referencetables" => parse_reference_table_entry(&mut definition, key, value),
                 "ftpbrowser" => parse_ftp_browser_entry(&mut definition, key, value),
@@ -474,6 +491,15 @@ fn parse_ini_internal(content: &str, ctx: &mut IncludeContext) -> Result<EcuDefi
     // replies frame the length big-endian (`00 01 | rc | crc32`). The comment
     // describes the ECU's internal representation, not the wire envelope. The
     // handshake's flip-retry still covers a firmware that genuinely differs.
+
+    // Diagnostic loggers, parsed as blocks from the raw section text. Doing it
+    // here rather than per-line is what lets a `loggerDef` own the indented
+    // keys that follow it.
+    if !logger_section_lines.is_empty() {
+        let refs: Vec<&str> = logger_section_lines.iter().map(String::as_str).collect();
+        definition.diagnostic_loggers =
+            crate::ini::diagnostic_logger::parse_logger_definitions(&refs);
+    }
 
     Ok(definition)
 }
@@ -4440,4 +4466,75 @@ ego_max_lambda = scalar, U08, lastOffset, "Lambda", 0.068, 0, 0.5, 1.7, 3
         9,
         "ego_max_lambda must overlay ego_max_afr at offset 9, not chain from the previous overlay"
     );
+}
+
+#[cfg(test)]
+mod tested_symbol_tests {
+    use super::*;
+
+    /// A definition records which symbols were *asked about*, separately from
+    /// which were active. Without that distinction the app cannot tell "this
+    /// INI has no temperature choice to make" from "the choice defaulted", and
+    /// would prompt on files that never mention units.
+    #[test]
+    fn a_definition_records_the_symbols_it_tested() {
+        set_default_symbols(Vec::<String>::new());
+        let ini = "\
+[MegaTune]
+ signature = \"test\"
+
+[OutputChannels]
+#if CELSIUS
+   coolant = { coolantRaw - 40 }
+#else
+   coolant = { (coolantRaw - 40) * 1.8 + 32 }
+#endif
+";
+        let def = parse_ini(ini).expect("parses");
+        assert!(
+            def.tests_symbol("CELSIUS"),
+            "the INI asked about CELSIUS, so there is a question to put to the user"
+        );
+        assert!(
+            !def.symbol_is_active("CELSIUS"),
+            "it was not defined, so the Fahrenheit arm was taken"
+        );
+    }
+
+    #[test]
+    fn an_ini_that_never_asks_records_nothing() {
+        set_default_symbols(Vec::<String>::new());
+        let ini = "\
+[MegaTune]
+ signature = \"test\"
+
+[OutputChannels]
+   coolant = scalar, U08, 0, \"C\", 1.0, 0.0
+";
+        let def = parse_ini(ini).expect("parses");
+        assert!(
+            !def.tests_symbol("CELSIUS"),
+            "nothing to ask about - prompting here would be noise"
+        );
+    }
+
+    /// The arm taken must not change what was recorded as tested: the question
+    /// was asked either way.
+    #[test]
+    fn the_symbol_is_recorded_even_when_defined() {
+        set_default_symbols(vec!["CELSIUS".to_string()]);
+        let ini = "\
+[MegaTune]
+ signature = \"test\"
+
+[OutputChannels]
+#if CELSIUS
+   coolant = { coolantRaw - 40 }
+#endif
+";
+        let def = parse_ini(ini).expect("parses");
+        set_default_symbols(Vec::<String>::new());
+        assert!(def.tests_symbol("CELSIUS"));
+        assert!(def.symbol_is_active("CELSIUS"));
+    }
 }
