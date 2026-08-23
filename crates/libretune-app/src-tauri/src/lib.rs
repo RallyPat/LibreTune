@@ -380,6 +380,9 @@ pub fn run() {
             write_text_file,
             // Diagnostic commands (stubs)
             start_tooth_logger,
+            commands::tooth_logger::start_tooth_capture,
+            commands::tooth_logger::stop_tooth_capture,
+            commands::tooth_logger::list_diagnostic_loggers,
             stop_tooth_logger,
             start_composite_logger,
             stop_composite_logger,

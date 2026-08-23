@@ -142,6 +142,9 @@ fn read_ini_file(path: &Path) -> Result<String, IniError> {
 /// Internal parsing function that handles #include directives
 fn parse_ini_internal(content: &str, ctx: &mut IncludeContext) -> Result<EcuDefinition, IniError> {
     let mut definition = EcuDefinition::default();
+    // Raw `[LoggerDefinition]` lines, kept so the diagnostic loggers can be
+    // parsed as blocks after the line-at-a-time pass finishes.
+    let mut logger_section_lines: Vec<String> = Vec::new();
     let mut current_section = String::new();
     let mut state = ParserState {
         current_page: 0,
@@ -387,7 +390,13 @@ fn parse_ini_internal(content: &str, ctx: &mut IncludeContext) -> Result<EcuDefi
                 "settingcontexthelp" => parse_setting_context_help(&mut definition, key, value),
                 "frontpage" => parse_frontpage_entry(&mut definition, key, value),
                 "controllercommands" => parse_controller_command_entry(&mut definition, key, value),
-                "loggerdefinition" => parse_logger_definition_entry(&mut definition, key, value),
+                "loggerdefinition" => {
+                    // Keep the raw line too: diagnostic loggers are BLOCKS
+                    // (a `loggerDef` opens one, indented keys follow), which
+                    // the line-at-a-time dispatch cannot represent.
+                    logger_section_lines.push(line.to_string());
+                    parse_logger_definition_entry(&mut definition, key, value)
+                }
                 "porteditor" => parse_port_editor_entry(&mut definition, key, value),
                 "referencetables" => parse_reference_table_entry(&mut definition, key, value),
                 "ftpbrowser" => parse_ftp_browser_entry(&mut definition, key, value),
@@ -474,6 +483,15 @@ fn parse_ini_internal(content: &str, ctx: &mut IncludeContext) -> Result<EcuDefi
     // replies frame the length big-endian (`00 01 | rc | crc32`). The comment
     // describes the ECU's internal representation, not the wire envelope. The
     // handshake's flip-retry still covers a firmware that genuinely differs.
+
+    // Diagnostic loggers, parsed as blocks from the raw section text. Doing it
+    // here rather than per-line is what lets a `loggerDef` own the indented
+    // keys that follow it.
+    if !logger_section_lines.is_empty() {
+        let refs: Vec<&str> = logger_section_lines.iter().map(String::as_str).collect();
+        definition.diagnostic_loggers =
+            crate::ini::diagnostic_logger::parse_logger_definitions(&refs);
+    }
 
     Ok(definition)
 }
