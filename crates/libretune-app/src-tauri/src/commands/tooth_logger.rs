@@ -25,12 +25,32 @@
 //! for half a second: 127 is the size of the ECU's buffer, not the length of a
 //! log. The firmware refills it and raises `toothLog1Ready` again, so a caller
 //! that reads once mistakes one bufferful for the hardware's limit.
+//!
+//! # This perturbs a running engine
+//!
+//! Tested on a Speeduino 202501 / ATmega2560: starting the tooth logger makes a
+//! running engine misfire. The cost is in the firmware, not the host - `H` puts
+//! it into logging mode and it then writes a record inside the trigger ISR on
+//! every tooth, which delays the ignition and injection scheduling that shares
+//! that path. Pacing the host reads was tried and does not help, because the
+//! work happens whether anything reads or not.
+//!
+//! So this is a stationary diagnostic. It is genuinely useful for checking
+//! trigger patterns, decoder setup and missing-tooth alignment while cranking
+//! or at a steady idle, and it should not be used to chase a fault that only
+//! appears under load - it will add a misfire to whatever is being hunted.
+//! `start_tooth_capture` refuses above a conservative rpm for that reason.
 
 use crate::AppState;
 use libretune_core::ini::diagnostic_logger::DiagnosticLogger;
 use serde::Serialize;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::Emitter;
+
+/// Above this the logger is refused: the firmware's per-tooth ISR work delays
+/// ignition scheduling, and the faster the engine turns the less slack there is.
+/// Idle and cranking are below it, which is where this diagnostic belongs.
+const MAX_SAFE_RPM: f64 = 1500.0;
 
 /// Set while a capture is running; cleared to ask it to stop.
 static RUNNING: AtomicBool = AtomicBool::new(false);
@@ -122,6 +142,21 @@ async fn run_capture(
         (logger, start, read, stop)
     };
 
+    // Refuse on a spinning engine. Logging is done inside the trigger ISR, so
+    // it delays spark and injection scheduling - measured as misfiring on a
+    // running car. Cranking and idle are fine and are where this is useful.
+    {
+        let rt = crate::commands::realtime_get::get_realtime_data(state.clone())
+            .await
+            .unwrap_or_default();
+        let rpm = rt.get("rpm").copied().unwrap_or(0.0);
+        if rpm > MAX_SAFE_RPM {
+            return Err(format!(
+                "Refusing to start the tooth logger at {rpm:.0} rpm. The firmware                  records each tooth inside the trigger interrupt, which delays                  ignition scheduling and makes a running engine misfire. Use it                  while cranking or at idle, below {MAX_SAFE_RPM:.0} rpm."
+            ));
+        }
+    }
+
     let mut conn_guard = state.connection.lock().await;
     let conn = conn_guard.as_mut().ok_or("Not connected to ECU")?;
 
@@ -135,6 +170,17 @@ async fn run_capture(
         .map_err(|e| format!("Failed to start '{}': {e}", logger.name))?;
 
     let timeout = std::time::Duration::from_millis(logger.data_read_timeout_ms.max(500));
+    // PACE THE READS. Without this the loop re-reads as fast as the serial
+    // round-trip allows, which on a 16 MHz ATmega2560 starves the main loop
+    // that schedules ignition and injection - observed as misfiring on a
+    // running engine, which is not an acceptable cost for a diagnostic.
+    //
+    // The buffer holds `record_len`-sized records and fills at the tooth rate;
+    // at idle that is about two seconds. Reading several times a second gains
+    // nothing and costs the ECU real time, so wait between reads and let the
+    // buffer do its job.
+    let min_interval = std::time::Duration::from_millis(250);
+    let mut last_read = std::time::Instant::now() - min_interval;
     let deadline =
         max_seconds.map(|s| std::time::Instant::now() + std::time::Duration::from_secs(s));
     let (mut records, mut reads, mut empty) = (0u64, 0u64, 0u64);
@@ -152,6 +198,12 @@ async fn run_capture(
             ));
             break;
         }
+
+        let since = last_read.elapsed();
+        if since < min_interval {
+            std::thread::sleep(min_interval - since);
+        }
+        last_read = std::time::Instant::now();
 
         let payload = match conn.send_raw_bytes_with_response(&read_cmd, timeout) {
             Ok(p) => p,
@@ -171,19 +223,39 @@ async fn run_capture(
                 note = Some("no data after 200 empty reads - is the engine running?".into());
                 break;
             }
-            std::thread::sleep(std::time::Duration::from_millis(20));
             continue;
         }
         empty = 0;
 
+        let mut real = 0usize;
         for i in 0..n {
             let off = logger.header_len + i * logger.record_len;
             let rec = &payload[off..off + logger.record_len];
+            // A zero-filled record is the firmware saying "nothing logged",
+            // not a tooth that took no time. Keeping them reports thousands of
+            // captured teeth from a stationary engine.
+            if logger.is_empty_record(rec) {
+                continue;
+            }
             batch.push(LoggerRecord {
                 index: records,
                 fields: logger.decode(rec).into_iter().collect(),
             });
             records += 1;
+            real += 1;
+        }
+        if real == 0 {
+            // A full buffer of zeros counts as not-ready, same as a short read.
+            empty += 1;
+            if empty > 200 {
+                note = Some(
+                    "buffer keeps coming back empty - the crank must be turning                      for the logger to record anything"
+                        .into(),
+                );
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+            continue;
         }
         if batch.len() >= 256 {
             let _ = app.emit("tooth-log-records", &batch);

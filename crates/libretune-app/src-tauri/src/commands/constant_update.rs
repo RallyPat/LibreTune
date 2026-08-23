@@ -277,3 +277,21 @@ pub(crate) async fn update_constant_internal(
 
     Ok(())
 }
+
+/// Write an array-valued constant, e.g. `taeBins` or `taeRates`.
+///
+/// Curves go through `update_curve_data`, but not every array is a curve: the
+/// accel-enrichment bins and rates are plain array constants, so there was no
+/// exposed way to write them at all and they could only be edited by hand in
+/// another tool.
+#[tauri::command]
+pub async fn update_constant_array(
+    state: tauri::State<'_, AppState>,
+    name: String,
+    values: Vec<f64>,
+) -> Result<(), String> {
+    if values.is_empty() {
+        return Err("No values provided".to_string());
+    }
+    crate::commands::table_internals::update_constant_array_internal(&state, &name, values).await
+}

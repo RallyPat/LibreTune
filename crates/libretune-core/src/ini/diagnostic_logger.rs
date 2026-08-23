@@ -30,6 +30,7 @@ use serde::{Deserialize, Serialize};
 
 /// One field within a logger record, as `recordField` declares it.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct LoggerRecordField {
     pub name: String,
     pub label: String,
@@ -42,6 +43,7 @@ pub struct LoggerRecordField {
 
 /// A diagnostic logger the INI declares, with the commands to drive it.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DiagnosticLogger {
     /// Identifier, e.g. `tooth` or `compositeLogger`.
     pub name: String,
@@ -81,6 +83,19 @@ impl DiagnosticLogger {
                 Some((f.name.clone(), raw as f64 * f.scale))
             })
             .collect()
+    }
+
+    /// Is this record entirely zeros?
+    ///
+    /// Speeduino hands back a zero-filled buffer when nothing has been logged -
+    /// a stopped engine produces a full 127 records of nothing. Counting those
+    /// as data reports a successful capture of five thousand teeth from an
+    /// engine that never turned, which is worse than reporting none.
+    ///
+    /// Every field, not just the first: a composite record's flags are
+    /// legitimately zero while its timestamp is not.
+    pub fn is_empty_record(&self, record: &[u8]) -> bool {
+        self.decode(record).iter().all(|(_, v)| *v == 0.0)
     }
 
     /// How many whole records a payload holds.
@@ -333,6 +348,26 @@ mod tests {
             (got["refTime"] - 1.0).abs() < 1e-9,
             "got {}",
             got["refTime"]
+        );
+    }
+
+    /// A stopped engine returns a full buffer of zeros. Counting those as data
+    /// reported a successful capture of thousands of teeth from an engine that
+    /// never turned - verified on a car with the ignition off.
+    #[test]
+    fn a_zero_filled_record_is_not_data() {
+        let l = parse();
+        assert!(
+            l[0].is_empty_record(&[0, 0, 0, 0]),
+            "no tooth takes zero time"
+        );
+        assert!(!l[0].is_empty_record(&[0x45, 0x23, 0x01, 0x00]));
+        // Composite flags are legitimately zero while the timestamp is not, so
+        // the test has to be every field rather than the first.
+        assert!(l[1].is_empty_record(&[0, 0, 0, 0, 0]));
+        assert!(
+            !l[1].is_empty_record(&[0x00, 0xE8, 0x03, 0x00, 0x00]),
+            "all flags clear but a real timestamp is still a record"
         );
     }
 
