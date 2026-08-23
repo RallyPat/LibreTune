@@ -602,3 +602,188 @@ mod tests {
         );
     }
 }
+
+/// A transport-delay model fitted to real measurements.
+///
+/// `delay = floor_ms + k / (rpm * load)` — exhaust transport time is plumbing
+/// volume divided by flow, and flow rises with both engine speed and load, so
+/// the delay is long at idle and short under power. The alternative on offer is
+/// a fixed rpm ramp (200 ms at idle to 50 ms at redline) which on one measured
+/// NA6 under-predicted every cell by an average of 287 ms.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FlowDelayFit {
+    /// High-flow asymptote: roughly the sensor's own response time.
+    pub floor_ms: f64,
+    /// Numerator of the flow term. Not user-facing; `anchor_ms` is.
+    pub k: f64,
+    /// Delay the model predicts at the anchor point AutoTune uses
+    /// (800 rpm, 40 kPa) — this is what `lambda_delay_ms` should be set to.
+    pub anchor_ms: f64,
+    /// Weighted RMS residual, in ms. Compare against the spread of the
+    /// measurements themselves before trusting it.
+    pub rms_ms: f64,
+    /// How many measurements the fit used.
+    pub samples: usize,
+}
+
+/// Anchor AutoTune's flow-scaled table is built around.
+const ANCHOR_RPM: f64 = 800.0;
+const ANCHOR_LOAD: f64 = 40.0;
+
+/// Fit [`FlowDelayFit`] to `(rpm, load, delay_ms)` measurements.
+///
+/// `floor` is scanned rather than solved because the model is only linear in
+/// `k` once `floor` is fixed; the range covers a plausible sensor response
+/// (40-250 ms) and the grid is far finer than the measurement spread, so a
+/// closed-form solve would add precision the data does not contain.
+///
+/// Returns `None` below four samples — three points will fit anything, and a
+/// confident-looking delay drawn from noise is worse than no recommendation.
+pub fn fit_flow_delay(samples: &[(f64, f64, f64)]) -> Option<FlowDelayFit> {
+    let usable: Vec<(f64, f64, f64)> = samples
+        .iter()
+        .copied()
+        .filter(|(rpm, load, ms)| *rpm > 0.0 && *load > 0.0 && *ms > 0.0)
+        .collect();
+    if usable.len() < 4 {
+        return None;
+    }
+
+    let inv_flow = |rpm: f64, load: f64| 1.0 / (rpm * load);
+    let mut best: Option<(f64, f64, f64)> = None; // (ss, floor, k)
+
+    let mut floor = 40.0_f64;
+    while floor <= 250.0 {
+        // Least squares for k with this floor: k = sum(x*y) / sum(x*x),
+        // x = 1/flow, y = measured - floor.
+        let (mut num, mut den) = (0.0_f64, 0.0_f64);
+        for (rpm, load, ms) in &usable {
+            let x = inv_flow(*rpm, *load);
+            num += x * (ms - floor);
+            den += x * x;
+        }
+        if den > 0.0 {
+            let k = num / den;
+            let ss: f64 = usable
+                .iter()
+                .map(|(rpm, load, ms)| {
+                    let pred = floor + k * inv_flow(*rpm, *load);
+                    (pred - ms).powi(2)
+                })
+                .sum();
+            if best.is_none_or(|(bss, _, _)| ss < bss) {
+                best = Some((ss, floor, k));
+            }
+        }
+        floor += 5.0;
+    }
+
+    let (ss, floor_ms, k) = best?;
+    Some(FlowDelayFit {
+        floor_ms,
+        k,
+        anchor_ms: floor_ms + k * inv_flow(ANCHOR_RPM, ANCHOR_LOAD),
+        rms_ms: (ss / usable.len() as f64).sqrt(),
+        samples: usable.len(),
+    })
+}
+
+#[cfg(test)]
+mod flow_fit_tests {
+    use super::*;
+
+    /// Data generated from a known model must recover that model.
+    #[test]
+    fn it_recovers_a_known_model() {
+        let (floor, k) = (150.0, 30_000_000.0);
+        let samples: Vec<(f64, f64, f64)> = [
+            (900.0, 35.0),
+            (1500.0, 40.0),
+            (2500.0, 50.0),
+            (3500.0, 70.0),
+            (5000.0, 90.0),
+            (6000.0, 96.0),
+        ]
+        .iter()
+        .map(|(rpm, load)| (*rpm, *load, floor + k / (rpm * load)))
+        .collect();
+
+        let fit = fit_flow_delay(&samples).expect("enough samples");
+        assert!(
+            (fit.floor_ms - floor).abs() <= 5.0,
+            "floor: {}",
+            fit.floor_ms
+        );
+        assert!(
+            fit.rms_ms < 5.0,
+            "clean data should fit tightly: {}",
+            fit.rms_ms
+        );
+        assert_eq!(fit.samples, 6);
+    }
+
+    /// The shape that matters: delay must fall as flow rises. A model that got
+    /// this backwards would attribute high-load readings to the wrong cells.
+    #[test]
+    fn the_fitted_model_falls_with_flow() {
+        let samples = vec![
+            (900.0, 35.0, 1100.0),
+            (1500.0, 40.0, 700.0),
+            (2500.0, 50.0, 450.0),
+            (5000.0, 90.0, 260.0),
+        ];
+        let fit = fit_flow_delay(&samples).expect("fits");
+        let at = |rpm: f64, load: f64| fit.floor_ms + fit.k / (rpm * load);
+        assert!(
+            at(900.0, 35.0) > at(5000.0, 90.0),
+            "delay must fall with flow"
+        );
+        assert!(fit.k > 0.0, "a negative k would invert the model");
+    }
+
+    #[test]
+    fn too_few_samples_yields_no_recommendation() {
+        // Three points fit anything; a confident number from noise is worse
+        // than admitting there is none.
+        assert!(fit_flow_delay(&[(1000.0, 40.0, 500.0)]).is_none());
+        assert!(fit_flow_delay(&[(1000.0, 40.0, 500.0), (2000.0, 50.0, 400.0)]).is_none());
+        assert!(fit_flow_delay(&[
+            (1000.0, 40.0, 500.0),
+            (2000.0, 50.0, 400.0),
+            (3000.0, 60.0, 300.0)
+        ])
+        .is_none());
+    }
+
+    #[test]
+    fn rubbish_samples_are_dropped_before_fitting() {
+        let samples = vec![
+            (0.0, 40.0, 500.0),   // engine stopped
+            (1000.0, 0.0, 500.0), // no load reading
+            (1000.0, 40.0, 0.0),  // no delay measured
+            (900.0, 35.0, 1100.0),
+            (1500.0, 40.0, 700.0),
+            (2500.0, 50.0, 450.0),
+            (5000.0, 90.0, 260.0),
+        ];
+        let fit = fit_flow_delay(&samples).expect("fits on the four good ones");
+        assert_eq!(fit.samples, 4);
+    }
+
+    /// The anchor is what `lambda_delay_ms` gets set to, so it must be the
+    /// model's value at the anchor point rather than any measured sample.
+    #[test]
+    fn the_anchor_is_the_model_at_800_by_40() {
+        let samples = vec![
+            (900.0, 35.0, 1100.0),
+            (1500.0, 40.0, 700.0),
+            (2500.0, 50.0, 450.0),
+            (5000.0, 90.0, 260.0),
+        ];
+        let fit = fit_flow_delay(&samples).expect("fits");
+        let expected = fit.floor_ms + fit.k / (800.0 * 40.0);
+        assert!((fit.anchor_ms - expected).abs() < 1e-6);
+        assert!(fit.anchor_ms > fit.floor_ms, "the anchor is the slow end");
+    }
+}
