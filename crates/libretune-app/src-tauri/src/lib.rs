@@ -309,6 +309,8 @@ pub fn run() {
             start_autotune,
             stop_autotune,
             get_autotune_status,
+            commands::temperature_units::get_temperature_units_status,
+            commands::temperature_units::set_temperature_units,
             get_autotune_recommendations,
             get_autotune_heatmap,
             send_autotune_recommendations,

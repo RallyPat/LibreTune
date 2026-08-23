@@ -103,6 +103,14 @@ import "./styles";
  * is intentionally registered once at module level (NOT in an effect) to dodge
  * a StrictMode double-invoke race — see the comment near `useRealtimeStream`.
  */
+/** Reported by `get_temperature_units_status`. */
+interface UnitsStatus {
+  needsChoice: boolean;
+  celsius: boolean;
+  source: string;
+  iniUsesCelsius: boolean;
+}
+
 function AppContent() {
   const { theme, setTheme } = useTheme();
   const { t } = useTranslation('menu');
@@ -116,6 +124,49 @@ function AppContent() {
 
   // Project state
   const [currentProject, setCurrentProject] = useState<CurrentProject | null>(null);
+  // Temperature units: an INI picks Celsius through `#if CELSIUS`, and a
+  // project that declares nothing silently takes the Fahrenheit arm. Ask once,
+  // and only when the INI actually branches on it.
+  const [unitsPrompt, setUnitsPrompt] = useState<UnitsStatus | null>(null);
+  const [unitsBusy, setUnitsBusy] = useState(false);
+
+  // Hooked to the project rather than to each open call: there are two places a
+  // project can be opened (restore-on-launch and the picker) and adding a third
+  // should not mean remembering to ask again.
+  useEffect(() => {
+    if (!currentProject) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const status = await invoke<UnitsStatus>('get_temperature_units_status');
+        if (!cancelled && status.needsChoice) setUnitsPrompt(status);
+      } catch {
+        // A project without a parsed definition yet is not an error worth
+        // interrupting anyone over; the question keeps until next open.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [currentProject]);
+
+  const chooseTemperatureUnits = useCallback(async (celsius: boolean) => {
+    setUnitsBusy(true);
+    try {
+      await invoke('set_temperature_units', { celsius });
+      setUnitsPrompt(null);
+      // Symbols are resolved during parsing, so the definition in memory still
+      // holds the old answer. Reopen to apply it rather than leaving the app
+      // showing one unit and reporting another.
+      const path = currentProject?.path;
+      if (path) {
+        const reopened = await invoke<CurrentProject>('open_project', { path });
+        setCurrentProject(reopened);
+      }
+    } catch (e) {
+      console.error('Failed to save temperature units:', e);
+    } finally {
+      setUnitsBusy(false);
+    }
+  }, [currentProject]);
   const { tuneModified, refreshTuneModified } = useTuneModified(!!currentProject);
   const [availableProjects, setAvailableProjects] = useState<ProjectInfo[]>([]);
   const [repositoryInis, setRepositoryInis] = useState<IniEntry[]>([]);
@@ -1624,6 +1675,35 @@ function AppContent() {
 
   return (
     <>
+      {unitsPrompt && (
+        <div className="units-backdrop" role="dialog" aria-modal="true" aria-label="Temperature units">
+          <div className="units-dialog">
+            <h2>Which temperature units does this ECU use?</h2>
+            <p>
+              This definition selects units with <code>#if CELSIUS</code>, but the project
+              does not say which to use. Until it does, temperatures are read as
+              <strong> Fahrenheit</strong> — so a 15&nbsp;°C morning shows as 59.
+            </p>
+            <p className="units-why">
+              It is not only cosmetic: AutoTune&rsquo;s minimum-coolant filter is compared
+              against this same channel, so the wrong unit silently accepts or rejects
+              whole sessions.
+            </p>
+            <div className="units-actions">
+              <button type="button" disabled={unitsBusy} onClick={() => chooseTemperatureUnits(true)}>
+                Celsius (°C)
+              </button>
+              <button type="button" disabled={unitsBusy} onClick={() => chooseTemperatureUnits(false)}>
+                Fahrenheit (°F)
+              </button>
+            </div>
+            <p className="units-note">
+              Saved to the project&rsquo;s <code>project.properties</code>, the same file and
+              key other tuning software uses, so you are asked once. The project reloads to apply it.
+            </p>
+          </div>
+        </div>
+      )}
       <TunerLayout
         menuItems={menuItems}
         toolbarItems={toolbarItems}
