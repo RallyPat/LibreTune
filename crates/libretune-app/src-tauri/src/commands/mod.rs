@@ -72,6 +72,7 @@ pub mod table_internals;
 pub mod table_ops;
 pub mod table_update;
 pub mod temperature_units;
+pub mod tooth_logger;
 pub mod ts_import;
 pub mod tune_apply;
 pub mod tune_compare;

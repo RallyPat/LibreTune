@@ -6,7 +6,7 @@
  * Wrapped in React.memo with custom comparator for performance optimization.
  */
 
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { TsGaugeConfig, TsColor } from '../dashboards/dashTypes';
 import {
   getEmbeddedImage as getCachedEmbeddedImage,
@@ -14,6 +14,7 @@ import {
   loadEmbeddedAssets,
 } from './assetCache';
 import { useGaugeRenderer } from './useGaugeRenderer';
+import { getRightAlignValues } from './renderSettings';
 import {
   ensurePaintersRegistered,
   painterRegistry,
@@ -39,6 +40,10 @@ interface TsGaugeProps {
 function TsGaugeInner({ config, value, embeddedImages, legacyMode = false, overrideStore = false, isConnected = false }: TsGaugeProps) {
   const [fontsReady, setFontsReady] = useState(false);
   const [imagesReady, setImagesReady] = useState(false);
+  // Transient-spike flash state, written per-frame by useGaugeRenderer and
+  // read per-frame by the paint callback (issue #82). A ref — not state —
+  // because it flips at animation cadence and must not re-render React.
+  const spikeActiveRef = useRef(false);
 
   // Load embedded fonts and images
   useEffect(() => {
@@ -184,6 +189,8 @@ function TsGaugeInner({ config, value, embeddedImages, legacyMode = false, overr
           getFontSpec,
           getFontFamily,
           getEmbeddedImage,
+          rightAlignValues: getRightAlignValues(),
+          spikeActive: spikeActiveRef.current,
         };
         migrated(pctx);
         return;
@@ -204,6 +211,8 @@ function TsGaugeInner({ config, value, embeddedImages, legacyMode = false, overr
         getFontSpec,
         getFontFamily,
         getEmbeddedImage,
+        rightAlignValues: getRightAlignValues(),
+        spikeActive: spikeActiveRef.current,
       });
     },
     // The legacy painter closures close over `config`, helpers, and
@@ -228,6 +237,7 @@ function TsGaugeInner({ config, value, embeddedImages, legacyMode = false, overr
     enabled: fontsReady && imagesReady,
     paint,
     continuousRender,
+    spikeActiveRef,
   });
 
   return (

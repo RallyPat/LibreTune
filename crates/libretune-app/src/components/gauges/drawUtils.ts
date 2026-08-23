@@ -31,6 +31,24 @@ export function roundRect(
   ctx.closePath();
 }
 
+/**
+ * Format a gauge value padded (left, with spaces) to the worst-case width of
+ * the gauge range — the "extend the field but never shrink it" idea from
+ * issue #82. With the monospace font painters already use for values, the
+ * rendered string has constant width, so digit-count and sign changes don't
+ * shift glyphs ("jumping text"). Painters that center the value inside a
+ * dial use this to stay steady while remaining centered.
+ */
+export function steadyValueText(
+  value: number,
+  digits: number,
+  min: number,
+  max: number,
+): string {
+  const worst = Math.max(min.toFixed(digits).length, max.toFixed(digits).length);
+  return value.toFixed(digits).padStart(worst, ' ');
+}
+
 /** Lighten a #rrggbb hex color by `percent` (0-100). */
 export function lightenColor(hex: string, percent: number): string {
   const num = parseInt(hex.replace('#', ''), 16);

@@ -124,6 +124,8 @@ describe('lineGraphPainter', () => {
       getFontSpec: (size) => `${size}px Arial`,
       getFontFamily: () => 'Arial',
       getEmbeddedImage: () => null,
+      rightAlignValues: false,
+      spikeActive: false,
     });
 
     expect(randomSpy).not.toHaveBeenCalled();
@@ -150,6 +152,8 @@ describe('lineGraphPainter', () => {
       getFontSpec: (size) => `${size}px Arial`,
       getFontFamily: () => 'Arial',
       getEmbeddedImage: () => null,
+      rightAlignValues: false,
+      spikeActive: false,
     });
 
     // With empty history the painter should emit trace points.
@@ -196,9 +200,87 @@ describe('lineGraphPainter', () => {
       getFontSpec: (size) => `${size}px Arial`,
       getFontFamily: () => 'Arial',
       getEmbeddedImage: () => null,
+      rightAlignValues: false,
+      spikeActive: false,
     });
 
     // With history we should get at least as many line points as history entries.
     expect(lineToCalls.length).toBeGreaterThanOrEqual(history.length);
+  });
+
+  it('EMA-smooths the trace instead of plotting raw samples (issue #82)', () => {
+    // 20 steady samples, then one small step (below the spike threshold).
+    for (let i = 0; i < 20; i++) {
+      useRealtimeStore.getState().updateChannels({ lambda: 1.0 });
+    }
+    useRealtimeStore.getState().updateChannels({ lambda: 1.06 });
+
+    const ctx = mockCtx();
+    const lineToCalls: { x: number; y: number }[] = [];
+    (ctx.lineTo as any).mockImplementation((x: number, y: number) => {
+      lineToCalls.push({ x, y });
+    });
+
+    lineGraphPainter({
+      ctx,
+      width: 200,
+      height: 100,
+      value: 1.06,
+      peakValue: 1.06,
+      config: baseConfig,
+      legacyMode: false,
+      bgImage: null,
+      needleImage: null,
+      getValueColor: () => baseConfig.font_color as TsColor,
+      getFontSpec: (size) => `${size}px Arial`,
+      getFontFamily: () => 'Arial',
+      getEmbeddedImage: () => null,
+      rightAlignValues: false,
+      spikeActive: false,
+    });
+
+    // Geometry: padding=8, titleHeight=12, graphY=20, graphHeight=72.
+    // Raw position of 1.06 (pct 0.6 of the 0.7..1.3 range) would be y=48.8.
+    // The smoothed trace must lag the raw step, so the newest trace point
+    // (last lineTo of the stroke path) sits lower (larger y) than raw.
+    const lastY = lineToCalls[lineToCalls.length - 1].y;
+    expect(lastY).toBeGreaterThan(49.5); // raw would be 48.8
+    expect(lastY).toBeLessThan(60); // but it must have moved toward the step
+  });
+
+  it('draws spike dots for transient deviations and none for steady data', () => {
+    const countArcs = (samples: number[]): number => {
+      useRealtimeStore.getState().clearChannels();
+      for (const s of samples) {
+        useRealtimeStore.getState().updateChannels({ lambda: s });
+      }
+      const ctx = mockCtx();
+      lineGraphPainter({
+        ctx,
+        width: 200,
+        height: 100,
+        value: samples[samples.length - 1],
+        peakValue: 1.3,
+        config: baseConfig,
+        legacyMode: false,
+        bgImage: null,
+        needleImage: null,
+        getValueColor: () => baseConfig.font_color as TsColor,
+        getFontSpec: (size) => `${size}px Arial`,
+        getFontFamily: () => 'Arial',
+        getEmbeddedImage: () => null,
+        rightAlignValues: false,
+        spikeActive: false,
+      });
+      return (ctx.arc as any).mock.calls.length;
+    };
+
+    // Steady data: only the current-value dot → exactly 1 arc.
+    const steady = countArcs(new Array(11).fill(1.0));
+    expect(steady).toBe(1);
+
+    // One big jump (0.3 > 15% of the 0.6 range): spike dot(s) + current dot.
+    const spiked = countArcs([...new Array(10).fill(1.0), 1.3]);
+    expect(spiked).toBeGreaterThanOrEqual(2);
   });
 });

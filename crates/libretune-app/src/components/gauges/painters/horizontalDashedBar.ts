@@ -88,8 +88,14 @@ export const horizontalDashedBarPainter: Painter = (pctx) => {
   ctx.shadowBlur = 2;
   ctx.fillStyle = tsColorToHex(config.font_color);
   ctx.font = getFontSpec(Math.max(11, valueHeight * 0.6), { bold: true, monospace: true });
-  ctx.textAlign = 'center';
   ctx.textBaseline = 'bottom';
-  ctx.fillText(`${value.toFixed(config.value_digits)}`, width / 2, height - 2);
+  if (pctx.rightAlignValues) {
+    // Fixed right edge — text grows leftward, no layout shift (issue #82).
+    ctx.textAlign = 'right';
+    ctx.fillText(`${value.toFixed(config.value_digits)}`, width - 4, height - 2);
+  } else {
+    ctx.textAlign = 'center';
+    ctx.fillText(`${value.toFixed(config.value_digits)}`, width / 2, height - 2);
+  }
   ctx.shadowColor = 'transparent';
 };

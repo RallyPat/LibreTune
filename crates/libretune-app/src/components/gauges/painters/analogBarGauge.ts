@@ -1,7 +1,7 @@
 /** AnalogBarGauge — semicircular bar indicator with metallic bezel. */
 
 import { tsColorToHex } from '../../dashboards/dashTypes';
-import { lightenColor, darkenColor, createMetallicGradient } from '../drawUtils';
+import { lightenColor, darkenColor, createMetallicGradient, steadyValueText } from '../drawUtils';
 import type { Painter } from './types';
 
 export const analogBarGaugePainter: Painter = (pctx) => {
@@ -85,7 +85,13 @@ export const analogBarGaugePainter: Painter = (pctx) => {
   ctx.font = getFontSpec(fontSize, { bold: true, monospace: true });
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText(value.toFixed(config.value_digits), centerX, centerY - radius * 0.3);
+  ctx.fillText(
+    pctx.rightAlignValues
+      ? steadyValueText(value, config.value_digits, config.min, config.max)
+      : value.toFixed(config.value_digits),
+    centerX,
+    centerY - radius * 0.3,
+  );
 
   // Units below value
   if (config.units) {

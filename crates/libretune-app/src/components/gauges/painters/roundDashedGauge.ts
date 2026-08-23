@@ -1,7 +1,7 @@
 /** RoundDashedGauge — circular gauge with segmented arc (~270°). */
 
 import { tsColorToHex, tsColorToRgba } from '../../dashboards/dashTypes';
-import { lightenColor, createMetallicGradient } from '../drawUtils';
+import { lightenColor, createMetallicGradient, steadyValueText } from '../drawUtils';
 import type { Painter } from './types';
 
 export const roundDashedGaugePainter: Painter = (pctx) => {
@@ -80,7 +80,13 @@ export const roundDashedGaugePainter: Painter = (pctx) => {
   ctx.font = getFontSpec(fontSize, { bold: true, monospace: true });
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText(value.toFixed(config.value_digits), centerX, centerY);
+  ctx.fillText(
+    pctx.rightAlignValues
+      ? steadyValueText(value, config.value_digits, config.min, config.max)
+      : value.toFixed(config.value_digits),
+    centerX,
+    centerY,
+  );
 
   // Units
   if (config.units) {

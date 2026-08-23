@@ -33,6 +33,7 @@ import { useTableCurveRefresh } from "./hooks/useTableCurveRefresh";
 import { useGlobalShortcuts } from "./hooks/useGlobalShortcuts";
 import { useEcuEventListeners } from "./hooks/useEcuEventListeners";
 import { useTableAccentColorVars } from "./utils/useTableOrientation";
+import { initRenderSettings } from "./components/gauges/renderSettings";
 import { useAutoConnect, type ConnectOptions } from "./hooks/useAutoConnect";
 import { useReconnectHandler } from "./hooks/useReconnectHandler";
 import { useTuneModified } from "./hooks/useTuneModified";
@@ -174,15 +175,16 @@ function AppContent() {
   const [onlineIniDialogOpen, setOnlineIniDialogOpen] = useState(false);
   const [connectEcuWizardOpen, setConnectEcuWizardOpen] = useState(false);
 
-  // Refresh the repository INI list whenever the New Project dialog opens.
-  // Removing a definition in Settings updates only that dialog's local copy,
-  // so without this the New Project picker would still show deleted INIs.
+  // Refresh the repository INI list whenever the New Project dialog or the
+  // Connect-ECU wizard opens. Removing a definition in Settings updates only
+  // the dialog's local copy, so without this the INI pickers would still show
+  // deleted INIs.
   useEffect(() => {
-    if (!newProjectDialogOpen) return;
+    if (!newProjectDialogOpen && !connectEcuWizardOpen) return;
     invoke<IniEntry[]>("list_repository_inis")
       .then(setRepositoryInis)
       .catch(() => {});
-  }, [newProjectDialogOpen]);
+  }, [newProjectDialogOpen, connectEcuWizardOpen]);
   const [baseMapDialogOpen, setBaseMapDialogOpen] = useState(false);
 
   // Connection state
@@ -763,6 +765,13 @@ function AppContent() {
 
   // User-configured cursor/trail colors → root CSS vars
   useTableAccentColorVars();
+
+  // Dashboard render settings (refresh-rate cap, right-aligned values) —
+  // imperative module read by the gauge rAF loop; keeps itself in sync with
+  // the `settings:changed` event (issue #82).
+  useEffect(() => {
+    void initRenderSettings();
+  }, []);
 
   // App-level event listeners: window title, active-tab persistence,
   // reconnect:request, ini:changed, demo:changed (extracted to hook).

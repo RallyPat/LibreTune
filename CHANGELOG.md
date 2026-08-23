@@ -13,6 +13,45 @@ relevant.
 
 ## [Unreleased]
 
+### 2026-08-23 — Dashboard performance & readability (issue #82)
+
+The dashboard redraw path was reworked around the three complaints in issue
+#82: extreme CPU load on battery, jumping value text when digit count or sign
+changes, and line graphs that look like an audio waveform at high stream
+rates.
+
+#### Added
+- **Configurable gauge refresh rate** — Settings → General → Dashboard →
+  "Gauge refresh rate" (10/15/20/25/30 Hz, default 30). Gauge redraw timers
+  are phase-staggered (16 slots, deterministic per channel) so a dashboard
+  full of gauges no longer piles all canvas work onto the same frame.
+- **Transient spike highlight** — when the raw channel value deviates from
+  the EMA-smoothed display value by more than 15% of the gauge range, digital
+  readouts flash the value in the critical color (~400 ms) and line graphs
+  draw a colored dot at the raw sample position, so short problem pulses stay
+  visible despite smoothing (the issue's "peak detect" ask).
+- **Right-align gauge values setting** (opt-in, default off) — digital/bar
+  gauges anchor value text to a fixed right edge; dial gauges pad values to a
+  fixed monospace width (`steadyValueText`), so number of characters changing
+  no longer shifts glyphs.
+
+#### Changed
+- **Value smoothing is now a time-constant EMA** (`components/gauges/ema.ts`,
+  τ=120 ms) instead of a per-frame lerp factor, so motion converges
+  identically at any refresh rate (the old lerp converged ~6× slower at
+  10 fps than at 60 fps).
+- **LineGraph renders the EMA of the history buffer** rather than raw
+  samples, eliminating the noisy "audio wave" look.
+
+#### Fixed
+- **`pub mod tooth_logger;` restored** in `commands/mod.rs` — the PR #247
+  merge dropped the declaration, leaving `main` not compiling
+  (`commands::tooth_logger::*` references in `lib.rs`).
+
+#### Notes
+- No `.dash` format changes: refresh/smoothing settings are app-global, not
+  per-gauge, so TunerStudio dashboard files round-trip unchanged.
+
 ### 2026-08-21 — Fix: open-table render storm with live data (freeze on open)
 
 Opening the fuel table with a live stream froze the window (issue #132): the

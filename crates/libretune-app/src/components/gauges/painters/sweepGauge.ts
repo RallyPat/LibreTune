@@ -1,7 +1,7 @@
 /** AsymmetricSweepGauge — curved sweep gauge with glowing tip and warning zones. */
 
 import { tsColorToHex } from '../../dashboards/dashTypes';
-import { lightenColor, darkenColor } from '../drawUtils';
+import { lightenColor, darkenColor, steadyValueText } from '../drawUtils';
 import type { Painter } from './types';
 
 export const sweepGaugePainter: Painter = (pctx) => {
@@ -183,7 +183,13 @@ export const sweepGaugePainter: Painter = (pctx) => {
   const sweepValueY = config.display_value_at_180
     ? centerY + radius * 0.25
     : centerY;
-  ctx.fillText(value.toFixed(config.value_digits), centerX, sweepValueY);
+  ctx.fillText(
+    pctx.rightAlignValues
+      ? steadyValueText(value, config.value_digits, config.min, config.max)
+      : value.toFixed(config.value_digits),
+    centerX,
+    sweepValueY,
+  );
   ctx.shadowColor = 'transparent';
 
   // Title below value
