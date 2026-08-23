@@ -168,6 +168,35 @@ pub async fn start_autotune(
     // best-effort auto-discovery from the INI by common table/map names. Any
     // lookup failure falls back to an empty table, which AutoTune handles by
     // reverting to settings.target_afr and the RPM-based delay curve.
+    // `min_clt` compares against the coolant channel, and the INI declares the
+    // right number for its own unit system:
+    //
+    //     #if CELSIUS
+    //          filter = minCltFilter, "Minimum CLT", coolant, <, 71,  , true
+    //     #else
+    //          filter = minCltFilter, "Minimum CLT", coolant, <, 160, , true
+    //
+    // The struct default is a bare 160, sensible in Fahrenheit and above
+    // boiling in Celsius - where it rejects every sample a warm engine can
+    // produce, and a whole session collects nothing. Warning about that after
+    // the fact was treating the symptom; the INI has had the answer all along,
+    // so take it when the caller has not chosen a value of their own.
+    let mut filters = filters;
+    if (filters.min_clt - AutoTuneFilters::default().min_clt).abs() < f64::EPSILON {
+        if let Some(declared) = def
+            .ve_analyze
+            .as_ref()
+            .and_then(|c| c.filters.iter().find(|f| f.name == "minCltFilter"))
+        {
+            tracing::info!(
+                was = filters.min_clt,
+                now = declared.default_value,
+                "min_clt left at its default; taking the value this INI declares"
+            );
+            filters.min_clt = declared.default_value;
+        }
+    }
+
     let (mut reference_tables, target_afr_source) = resolve_reference_tables(
         def,
         cache,
@@ -360,10 +389,41 @@ pub(crate) fn read_axis_bins(
 /// The parser already turns that into [`TableRole::AfrTarget`], so the answer
 /// is sitting in the definition — it was simply never consulted here.
 fn ini_declared_afr_target(def: &EcuDefinition) -> Option<&str> {
-    def.tables
+    // `[VeAnalyze]` names the primary target outright, so take it. Scanning for
+    // the role is a fallback, and a poor primary: `infer_table_roles` stamps
+    // `AfrTarget` on every entry of `lambdaTargetTables` and on the WUE target
+    // too, and `def.tables` is a `HashMap`, whose iteration order is
+    // unspecified and varies between runs of the same binary. On this car that
+    // means `afrTable1Tbl` and `afrTSCustom` both carry the role, so a scan can
+    // silently tune against a custom table one launch and the real one the
+    // next, with nothing on screen to distinguish the two sessions.
+    if let Some(cfg) = def.ve_analyze.as_ref() {
+        let name = cfg.target_table_name.trim();
+        if !name.is_empty() && def.get_table_by_name_or_map(name).is_some() {
+            return Some(name);
+        }
+    }
+
+    // No `[VeAnalyze]`: fall back to the role, but deterministically. Sorting
+    // by name is arbitrary in meaning yet stable in effect, which is the point
+    // - two runs must agree even when neither can be sure it is right.
+    let mut candidates: Vec<&str> = def
+        .tables
         .values()
-        .find(|t| t.role == TableRole::AfrTarget)
+        .filter(|t| t.role == TableRole::AfrTarget)
         .map(|t| t.name.as_str())
+        .collect();
+    candidates.sort_unstable();
+    if candidates.len() > 1 {
+        tracing::warn!(
+            ?candidates,
+            chosen = candidates[0],
+            "several tables claim the AFR-target role and the INI names no \
+             primary; picking the first by name so the choice is at least the \
+             same every run"
+        );
+    }
+    candidates.first().copied()
 }
 
 /// Resolve the per-cell Target AFR and lambda-delay reference tables for an
@@ -393,7 +453,7 @@ fn ini_declared_afr_target(def: &EcuDefinition) -> Option<&str> {
 /// fallback, because a flat target is a documented mode ("blank = use Target
 /// AFR setting"). `target_afr_source` records which of the three applied so the
 /// caller can say so out loud instead of silently substituting stoich.
-fn resolve_reference_tables(
+pub(crate) fn resolve_reference_tables(
     def: &EcuDefinition,
     cache: Option<&TuneCache>,
     ve_table_name: &str,
@@ -559,7 +619,7 @@ fn resolve_named_table(
 
 /// Read the Z (data) values of a table constant and reshape into row-major
 /// `[row][col]`. Returns `None` on any read failure or zero-size table.
-fn read_table_z_values(
+pub(crate) fn read_table_z_values(
     def: &EcuDefinition,
     cache: Option<&TuneCache>,
     map_name: &str,
@@ -877,6 +937,63 @@ mod target_afr_resolution_tests {
         let cache = cache_with_rich_targets(&def);
         let z = read_table_z_values(&def, Some(&cache), "afrTable", 2, 2).expect("full page reads");
         assert_eq!(z, vec![vec![13.0, 13.0], vec![13.0, 13.0]]);
+    }
+
+    /// `infer_table_roles` stamps AfrTarget on several tables, and `def.tables`
+    /// is a HashMap. Without a deterministic rule the session can tune against
+    /// a different table each launch, silently.
+    #[test]
+    fn several_role_claimants_resolve_the_same_way_every_time() {
+        let mut def = def_with_afr_table("afrTable1Tbl", TableRole::AfrTarget);
+        // A second claimant, as a real Speeduino INI produces.
+        def.tables.insert(
+            "afrTSCustom".to_string(),
+            TableDefinition {
+                name: "afrTSCustom".to_string(),
+                map: "afrTable".to_string(),
+                x_size: 2,
+                y_size: 2,
+                role: TableRole::AfrTarget,
+                ..Default::default()
+            },
+        );
+        // Repeat: a HashMap scan would eventually disagree with itself.
+        let picks: std::collections::HashSet<_> = (0..50)
+            .map(|_| ini_declared_afr_target(&def).unwrap().to_string())
+            .collect();
+        assert_eq!(
+            picks.len(),
+            1,
+            "must pick the same table every time, got {picks:?}"
+        );
+    }
+
+    /// When the INI names a primary, that outranks any role scan.
+    #[test]
+    fn the_ve_analyze_declaration_outranks_the_role_scan() {
+        use libretune_core::ini::VeAnalyzeConfig;
+        let mut def = def_with_afr_table("afrTSCustom", TableRole::AfrTarget);
+        def.tables.insert(
+            "afrTable1Tbl".to_string(),
+            TableDefinition {
+                name: "afrTable1Tbl".to_string(),
+                map: "afrTable".to_string(),
+                x_size: 2,
+                y_size: 2,
+                role: TableRole::AfrTarget,
+                ..Default::default()
+            },
+        );
+        def.ve_analyze = Some(VeAnalyzeConfig {
+            ve_table_name: "veTable1Tbl".to_string(),
+            target_table_name: "afrTable1Tbl".to_string(),
+            ..Default::default()
+        });
+        assert_eq!(
+            ini_declared_afr_target(&def),
+            Some("afrTable1Tbl"),
+            "the INI's own [VeAnalyze] naming must win"
+        );
     }
 
     #[test]
