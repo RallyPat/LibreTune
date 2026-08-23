@@ -89,10 +89,49 @@ impl Default for AutoTuneSettings {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AutoTuneAuthorityLimits {
+    /// Largest single-update change, in **absolute table units** (not percent).
     #[serde(alias = "max_change_per_cell")]
     pub max_cell_value_change: f64,
+    /// Largest single-update change as a percentage of the cell's value at the
+    /// start of this session.
     #[serde(alias = "max_total_change")]
     pub max_cell_percentage_change: f64,
+    /// Absolute floor for any cell value.
+    ///
+    /// Both clamps above are relative to `beginning_value`, which is re-anchored
+    /// to the live table at the first hit of every session (see
+    /// `add_data_point`). That makes them per-session allowances: three sessions
+    /// of "+20% max" compound to +73%, with nothing to stop the fourth. These
+    /// two are the only limits expressed against the table itself rather than
+    /// against wherever the last session happened to finish, so they are what
+    /// actually bounds a runaway.
+    ///
+    /// The UI has always sent them. Nothing received them: the struct had no
+    /// such fields and `#[serde(default)]` drops unknown keys without a word,
+    /// so a tuner who set "min 0 / max 200" got no clamp at all.
+    #[serde(alias = "min_value")]
+    pub min_cell_value: f64,
+    /// Absolute ceiling for any cell value. See [`Self::min_cell_value`].
+    #[serde(alias = "max_value")]
+    pub max_cell_value: f64,
+}
+
+impl AutoTuneAuthorityLimits {
+    /// Clamp a proposed cell value to the absolute rails.
+    ///
+    /// Shared rather than inlined because the authority policy has two
+    /// implementations — [`AutoTuneState::apply_authority_limits`] for a live
+    /// VE Analyze session and `agent::safety::clamp_table_edit` for agent-driven
+    /// edits. Both enforce the same two relative limits; adding the rails to
+    /// only one would leave the other able to write past them.
+    ///
+    /// A reversed pair (min above max) is ordered rather than trusted, because
+    /// `f64::clamp` panics when `lo > hi` and this runs per accepted sample.
+    pub fn clamp_to_rails(&self, value: f64) -> f64 {
+        let lo = self.min_cell_value.min(self.max_cell_value);
+        let hi = self.min_cell_value.max(self.max_cell_value);
+        value.clamp(lo, hi)
+    }
 }
 
 impl Default for AutoTuneAuthorityLimits {
@@ -100,6 +139,12 @@ impl Default for AutoTuneAuthorityLimits {
         Self {
             max_cell_value_change: 10.0,
             max_cell_percentage_change: 20.0,
+            // The full range a Speeduino VE byte can represent. A default rail
+            // should catch a runaway without ever trimming a legitimate tune —
+            // a big turbo VE can pass 200, so defaulting there would silently
+            // cap real tuning. Operators who want a tighter rail set one.
+            min_cell_value: 0.0,
+            max_cell_value: 255.0,
         }
     }
 }
@@ -194,6 +239,32 @@ impl Default for AutoTuneState {
         }
     }
 }
+
+/// Normalise a mixture reading to AFR, accepting either AFR or lambda.
+///
+/// Lambda runs about 0.7-1.2 and AFR about 10-20, so the two ranges do not
+/// overlap and a threshold of 2.0 separates them safely.
+///
+/// This exists because the measured and target sides used to disagree. The
+/// realtime path normalised what the sensor reported, while `resolve_target_afr`
+/// took the target table's value as-is — so a lambda target table (declared by
+/// the INI on any `#if LAMBDA` project) supplied 0.88 to be divided into a
+/// measured 13.0. That is a correction factor of 14.8 on every cell of every
+/// pass, pinned to whatever the authority ceiling allows and re-anchored higher
+/// next session. Both sides call this now so they cannot drift apart again.
+pub fn normalise_to_afr(value: f64) -> f64 {
+    if value < LAMBDA_AFR_THRESHOLD {
+        value * STOICH_AFR
+    } else {
+        value
+    }
+}
+
+/// Below this a mixture reading is lambda, above it AFR.
+pub const LAMBDA_AFR_THRESHOLD: f64 = 2.0;
+
+/// Stoichiometric AFR for petrol, the lambda -> AFR scale factor.
+pub const STOICH_AFR: f64 = 14.7;
 
 /// Wideband readings outside this range are the sensor at a stop rather than
 /// a mixture: no running engine sustains them, and a railed reading carries no
@@ -294,7 +365,10 @@ impl AutoTuneState {
             .get(cell_y)
             .and_then(|row| row.get(cell_x))
         {
-            Some(&v) if v > 0.1 => v,
+            // Normalised, because the INI may legitimately declare a lambda
+            // table as the target (`#if LAMBDA`) while the measured value
+            // arriving here has already been converted to AFR.
+            Some(&v) if v > 0.1 => normalise_to_afr(v),
             _ => fallback,
         }
     }
@@ -737,7 +811,11 @@ impl AutoTuneState {
         let max_pct_delta = beginning_value * (authority.max_cell_percentage_change / 100.0);
         let final_delta = clamped_delta.clamp(-max_pct_delta, max_pct_delta);
 
-        beginning_value + final_delta
+        // Absolute rails last, so they bound the result no matter what the two
+        // relative clamps allowed. Both of those are measured from
+        // `beginning_value`, which each session re-reads from the live table —
+        // so on their own they permit unlimited drift one session at a time.
+        authority.clamp_to_rails(beginning_value + final_delta)
     }
 
     fn find_bin_index(&self, value: f64, bins: &[f64]) -> Option<usize> {
@@ -1485,5 +1563,100 @@ mod tests {
         assert_eq!(r.cell_x, 2, "rpm 3000 should map to X bin 2");
         assert_eq!(r.cell_y, 3, "75%% throttle should map to Y bin 3");
         assert!(r.hit_count >= 1);
+    }
+}
+
+#[cfg(test)]
+mod authority_rail_tests {
+    use super::*;
+
+    fn limits(max_val: f64, max_pct: f64, lo: f64, hi: f64) -> AutoTuneAuthorityLimits {
+        AutoTuneAuthorityLimits {
+            max_cell_value_change: max_val,
+            max_cell_percentage_change: max_pct,
+            min_cell_value: lo,
+            max_cell_value: hi,
+        }
+    }
+
+    /// The UI has always sent `min_value`/`max_value`. Before these fields
+    /// existed, serde dropped them and the rails did nothing at all.
+    #[test]
+    fn the_ui_payload_field_names_actually_bind() {
+        let json = r#"{
+            "max_change_per_cell": 15.0,
+            "max_total_change": 30.0,
+            "min_value": 40.0,
+            "max_value": 120.0
+        }"#;
+        let a: AutoTuneAuthorityLimits = serde_json::from_str(json).expect("UI payload parses");
+        assert_eq!(a.max_cell_value_change, 15.0);
+        assert_eq!(a.max_cell_percentage_change, 30.0);
+        assert_eq!(a.min_cell_value, 40.0, "min_value must reach the backend");
+        assert_eq!(a.max_cell_value, 120.0, "max_value must reach the backend");
+    }
+
+    #[test]
+    fn the_ceiling_bounds_a_single_update() {
+        // Relative clamps would allow 100 -> 120; the rail stops it at 110.
+        let a = limits(50.0, 50.0, 0.0, 110.0);
+        assert_eq!(
+            AutoTuneState::apply_authority_limits(100.0, 120.0, &a),
+            110.0
+        );
+    }
+
+    #[test]
+    fn the_floor_bounds_a_single_update() {
+        let a = limits(50.0, 50.0, 80.0, 255.0);
+        assert_eq!(AutoTuneState::apply_authority_limits(100.0, 60.0, &a), 80.0);
+    }
+
+    /// The real failure the rails exist for: each session re-anchors
+    /// `beginning_value` to the live table, so a percentage allowance renews
+    /// itself indefinitely. Without an absolute rail this compounds forever.
+    #[test]
+    fn repeated_sessions_cannot_compound_past_the_rail() {
+        let unrailed = limits(1000.0, 20.0, 0.0, f64::INFINITY);
+        let mut ve = 100.0;
+        for _ in 0..10 {
+            // Each session asks for far more than allowed and is clamped to
+            // +20% of wherever the last one finished.
+            ve = AutoTuneState::apply_authority_limits(ve, ve * 10.0, &unrailed);
+        }
+        assert!(
+            ve > 600.0,
+            "without a rail, ten sessions of +20% compound unbounded; got {ve}"
+        );
+
+        let railed = limits(1000.0, 20.0, 0.0, 130.0);
+        let mut ve = 100.0;
+        for _ in 0..10 {
+            ve = AutoTuneState::apply_authority_limits(ve, ve * 10.0, &railed);
+        }
+        assert_eq!(ve, 130.0, "the rail must stop the compounding");
+    }
+
+    #[test]
+    fn a_reversed_min_max_pair_does_not_panic() {
+        // f64::clamp panics when lo > hi. A misconfigured pair should be inert,
+        // not fatal, in a loop that runs per accepted sample on a live engine.
+        let a = limits(50.0, 50.0, 200.0, 50.0);
+        let out = AutoTuneState::apply_authority_limits(100.0, 120.0, &a);
+        assert!(out.is_finite());
+        assert!((50.0..=200.0).contains(&out));
+    }
+
+    #[test]
+    fn the_default_rail_never_trims_a_legitimate_tune() {
+        // A big-turbo VE can pass 200; a default that clipped there would
+        // silently cap real tuning rather than catch a runaway.
+        let a = AutoTuneAuthorityLimits::default();
+        assert_eq!(a.min_cell_value, 0.0);
+        assert!(
+            a.max_cell_value >= 255.0,
+            "default ceiling must cover the full byte range, got {}",
+            a.max_cell_value
+        );
     }
 }

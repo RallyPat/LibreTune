@@ -8,7 +8,7 @@ use crate::state::{
 use libretune_core::autotune::{
     AutoTuneAuthorityLimits, AutoTuneFilters, AutoTuneReferenceTables, AutoTuneSettings,
 };
-use libretune_core::ini::{Constant, EcuDefinition};
+use libretune_core::ini::{Constant, EcuDefinition, TableRole};
 use libretune_core::tune::TuneCache;
 
 #[tauri::command]
@@ -168,13 +168,30 @@ pub async fn start_autotune(
     // best-effort auto-discovery from the INI by common table/map names. Any
     // lookup failure falls back to an empty table, which AutoTune handles by
     // reverting to settings.target_afr and the RPM-based delay curve.
-    let mut reference_tables = resolve_reference_tables(
+    let (mut reference_tables, target_afr_source) = resolve_reference_tables(
         def,
         cache,
         &table_name,
         target_afr_table_name.as_deref(),
         lambda_delay_table_name.as_deref(),
     );
+
+    // Say which target the corrections are actually chasing. A flat target is a
+    // legitimate mode, but silently substituting one for a table the tuner
+    // believed was auto-discovered is how a session ends up leaning every
+    // full-load cell to stoich.
+    match &target_afr_source {
+        TargetAfrSource::FlatSetting => tracing::warn!(
+            flat_target_afr = settings.target_afr,
+            "{}",
+            target_afr_source.describe(settings.target_afr)
+        ),
+        _ => tracing::info!(
+            table = target_afr_source.table_name().unwrap_or("-"),
+            "{}",
+            target_afr_source.describe(settings.target_afr)
+        ),
+    }
 
     // Flow-scaled lambda-delay table: when requested and no explicit per-cell
     // delay table was found (the Speeduino case — no lambdaDelay in the INI),
@@ -329,37 +346,124 @@ pub(crate) fn read_axis_bins(
     Ok(fallback_bins(axis_hint, size))
 }
 
+/// The AFR/lambda target table the INI itself declares, if any.
+///
+/// Speeduino states the pairing outright rather than leaving it to be guessed:
+///
+/// ```text
+/// #if LAMBDA
+///   veAnalyzeMap = veTable1Tbl, lambdaTable1Tbl, lambda, egoCorrection
+/// #else
+///   veAnalyzeMap = veTable1Tbl, afrTable1Tbl,    afr,    egoCorrection
+/// ```
+///
+/// The parser already turns that into [`TableRole::AfrTarget`], so the answer
+/// is sitting in the definition — it was simply never consulted here.
+fn ini_declared_afr_target(def: &EcuDefinition) -> Option<&str> {
+    def.tables
+        .values()
+        .find(|t| t.role == TableRole::AfrTarget)
+        .map(|t| t.name.as_str())
+}
+
 /// Resolve the per-cell Target AFR and lambda-delay reference tables for an
 /// AutoTune session (bug #14).
 ///
-/// Lookup order for each table:
+/// Lookup order for the AFR target:
 /// 1. The explicit name passed by the caller (UI override).
-/// 2. Best-effort auto-discovery from the INI by common table/map names.
+/// 2. The table the INI declares as [`TableRole::AfrTarget`].
+/// 3. Best-effort name matching, for INIs that declare nothing.
 ///
-/// Any failure returns an empty table for that slot, which AutoTune handles by
-/// falling back to `settings.target_afr` (for AFR) or the RPM-based delay curve
-/// (for lambda delay). This never fails the whole `start_autotune` call.
+/// Step 2 is why this is not merely tidier than guessing. The candidate list
+/// held `afrTable1` while every Speeduino names the table **`afrTable1Tbl`**,
+/// so auto-discovery missed on every Speeduino project and fell through to a
+/// flat `settings.target_afr` of 14.7 — stoich at wide-open throttle, where the
+/// car's own table asked for 12.7. On a real drive that produced 154
+/// recommendations, 117 of them removing fuel, the worst cutting VE 91 -> 78 at
+/// full load. Nothing surfaced the substitution: the UI offers "Auto-discover"
+/// and reports success either way.
+///
+/// The candidate list also spanned both kinds of table (`afrTable` *and*
+/// `lambdaTable`), so on a lambda INI it could match a target of ~0.88 against
+/// a measured AFR of ~13. `lambdaTable` is gone from it: the role lookup picks
+/// the lambda table correctly on a lambda INI, where the measured channel is
+/// lambda too, so the pair stays consistent.
+///
+/// A failure still yields an empty table and the `settings.target_afr`
+/// fallback, because a flat target is a documented mode ("blank = use Target
+/// AFR setting"). `target_afr_source` records which of the three applied so the
+/// caller can say so out loud instead of silently substituting stoich.
 fn resolve_reference_tables(
     def: &EcuDefinition,
     cache: Option<&TuneCache>,
     ve_table_name: &str,
     target_afr_table_name: Option<&str>,
     lambda_delay_table_name: Option<&str>,
-) -> AutoTuneReferenceTables {
+) -> (AutoTuneReferenceTables, TargetAfrSource) {
+    let declared = ini_declared_afr_target(def);
+    let requested = target_afr_table_name.or(declared);
+
     let target_afr_table = resolve_named_table(
         def,
         cache,
-        target_afr_table_name,
+        requested,
         &[
             "afrTable",
             "afr_target",
             "afrTarget",
             "targetAfr",
             "afrTable1",
-            "lambdaTable",
         ],
     )
     .unwrap_or_default();
+
+    // `resolve_target_afr` indexes the target with the VE table's own (x, y),
+    // so the two must be the same shape. Nothing checked that. The AFR target
+    // has independent axes by design — Speeduino gives it `afrRpmBins`/
+    // `afrLoadBins` against the VE table's `veRpmBins`/`veLoadBins` — so a
+    // smaller target simply returns `None` for the rows and columns past its
+    // end, and those cells fall back to the flat target with no symptom. Once
+    // again that is the top-load, high-rpm corner.
+    //
+    // Equal dimensions are necessary but not sufficient: two 16x16 tables on
+    // different bin values line up index-for-index while meaning different
+    // things. Comparing bins would need them plumbed in here; refusing a shape
+    // mismatch removes the case that silently half-applies, which is the one
+    // that produced a wrong answer while looking resolved.
+    let ve_shape = def
+        .get_table_by_name_or_map(ve_table_name)
+        .map(|t| (t.y_size, t.x_size));
+    let target_afr_table = match (&ve_shape, target_afr_table.is_empty()) {
+        (Some((rows, cols)), false) => {
+            let got = (
+                target_afr_table.len(),
+                target_afr_table.first().map(|r| r.len()).unwrap_or(0),
+            );
+            if got == (*rows, *cols) {
+                target_afr_table
+            } else {
+                tracing::warn!(
+                    ve_table = ve_table_name,
+                    expected = ?(*rows, *cols),
+                    got = ?got,
+                    "AFR target table is a different shape to the VE table; \
+                     ignoring it rather than applying it to part of the map"
+                );
+                Vec::new()
+            }
+        }
+        _ => target_afr_table,
+    };
+
+    let target_afr_source = if target_afr_table.is_empty() {
+        TargetAfrSource::FlatSetting
+    } else if target_afr_table_name.is_some() {
+        TargetAfrSource::Explicit(requested.unwrap_or_default().to_string())
+    } else if declared.is_some() {
+        TargetAfrSource::IniDeclared(requested.unwrap_or_default().to_string())
+    } else {
+        TargetAfrSource::NameMatch
+    };
 
     // Lambda-delay tables are uncommon; only attempt when named explicitly or
     // via the most common Speeduino/rusEFI identifier.
@@ -375,9 +479,52 @@ fn resolve_reference_tables(
     // INI cross-referencing (e.g. walking the VE table's own reference field).
     let _ = ve_table_name;
 
-    AutoTuneReferenceTables {
-        lambda_delay_table,
-        target_afr_table,
+    (
+        AutoTuneReferenceTables {
+            lambda_delay_table,
+            target_afr_table,
+        },
+        target_afr_source,
+    )
+}
+
+/// Where a session's per-cell AFR target came from.
+///
+/// Exists so the answer can be shown to the user. The dangerous case is
+/// [`Self::FlatSetting`]: it means every cell is being tuned to one number,
+/// which is only ever right if that is what the tuner intended.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum TargetAfrSource {
+    /// Caller named the table explicitly.
+    Explicit(String),
+    /// Taken from the INI's own `TableRole::AfrTarget` declaration.
+    IniDeclared(String),
+    /// Matched by name from the candidate list (INI declared nothing).
+    NameMatch,
+    /// No table resolved — every cell uses the flat `settings.target_afr`.
+    FlatSetting,
+}
+
+impl TargetAfrSource {
+    /// Table name, when a table was actually resolved.
+    pub(crate) fn table_name(&self) -> Option<&str> {
+        match self {
+            Self::Explicit(n) | Self::IniDeclared(n) => Some(n.as_str()),
+            Self::NameMatch | Self::FlatSetting => None,
+        }
+    }
+
+    /// A line fit to show a tuner, naming what the corrections are chasing.
+    pub(crate) fn describe(&self, flat_target: f64) -> String {
+        match self {
+            Self::Explicit(n) => format!("per-cell AFR target from '{n}' (chosen)"),
+            Self::IniDeclared(n) => format!("per-cell AFR target from '{n}' (declared by the INI)"),
+            Self::NameMatch => "per-cell AFR target from a name-matched table".to_string(),
+            Self::FlatSetting => format!(
+                "NO AFR target table resolved - every cell targets a flat {flat_target}. \
+                 Set 'Target AFR Table' if the engine runs richer under load."
+            ),
+        }
     }
 }
 
@@ -431,22 +578,322 @@ fn read_table_z_values(
     }
     let mut offset = constant.offset as usize;
 
+    // A short or undecodable page must fail, not pad. Padding produced a table
+    // that reported as resolved while its tail was zeros — and because
+    // `resolve_target_afr` ignores values <= 0.1, exactly those cells silently
+    // reverted to the flat target. The tail of a row-major table is the
+    // high-load, high-rpm corner, so the cells that got the fabricated target
+    // were the ones where being wrong matters most. `None` costs the caller the
+    // whole table, which is the honest outcome: a partially-read table cannot
+    // be told apart from a fully-read one by anything downstream.
     let mut out = Vec::with_capacity(rows);
     for _ in 0..rows {
         let mut row = Vec::with_capacity(cols);
         for _ in 0..cols {
-            if offset + elem_size <= page_data.len() {
-                if let Ok(raw) = read_raw_value(&page_data[offset..], &constant.data_type) {
-                    row.push(constant.raw_to_display(raw));
-                } else {
-                    row.push(0.0);
-                }
-                offset += elem_size;
-            } else {
-                row.push(0.0);
+            if offset + elem_size > page_data.len() {
+                tracing::warn!(
+                    map = map_name,
+                    page = constant.page,
+                    need = offset + elem_size,
+                    have = page_data.len(),
+                    "table read ran past the end of the page; refusing a partial table"
+                );
+                return None;
             }
+            let raw = match read_raw_value(&page_data[offset..], &constant.data_type) {
+                Ok(raw) => raw,
+                Err(e) => {
+                    tracing::warn!(
+                        map = map_name,
+                        offset,
+                        error = %e,
+                        "table value failed to decode; refusing a partial table"
+                    );
+                    return None;
+                }
+            };
+            row.push(constant.raw_to_display(raw));
+            offset += elem_size;
         }
         out.push(row);
     }
     Some(out)
+}
+
+#[cfg(test)]
+mod target_afr_resolution_tests {
+    use super::*;
+    use libretune_core::ini::{DataType, TableDefinition};
+    use libretune_core::tune::TuneCache;
+
+    /// A definition holding one 2x2 AFR-target table, optionally declaring the
+    /// `AfrTarget` role the way a real Speeduino INI does.
+    fn def_with_afr_table(table_name: &str, role: TableRole) -> EcuDefinition {
+        let mut def = EcuDefinition {
+            page_sizes: vec![16],
+            n_pages: 1,
+            ..Default::default()
+        };
+
+        def.constants.insert(
+            "afrTable".to_string(),
+            Constant {
+                name: "afrTable".to_string(),
+                page: 0,
+                offset: 0,
+                data_type: DataType::U08,
+                scale: 0.1,
+                translate: 0.0,
+                ..Default::default()
+            },
+        );
+        def.tables.insert(
+            table_name.to_string(),
+            TableDefinition {
+                name: table_name.to_string(),
+                map: "afrTable".to_string(),
+                x_size: 2,
+                y_size: 2,
+                role,
+                ..Default::default()
+            },
+        );
+        def
+    }
+
+    /// Page bytes for a 2x2 table of 13.0 AFR at scale 0.1 (raw 130).
+    fn cache_with_rich_targets(def: &EcuDefinition) -> TuneCache {
+        let mut cache = TuneCache::from_definition(def);
+        cache.load_page(0, vec![130u8; 16]);
+        cache
+    }
+
+    #[test]
+    fn ini_declaration_is_consulted_for_the_real_speeduino_table_name() {
+        // `afrTable1Tbl` is what every Speeduino calls it, and it was NOT in the
+        // old candidate list ("afrTable1" was). Before the fix this resolved to
+        // nothing and the session silently targeted a flat 14.7.
+        let def = def_with_afr_table("afrTable1Tbl", TableRole::AfrTarget);
+        assert_eq!(ini_declared_afr_target(&def), Some("afrTable1Tbl"));
+
+        let cache = cache_with_rich_targets(&def);
+        let (tables, source) =
+            resolve_reference_tables(&def, Some(&cache), "veTable1Tbl", None, None);
+
+        assert_eq!(
+            source,
+            TargetAfrSource::IniDeclared("afrTable1Tbl".to_string()),
+            "auto-discovery must take the table the INI declares"
+        );
+        // The values must actually arrive, not just the name: a resolved-but-empty
+        // table falls through to the flat target just as invisibly.
+        assert_eq!(
+            tables.target_afr_table,
+            vec![vec![13.0, 13.0], vec![13.0, 13.0]]
+        );
+    }
+
+    #[test]
+    fn an_undeclared_ini_still_falls_back_to_name_matching() {
+        // `afrTable` is a candidate name, so this resolves even with no role.
+        let def = def_with_afr_table("afrTable", TableRole::Other);
+        assert_eq!(ini_declared_afr_target(&def), None);
+
+        let cache = cache_with_rich_targets(&def);
+        let (tables, source) =
+            resolve_reference_tables(&def, Some(&cache), "veTable1Tbl", None, None);
+        assert_eq!(source, TargetAfrSource::NameMatch);
+        assert!(!tables.target_afr_table.is_empty());
+    }
+
+    #[test]
+    fn a_lambda_table_is_never_name_matched_as_an_afr_target() {
+        // The old candidate list ended in "lambdaTable", so an undeclared lambda
+        // INI could match a target of ~0.88 against a measured AFR of ~13.
+        let def = def_with_afr_table("lambdaTable", TableRole::Other);
+        let cache = cache_with_rich_targets(&def);
+        let (tables, source) =
+            resolve_reference_tables(&def, Some(&cache), "veTable1Tbl", None, None);
+
+        assert_eq!(source, TargetAfrSource::FlatSetting);
+        assert!(
+            tables.target_afr_table.is_empty(),
+            "a lambda table must not be picked up as an AFR target by name"
+        );
+    }
+
+    #[test]
+    fn a_declared_lambda_target_is_still_used_when_the_ini_says_so() {
+        // On a real lambda INI the role points at the lambda table. Resolution
+        // must accept it - but see the unit test below: the VALUES then need
+        // normalising, because the measured side reports AFR either way. An
+        // earlier version of this test asserted only that resolution happened
+        // and so would have passed while the units were mismatched.
+        let def = def_with_afr_table("lambdaTable1Tbl", TableRole::AfrTarget);
+        let cache = cache_with_rich_targets(&def);
+        let (tables, source) =
+            resolve_reference_tables(&def, Some(&cache), "veTable1Tbl", None, None);
+        assert_eq!(
+            source,
+            TargetAfrSource::IniDeclared("lambdaTable1Tbl".to_string())
+        );
+        assert!(!tables.target_afr_table.is_empty());
+    }
+
+    #[test]
+    fn a_lambda_target_is_normalised_before_it_reaches_the_correction() {
+        // The whole point: a lambda table holds ~0.88 while the measured value
+        // arriving at the correction has already been converted to AFR (~13.0).
+        // Divided un-normalised that is a 14.8x correction on every cell, every
+        // pass - the authority ceiling, forever, re-anchored higher each session.
+        use libretune_core::autotune::normalise_to_afr;
+
+        let lambda_target = 0.88_f64;
+        let normalised = normalise_to_afr(lambda_target);
+        assert!(
+            (normalised - 12.936).abs() < 1e-6,
+            "0.88 lambda must become {} AFR, got {normalised}",
+            0.88 * 14.7
+        );
+
+        // An AFR target must pass through untouched.
+        assert_eq!(normalise_to_afr(12.7), 12.7);
+        assert_eq!(normalise_to_afr(14.7), 14.7);
+
+        // And the correction ratio must be sane rather than enormous.
+        let measured = 13.0_f64;
+        let ratio = measured / normalised;
+        assert!(
+            (0.9..1.1).contains(&ratio),
+            "a lambda target of 0.88 against a measured 13.0 AFR should be a              near-unity correction, got {ratio}x"
+        );
+    }
+
+    #[test]
+    fn an_explicit_name_outranks_the_ini_declaration() {
+        let def = def_with_afr_table("afrTable1Tbl", TableRole::AfrTarget);
+        let cache = cache_with_rich_targets(&def);
+        let (_, source) = resolve_reference_tables(
+            &def,
+            Some(&cache),
+            "veTable1Tbl",
+            Some("afrTable1Tbl"),
+            None,
+        );
+        assert_eq!(
+            source,
+            TargetAfrSource::Explicit("afrTable1Tbl".to_string())
+        );
+    }
+
+    /// Give the definition a VE table so `resolve_reference_tables` can compare
+    /// shapes. `rows`/`cols` are the VE table's, which the target must match.
+    fn with_ve_table(mut def: EcuDefinition, rows: usize, cols: usize) -> EcuDefinition {
+        def.constants.insert(
+            "veTable".to_string(),
+            Constant {
+                name: "veTable".to_string(),
+                page: 0,
+                offset: 0,
+                data_type: DataType::U08,
+                scale: 1.0,
+                translate: 0.0,
+                ..Default::default()
+            },
+        );
+        def.tables.insert(
+            "veTable1Tbl".to_string(),
+            TableDefinition {
+                name: "veTable1Tbl".to_string(),
+                map: "veTable".to_string(),
+                x_size: cols,
+                y_size: rows,
+                role: TableRole::Ve,
+                ..Default::default()
+            },
+        );
+        def
+    }
+
+    #[test]
+    fn a_target_table_of_a_different_shape_is_refused() {
+        // `resolve_target_afr` indexes the target with the VE table's own
+        // (x, y). A smaller target returns None for the rows and columns past
+        // its end - the high-load, high-rpm corner - and those cells silently
+        // revert to the flat target. Half-applying is worse than not applying.
+        let def = def_with_afr_table("afrTable1Tbl", TableRole::AfrTarget);
+        let def = with_ve_table(def, 4, 4); // VE is 4x4, the target is 2x2
+        let cache = cache_with_rich_targets(&def);
+
+        let (tables, source) =
+            resolve_reference_tables(&def, Some(&cache), "veTable1Tbl", None, None);
+        assert!(
+            tables.target_afr_table.is_empty(),
+            "a 2x2 target must not be applied to a 4x4 VE table"
+        );
+        assert_eq!(source, TargetAfrSource::FlatSetting, "and it must say so");
+    }
+
+    #[test]
+    fn a_matching_shape_is_accepted() {
+        let def = def_with_afr_table("afrTable1Tbl", TableRole::AfrTarget);
+        let def = with_ve_table(def, 2, 2); // same shape as the target
+        let cache = cache_with_rich_targets(&def);
+
+        let (tables, source) =
+            resolve_reference_tables(&def, Some(&cache), "veTable1Tbl", None, None);
+        assert_eq!(tables.target_afr_table.len(), 2);
+        assert_eq!(
+            source,
+            TargetAfrSource::IniDeclared("afrTable1Tbl".to_string())
+        );
+    }
+
+    #[test]
+    fn a_short_page_yields_no_table_rather_than_zeros() {
+        // Padding a short read with 0.0 produced a table that reported as
+        // resolved with a zero tail; `resolve_target_afr` ignores values <= 0.1,
+        // so exactly those cells fell back to the flat target invisibly.
+        let def = def_with_afr_table("afrTable1Tbl", TableRole::AfrTarget);
+        let mut cache = TuneCache::from_definition(&def);
+        cache.load_page(0, vec![130u8; 2]); // 2 bytes for a 2x2 table
+
+        let z = read_table_z_values(&def, Some(&cache), "afrTable", 2, 2);
+        assert!(
+            z.is_none(),
+            "a partial read must fail, not return a zero-padded table: {z:?}"
+        );
+
+        let (tables, source) =
+            resolve_reference_tables(&def, Some(&cache), "veTable1Tbl", None, None);
+        assert!(tables.target_afr_table.is_empty());
+        assert_eq!(source, TargetAfrSource::FlatSetting);
+    }
+
+    #[test]
+    fn a_full_page_still_reads_every_cell() {
+        // The padding fix must not make a healthy read fail.
+        let def = def_with_afr_table("afrTable1Tbl", TableRole::AfrTarget);
+        let cache = cache_with_rich_targets(&def);
+        let z = read_table_z_values(&def, Some(&cache), "afrTable", 2, 2).expect("full page reads");
+        assert_eq!(z, vec![vec![13.0, 13.0], vec![13.0, 13.0]]);
+    }
+
+    #[test]
+    fn an_unresolved_target_says_so_loudly() {
+        // The failure that bit a real car: no table, every cell at 14.7, and
+        // nothing on screen to say so. The message must name the number.
+        let def = EcuDefinition::default();
+        let (tables, source) = resolve_reference_tables(&def, None, "veTable1Tbl", None, None);
+        assert_eq!(source, TargetAfrSource::FlatSetting);
+        assert!(tables.target_afr_table.is_empty());
+
+        let msg = source.describe(14.7);
+        assert!(msg.contains("14.7"), "must name the flat target: {msg}");
+        assert!(
+            msg.contains("NO AFR target table"),
+            "must be unmistakable, got: {msg}"
+        );
+        assert_eq!(source.table_name(), None);
+    }
 }

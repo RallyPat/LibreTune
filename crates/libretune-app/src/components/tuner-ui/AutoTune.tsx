@@ -101,13 +101,22 @@ interface AutoTuneFilters {
  * Limits on how much AutoTune can modify cell values.
  */
 interface AutoTuneAuthorityLimits {
-  /** Maximum change per update per cell (percentage) */
+  /**
+   * Maximum change per update per cell, in ABSOLUTE table units (VE points).
+   * Not a percentage - the backend clamps the raw delta against this value.
+   * It was labelled "(%)" here and in the panel for as long as it has existed,
+   * so anyone who typed 15 meaning 15% was authorising +/-15 VE.
+   */
   max_change_per_cell: number;
-  /** Maximum total change from original value (percentage) */
+  /** Maximum change per update as a percentage of the cell's session-start value. */
   max_total_change: number;
-  /** Absolute minimum allowed cell value */
+  /**
+   * Absolute floor for any cell value. The two limits above are both measured
+   * from the cell's value at session start, so they reset every session and
+   * cannot bound drift across several; these rails can.
+   */
   min_value: number;
-  /** Absolute maximum allowed cell value */
+  /** Absolute ceiling for any cell value. See `min_value`. */
   max_value: number;
 }
 
@@ -1179,7 +1188,7 @@ export function AutoTune({ tableName: initialTableName = '', onClose, isConnecte
           <div className="autotune-settings-section">
             <h3>Authority Limits</h3>
             <div className="setting-row">
-              <label>Max Change/Cell (%):</label>
+              <label>Max Change/Cell (VE):</label>
               <input
                 type="number"
                 value={authority.max_change_per_cell}
@@ -1187,11 +1196,27 @@ export function AutoTune({ tableName: initialTableName = '', onClose, isConnecte
               />
             </div>
             <div className="setting-row">
-              <label>Max Total Change (%):</label>
+              <label>Max Change/Cell (%):</label>
               <input
                 type="number"
                 value={authority.max_total_change}
                 onChange={(e) => setAuthority({ ...authority, max_total_change: parseFloat(e.target.value) })}
+              />
+            </div>
+            <div className="setting-row">
+              <label>Min Cell Value (VE):</label>
+              <input
+                type="number"
+                value={authority.min_value}
+                onChange={(e) => setAuthority({ ...authority, min_value: parseFloat(e.target.value) })}
+              />
+            </div>
+            <div className="setting-row">
+              <label>Max Cell Value (VE):</label>
+              <input
+                type="number"
+                value={authority.max_value}
+                onChange={(e) => setAuthority({ ...authority, max_value: parseFloat(e.target.value) })}
               />
             </div>
           </div>

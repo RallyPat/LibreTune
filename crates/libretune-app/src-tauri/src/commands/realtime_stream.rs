@@ -280,7 +280,9 @@ pub(crate) async fn feed_autotune_data(
         .or_else(|| data.get("afr1"))
         .or_else(|| data.get("AFRValue"))
         .or_else(|| data.get("lambda1"))
-        .map(|v| if *v < 2.0 { *v * 14.7 } else { *v }) // Convert lambda to AFR
+        // Shared with the target side (`resolve_target_afr`) so a lambda target
+        // table and a lambda sensor reading cannot end up on different scales.
+        .map(|v| libretune_core::autotune::normalise_to_afr(*v))
         .unwrap_or(14.7);
 
     let ve = data
