@@ -258,7 +258,7 @@ pub fn replay(
         .into_iter()
         .map(|(k, v)| (k.to_string(), v))
         .collect();
-    rejections.sort_by(|a, b| b.1.cmp(&a.1));
+    rejections.sort_by_key(|r| std::cmp::Reverse(r.1));
 
     ReplayReport {
         validation: config
@@ -391,8 +391,8 @@ pub fn validate(
             })
             .collect();
 
-        for i in 0..n {
-            if block(i) % FOLDS != fold || !steady_flags[i] {
+        for (i, &is_steady) in steady_flags.iter().enumerate() {
+            if block(i) % FOLDS != fold || !is_steady {
                 continue;
             }
             let (rpm, load, afr) = (log.rpm[i], log.load[i], log.afr[i]);
@@ -442,7 +442,7 @@ pub const VALIDATION_STEADY_MS: f64 = 800.0;
 fn steady_mask(log: &LogChannels) -> Vec<bool> {
     let n = log.len();
     let mut out = vec![false; n];
-    for i in 0..n {
+    for (i, flag) in out.iter_mut().enumerate() {
         let (rpm, load, afr) = (log.rpm[i], log.load[i], log.afr[i]);
         if rpm < 1.0 || !(super::AFR_RAIL_LOW..=super::AFR_RAIL_HIGH).contains(&afr) {
             continue;
@@ -465,7 +465,7 @@ fn steady_mask(log: &LogChannels) -> Vec<bool> {
         }
         // Not reaching back far enough is not evidence of steadiness: it is the
         // start of the log, or the far side of a gap.
-        out[i] = steady && reached_back;
+        *flag = steady && reached_back;
     }
     out
 }
