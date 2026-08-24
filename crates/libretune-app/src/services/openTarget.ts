@@ -102,10 +102,10 @@ export async function openTargetImpl(
     return;
   }
 
-  if (name === "log-analyze") {
-    setTabs([...tabs, { id: "log-analyze", title: title || "Log Analyze", icon: "autotune" }]);
-    setTabContents({ ...tabContents, "log-analyze": { type: "log-analyze" } });
-    setActiveTabId("log-analyze");
+  if (name === "datalog-viewer") {
+    setTabs([...tabs, { id: "datalog-viewer", title: title || "Datalog Viewer", icon: "autotune" }]);
+    setTabContents({ ...tabContents, "datalog-viewer": { type: "datalog-viewer" } });
+    setActiveTabId("datalog-viewer");
     return;
   }
 

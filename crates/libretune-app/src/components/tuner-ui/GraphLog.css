@@ -279,3 +279,25 @@
   color: var(--accent-color, #4f8fe8) !important;
   border-color: var(--accent-color, #4f8fe8) !important;
 }
+
+/* Per-track channel pickers, sitting in the axis gutter their trace is
+   labelled against so it is obvious which dropdown drives which line. */
+.graphlog-track-pick {
+  position: absolute;
+  top: 3px;
+  max-width: 108px;
+  padding: 1px 3px;
+  border: 1px solid;
+  border-radius: 3px;
+  background: var(--graphlog-pane-bg, #141824);
+  font-size: 10px;
+  font-family: inherit;
+  cursor: pointer;
+  opacity: 0.75;
+}
+.graphlog-track-pick:hover,
+.graphlog-track-pick:focus { opacity: 1; }
+
+.graphlog-track-left { left: 4px; }
+/* Clear of the gear button in the top-right corner. */
+.graphlog-track-right { right: 26px; }

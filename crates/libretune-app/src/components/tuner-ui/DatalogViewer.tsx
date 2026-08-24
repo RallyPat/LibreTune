@@ -1,5 +1,5 @@
 /**
- * Log Analyze — tune a VE table from a recorded drive, offline.
+ * Datalog Viewer — tune a VE table from a recorded drive, offline.
  *
  * A live AutoTune session gives you one pass over whatever samples the drive
  * happened to produce, and no way to ask what a different setting would have
@@ -25,7 +25,7 @@ import { open } from '@tauri-apps/plugin-dialog';
 import { FolderOpen, Play, Check, AlertTriangle, Info } from 'lucide-react';
 import { parseLogFile, type LogSample } from '../../utils/parseLogFile';
 import GraphLog, { type GraphSample } from './GraphLog';
-import './LogAnalyze.css';
+import './DatalogViewer.css';
 
 /** Channel name candidates, first match wins. Speeduino/MS naming varies. */
 const CHANNEL_ALIASES: Record<string, string[]> = {
@@ -69,12 +69,12 @@ const WEIGHTINGS = [
   { v: 'cell_centre_only', label: 'Hard — only samples near a cell centre count at all' },
 ];
 
-export interface LogAnalyzeProps {
+export interface DatalogViewerProps {
   tableName?: string;
   isConnected: boolean;
 }
 
-export const LogAnalyze: React.FC<LogAnalyzeProps> = ({ tableName, isConnected }) => {
+export const DatalogViewer: React.FC<DatalogViewerProps> = ({ tableName, isConnected }) => {
   const [samples, setSamples] = useState<LogSample[]>([]);
   const [logName, setLogName] = useState<string>('');
   const [channels, setChannels] = useState<string[]>([]);
@@ -85,7 +85,9 @@ export const LogAnalyze: React.FC<LogAnalyzeProps> = ({ tableName, isConnected }
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<[number, number] | null>(null);
-  const [view, setView] = useState<'analyse' | 'traces'>('analyse');
+  // Traces first: reading the log is the common errand, and tuning a table
+  // from it is the occasional one.
+  const [view, setView] = useState<'analyse' | 'traces'>('traces');
 
   // Config
   const [weighting, setWeighting] = useState('cell_proximity');
@@ -253,40 +255,40 @@ export const LogAnalyze: React.FC<LogAnalyzeProps> = ({ tableName, isConnected }
   const changed = report?.cells.filter((c) => c.delta !== 0).length ?? 0;
 
   return (
-    <div className="log-analyze">
-      <div className="la-bar">
-        <button className="la-btn" onClick={loadLog}>
+    <div className="datalog-viewer">
+      <div className="dv-bar">
+        <button className="dv-btn" onClick={loadLog}>
           <FolderOpen size={15} /> {logName || 'Open log…'}
         </button>
-        <select className="la-select" value={table} onChange={(e) => setTable(e.target.value)}>
+        <select className="dv-select" value={table} onChange={(e) => setTable(e.target.value)}>
           {tables.length === 0 && <option value="">no tables</option>}
           {tables.map((t) => <option key={t} value={t}>{t}</option>)}
         </select>
         <button
-          className="la-btn la-primary"
+          className="dv-btn dv-primary"
           disabled={!samples.length || !table || busy || missing.length > 0}
           onClick={run}
         >
           <Play size={15} /> {busy ? 'Working…' : 'Analyse'}
         </button>
-        <button className="la-btn" disabled={!report || changed === 0 || busy} onClick={apply}>
+        <button className="dv-btn" disabled={!report || changed === 0 || busy} onClick={apply}>
           <Check size={15} /> Apply {changed > 0 ? `${changed} cells` : ''}
         </button>
         {samples.length > 0 && (
-          <span className="la-meta">{samples.length.toLocaleString()} samples</span>
+          <span className="dv-meta">{samples.length.toLocaleString()} samples</span>
         )}
-        {!isConnected && <span className="la-meta la-warn">offline — reading the project tune</span>}
+        {!isConnected && <span className="dv-meta dv-warn">offline — reading the project tune</span>}
       </div>
 
-      {error && <div className="la-error"><AlertTriangle size={14} /> {error}</div>}
+      {error && <div className="dv-error"><AlertTriangle size={14} /> {error}</div>}
       {missing.length > 0 && samples.length > 0 && (
-        <div className="la-error">
+        <div className="dv-error">
           <AlertTriangle size={14} /> This log has no {missing.join(', ')} channel — nothing can be
           attributed to a cell without it.
         </div>
       )}
 
-      <div className="la-subtabs" role="tablist">
+      <div className="dv-subtabs" role="tablist">
         <button
           role="tab"
           aria-selected={view === 'analyse'}
@@ -300,7 +302,6 @@ export const LogAnalyze: React.FC<LogAnalyzeProps> = ({ tableName, isConnected }
           aria-selected={view === 'traces'}
           className={view === 'traces' ? 'on' : ''}
           onClick={() => setView('traces')}
-          disabled={!samples.length}
         >
           Traces
         </button>
@@ -312,15 +313,15 @@ export const LogAnalyze: React.FC<LogAnalyzeProps> = ({ tableName, isConnected }
           // channels per pane, Q/A or the buttons to zoom, arrow keys to step
           // the cursor. Reused rather than rebuilt so both places behave the
           // same and a pane layout set in one is the layout in the other.
-          <div className="la-traces">
+          <div className="dv-traces">
             <GraphLog samples={graphSamples} availableChannels={channels} />
           </div>
         ) : (
-          <p className="la-note la-pad">Open a log to plot its channels.</p>
+          <p className="dv-note dv-pad">Open a log to plot its channels.</p>
         )
       ) : (
-      <div className="la-body">
-        <aside className="la-config">
+      <div className="dv-body">
+        <aside className="dv-config">
           <h4>Sample weighting</h4>
           <label>
             How much a sample counts for its cell
@@ -341,21 +342,21 @@ export const LogAnalyze: React.FC<LogAnalyzeProps> = ({ tableName, isConnected }
           {report && report.rejections.length > 0 && (
             <>
               <h4>Why samples were dropped</h4>
-              <table className="la-rej">
+              <table className="dv-rej">
                 <tbody>
                   {report.rejections.slice(0, 8).map(([r, n]) => (
                     <tr key={r}><td>{r}</td><td>{n.toLocaleString()}</td></tr>
                   ))}
                 </tbody>
               </table>
-              <p className="la-note">
+              <p className="dv-note">
                 {report.total_samples.toLocaleString()} samples counted.
               </p>
             </>
           )}
         </aside>
 
-        <main className="la-main">
+        <main className="dv-main">
           {tableData ? (
             <Grid
               table={tableData}
@@ -365,7 +366,7 @@ export const LogAnalyze: React.FC<LogAnalyzeProps> = ({ tableName, isConnected }
               onSelect={setSelected}
             />
           ) : (
-            <p className="la-note">Pick a table to analyse.</p>
+            <p className="dv-note">Pick a table to analyse.</p>
           )}
           {report && (
             <Timeline
@@ -407,15 +408,15 @@ const Num: React.FC<{
 const Validation: React.FC<{ v: ValidationScore }> = ({ v }) => {
   const good = v.gain_pct > 0;
   return (
-    <div className={`la-score ${good ? 'ok' : 'bad'}`}>
+    <div className={`dv-score ${good ? 'ok' : 'bad'}`}>
       <h4><Info size={13} /> Checked against unseen samples</h4>
-      <div className="la-score-big">{v.gain_pct > 0 ? '+' : ''}{v.gain_pct.toFixed(1)}%</div>
+      <div className="dv-score-big">{v.gain_pct > 0 ? '+' : ''}{v.gain_pct.toFixed(1)}%</div>
       <p>
         {good
           ? `closer to target AFR on ${v.scored.toLocaleString()} samples this proposal never trained on.`
           : `further from target on ${v.scored.toLocaleString()} unseen samples — this configuration is fitting noise, not the tune.`}
       </p>
-      <p className="la-note">{v.worsened_pct.toFixed(0)}% of them get worse, over {v.folds} folds.</p>
+      <p className="dv-note">{v.worsened_pct.toFixed(0)}% of them get worse, over {v.folds} folds.</p>
     </div>
   );
 };
@@ -447,21 +448,21 @@ const Grid: React.FC<{
   );
 
   return (
-    <div className="la-grid-wrap">
-      <div className="la-grid-head">
+    <div className="dv-grid-wrap">
+      <div className="dv-grid-head">
         <strong>{table.title || table.name}</strong>
-        <div className="la-toggle">
+        <div className="dv-toggle">
           <button className={mode === 'delta' ? 'on' : ''} onClick={() => setMode('delta')}>Change</button>
           <button className={mode === 'coverage' ? 'on' : ''} onClick={() => setMode('coverage')}>Coverage</button>
         </div>
-        <span className="la-note">
+        <span className="dv-note">
           {mode === 'delta'
             ? 'blue adds fuel, red removes it'
             : 'accepted samples per cell — where the tune has evidence'}
         </span>
       </div>
-      <div className="la-grid-scroll">
-        <table className="la-grid">
+      <div className="dv-grid-scroll">
+        <table className="dv-grid">
           <tbody>
             {/* Highest load at the top, the way a tuner reads a fuel map. */}
             {table.y_bins.map((_, yi) => {
@@ -495,7 +496,7 @@ const Grid: React.FC<{
                 </tr>
               );
             })}
-            <tr className="la-xaxis">
+            <tr className="dv-xaxis">
               <th />
               {table.x_bins.map((rpm) => <th key={rpm}>{rpm}</th>)}
             </tr>
@@ -578,10 +579,10 @@ const Timeline: React.FC<{
   }, [verdicts]);
 
   return (
-    <div className="la-timeline">
-      <div className="la-grid-head">
+    <div className="dv-timeline">
+      <div className="dv-grid-head">
         <strong>Every sample, and whether it counted</strong>
-        <span className="la-note">
+        <span className="dv-note">
           {selected ? 'yellow ticks mark the selected cell' : 'click a cell above to locate its samples'}
         </span>
       </div>
@@ -597,7 +598,7 @@ const Timeline: React.FC<{
         }}
         onMouseLeave={() => setHover(null)}
       />
-      <div className="la-legend">
+      <div className="dv-legend">
         {legend.map(([k, n]) => (
           <span key={k} className={hover === k ? 'on' : ''}>
             <i style={{ background: VERDICT_COLOURS[k] ?? '#555' }} />
@@ -610,7 +611,7 @@ const Timeline: React.FC<{
 };
 
 const CellDetail: React.FC<{ c: CellResult }> = ({ c }) => (
-  <div className="la-detail">
+  <div className="dv-detail">
     <strong>{c.rpm} rpm, load {c.load}</strong>
     <dl>
       <div><dt>VE now</dt><dd>{c.current_ve.toFixed(1)}</dd></div>
@@ -622,7 +623,7 @@ const CellDetail: React.FC<{ c: CellResult }> = ({ c }) => (
       <div><dt>Target AFR</dt><dd>{c.target_afr.toFixed(2)}</dd></div>
     </dl>
     {c.confidence < 1 && (
-      <p className="la-note">
+      <p className="dv-note">
         Below full confidence, so the change is scaled down in proportion — this cell
         has seen {c.hits} samples.
       </p>
@@ -630,4 +631,4 @@ const CellDetail: React.FC<{ c: CellResult }> = ({ c }) => (
   </div>
 );
 
-export default LogAnalyze;
+export default DatalogViewer;

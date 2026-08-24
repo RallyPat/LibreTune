@@ -164,3 +164,39 @@ test('scrolling the bar pans the view', () => {
   fireEvent.scroll(bar);
   expect(latestButton()).not.toBeNull();
 });
+
+/**
+ * Picking what a track shows was behind a gear button and a modal. Every pane
+ * now carries its two pickers, coloured to match the lines they drive.
+ */
+test('each track has its own dropdown on the pane', () => {
+  render(<GraphLog samples={SAMPLES} availableChannels={CHANNELS} />);
+  const left = screen.getAllByLabelText('Left trace');
+  const right = screen.getAllByLabelText('Right trace');
+  expect(left.length).toBeGreaterThan(0);
+  expect(left.length).toBe(right.length); // one pair per pane
+
+  const opts = [...(left[0] as HTMLSelectElement).options].map((o) => o.value);
+  expect(opts).toContain('rpm');
+  expect(opts).toContain('afr');
+  expect(opts).toContain(''); // — none —
+});
+
+test('choosing a channel from a track dropdown assigns it', () => {
+  render(<GraphLog samples={SAMPLES} availableChannels={CHANNELS} />);
+  const left = screen.getAllByLabelText('Left trace')[0] as HTMLSelectElement;
+  fireEvent.change(left, { target: { value: 'afr' } });
+  expect((screen.getAllByLabelText('Left trace')[0] as HTMLSelectElement).value).toBe('afr');
+});
+
+/**
+ * The pickers sit on top of the plot, which places the data cursor on click.
+ * Opening a dropdown must not also move the cursor.
+ */
+test('using a track dropdown does not move the data cursor', () => {
+  render(<GraphLog samples={SAMPLES} availableChannels={CHANNELS} />);
+  const left = screen.getAllByLabelText('Left trace')[0];
+  fireEvent.mouseDown(left);
+  fireEvent.click(left);
+  expect(document.querySelector('.graphlog-cursor-time')).toBeNull();
+});

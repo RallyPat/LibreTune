@@ -45,4 +45,4 @@ export { AutoTune } from './AutoTune';
 
 // Data Logging
 export { DataLogView } from './DataLogView';
-export { LogAnalyze } from './LogAnalyze';
+export { DatalogViewer } from './DatalogViewer';

@@ -124,6 +124,9 @@ interface PaneCanvasProps {
   /** Persistent data cursor sample (arrow-key navigable), or null */
   cursorSample?: GraphSample | null;
   onOpenConfig: () => void;
+  /** Channels offered by the per-track pickers on the pane itself. */
+  availableChannels: string[];
+  onPickChannel: (side: AxisSide, channel: string | null) => void;
 }
 
 const PaneCanvas: React.FC<PaneCanvasProps> = ({
@@ -137,7 +140,10 @@ const PaneCanvas: React.FC<PaneCanvasProps> = ({
   hoverFrac = null,
   cursorSample = null,
   onOpenConfig,
+  availableChannels,
+  onPickChannel,
 }) => {
+  const groups = useMemo(() => groupChannels(availableChannels), [availableChannels]);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
@@ -380,13 +386,41 @@ const PaneCanvas: React.FC<PaneCanvasProps> = ({
     }
   }, [pane, visible, windowMs, windowEnd, width, height, cursorPosition, hoverFrac, cursorSample]);
 
+  const picker = (side: AxisSide) => (
+    <select
+      className={`graphlog-track-pick graphlog-track-${side}`}
+      style={{ color: pane[side].color, borderColor: pane[side].color }}
+      value={pane[side].channel ?? ''}
+      title={`${side === 'left' ? 'Left' : 'Right'} trace`}
+      aria-label={`${side === 'left' ? 'Left' : 'Right'} trace`}
+      // Stops the click reaching the panes below, which would drop the data
+      // cursor every time someone opened the list.
+      onClick={(e) => e.stopPropagation()}
+      onMouseDown={(e) => e.stopPropagation()}
+      onChange={(e) => onPickChannel(side, e.target.value || null)}
+    >
+      <option value="">— none —</option>
+      {groups.map((g) => (
+        <optgroup key={g.label} label={g.label}>
+          {g.channels.map((c) => (
+            <option key={c} value={c}>
+              {c}
+            </option>
+          ))}
+        </optgroup>
+      ))}
+    </select>
+  );
+
   return (
     <div className="graphlog-pane" style={{ height }}>
       <canvas ref={canvasRef} style={{ width, height }} />
+      {picker('left')}
+      {picker('right')}
       <button
         type="button"
         className="graphlog-pane-config"
-        title="Configure pane channels and scales"
+        title="Configure pane scales"
         onClick={onOpenConfig}
       >
         <Settings2 size={13} />
@@ -906,6 +940,10 @@ export const GraphLog: React.FC<GraphLogProps> = ({
               hoverFrac={hoverFrac}
               cursorSample={cursorSample}
               onOpenConfig={() => setConfigPane(paneIndex)}
+              availableChannels={availableChannels}
+              onPickChannel={(side, channel) =>
+                updateSlot(activeTab.id, paneIndex, side, { channel })
+              }
             />
           );
         })}

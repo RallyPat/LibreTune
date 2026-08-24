@@ -219,6 +219,7 @@ export function buildMenuItems(deps: BuildMenuItemsDeps): TunerMenuItem[] {
   toolItems.push({ id: "autotune", label: t('tools.autotune'), onClick: () => openTarget("autotune", "AutoTune"), disabled: !currentProject });
   if (caps?.has_datalog_entries || caps?.has_output_channels) {
     toolItems.push({ id: "datalog", label: t('tools.dataLogging'), onClick: () => openTarget("datalog", "Data Logging"), disabled: !currentProject });
+    toolItems.push({ id: "datalog-viewer", label: "Datalog Viewer…", onClick: () => openTarget("datalog-viewer", "Datalog Viewer"), disabled: !currentProject });
     toolItems.push({ id: "och-status", label: t('tools.outputChannelStatus'), onClick: () => openTarget("och-status", "Output Channel Status"), disabled: !currentProject });
   }
   if (caps?.has_logger_definitions) {
@@ -272,7 +273,6 @@ export function buildMenuItems(deps: BuildMenuItemsDeps): TunerMenuItem[] {
   if (toolItems.length > 0) toolItems.push({ id: "sep3", label: "", separator: true });
   toolItems.push({ id: "compare-tables", label: t('tools.tableCompare'), onClick: () => setTableComparisonOpen(true), disabled: !currentProject });
   toolItems.push({ id: "tune-file-diff", label: t('tools.tuneFileDiff'), onClick: () => setTuneFileDiffOpen(true), disabled: !currentProject });
-  toolItems.push({ id: "log-analyze", label: "Log Analyze…", onClick: () => openTarget("log-analyze", "Log Analyze"), disabled: !currentProject });
   toolItems.push({ id: "dyno-overlay", label: t('tools.dynoData'), onClick: () => setDynoOverlayOpen(true) });
   toolItems.push({ id: "math-channels", label: t('tools.mathChannels'), onClick: () => setMathChannelsDialogOpen(true), disabled: !currentProject });
   // Requires a live ECU as well as a project; the command reports clearly

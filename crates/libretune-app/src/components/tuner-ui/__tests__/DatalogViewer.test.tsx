@@ -6,7 +6,7 @@ vi.mock('@tauri-apps/plugin-dialog', () => ({ open: vi.fn(), save: vi.fn() }));
 
 import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
-import { LogAnalyze } from '../LogAnalyze';
+import { DatalogViewer } from '../DatalogViewer';
 
 const TABLE_DATA = {
   name: 'veTable1Tbl',
@@ -67,11 +67,13 @@ beforeEach(() => {
 
 async function loadAndAnalyse() {
   const user = userEvent.setup();
-  render(<LogAnalyze isConnected />);
+  render(<DatalogViewer isConnected />);
   await waitFor(() => expect(screen.getByText('veTable1Tbl')).toBeInTheDocument());
   await user.click(screen.getByRole('button', { name: /Open log/i }));
   await waitFor(() => expect(screen.getByText(/40 samples/)).toBeInTheDocument());
-  await user.click(screen.getByRole('button', { name: /Analyse/i }));
+  await user.click(screen.getByRole('button', { name: /^Analyse$/i }));
+  // Traces is the landing view, so step over to the analysis to read results.
+  await user.click(screen.getByRole('tab', { name: 'Analyse' }));
   return user;
 }
 
@@ -190,7 +192,7 @@ test('a log missing a required channel refuses to analyse and says which', async
     return Promise.resolve();
   });
   const user = userEvent.setup();
-  render(<LogAnalyze isConnected />);
+  render(<DatalogViewer isConnected />);
   await waitFor(() => expect(screen.getByText('veTable1Tbl')).toBeInTheDocument());
   await user.click(screen.getByRole('button', { name: /Open log/i }));
 
@@ -204,22 +206,27 @@ test('a log missing a required channel refuses to analyse and says which', async
  * Traces is the plain "look at the log" view, so it must not depend on having
  * run an analysis — but it has nothing to draw before a log is opened.
  */
-test('the Traces tab is offered only once a log is loaded', async () => {
+/**
+ * Traces is the landing view: reading a log is the common errand, and tuning a
+ * table from it the occasional one. It has to stand on its own before any
+ * analysis has run, and before a log is even open.
+ */
+test('it opens on Traces and can move to the analysis and back', async () => {
   mockInvoke();
   const user = userEvent.setup();
-  render(<LogAnalyze isConnected />);
+  render(<DatalogViewer isConnected />);
   await waitFor(() => expect(screen.getByText('veTable1Tbl')).toBeInTheDocument());
 
-  expect(screen.getByRole('tab', { name: 'Traces' })).toBeDisabled();
+  expect(screen.getByRole('tab', { name: 'Traces' })).toHaveAttribute('aria-selected', 'true');
+  expect(screen.getByText(/Open a log to plot its channels/i)).toBeInTheDocument();
+  expect(screen.queryByText(/blue adds fuel/)).not.toBeInTheDocument();
 
   await user.click(screen.getByRole('button', { name: /Open log/i }));
-  await waitFor(() => expect(screen.getByRole('tab', { name: 'Traces' })).toBeEnabled());
-
-  // Switching away from Analyse must not require an analysis to have run.
-  await user.click(screen.getByRole('tab', { name: 'Traces' }));
-  expect(screen.getByRole('tab', { name: 'Traces' })).toHaveAttribute('aria-selected', 'true');
-  expect(screen.queryByText(/blue adds fuel/)).not.toBeInTheDocument();
+  await waitFor(() => expect(screen.getByText(/40 samples/)).toBeInTheDocument());
 
   await user.click(screen.getByRole('tab', { name: 'Analyse' }));
   expect(await screen.findByText(/blue adds fuel/)).toBeInTheDocument();
+
+  await user.click(screen.getByRole('tab', { name: 'Traces' }));
+  expect(screen.queryByText(/blue adds fuel/)).not.toBeInTheDocument();
 });

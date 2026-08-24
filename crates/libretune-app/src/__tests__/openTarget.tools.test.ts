@@ -6,7 +6,7 @@
  * `get_curve_data` — so a tool with a menu entry but no branch does not fail
  * loudly, it goes looking for a *table* of that name and reports it missing.
  *
- * Log Analyze shipped exactly that way: menu entry, tab type, router case and
+ * Datalog Viewer shipped exactly that way: menu entry, tab type, router case and
  * component all present and typechecking, with no branch here, so the menu item
  * raised "table not found". Types cannot catch it because the name is a string
  * on both sides. This test is the thing that does.
@@ -23,7 +23,7 @@ import type { TabContent } from '../types/app';
 const BUILT_IN_TOOLS: { name: string; type: TabContent['type'] }[] = [
   { name: 'autotune', type: 'autotune' },
   { name: 'datalog', type: 'datalog' },
-  { name: 'log-analyze', type: 'log-analyze' },
+  { name: 'datalog-viewer', type: 'datalog-viewer' },
   { name: 'tooth-logger', type: 'tooth-logger' },
   { name: 'composite-logger', type: 'composite-logger' },
   { name: 'och-status', type: 'och-status' },
