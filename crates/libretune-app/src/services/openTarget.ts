@@ -102,6 +102,13 @@ export async function openTargetImpl(
     return;
   }
 
+  if (name === "datalog-viewer") {
+    setTabs([...tabs, { id: "datalog-viewer", title: title || "Datalog Viewer", icon: "autotune" }]);
+    setTabContents({ ...tabContents, "datalog-viewer": { type: "datalog-viewer" } });
+    setActiveTabId("datalog-viewer");
+    return;
+  }
+
   if (name === "och-status") {
     setTabs([...tabs, { id: "och-status", title: title || "Output Channel Status", icon: "dashboard" }]);
     setTabContents({ ...tabContents, "och-status": { type: "och-status" } });

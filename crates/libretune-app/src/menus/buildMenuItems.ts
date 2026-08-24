@@ -219,6 +219,7 @@ export function buildMenuItems(deps: BuildMenuItemsDeps): TunerMenuItem[] {
   toolItems.push({ id: "autotune", label: t('tools.autotune'), onClick: () => openTarget("autotune", "AutoTune"), disabled: !currentProject });
   if (caps?.has_datalog_entries || caps?.has_output_channels) {
     toolItems.push({ id: "datalog", label: t('tools.dataLogging'), onClick: () => openTarget("datalog", "Data Logging"), disabled: !currentProject });
+    toolItems.push({ id: "datalog-viewer", label: "Datalog Viewer…", onClick: () => openTarget("datalog-viewer", "Datalog Viewer"), disabled: !currentProject });
     toolItems.push({ id: "och-status", label: t('tools.outputChannelStatus'), onClick: () => openTarget("och-status", "Output Channel Status"), disabled: !currentProject });
   }
   if (caps?.has_logger_definitions) {

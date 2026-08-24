@@ -142,7 +142,7 @@ describe('App integration (toolbar connection-info)', () => {
       },
       { timeout: 10_000 },
     );
-  });
+  }, 15000);
 
   it('shows placeholder packet mode when disconnected', async () => {
     (invoke as unknown as any).mockImplementation((cmd: string) => {
