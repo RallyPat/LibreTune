@@ -417,6 +417,15 @@ pub struct AutoTuneState {
     // Total number of samples that passed filters (denominator for
     // hit_percentage). See bug #16.
     total_samples: u64,
+    // How many rejections this session has seen, for throttling the diagnostic
+    // above. Per session rather than per process: a process-global counter let
+    // the second session of an app run start past the throttle and log nothing
+    // at all, and made the throttle's behaviour depend on what every other
+    // AutoTune in the process had already done — under `cargo test` that is
+    // whichever tests happen to run alongside, which is how
+    // `filter_rejected_sample_is_logged_not_silent` came to fail on Linux and
+    // pass on Windows.
+    rejects_logged: u64,
     // Per-reason counts of samples rejected by the filters. Surface these in
     // the UI (issue #132): a session that accepts nothing looks exactly like
     // a broken one, and the counts say which filter is eating the data
@@ -436,6 +445,7 @@ impl Default for AutoTuneState {
             reference_tables: AutoTuneReferenceTables::default(),
             strict_lambda_match: true, // Safe default: drop unmatched samples
             total_samples: 0,
+            rejects_logged: 0,
             rejected_by_reason: HashMap::new(),
         }
     }
@@ -822,8 +832,8 @@ impl AutoTuneState {
             // show *why* AutoTune "does nothing": compare these against the
             // active filter thresholds (a warm-up CLT below min_clt and a
             // tip-in TPS rate above max_tps_rate are the usual culprits).
-            static REJECTS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-            let n = REJECTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let n = self.rejects_logged;
+            self.rejects_logged += 1;
             if n < 5 || n.is_multiple_of(100) {
                 // Name the specific filter. Previously the line printed only
                 // rpm/clt/tps_rate, so a rejection by load bounds or accel
@@ -1646,12 +1656,12 @@ mod tests {
             let s = AutoTuneSettings::default();
             let f = AutoTuneFilters::default(); // min_clt = 160
             let a = AutoTuneAuthorityLimits::default();
-            // clt=20 is far below min_clt: the sample must be rejected AND logged
-            // (before D9 this path returned silently). The reject log is
-            // throttled by a process-global counter, so feed a full throttle
-            // window (100+) to guarantee at least one line regardless of what
-            // other tests already put on that counter -- otherwise this flakes
-            // depending on test order.
+            // clt=20 is far below min_clt: the sample must be rejected AND
+            // logged (before D9 this path returned silently). The throttle
+            // counts per session, so a fresh state logs its first rejection and
+            // one sample is enough. It used to count per process, which made
+            // this depend on what every other test in the binary had already
+            // rejected.
             let p = VEDataPoint {
                 rpm: 2000.0,
                 load: 50.0,
@@ -1663,9 +1673,7 @@ mod tests {
                 timestamp_ms: 1000,
                 ..Default::default()
             };
-            for _ in 0..101 {
-                st.add_data_point(p.clone(), &[1000.0, 2000.0], &[40.0, 80.0], &s, &f, &a);
-            }
+            st.add_data_point(p, &[1000.0, 2000.0], &[40.0, 80.0], &s, &f, &a);
         });
         assert!(
             logs.lock()
