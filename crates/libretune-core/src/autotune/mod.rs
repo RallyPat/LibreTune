@@ -54,12 +54,13 @@ pub fn fuel_tune_refusal(def: &EcuDefinition, table_name: &str) -> Option<String
             "{} is {what}. AutoTune scales a table by measured/target AFR, which \
              is only meaningful for a fuel table — on this one it would corrupt \
              the values.",
-            table
-                .title
-                .as_str()
-                .is_empty()
-                .then_some(table_name)
-                .unwrap_or(&table.title),
+            // Prefer the human title; fall back to the identifier when the INI
+            // gives the table no title of its own.
+            if table.title.is_empty() {
+                table_name
+            } else {
+                &table.title
+            },
         ))
     };
     match table.role {
