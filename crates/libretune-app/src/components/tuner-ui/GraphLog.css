@@ -116,8 +116,27 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  /* Panes stop shrinking at their minimum height, so enough of them overflow
+     a short window. Scroll them rather than clipping the ones off the bottom. */
+  overflow-x: hidden;
+  overflow-y: auto;
   position: relative;
+}
+
+/* Time scrollbar. A native overflow container so the platform draws the thumb
+   and handles click-the-track paging; the strip inside is only there to give
+   it something to scroll. */
+.graphlog-hscroll {
+  flex: 0 0 auto;
+  overflow-x: auto;
+  overflow-y: hidden;
+  /* Room for the bar itself on platforms that reserve space for it. */
+  height: 14px;
+  margin: 0 52px 2px;
+}
+
+.graphlog-hscroll > div {
+  height: 1px;
 }
 
 .graphlog-pane {

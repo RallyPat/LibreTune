@@ -592,6 +592,10 @@ export const GraphLog: React.FC<GraphLogProps> = ({
 
   /** Click on the graphs places the data cursor at the nearest sample */
   const handlePanesClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    if (draggedRef.current) {
+      draggedRef.current = false;
+      return;
+    }
     const data = samplesRef.current;
     if (data.length === 0) return;
     const rect = e.currentTarget.getBoundingClientRect();
@@ -604,11 +608,122 @@ export const GraphLog: React.FC<GraphLogProps> = ({
     setCursorT(data[nearestIndex(data, t)].t);
   }, []);
 
+  /** Move the right edge of the view to `next`, clamped to the recorded span.
+   *
+   *  Scrolling past the newest sample means "follow the live edge" rather than
+   *  panning into empty space, so it reverts to `null`. The other end stops
+   *  where a full window still has data behind it - and a log shorter than the
+   *  window has nowhere to scroll, so it stays following rather than showing a
+   *  Latest button that would do nothing.
+   */
+  const setViewEndClamped = useCallback((next: number) => {
+    const data = samplesRef.current;
+    if (data.length === 0) return;
+    const winMs = useGraphLogStore.getState().timeWindowSec * 1000;
+    const lastT = data[data.length - 1].t;
+    const earliestEnd = Math.min(lastT, data[0].t + winMs);
+    const clamped = Math.max(next, earliestEnd);
+    setViewEnd(clamped >= lastT ? null : clamped);
+  }, []);
+
+  /** Shift the view by a fraction of the visible window. */
+  const panByFraction = useCallback(
+    (frac: number) => {
+      const data = samplesRef.current;
+      if (data.length === 0) return;
+      const winMs = useGraphLogStore.getState().timeWindowSec * 1000;
+      const end = viewEndRef.current ?? data[data.length - 1].t;
+      setViewEndClamped(end + frac * winMs);
+    },
+    [setViewEndClamped],
+  );
+
+  /** Drag origin: where the pointer went down, and the view edge at that moment. */
+  const dragRef = useRef<{ x: number; end: number; width: number; moved: boolean } | null>(null);
+
+  const handlePanesMouseDown = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    if (e.button !== 0 || samplesRef.current.length === 0) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const data = samplesRef.current;
+    dragRef.current = {
+      x: e.clientX,
+      end: viewEndRef.current ?? data[data.length - 1].t,
+      width: Math.max(1, rect.width - PAD_L - PAD_R),
+      moved: false,
+    };
+  }, []);
+
   const handlePanesMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
     const frac = (e.clientX - rect.left - PAD_L) / Math.max(1, rect.width - PAD_L - PAD_R);
     setHoverFrac(frac >= 0 && frac <= 1 ? frac : null);
+
+    const drag = dragRef.current;
+    if (!drag) return;
+    const dx = e.clientX - drag.x;
+    // A few pixels of slop, so a click that wobbles still places the cursor
+    // rather than being swallowed as a pan.
+    if (!drag.moved && Math.abs(dx) < 4) return;
+    drag.moved = true;
+    const winMs = useGraphLogStore.getState().timeWindowSec * 1000;
+    // Drag right pulls earlier time into view, the way dragging paper does.
+    setViewEndClamped(drag.end - (dx / drag.width) * winMs);
+  }, [setViewEndClamped]);
+
+  /** Set on mouseup when the gesture turned out to be a pan, so the click that
+   *  follows does not also drop the data cursor where the drag ended. */
+  const draggedRef = useRef(false);
+
+  const endDrag = useCallback(() => {
+    draggedRef.current = dragRef.current?.moved ?? false;
+    dragRef.current = null;
   }, []);
+
+  // Wheel over the graphs zooms about the pointer; Shift makes it scroll along
+  // the time axis instead. Registered non-passively because the default action
+  // would scroll whatever container the graphs happen to sit in — here, the Log
+  // Analyze tab.
+  const panesRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = panesRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      if (samplesRef.current.length === 0) return;
+      e.preventDefault();
+      const delta = e.deltaY !== 0 ? e.deltaY : e.deltaX;
+      if (e.shiftKey) {
+        panByFraction(delta > 0 ? 0.15 : -0.15);
+      } else {
+        zoomBy(delta < 0 ? ZOOM_FACTOR : 1 / ZOOM_FACTOR);
+      }
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, [zoomBy, panByFraction]);
+
+  // A real scrollbar for the time axis. Built on a native overflow container
+  // rather than a drawn widget, so it gets the platform's thumb, click-the-
+  // track paging and keyboard behaviour for free — and shows how much of the
+  // log is on screen, which zoom and pan alone never say.
+  const hScrollRef = useRef<HTMLDivElement>(null);
+  /** Set while syncing scrollLeft from the view, so the resulting scroll event
+   *  is not fed back in as a user pan. */
+  const syncingScroll = useRef(false);
+
+  const handleHScroll = useCallback(() => {
+    if (syncingScroll.current) return;
+    const el = hScrollRef.current;
+    const data = samplesRef.current;
+    if (!el || data.length === 0) return;
+    const spanMs = data[data.length - 1].t - data[0].t;
+    const scrollable = el.scrollWidth - el.clientWidth;
+    if (scrollable <= 0 || spanMs <= 0) return;
+    const winMs = useGraphLogStore.getState().timeWindowSec * 1000;
+    const frac = el.scrollLeft / scrollable;
+    // The thumb spans the window, so the reachable start range is what is left
+    // of the log once a window is subtracted.
+    setViewEndClamped(data[0].t + frac * Math.max(0, spanMs - winMs) + winMs);
+  }, [setViewEndClamped]);
 
   // Track container size
   useEffect(() => {
@@ -639,6 +754,29 @@ export const GraphLog: React.FC<GraphLogProps> = ({
     () => (cursorT !== null && samples.length > 0 ? samples[nearestIndex(samples, cursorT)] : null),
     [cursorT, samples],
   );
+
+  // How long the log is, in windows. 100% means it all fits and there is
+  // nothing to scroll, so the bar sits inert at full width.
+  const logSpanMs = samples.length > 1 ? samples[samples.length - 1].t - samples[0].t : 0;
+  const scrollStripPercent = Math.max(100, (logSpanMs / Math.max(1, windowMs)) * 100);
+
+  // Keep the thumb where the view is, whoever moved it — wheel, drag, keys or
+  // the Latest button.
+  useEffect(() => {
+    const el = hScrollRef.current;
+    if (!el || logSpanMs <= 0) return;
+    const scrollable = el.scrollWidth - el.clientWidth;
+    if (scrollable <= 0) return;
+    const startFrac = (windowStart - samples[0].t) / Math.max(1, logSpanMs - windowMs);
+    const target = Math.max(0, Math.min(1, startFrac)) * scrollable;
+    if (Math.abs(el.scrollLeft - target) < 1) return;
+    syncingScroll.current = true;
+    el.scrollLeft = target;
+    // Cleared after the scroll event this triggers has been delivered.
+    requestAnimationFrame(() => {
+      syncingScroll.current = false;
+    });
+  }, [windowStart, windowMs, logSpanMs, samples]);
 
   const visiblePanes = activeTab.panes.filter((p) => !p.hidden);
   const timeAxisHeight = 22;
@@ -738,9 +876,16 @@ export const GraphLog: React.FC<GraphLogProps> = ({
       </div>
 
       <div
+        ref={panesRef}
         className="graphlog-panes"
+        title="Drag to scroll - wheel to zoom - Shift+wheel to scroll - click to place the cursor"
+        onMouseDown={handlePanesMouseDown}
         onMouseMove={handlePanesMouseMove}
-        onMouseLeave={() => setHoverFrac(null)}
+        onMouseUp={endDrag}
+        onMouseLeave={() => {
+          setHoverFrac(null);
+          endDrag();
+        }}
         onClick={handlePanesClick}
       >
         {samples.length === 0 && (
@@ -771,6 +916,17 @@ export const GraphLog: React.FC<GraphLogProps> = ({
             </span>
           ))}
         </div>
+      </div>
+
+      {/* Width of the inner strip sets the thumb size: the track is one window
+          wide, so the strip is as many windows long as the log lasts. */}
+      <div
+        ref={hScrollRef}
+        className="graphlog-hscroll"
+        onScroll={handleHScroll}
+        title="Scroll through the log"
+      >
+        <div style={{ width: `${scrollStripPercent}%` }} />
       </div>
 
       <Dialog
