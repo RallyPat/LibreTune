@@ -3,6 +3,7 @@ import {
   TableEditor,
   AutoTune,
   DataLogView,
+  LogAnalyze,
   type TableData as TunerTableData,
 } from "./tuner-ui";
 import TsDashboard from "./dashboards/TsDashboard";
@@ -219,6 +220,13 @@ export function TabContentRouter(props: TabContentRouterProps) {
       );
     case "datalog":
       return <DataLogView />;
+    case "log-analyze":
+      return (
+        <LogAnalyze
+          tableName={typeof content.data === "string" ? content.data : undefined}
+          isConnected={status.state === "Connected"}
+        />
+      );
     case "tooth-logger":
       return <ToothLoggerView onClose={() => handleTabClose("tooth-logger")} />;
     case "composite-logger":

@@ -197,7 +197,7 @@ export interface PortEditorConfig {
 
 // Tab content types
 export interface TabContent {
-  type: "dashboard" | "table" | "curve" | "dialog" | "portEditor" | "settings" | "project" | "autotune" | "datalog" | "tooth-logger" | "composite-logger" | "console" | "lua-console" | "och-status";
+  type: "dashboard" | "table" | "curve" | "dialog" | "portEditor" | "settings" | "project" | "autotune" | "datalog" | "log-analyze" | "tooth-logger" | "composite-logger" | "console" | "lua-console" | "och-status";
   data?: TunerTableData | RendererDialogDef | PortEditorConfig | CurveData | string;
   gauge?: SimpleGaugeInfo | null; // For curve tabs with associated gauges
   /** Search term to highlight within the content (e.g., matching field labels in dialogs) */

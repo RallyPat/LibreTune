@@ -410,6 +410,7 @@ pub fn run() {
             commands::tooth_logger::stop_tooth_capture,
             commands::tooth_logger::list_diagnostic_loggers,
             commands::ini_meta::list_tunable_tables,
+            commands::analyse_log::analyse_log,
             stop_tooth_logger,
             start_composite_logger,
             stop_composite_logger,

@@ -1,0 +1,251 @@
+/* Log Analyze — offline VE tuning from a recorded drive. */
+
+.log-analyze {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--bg-primary, #12121a);
+  color: var(--text-primary, #e6e6ef);
+  font-size: 13px;
+}
+
+/* ---- top bar ---- */
+.la-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border-color, #2a2a3a);
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+}
+
+.la-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 11px;
+  border: 1px solid var(--border-color, #2a2a3a);
+  border-radius: 5px;
+  background: var(--bg-secondary, #1c1c28);
+  color: inherit;
+  cursor: pointer;
+  font-size: 13px;
+  max-width: 280px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.la-btn:hover:not(:disabled) { background: var(--bg-hover, #26263a); }
+.la-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.la-btn.la-primary {
+  background: var(--accent, #3a6ea5);
+  border-color: var(--accent, #3a6ea5);
+  color: #fff;
+}
+
+.la-select {
+  padding: 6px 8px;
+  border: 1px solid var(--border-color, #2a2a3a);
+  border-radius: 5px;
+  background: var(--bg-secondary, #1c1c28);
+  color: inherit;
+  font-size: 13px;
+}
+
+.la-meta { color: var(--text-secondary, #9a9aae); font-size: 12px; }
+.la-meta.la-warn { color: #d8a24a; }
+
+.la-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 10px;
+  padding: 8px 11px;
+  border: 1px solid #7a3030;
+  border-left-width: 3px;
+  border-radius: 4px;
+  background: #2a1616;
+  color: #f0b8b8;
+}
+
+/* ---- layout ---- */
+.la-body {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.la-config {
+  flex: 0 0 290px;
+  padding: 12px;
+  overflow-y: auto;
+  border-right: 1px solid var(--border-color, #2a2a3a);
+}
+
+.la-config h4 {
+  margin: 16px 0 8px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-secondary, #9a9aae);
+}
+.la-config h4:first-child { margin-top: 0; }
+
+.la-config label {
+  display: block;
+  margin-bottom: 9px;
+  font-size: 12px;
+  color: var(--text-secondary, #b6b6c8);
+}
+
+.la-config input,
+.la-config select {
+  display: block;
+  width: 100%;
+  margin-top: 3px;
+  padding: 5px 7px;
+  border: 1px solid var(--border-color, #2a2a3a);
+  border-radius: 4px;
+  background: var(--bg-primary, #12121a);
+  color: var(--text-primary, #e6e6ef);
+  font-size: 12px;
+}
+
+.la-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 12px;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.la-note { color: var(--text-secondary, #8a8a9e); font-size: 11.5px; margin: 4px 0 0; }
+
+/* ---- validation score ---- */
+.la-score {
+  margin-top: 16px;
+  padding: 10px;
+  border-radius: 5px;
+  border: 1px solid;
+}
+.la-score.ok { border-color: #2f6b45; background: #16241c; }
+.la-score.bad { border-color: #7a4030; background: #251a16; }
+.la-score h4 {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin: 0 0 4px;
+}
+.la-score-big { font-size: 26px; font-weight: 600; line-height: 1.1; }
+.la-score.ok .la-score-big { color: #6fd898; }
+.la-score.bad .la-score-big { color: #e88a70; }
+.la-score p { margin: 4px 0 0; font-size: 12px; color: var(--text-secondary, #b6b6c8); }
+
+.la-rej { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+.la-rej td { padding: 2px 0; color: var(--text-secondary, #a6a6ba); }
+.la-rej td:last-child { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* ---- table grid ---- */
+.la-grid-wrap {
+  border: 1px solid var(--border-color, #2a2a3a);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.la-grid-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 7px 10px;
+  background: var(--bg-secondary, #1c1c28);
+  border-bottom: 1px solid var(--border-color, #2a2a3a);
+  flex-wrap: wrap;
+}
+
+.la-toggle { display: flex; border: 1px solid var(--border-color, #2a2a3a); border-radius: 4px; overflow: hidden; }
+.la-toggle button {
+  padding: 3px 10px;
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary, #9a9aae);
+  cursor: pointer;
+  font-size: 12px;
+}
+.la-toggle button.on { background: var(--accent, #3a6ea5); color: #fff; }
+
+/* Wide tables scroll inside their own box rather than the page. */
+.la-grid-scroll { overflow-x: auto; }
+
+.la-grid {
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+  font-size: 11.5px;
+  width: 100%;
+}
+.la-grid th {
+  padding: 3px 6px;
+  color: var(--text-secondary, #8a8a9e);
+  font-weight: 500;
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+.la-grid td {
+  padding: 4px 5px;
+  min-width: 42px;
+  text-align: center;
+  border: 1px solid var(--border-color, #23232f);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.la-grid td:hover { outline: 1px solid var(--accent, #3a6ea5); }
+.la-grid td.sel { outline: 2px solid #ffd54a; outline-offset: -2px; }
+.la-grid td sub { font-size: 9px; opacity: 0.85; margin-left: 2px; vertical-align: baseline; }
+.la-xaxis th { border-top: 1px solid var(--border-color, #2a2a3a); }
+
+/* ---- verdict timeline ---- */
+.la-timeline {
+  border: 1px solid var(--border-color, #2a2a3a);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.la-timeline canvas {
+  display: block;
+  width: 100%;
+  height: 34px;
+}
+.la-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  padding: 7px 10px;
+  font-size: 11px;
+  color: var(--text-secondary, #9a9aae);
+}
+.la-legend span { display: inline-flex; align-items: center; gap: 5px; }
+.la-legend span.on { color: var(--text-primary, #e6e6ef); }
+.la-legend i { width: 9px; height: 9px; border-radius: 2px; display: inline-block; }
+
+/* ---- selected cell ---- */
+.la-detail {
+  border: 1px solid var(--border-color, #2a2a3a);
+  border-radius: 6px;
+  padding: 10px 12px;
+}
+.la-detail dl {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 22px;
+  margin: 8px 0 0;
+}
+.la-detail dl div { display: flex; flex-direction: column; }
+.la-detail dt { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-secondary, #8a8a9e); }
+.la-detail dd { margin: 1px 0 0; font-size: 15px; font-variant-numeric: tabular-nums; }
+
+@media (max-width: 900px) {
+  .la-body { flex-direction: column; }
+  .la-config { flex: 0 0 auto; border-right: 0; border-bottom: 1px solid var(--border-color, #2a2a3a); }
+}

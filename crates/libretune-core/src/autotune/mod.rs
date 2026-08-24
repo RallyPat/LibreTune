@@ -20,6 +20,7 @@ pub mod delay_measure;
 pub mod health;
 pub mod predictor;
 pub mod preflight;
+pub mod replay;
 
 use crate::ini::{EcuDefinition, TableRole};
 use evalexpr::{eval_with_context, ContextWithMutableVariables, HashMapContext, Value};
@@ -191,7 +192,7 @@ pub enum HitWeighting {
     /// in noticeably. Squaring concentrates each cell's answer on the samples
     /// actually taken near it, at the cost of needing more of them.
     CellProximitySquared,
-    /// Nearest cell only, but a sample more than halfway toward its neighbour
+    /// Nearest cell only, and a sample that is not comfortably inside the cell
     /// is dropped rather than counted.
     ///
     /// A `weightThreshold` in spirit: refuse the ambiguous samples
@@ -200,6 +201,17 @@ pub enum HitWeighting {
     /// trimmed.
     CellCentreOnly,
 }
+
+/// How close to a cell's centre a sample must sit for [`HitWeighting::CellCentreOnly`]
+/// to accept it, as a fraction of the gap to the neighbouring bin.
+///
+/// Must be above 0.5. Samples are attributed to their *nearest* bin, so every
+/// sample that reaches [`HitWeighting::weight`] is already within half a bin
+/// and scores at least 0.5 - a 0.5 threshold therefore accepted everything and
+/// made this option a synonym for [`HitWeighting::Uniform`]. 0.75 keeps the
+/// middle half of each cell, which is what "only samples near a cell centre"
+/// was always meant to mean.
+pub const CENTRE_ONLY_MIN_WEIGHT: f64 = 0.75;
 
 impl HitWeighting {
     /// Weight for a sample at (`rpm`, `load`) landing in cell (`x`, `y`).
@@ -226,11 +238,16 @@ impl HitWeighting {
                 w * w
             }
             Self::CellCentreOnly => {
-                // Both axes must be within half a bin, or the sample belongs as
-                // much to a neighbour as to here and is not worth guessing over.
+                // Both axes must be *well* inside the cell, not merely nearest
+                // to it. Samples arrive already assigned to their nearest bin,
+                // which by definition puts them no more than halfway to a
+                // neighbour - so `axis_weight` is never below 0.5 here and a
+                // 0.5 threshold rejected nothing at all, making this option
+                // silently identical to `Uniform`. See
+                // `centre_only_is_not_merely_uniform`.
                 let wx = axis_weight(rpm, x, x_bins);
                 let wy = axis_weight(load, y, y_bins);
-                if wx >= 0.5 && wy >= 0.5 {
+                if wx >= CENTRE_ONLY_MIN_WEIGHT && wy >= CENTRE_ONLY_MIN_WEIGHT {
                     1.0
                 } else {
                     0.0
@@ -364,7 +381,29 @@ pub struct AutoTuneFilters {
     // Transient filtering
     pub max_tps_rate: f64, // Max TPS change rate (%/sec) before filtering
     pub exclude_accel_enrich: bool, // Exclude data when accel enrichment active
+    /// Require rpm and load to have held steady for this many ms before a
+    /// sample counts. `0` (default) disables the check.
+    ///
+    /// The throttle-based filters above miss every load change that arrives
+    /// without the pedal moving - a gear change, a hill, closing on traffic.
+    /// During those the gas reaching the sensor was burnt in a cell the engine
+    /// has already left, and no single delay figure says reliably which, because
+    /// the delay itself varies with the flow that is mid-change.
+    ///
+    /// Set it longer than the longest transport delay in use. Across two logged
+    /// drives, 800 ms lifted the held-out AFR improvement from 34.1% to 39.5%
+    /// and roughly halved the largest proposed change - at the cost of covering
+    /// 52 cells instead of 131, since a sample must now earn its place.
+    pub min_steady_ms: u64,
 }
+
+/// Widest rpm and load excursion still counted as steady, for
+/// [`AutoTuneFilters::min_steady_ms`].
+///
+/// Generous enough to ride out sensor noise and small throttle corrections,
+/// tight enough that the engine has not left the cell.
+pub const STEADY_RPM_TOLERANCE: f64 = 100.0;
+pub const STEADY_LOAD_TOLERANCE: f64 = 3.0;
 
 impl Default for AutoTuneFilters {
     fn default() -> Self {
@@ -382,6 +421,9 @@ impl Default for AutoTuneFilters {
             // accel transients are still caught by `exclude_accel_enrich`.
             max_tps_rate: 50.0,
             exclude_accel_enrich: true, // Exclude accel enrichment by default
+            // Off by default: it changes which samples an existing session
+            // accepts, and that is the tuner's call to make.
+            min_steady_ms: 0,
         }
     }
 }
@@ -397,6 +439,13 @@ pub struct AutoTuneReferenceTables {
     /// Used to compute the required VE correction (#1) and populate
     /// `target_afr` on recommendations (#16).
     pub target_afr_table: Vec<Vec<f64>>,
+    /// The VE table being tuned, indexed `[row][col]`.
+    ///
+    /// A cell's recommendation is anchored to its value here rather than to the
+    /// interpolated `veCurr` a sample carried, because the recommendation is
+    /// written back to the cell. Empty means "not supplied", and the sample's
+    /// own VE is used instead.
+    pub ve_table: Vec<Vec<f64>>,
 }
 
 /// VE Analyze runtime state
@@ -656,7 +705,7 @@ impl AutoTuneState {
     /// can bracket the target time. Never shrinks below the original 500 ms.
     /// When nothing is configured (auto/RPM curve), stays at 500 ms exactly so
     /// behaviour is unchanged.
-    fn required_buffer_ms(&self, settings: &AutoTuneSettings) -> u64 {
+    fn required_buffer_ms(&self, settings: &AutoTuneSettings, filters: &AutoTuneFilters) -> u64 {
         const DEFAULT_BUFFER_MS: u64 = 500;
         const MARGIN_MS: u64 = 500;
         let table_max = self
@@ -667,11 +716,14 @@ impl AutoTuneState {
             .cloned()
             .fold(0.0_f64, f64::max);
         let configured = settings.lambda_delay_ms.max(0.0).max(table_max);
-        if configured <= 0.0 {
+        let for_delay = if configured <= 0.0 {
             DEFAULT_BUFFER_MS
         } else {
             (configured as u64 + MARGIN_MS).max(DEFAULT_BUFFER_MS)
-        }
+        };
+        // The steadiness check reads the same buffer, so it has to reach back
+        // far enough to see the whole window it is asked about.
+        for_delay.max(filters.min_steady_ms + MARGIN_MS)
     }
     /// Prune old entries from the data buffer
     fn prune_data_buffer(&mut self, current_timestamp_ms: u64) {
@@ -770,6 +822,37 @@ impl AutoTuneState {
 
     /// Which filter rejected a sample, for the diagnostic log. Mirrors the
     /// order of the checks in `passes_filters`.
+    /// Have rpm and load held steady for `filters.min_steady_ms` before `point`?
+    ///
+    /// Reads the correlation buffer rather than keeping a second history, so
+    /// the window it sees is exactly the window that was recorded. The buffer
+    /// is sized to cover it in [`Self::required_buffer_ms`].
+    ///
+    /// A window the buffer cannot cover yet - the first samples of a session,
+    /// or the far side of a gap in the log - is *not* steady. Treating a short
+    /// history as proof of steadiness would wave through exactly the samples
+    /// taken right after a transient.
+    fn is_steady(&self, point: &VEDataPoint, filters: &AutoTuneFilters) -> bool {
+        if filters.min_steady_ms == 0 {
+            return true;
+        }
+        let window_start = point.timestamp_ms.saturating_sub(filters.min_steady_ms);
+        let mut reached_back = false;
+        for p in self.data_buffer.iter().rev() {
+            if p.timestamp_ms < window_start {
+                reached_back = true;
+                break;
+            }
+            if (p.rpm - point.rpm).abs() > STEADY_RPM_TOLERANCE
+                || (p.load - point.load).abs() > STEADY_LOAD_TOLERANCE
+                || p.fuel_cut_active == Some(true)
+            {
+                return false;
+            }
+        }
+        reached_back
+    }
+
     fn rejection_reason(point: &VEDataPoint, filters: &AutoTuneFilters) -> &'static str {
         if point.rpm < filters.min_rpm || point.rpm > filters.max_rpm {
             return "rpm out of range";
@@ -799,6 +882,27 @@ impl AutoTuneState {
         "custom_filter"
     }
 
+    /// Whether a sample counts, and if not, which filter refused it.
+    ///
+    /// The single place that answers the question, so the live path and offline
+    /// analysis cannot disagree about what a session would have accepted.
+    /// Steadiness is settled here rather than in [`Self::rejection_reason`],
+    /// which has no buffer to consult and would report the catch-all instead.
+    pub fn classify(
+        &self,
+        point: &VEDataPoint,
+        filters: &AutoTuneFilters,
+    ) -> Result<(), &'static str> {
+        if !self.is_steady(point, filters) {
+            return Err("rpm/load not steady");
+        }
+        if self.passes_filters(point, filters) {
+            Ok(())
+        } else {
+            Err(Self::rejection_reason(point, filters))
+        }
+    }
+
     pub fn add_data_point(
         &mut self,
         point: VEDataPoint,
@@ -818,16 +922,15 @@ impl AutoTuneState {
         // the RPM-curve's ~200 ms max (this NA6 measures ~990 ms); the old
         // fixed 500 ms buffer silently pruned those away, so strict mode
         // dropped every such sample. Must run before pruning below.
-        self.buffer_max_age_ms = self.required_buffer_ms(settings);
+        self.buffer_max_age_ms = self.required_buffer_ms(settings, filters);
 
         // Always add to buffer for lambda delay correlation
         self.data_buffer.push_back(point.clone());
         self.prune_data_buffer(point.timestamp_ms);
 
-        if !self.passes_filters(&point, filters) {
+        if let Err(reason) = self.classify(&point, filters) {
             // Count per reason for the UI's rejection indicator (issue #132):
             // a session that accepts nothing looks exactly like a broken one.
-            let reason = Self::rejection_reason(&point, filters);
             *self.rejected_by_reason.entry(reason).or_insert(0) += 1;
             // Throttled so a full drive doesn't flood the log, but enough to
             // show *why* AutoTune "does nothing": compare these against the
@@ -926,7 +1029,6 @@ impl AutoTuneState {
         // actually in when that exhaust charge was produced.
         let cell_rpm = historical_point.rpm;
         let cell_load = historical_point.load;
-        let cell_ve = historical_point.ve;
 
         let x_idx = self.find_bin_index(cell_rpm, table_x_bins);
         let y_idx = self.find_bin_index(cell_load, table_y_bins);
@@ -937,6 +1039,35 @@ impl AutoTuneState {
 
         let cell_x_idx = x_idx.unwrap();
         let cell_y_idx = y_idx.unwrap();
+
+        // The VE this correction is *about* is the cell's own table value, not
+        // the `veCurr` the sample carried.
+        //
+        // `veCurr` is what the ECU interpolated between cells at that instant.
+        // A sample sitting between bins reports a blend of its neighbours, and
+        // scaling that blend by (measured / target) yields a number that is then
+        // written to the cell corner — a different quantity. Where a cell's
+        // samples sit off-centre the proposed change can come out with the wrong
+        // sign: a cell reading 45 interpolated against a table value of 50,
+        // asked for 2% more fuel, proposes 45.9 and so *removes* 4 VE.
+        //
+        // Replaying two logged drives through this function, anchoring on the
+        // cell instead moved the held-out AFR improvement from -6.6% to +39.5%
+        // and cut the share of samples made worse from 36.5% to 4.9%. An ideal
+        // per-cell correction on the same data reaches 40.9%, so this is
+        // substantially the whole gap.
+        //
+        // Falls back to the sample's own VE when no table has been supplied, so
+        // a caller that never calls `set_ve_table` keeps the old behaviour
+        // rather than silently correcting against zero.
+        let cell_ve = self
+            .reference_tables
+            .ve_table
+            .get(cell_y_idx)
+            .and_then(|row| row.get(cell_x_idx))
+            .copied()
+            .filter(|v| *v > 0.1)
+            .unwrap_or(historical_point.ve);
 
         if self.is_cell_locked(cell_x_idx, cell_y_idx) {
             return;
@@ -1177,6 +1308,13 @@ impl AutoTuneState {
 
         // Transient filtering: reject if TPS is changing too fast
         if point.tps_rate.abs() > filters.max_tps_rate {
+            return false;
+        }
+
+        // Transient filtering by result rather than by cause: the throttle
+        // checks above and below cannot see a load change the pedal did not
+        // make. Off unless the tuner sets `min_steady_ms`.
+        if !self.is_steady(point, filters) {
             return false;
         }
 
@@ -1692,7 +1830,10 @@ mod tests {
         let state = AutoTuneState::new();
         let settings = AutoTuneSettings::default();
         assert_eq!(settings.lambda_delay_ms, 0.0);
-        assert_eq!(state.required_buffer_ms(&settings), 500);
+        assert_eq!(
+            state.required_buffer_ms(&settings, &AutoTuneFilters::default()),
+            500
+        );
     }
 
     #[test]
@@ -1708,7 +1849,10 @@ mod tests {
         let x = vec![1000.0, 2000.0];
         let y = vec![50.0, 100.0];
 
-        assert_eq!(state.required_buffer_ms(&settings), 1400); // 900 + 500 margin
+        assert_eq!(
+            state.required_buffer_ms(&settings, &AutoTuneFilters::default()),
+            1400
+        ); // 900 + 500 margin
         assert_eq!(state.configured_or_curve_delay_ms(&settings, 1500.0), 900);
 
         // Feed samples spanning 0..1000 ms; the oldest (t=0) must survive,
@@ -2073,6 +2217,124 @@ mod fuel_tunable_tests {
 }
 
 #[cfg(test)]
+mod cell_anchor_tests {
+    use super::*;
+
+    const RPM: [f64; 3] = [2000.0, 3000.0, 4000.0];
+    const LOAD: [f64; 3] = [30.0, 50.0, 70.0];
+
+    fn point(rpm: f64, load: f64, ve: f64, afr: f64, t_ms: u64) -> VEDataPoint {
+        VEDataPoint {
+            rpm,
+            load,
+            map: load,
+            ve,
+            afr,
+            clt: 90.0,
+            timestamp_ms: t_ms,
+            fuel_cut_active: Some(false),
+            accel_enrich_active: Some(false),
+            ..Default::default()
+        }
+    }
+
+    fn settings() -> AutoTuneSettings {
+        AutoTuneSettings {
+            // No ramp or threshold: this test is about the sign and size of the
+            // correction, not about how cautiously it is approached.
+            base_weight: 0.0,
+            min_change: 0.0,
+            ..Default::default()
+        }
+    }
+
+    /// A lean cell must gain VE even when its samples sat between bins.
+    ///
+    /// The engine ran slightly off the 3000 rpm bin, so `veCurr` interpolated
+    /// to 45 while the cell itself holds 50. Anchoring the correction to the 45
+    /// and writing the result to the cell proposed 45.9 — a 4-point *cut* to a
+    /// cell that was asking for more fuel. Replayed against two real drives
+    /// that error alone accounted for the difference between a 6.6% regression
+    /// and a 39.5% improvement in held-out AFR.
+    #[test]
+    fn a_lean_cell_gains_ve_even_when_its_samples_sat_between_bins() {
+        let mut st = AutoTuneState::new();
+        st.set_reference_tables(AutoTuneReferenceTables {
+            ve_table: vec![vec![50.0; 3]; 3],
+            target_afr_table: vec![vec![14.0; 3]; 3],
+            lambda_delay_table: Vec::new(),
+        });
+        st.set_strict_lambda_match(false);
+        st.start();
+
+        // Measured 14.7 against a target of 14.0: lean, so VE must rise.
+        for i in 0..40 {
+            st.add_data_point(
+                point(3000.0, 50.0, 45.0, 14.7, i * 100),
+                &RPM,
+                &LOAD,
+                &settings(),
+                &AutoTuneFilters {
+                    min_clt: 71.0,
+                    ..Default::default()
+                },
+                &AutoTuneAuthorityLimits::default(),
+            );
+        }
+
+        let rec = st
+            .get_recommendations()
+            .into_iter()
+            .find(|r| (r.cell_x, r.cell_y) == (1, 1))
+            .expect("the 3000/50 cell was hit 40 times");
+        assert_eq!(
+            rec.beginning_value, 50.0,
+            "anchor must be the cell, not veCurr"
+        );
+        assert!(
+            rec.recommended_value > 50.0,
+            "a lean cell must gain VE; got {} (below 50 means the interpolated \
+             veCurr was scaled and written to the cell)",
+            rec.recommended_value
+        );
+        // 50 * 14.7/14.0 = 52.5
+        assert!(
+            (rec.recommended_value - 52.5).abs() < 0.1,
+            "expected ~52.5, got {}",
+            rec.recommended_value
+        );
+    }
+
+    /// Without a VE table the old behaviour must survive, so a caller that
+    /// never supplies one is not silently corrected against zero.
+    #[test]
+    fn no_ve_table_falls_back_to_the_samples_own_ve() {
+        let mut st = AutoTuneState::new();
+        st.set_strict_lambda_match(false);
+        st.start();
+        for i in 0..40 {
+            st.add_data_point(
+                point(3000.0, 50.0, 45.0, 14.7, i * 100),
+                &RPM,
+                &LOAD,
+                &settings(),
+                &AutoTuneFilters {
+                    min_clt: 71.0,
+                    ..Default::default()
+                },
+                &AutoTuneAuthorityLimits::default(),
+            );
+        }
+        let rec = st
+            .get_recommendations()
+            .into_iter()
+            .find(|r| (r.cell_x, r.cell_y) == (1, 1))
+            .expect("cell hit");
+        assert_eq!(rec.beginning_value, 45.0);
+    }
+}
+
+#[cfg(test)]
 mod hit_weighting_tests {
     use super::*;
 
@@ -2350,16 +2612,54 @@ mod weighting_approach_tests {
         assert_eq!(at(HitWeighting::Uniform), 1.0);
         assert!((at(HitWeighting::CellProximity) - 0.5).abs() < 1e-9);
         assert!((at(HitWeighting::CellProximitySquared) - 0.25).abs() < 1e-9);
-        // exactly halfway still counts under centre-only; past it does not
-        assert_eq!(at(HitWeighting::CellCentreOnly), 1.0);
+        // A sample halfway to the neighbour is exactly the ambiguous case
+        // centre-only exists to refuse.
+        assert_eq!(at(HitWeighting::CellCentreOnly), 0.0);
     }
 
     #[test]
-    fn centre_only_drops_a_sample_past_the_halfway_point() {
+    fn centre_only_drops_a_sample_that_is_not_well_inside_the_cell() {
         let w = HitWeighting::CellCentreOnly;
         // 3400 of the way from 2000 to 4000 is 70% - too far to claim.
         assert_eq!(w.weight(3400.0, 50.0, 2, 1, &RPM, &LOAD), 0.0);
         assert_eq!(w.weight(2200.0, 50.0, 2, 1, &RPM, &LOAD), 1.0);
+    }
+
+    /// Centre-only must actually reject something once samples are assigned the
+    /// way the real code assigns them.
+    ///
+    /// Samples go to their *nearest* bin, so `axis_weight` never drops below
+    /// 0.5 in practice. The original 0.5 threshold therefore accepted every
+    /// sample, making this option a silent synonym for `Uniform` - a choice
+    /// offered in the UI that changed nothing. The old test missed it by
+    /// pairing 3400 rpm with cell 2 (2000 rpm), which `find_bin_index` would
+    /// never produce: 3400 is nearest to 4000.
+    #[test]
+    fn centre_only_is_not_merely_uniform() {
+        let st = AutoTuneState::new();
+        let (mut kept, mut dropped) = (0, 0);
+        for rpm in (600..=7000).step_by(50) {
+            let rpm = f64::from(rpm);
+            let x = st.find_bin_index(rpm, &RPM).expect("a bin for every rpm");
+            let y = st.find_bin_index(50.0, &LOAD).expect("a bin for 50 load");
+            // Whatever the rule is, it may never discount a sample the uniform
+            // rule would have counted at full weight *and* claim to be selective
+            // without ever selecting.
+            assert!(HitWeighting::Uniform.weight(rpm, 50.0, x, y, &RPM, &LOAD) == 1.0);
+            if HitWeighting::CellCentreOnly.weight(rpm, 50.0, x, y, &RPM, &LOAD) > 0.0 {
+                kept += 1;
+            } else {
+                dropped += 1;
+            }
+        }
+        assert!(
+            dropped > 0,
+            "centre-only accepted all {kept} nearest-bin samples: it is Uniform under another name"
+        );
+        assert!(
+            kept > 0,
+            "centre-only rejected everything, which is no more useful"
+        );
     }
 
     #[test]

@@ -102,6 +102,13 @@ export async function openTargetImpl(
     return;
   }
 
+  if (name === "log-analyze") {
+    setTabs([...tabs, { id: "log-analyze", title: title || "Log Analyze", icon: "autotune" }]);
+    setTabContents({ ...tabContents, "log-analyze": { type: "log-analyze" } });
+    setActiveTabId("log-analyze");
+    return;
+  }
+
   if (name === "och-status") {
     setTabs([...tabs, { id: "och-status", title: title || "Output Channel Status", icon: "dashboard" }]);
     setTabContents({ ...tabContents, "och-status": { type: "och-status" } });

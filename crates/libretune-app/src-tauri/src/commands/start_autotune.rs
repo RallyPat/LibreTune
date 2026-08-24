@@ -502,29 +502,64 @@ pub(crate) fn resolve_reference_tables(
     //
     // Equal dimensions are necessary but not sufficient: two 16x16 tables on
     // different bin values line up index-for-index while meaning different
-    // things. Comparing bins would need them plumbed in here; refusing a shape
-    // mismatch removes the case that silently half-applies, which is the one
-    // that produced a wrong answer while looking resolved.
-    let ve_shape = def
-        .get_table_by_name_or_map(ve_table_name)
-        .map(|t| (t.y_size, t.x_size));
+    // things. On this Speeduino the VE rpm axis ends 6000, 6500, 7200, 8000
+    // and the AFR target's ends 5300, 5800, 6300, 6800 — so cell 12 asked for
+    // the 6300 rpm target while the sample came from 6000 rpm. Measured against
+    // the real tables that reaches 0.52 AFR (3.7% VE) at 6000 rpm, and it errs
+    // *lean* at the top of the map, which is the direction that costs pistons.
+    //
+    // So resample the target onto the VE table's own axes rather than trusting
+    // the indices to mean the same thing. Only when an axis cannot be read do
+    // we fall back to the old shape test, which is still better than nothing.
+    let ve_table = def.get_table_by_name_or_map(ve_table_name);
+    let ve_shape = ve_table.map(|t| (t.y_size, t.x_size));
     let target_afr_table = match (&ve_shape, target_afr_table.is_empty()) {
         (Some((rows, cols)), false) => {
             let got = (
                 target_afr_table.len(),
                 target_afr_table.first().map(|r| r.len()).unwrap_or(0),
             );
-            if got == (*rows, *cols) {
-                target_afr_table
-            } else {
-                tracing::warn!(
-                    ve_table = ve_table_name,
-                    expected = ?(*rows, *cols),
-                    got = ?got,
-                    "AFR target table is a different shape to the VE table; \
-                     ignoring it rather than applying it to part of the map"
-                );
-                Vec::new()
+            let axes = ve_table
+                .zip(requested.and_then(|n| def.get_table_by_name_or_map(n)))
+                .and_then(|(ve, tgt)| {
+                    Some((
+                        read_table_axes(def, cache, ve)?,
+                        read_table_axes(def, cache, tgt)?,
+                    ))
+                });
+
+            match axes {
+                Some(((ve_x, ve_y), (tgt_x, tgt_y))) if ve_x != tgt_x || ve_y != tgt_y => {
+                    tracing::info!(
+                        ve_table = ve_table_name,
+                        "AFR target table has different axes to the VE table; \
+                         resampling it onto the VE axes"
+                    );
+                    libretune_core::table_ops::rebin_table(
+                        &tgt_x,
+                        &tgt_y,
+                        &target_afr_table,
+                        ve_x,
+                        ve_y,
+                        true,
+                    )
+                    .z_values
+                }
+                // Axes already agree: index-for-index is correct as it stands.
+                Some(_) => target_afr_table,
+                // Axes unreadable — fall back to the shape check.
+                None if got == (*rows, *cols) => target_afr_table,
+                None => {
+                    tracing::warn!(
+                        ve_table = ve_table_name,
+                        expected = ?(*rows, *cols),
+                        got = ?got,
+                        "AFR target table is a different shape to the VE table and its \
+                         axes could not be read; ignoring it rather than applying it to \
+                         part of the map"
+                    );
+                    Vec::new()
+                }
             }
         }
         _ => target_afr_table,
@@ -558,6 +593,14 @@ pub(crate) fn resolve_reference_tables(
         AutoTuneReferenceTables {
             lambda_delay_table,
             target_afr_table,
+            // The table being tuned. A cell's correction is anchored to its
+            // value here rather than to the interpolated `veCurr` of whichever
+            // sample hit it first — see `add_data_point`. Empty on a read
+            // failure, which restores the old sample-anchored behaviour rather
+            // than correcting every cell against zero.
+            ve_table: ve_table
+                .and_then(|t| read_table_z_values(def, cache, t.map.as_str(), t.x_size, t.y_size))
+                .unwrap_or_default(),
         },
         target_afr_source,
     )
@@ -630,6 +673,25 @@ fn resolve_named_table(
         }
     }
     None
+}
+
+/// Read a table's X and Y axis values.
+///
+/// An axis is a 1xN constant, so it goes through the same reader as the Z data
+/// — including its refusal to pad a short read, which matters just as much
+/// here: a truncated axis would place cells at fabricated rpm.
+///
+/// `None` if either axis is missing or unreadable, which sends the caller back
+/// to comparing shapes rather than silently resampling against a wrong axis.
+pub(crate) fn read_table_axes(
+    def: &EcuDefinition,
+    cache: Option<&TuneCache>,
+    table: &libretune_core::ini::TableDefinition,
+) -> Option<(Vec<f64>, Vec<f64>)> {
+    let y_name = table.y_bins.as_deref()?;
+    let x = read_table_z_values(def, cache, &table.x_bins, table.x_size, 1)?.pop()?;
+    let y = read_table_z_values(def, cache, y_name, table.y_size, 1)?.pop()?;
+    (x.len() == table.x_size && y.len() == table.y_size).then_some((x, y))
 }
 
 /// Read the Z (data) values of a table constant and reshape into row-major
@@ -734,6 +796,138 @@ mod target_afr_resolution_tests {
             },
         );
         def
+    }
+
+    /// A VE table and an AFR target table on *different* rpm axes, the way a
+    /// real Speeduino ships them.
+    ///
+    /// AFR rpm bins are 1000/4000 against the VE table's 1000/2000, and the
+    /// target rises 12.0 -> 15.0 across them. Index-for-index the VE table's
+    /// 2000 rpm cell therefore picks up the 4000 rpm target of 15.0, when the
+    /// value actually asked for at 2000 rpm is 13.0.
+    fn def_with_offset_axes() -> (EcuDefinition, TuneCache) {
+        let mut def = EcuDefinition {
+            page_sizes: vec![16],
+            n_pages: 1,
+            ..Default::default()
+        };
+        let mut konst = |name: &str, offset: u16, scale: f64| {
+            def.constants.insert(
+                name.to_string(),
+                Constant {
+                    name: name.to_string(),
+                    page: 0,
+                    offset,
+                    data_type: DataType::U08,
+                    scale,
+                    translate: 0.0,
+                    ..Default::default()
+                },
+            );
+        };
+        konst("afrTable", 0, 0.1); // 4 bytes
+        konst("afrRpmBins", 4, 100.0); // 2 bytes
+        konst("afrLoadBins", 6, 1.0);
+        konst("veRpmBins", 8, 100.0);
+        konst("veLoadBins", 10, 1.0);
+        konst("veTable", 12, 1.0);
+
+        // Key, `name` and `map` are distinct in a real INI: the table is keyed
+        // and named `afrTable1Tbl` while its data constant is `afrTable`.
+        let mut table = |name: &str, map: &str, x: &str, y: &str, role: TableRole| {
+            def.tables.insert(
+                name.to_string(),
+                TableDefinition {
+                    name: name.to_string(),
+                    map: map.to_string(),
+                    x_bins: x.to_string(),
+                    y_bins: Some(y.to_string()),
+                    x_size: 2,
+                    y_size: 2,
+                    role,
+                    ..Default::default()
+                },
+            );
+        };
+        table(
+            "afrTable1Tbl",
+            "afrTable",
+            "afrRpmBins",
+            "afrLoadBins",
+            TableRole::AfrTarget,
+        );
+        table(
+            "veTable1Tbl",
+            "veTable",
+            "veRpmBins",
+            "veLoadBins",
+            TableRole::Ve,
+        );
+
+        let mut cache = TuneCache::from_definition(&def);
+        cache.load_page(
+            0,
+            vec![
+                120, 150, 120, 150, // afrTable: 12.0, 15.0 per row
+                10, 40, // afrRpmBins: 1000, 4000
+                20, 80, // afrLoadBins
+                10, 20, // veRpmBins: 1000, 2000
+                20, 80, // veLoadBins
+                0, 0, 0, 0, // veTable z, unread here
+            ],
+        );
+        (def, cache)
+    }
+
+    /// The target must be resampled onto the VE table's axes, not indexed by
+    /// its cell numbers.
+    ///
+    /// Both tables are 2x2, so the shape check that used to guard this passes
+    /// and the mismatch went through silently. On the real NA6 tables the error
+    /// reached 0.52 AFR at 6000 rpm and always in the lean direction, because
+    /// the AFR axis is compressed relative to the VE axis at the top end.
+    #[test]
+    fn a_target_on_different_axes_is_resampled_not_indexed() {
+        let (def, cache) = def_with_offset_axes();
+        let (tables, source) =
+            resolve_reference_tables(&def, Some(&cache), "veTable1Tbl", None, None);
+
+        assert!(
+            matches!(source, TargetAfrSource::IniDeclared(_)),
+            "got {source:?}"
+        );
+        let got = tables.target_afr_table;
+        assert_eq!(got.len(), 2);
+        // 2000 rpm sits a third of the way from 1000 to 4000: 12 + (15-12)/3.
+        assert!(
+            (got[0][1] - 13.0).abs() < 1e-6,
+            "VE cell at 2000 rpm should target 13.0, got {} \
+             (15.0 means it was indexed rather than resampled)",
+            got[0][1]
+        );
+        assert!(
+            (got[0][0] - 12.0).abs() < 1e-6,
+            "1000 rpm is shared by both axes"
+        );
+    }
+
+    /// Axes that already agree must be left exactly as they are - resampling a
+    /// table onto its own axis should be a no-op, not a slow rounding error.
+    #[test]
+    fn a_target_on_matching_axes_is_untouched() {
+        let (mut def, mut cache) = def_with_offset_axes();
+        // Make the VE rpm axis identical to the AFR one.
+        if let Some(c) = def.constants.get_mut("veRpmBins") {
+            c.offset = 4;
+        }
+        cache.load_page(
+            0,
+            vec![
+                120, 150, 120, 150, 10, 40, 20, 80, 10, 40, 20, 80, 0, 0, 0, 0,
+            ],
+        );
+        let (tables, _) = resolve_reference_tables(&def, Some(&cache), "veTable1Tbl", None, None);
+        assert_eq!(tables.target_afr_table[0], vec![12.0, 15.0]);
     }
 
     /// Page bytes for a 2x2 table of 13.0 AFR at scale 0.1 (raw 130).

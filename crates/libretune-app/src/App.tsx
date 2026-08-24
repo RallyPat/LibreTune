@@ -551,6 +551,7 @@ function AppContent() {
              const TOOLS: Record<string, { title: string, icon: string, type: TabContent['type'] }> = {
                "console": { title: "ECU Console", icon: "terminal", type: "console" },
                "datalog": { title: "Data Logging", icon: "datalog", type: "datalog" },
+               "log-analyze": { title: "Log Analyze", icon: "autotune", type: "log-analyze" },
                "autotune": { title: "AutoTune", icon: "autotune", type: "autotune" },
                "tooth-logger": { title: "Tooth Logger", icon: "scope", type: "tooth-logger" },
                "composite-logger": { title: "Composite Logger", icon: "scope", type: "composite-logger" },
