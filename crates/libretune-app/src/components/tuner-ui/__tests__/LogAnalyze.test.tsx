@@ -199,3 +199,27 @@ test('a log missing a required channel refuses to analyse and says which', async
   });
   expect(screen.getByRole('button', { name: /Analyse/i })).toBeDisabled();
 });
+
+/**
+ * Traces is the plain "look at the log" view, so it must not depend on having
+ * run an analysis — but it has nothing to draw before a log is opened.
+ */
+test('the Traces tab is offered only once a log is loaded', async () => {
+  mockInvoke();
+  const user = userEvent.setup();
+  render(<LogAnalyze isConnected />);
+  await waitFor(() => expect(screen.getByText('veTable1Tbl')).toBeInTheDocument());
+
+  expect(screen.getByRole('tab', { name: 'Traces' })).toBeDisabled();
+
+  await user.click(screen.getByRole('button', { name: /Open log/i }));
+  await waitFor(() => expect(screen.getByRole('tab', { name: 'Traces' })).toBeEnabled());
+
+  // Switching away from Analyse must not require an analysis to have run.
+  await user.click(screen.getByRole('tab', { name: 'Traces' }));
+  expect(screen.getByRole('tab', { name: 'Traces' })).toHaveAttribute('aria-selected', 'true');
+  expect(screen.queryByText(/blue adds fuel/)).not.toBeInTheDocument();
+
+  await user.click(screen.getByRole('tab', { name: 'Analyse' }));
+  expect(await screen.findByText(/blue adds fuel/)).toBeInTheDocument();
+});

@@ -249,3 +249,38 @@
   .la-body { flex-direction: column; }
   .la-config { flex: 0 0 auto; border-right: 0; border-bottom: 1px solid var(--border-color, #2a2a3a); }
 }
+
+/* ---- sub-tabs: Analyse | Traces ---- */
+.la-subtabs {
+  display: flex;
+  gap: 2px;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--border-color, #2a2a3a);
+  flex: 0 0 auto;
+}
+
+.la-subtabs button {
+  padding: 7px 16px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--text-secondary, #9a9aae);
+  cursor: pointer;
+  font-size: 13px;
+}
+.la-subtabs button:hover:not(:disabled) { color: var(--text-primary, #e6e6ef); }
+.la-subtabs button.on {
+  color: var(--text-primary, #e6e6ef);
+  border-bottom-color: var(--accent, #3a6ea5);
+}
+.la-subtabs button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* GraphLog sizes itself to its container, so give it the remaining height. */
+.la-traces {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.la-pad { padding: 14px; }

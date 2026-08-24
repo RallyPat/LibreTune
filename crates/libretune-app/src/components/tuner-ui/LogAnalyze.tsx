@@ -24,6 +24,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
 import { FolderOpen, Play, Check, AlertTriangle, Info } from 'lucide-react';
 import { parseLogFile, type LogSample } from '../../utils/parseLogFile';
+import GraphLog, { type GraphSample } from './GraphLog';
 import './LogAnalyze.css';
 
 /** Channel name candidates, first match wins. Speeduino/MS naming varies. */
@@ -84,6 +85,7 @@ export const LogAnalyze: React.FC<LogAnalyzeProps> = ({ tableName, isConnected }
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<[number, number] | null>(null);
+  const [view, setView] = useState<'analyse' | 'traces'>('analyse');
 
   // Config
   const [weighting, setWeighting] = useState('cell_proximity');
@@ -242,6 +244,12 @@ export const LogAnalyze: React.FC<LogAnalyzeProps> = ({ tableName, isConnected }
     return m;
   }, [report]);
 
+  // GraphLog names the timestamp `t`; the parser calls it `x`. Same number.
+  const graphSamples: GraphSample[] = useMemo(
+    () => samples.map((s) => ({ t: s.x, values: s.values })),
+    [samples],
+  );
+
   const changed = report?.cells.filter((c) => c.delta !== 0).length ?? 0;
 
   return (
@@ -278,6 +286,39 @@ export const LogAnalyze: React.FC<LogAnalyzeProps> = ({ tableName, isConnected }
         </div>
       )}
 
+      <div className="la-subtabs" role="tablist">
+        <button
+          role="tab"
+          aria-selected={view === 'analyse'}
+          className={view === 'analyse' ? 'on' : ''}
+          onClick={() => setView('analyse')}
+        >
+          Analyse
+        </button>
+        <button
+          role="tab"
+          aria-selected={view === 'traces'}
+          className={view === 'traces' ? 'on' : ''}
+          onClick={() => setView('traces')}
+          disabled={!samples.length}
+        >
+          Traces
+        </button>
+      </div>
+
+      {view === 'traces' ? (
+        samples.length ? (
+          // The strip charts the Data Logging tab already uses: assignable
+          // channels per pane, Q/A or the buttons to zoom, arrow keys to step
+          // the cursor. Reused rather than rebuilt so both places behave the
+          // same and a pane layout set in one is the layout in the other.
+          <div className="la-traces">
+            <GraphLog samples={graphSamples} availableChannels={channels} />
+          </div>
+        ) : (
+          <p className="la-note la-pad">Open a log to plot its channels.</p>
+        )
+      ) : (
       <div className="la-body">
         <aside className="la-config">
           <h4>Sample weighting</h4>
@@ -338,6 +379,7 @@ export const LogAnalyze: React.FC<LogAnalyzeProps> = ({ tableName, isConnected }
           )}
         </main>
       </div>
+      )}
     </div>
   );
 };
