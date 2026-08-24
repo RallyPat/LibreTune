@@ -21,9 +21,79 @@ pub mod health;
 pub mod predictor;
 pub mod preflight;
 
+use crate::ini::{EcuDefinition, TableRole};
 use evalexpr::{eval_with_context, ContextWithMutableVariables, HashMapContext, Value};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+
+/// Why `table_name` must not be fuel-tuned, or `None` if it may be.
+///
+/// AutoTune's correction is `value * (measured AFR / target AFR)`. That is only
+/// meaningful for a table whose values are fuel quantity. Applied to an
+/// ignition table it multiplies *degrees of advance*, and a lean cell — the
+/// common case, the one that asks for more fuel — multiplies by more than one
+/// and so **adds timing**, at exactly the high-load cells where that breaks
+/// pistons.
+///
+/// Nothing checked this. Every table in the INI reached the table pickers, so
+/// choosing the spark table and pressing Apply wrote scaled timing values
+/// straight to it. Both entry points route through here, because a guard in one
+/// picker leaves the other still able to do it — and the UI is not the place to
+/// enforce a rule this expensive to get wrong.
+///
+/// Tables the INI labels [`TableRole::Ve`] are the accepted set. When an INI
+/// declares none — no `[VeAnalyze]` section, so nothing is labelled — the rule
+/// relaxes to "anything not known to be dangerous", so the feature still works
+/// there rather than refusing every table.
+pub fn fuel_tune_refusal(def: &EcuDefinition, table_name: &str) -> Option<String> {
+    let Some(table) = def.get_table_by_name_or_map(table_name) else {
+        return Some(format!("{table_name} is not a table in this definition."));
+    };
+    let describe = |what: &str| {
+        Some(format!(
+            "{} is {what}. AutoTune scales a table by measured/target AFR, which \
+             is only meaningful for a fuel table — on this one it would corrupt \
+             the values.",
+            // Prefer the human title; fall back to the identifier when the INI
+            // gives the table no title of its own.
+            if table.title.is_empty() {
+                table_name
+            } else {
+                &table.title
+            },
+        ))
+    };
+    match table.role {
+        TableRole::Ve => None,
+        TableRole::Ignition => describe("an ignition table"),
+        TableRole::AfrTarget => describe("the AFR target table"),
+        TableRole::WarmupEnrichment => describe("a warm-up enrichment table"),
+        TableRole::Other => {
+            if def.tables.values().any(|t| t.role == TableRole::Ve) {
+                describe("not a fuel table")
+            } else {
+                // This INI labels nothing, so `Other` carries no information.
+                None
+            }
+        }
+    }
+}
+
+/// Tables this definition will allow a fuel tune on, by name.
+///
+/// The pickers use this so a table that [`fuel_tune_refusal`] would reject is
+/// never offered in the first place.
+pub fn fuel_tunable_tables(def: &EcuDefinition) -> Vec<String> {
+    let mut names: Vec<String> = def
+        .tables
+        .iter()
+        .filter(|(_, t)| t.y_bins.is_some())
+        .filter(|(name, _)| fuel_tune_refusal(def, name).is_none())
+        .map(|(name, _)| name.clone())
+        .collect();
+    names.sort();
+    names
+}
 
 /// A single cell recommendation in the VE table
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -348,6 +418,15 @@ pub struct AutoTuneState {
     // Total number of samples that passed filters (denominator for
     // hit_percentage). See bug #16.
     total_samples: u64,
+    // How many rejections this session has seen, for throttling the diagnostic
+    // above. Per session rather than per process: a process-global counter let
+    // the second session of an app run start past the throttle and log nothing
+    // at all, and made the throttle's behaviour depend on what every other
+    // AutoTune in the process had already done — under `cargo test` that is
+    // whichever tests happen to run alongside, which is how
+    // `filter_rejected_sample_is_logged_not_silent` came to fail on Linux and
+    // pass on Windows.
+    rejects_logged: u64,
     // Per-reason counts of samples rejected by the filters. Surface these in
     // the UI (issue #132): a session that accepts nothing looks exactly like
     // a broken one, and the counts say which filter is eating the data
@@ -367,6 +446,7 @@ impl Default for AutoTuneState {
             reference_tables: AutoTuneReferenceTables::default(),
             strict_lambda_match: true, // Safe default: drop unmatched samples
             total_samples: 0,
+            rejects_logged: 0,
             rejected_by_reason: HashMap::new(),
         }
     }
@@ -753,8 +833,8 @@ impl AutoTuneState {
             // show *why* AutoTune "does nothing": compare these against the
             // active filter thresholds (a warm-up CLT below min_clt and a
             // tip-in TPS rate above max_tps_rate are the usual culprits).
-            static REJECTS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-            let n = REJECTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let n = self.rejects_logged;
+            self.rejects_logged += 1;
             if n < 5 || n.is_multiple_of(100) {
                 // Name the specific filter. Previously the line printed only
                 // rpm/clt/tps_rate, so a rejection by load bounds or accel
@@ -1577,12 +1657,12 @@ mod tests {
             let s = AutoTuneSettings::default();
             let f = AutoTuneFilters::default(); // min_clt = 160
             let a = AutoTuneAuthorityLimits::default();
-            // clt=20 is far below min_clt: the sample must be rejected AND logged
-            // (before D9 this path returned silently). The reject log is
-            // throttled by a process-global counter, so feed a full throttle
-            // window (100+) to guarantee at least one line regardless of what
-            // other tests already put on that counter -- otherwise this flakes
-            // depending on test order.
+            // clt=20 is far below min_clt: the sample must be rejected AND
+            // logged (before D9 this path returned silently). The throttle
+            // counts per session, so a fresh state logs its first rejection and
+            // one sample is enough. It used to count per process, which made
+            // this depend on what every other test in the binary had already
+            // rejected.
             let p = VEDataPoint {
                 rpm: 2000.0,
                 load: 50.0,
@@ -1594,9 +1674,7 @@ mod tests {
                 timestamp_ms: 1000,
                 ..Default::default()
             };
-            for _ in 0..101 {
-                st.add_data_point(p.clone(), &[1000.0, 2000.0], &[40.0, 80.0], &s, &f, &a);
-            }
+            st.add_data_point(p, &[1000.0, 2000.0], &[40.0, 80.0], &s, &f, &a);
         });
         assert!(
             logs.lock()
@@ -1881,6 +1959,116 @@ mod authority_rail_tests {
             "default ceiling must cover the full byte range, got {}",
             a.max_cell_value
         );
+    }
+}
+
+#[cfg(test)]
+#[cfg(test)]
+mod fuel_tunable_tests {
+    use super::*;
+    use crate::ini::{TableDefinition, TableRole};
+
+    fn def_with(tables: &[(&str, TableRole)]) -> EcuDefinition {
+        let mut def = EcuDefinition::default();
+        for (name, role) in tables {
+            def.tables.insert(
+                (*name).to_string(),
+                TableDefinition {
+                    name: (*name).to_string(),
+                    title: (*name).to_string(),
+                    map: (*name).to_string(),
+                    x_bins: "xb".into(),
+                    y_bins: Some("yb".into()),
+                    x_size: 16,
+                    y_size: 16,
+                    role: *role,
+                    ..Default::default()
+                },
+            );
+        }
+        def
+    }
+
+    /// The one that breaks pistons.
+    ///
+    /// A lean cell asks for more fuel, so the correction multiplies by more
+    /// than one. On an ignition table that *adds advance*, and it does it at
+    /// the high-load cells where detonation lives. Every table in the INI used
+    /// to reach the pickers, so this was two clicks away.
+    #[test]
+    fn an_ignition_table_is_refused() {
+        let def = def_with(&[
+            ("veTable1Tbl", TableRole::Ve),
+            ("sparkTbl", TableRole::Ignition),
+        ]);
+        let why = fuel_tune_refusal(&def, "sparkTbl").expect("must refuse an ignition table");
+        assert!(why.contains("ignition"), "the reason must say why: {why}");
+        assert!(fuel_tune_refusal(&def, "veTable1Tbl").is_none());
+    }
+
+    /// Tuning the target towards itself converges on doing nothing, slowly,
+    /// while destroying the targets.
+    #[test]
+    fn the_afr_target_table_is_refused() {
+        let def = def_with(&[
+            ("veTable1Tbl", TableRole::Ve),
+            ("afrTable1Tbl", TableRole::AfrTarget),
+        ]);
+        assert!(fuel_tune_refusal(&def, "afrTable1Tbl").is_some());
+    }
+
+    /// Boost, dwell, VVT and friends are not fuel either.
+    #[test]
+    fn an_unrelated_table_is_refused_when_the_ini_labels_a_ve_table() {
+        let def = def_with(&[
+            ("veTable1Tbl", TableRole::Ve),
+            ("dwell_map", TableRole::Other),
+        ]);
+        assert!(fuel_tune_refusal(&def, "dwell_map").is_some());
+    }
+
+    /// An INI that labels nothing must stay usable: `Other` carries no
+    /// information there, so only the known-dangerous roles are refused.
+    #[test]
+    fn an_unlabelled_ini_still_allows_its_tables_but_never_ignition() {
+        let def = def_with(&[
+            ("mainFuel", TableRole::Other),
+            ("sparkTbl", TableRole::Ignition),
+        ]);
+        assert!(
+            fuel_tune_refusal(&def, "mainFuel").is_none(),
+            "refusing everything would make the feature useless on this INI"
+        );
+        assert!(
+            fuel_tune_refusal(&def, "sparkTbl").is_some(),
+            "still never ignition"
+        );
+    }
+
+    #[test]
+    fn a_table_that_does_not_exist_is_refused() {
+        let def = def_with(&[("veTable1Tbl", TableRole::Ve)]);
+        assert!(fuel_tune_refusal(&def, "nope").is_some());
+    }
+
+    /// The picker offers exactly what the guard would accept, so a user is
+    /// never shown a table that will be rejected on Apply.
+    #[test]
+    fn the_picker_list_matches_what_the_guard_allows() {
+        let def = def_with(&[
+            ("veTable1Tbl", TableRole::Ve),
+            ("veTable2Tbl", TableRole::Ve),
+            ("sparkTbl", TableRole::Ignition),
+            ("afrTable1Tbl", TableRole::AfrTarget),
+            ("boostTbl", TableRole::Other),
+        ]);
+        assert_eq!(
+            fuel_tunable_tables(&def),
+            vec!["veTable1Tbl", "veTable2Tbl"]
+        );
+        for name in fuel_tunable_tables(&def) {
+            assert!(fuel_tune_refusal(&def, &name).is_none());
+        }
     }
 }
 

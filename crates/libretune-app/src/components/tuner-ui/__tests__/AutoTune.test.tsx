@@ -24,7 +24,12 @@ const TABLE_DATA = {
 function mockInvoke() {
   (invoke as unknown as any).mockImplementation((cmd: string) => {
     if (cmd === 'get_ve_analyze_config') return Promise.resolve(null);
-    if (cmd === 'get_tables') return Promise.resolve([{ name: 'veTable1Tbl', title: 'VE Table' }]);
+    if (cmd === 'get_tables')
+      return Promise.resolve([
+        { name: 'veTable1Tbl', title: 'VE Table' },
+        { name: 'sparkTbl', title: 'Spark Advance' },
+      ]);
+    if (cmd === 'list_tunable_tables') return Promise.resolve(['veTable1Tbl']);
     if (cmd === 'get_table_data') return Promise.resolve(TABLE_DATA);
     if (cmd === 'get_available_channels') return Promise.resolve([]);
     return Promise.resolve();
@@ -236,4 +241,27 @@ describe('AutoTune settings persistence', () => {
     render(<ToastProvider><AutoTune isConnected onClose={() => {}} /></ToastProvider>);
     expect((await delayInput()).value).toBe('0');
   });
+});
+
+/**
+ * The spark table must never be offered.
+ *
+ * AutoTune scales the selected table by measured/target AFR. A lean cell asks
+ * for more fuel, so the factor exceeds one — on an ignition table that *adds
+ * advance*, at the high-load cells where detonation lives. `get_tables` returns
+ * every table in the INI, so before this the spark table sat in the dropdown
+ * next to the VE table, live-writing to the ECU.
+ */
+test('tables that are not fuel tables are kept out of the picker', async () => {
+  mockInvoke();
+  render(
+    <ToastProvider>
+      <AutoTune tableName="" onClose={() => {}} isConnected />
+    </ToastProvider>,
+  );
+
+  await waitFor(() => {
+    expect(screen.getByRole('option', { name: /VE Table/i })).toBeInTheDocument();
+  });
+  expect(screen.queryByRole('option', { name: /Spark Advance/i })).not.toBeInTheDocument();
 });
