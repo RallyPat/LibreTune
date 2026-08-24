@@ -41,6 +41,21 @@ pub async fn start_autotune(
         tracing::warn!("start_autotune: no ECU definition loaded — cannot start");
         "No ECU definition loaded".to_string()
     })?;
+    // This session's corrections are `value * measured/target AFR`, which only
+    // means anything on a fuel table. Refused here rather than in the picker,
+    // because this path writes to the ECU and a UI is not where a rule that
+    // expensive belongs.
+    if let Some(why) = libretune_core::autotune::fuel_tune_refusal(def, &table_name) {
+        tracing::warn!(table = %table_name, "start_autotune: refused, not a fuel table");
+        return Err(why);
+    }
+    if let Some(secondary) = secondary_table_name.as_deref() {
+        if let Some(why) = libretune_core::autotune::fuel_tune_refusal(def, secondary) {
+            tracing::warn!(table = %secondary, "start_autotune: refused secondary");
+            return Err(why);
+        }
+    }
+
     let definition_signature = def.signature.clone();
     let cache_guard = state.tune_cache.lock().await;
     let cache = cache_guard.as_ref();

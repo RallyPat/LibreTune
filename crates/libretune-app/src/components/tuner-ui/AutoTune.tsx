@@ -420,7 +420,17 @@ export function AutoTune({ tableName: initialTableName = '', onClose, isConnecte
 
   const loadAvailableTables = useCallback(async () => {
     try {
-      const tables = await invoke<TableInfo[]>('get_tables');
+      // Only tables a fuel tune may legitimately be applied to. `get_tables`
+      // returns every table in the INI, which put the spark table two clicks
+      // from being scaled by measured/target AFR — a lean cell multiplies by
+      // more than one, so that *adds advance*. The backend refuses it either
+      // way; this keeps it out of the picker so nobody is offered the choice.
+      // Falls back to the unfiltered list if that call fails, rather than
+      // leaving the picker empty: `start_autotune` refuses a non-fuel table on
+      // its own, so the worst case is an error on Start instead of a dead UI.
+      const allowed = await invoke<string[]>('list_tunable_tables').catch(() => null);
+      const all = await invoke<TableInfo[]>('get_tables');
+      const tables = Array.isArray(allowed) ? all.filter((t) => allowed.includes(t.name)) : all;
       setAvailableTables(tables);
 
       // Auto-select table: prefer INI config, then common VE table names, then first table

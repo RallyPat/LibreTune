@@ -40,6 +40,19 @@ pub async fn get_tables(state: tauri::State<'_, AppState>) -> Result<Vec<TableIn
     Ok(tables)
 }
 
+/// Names of the tables a fuel tune may legitimately be applied to.
+///
+/// [`get_tables`] returns every table in the INI, which is right for a table
+/// browser and wrong for a tuning picker: it put the ignition table two clicks
+/// from being scaled by measured/target AFR. Pickers use this instead, and the
+/// backend refuses the rest regardless of what the UI sends.
+#[tauri::command]
+pub async fn list_tunable_tables(state: tauri::State<'_, AppState>) -> Result<Vec<String>, String> {
+    let def_guard = state.definition.lock().await;
+    let def = def_guard.as_ref().ok_or("Definition not loaded")?;
+    Ok(libretune_core::autotune::fuel_tunable_tables(def))
+}
+
 /// Lists all available curves from the loaded INI definition.
 ///
 /// Returns basic info (name and title) for all curves defined in the INI.
