@@ -364,24 +364,76 @@ pub(crate) fn read_axis_bins(
         }
     };
 
-    // If we have cached tune data, read from it
+    // If we have cached tune data, read from it.
+    //
+    // All `size` bins or none. The old loop skipped a bin it could not read but
+    // carried on - a short page returned a truncated axis, and a single failed
+    // decode dropped one bin and shifted every bin after it down one position.
+    // Either way AutoTune ends up with fewer axis bins than the table has
+    // cells, so `nearest_bin` attributes a sample to the wrong RPM or load cell
+    // and the recommendation is filed against a cell the engine was never in.
+    // `read_table_z_values` already refuses a partial table for the same
+    // reason; an axis is no different. Falling through to `fallback_bins` keeps
+    // the existing contract for "cannot read this constant" rather than adding
+    // a new fabrication path.
     if let Some(cache) = cache {
         if let Some(page_data) = cache.get_page(constant.page) {
             let elem_size = constant.data_type.size_bytes();
-            let mut bins = Vec::with_capacity(size);
-            let mut offset = constant.offset as usize;
+            if elem_size == 0 {
+                tracing::warn!(
+                    axis = const_name,
+                    "axis constant has a zero-width data type; using generated bins"
+                );
+            } else {
+                let mut bins = Vec::with_capacity(size);
+                let mut offset = constant.offset as usize;
 
-            for _ in 0..size {
-                if offset + elem_size <= page_data.len() {
-                    if let Ok(raw) = read_raw_value(&page_data[offset..], &constant.data_type) {
-                        bins.push(constant.raw_to_display(raw));
+                for i in 0..size {
+                    if offset + elem_size > page_data.len() {
+                        tracing::warn!(
+                            axis = const_name,
+                            page = constant.page,
+                            bin = i,
+                            of = size,
+                            need = offset + elem_size,
+                            have = page_data.len(),
+                            "axis read ran past the end of the page"
+                        );
+                        bins.clear();
+                        break;
+                    }
+                    match read_raw_value(&page_data[offset..], &constant.data_type) {
+                        Ok(raw) => bins.push(constant.raw_to_display(raw)),
+                        Err(e) => {
+                            tracing::warn!(
+                                axis = const_name,
+                                bin = i,
+                                offset,
+                                error = %e,
+                                "axis bin failed to decode"
+                            );
+                            bins.clear();
+                            break;
+                        }
                     }
                     offset += elem_size;
                 }
-            }
 
-            if !bins.is_empty() {
-                return Ok(bins);
+                if bins.len() == size {
+                    return Ok(bins);
+                }
+                // The page is there but does not hold the axis. Falling through
+                // to fallback_bins would answer with a fixed 500-6500 rpm (or
+                // 20-100 kPa) ramp that has nothing to do with this table, and
+                // AutoTune would file every recommendation against a cell
+                // chosen by that invented axis - across the full table width
+                // rather than part of it. read_table_z_values refuses the
+                // identical condition; the fallback below is for an axis the
+                // INI never declared, which is a different thing.
+                return Err(format!(
+                    "Axis '{const_name}' could not be read from page {}: the page is                      present but does not hold {size} complete bins. Re-sync the ECU                      and try again.",
+                    constant.page
+                ));
             }
         }
     }
@@ -755,6 +807,80 @@ pub(crate) fn read_table_z_values(
         out.push(row);
     }
     Some(out)
+}
+
+#[cfg(test)]
+mod axis_bin_tests {
+    use super::*;
+    use libretune_core::ini::DataType;
+    use libretune_core::tune::TuneCache;
+
+    /// One 8-entry U16 RPM axis at page offset 0. `page_bytes` decides whether
+    /// the page is long enough to hold it.
+    fn def_and_cache(page_bytes: usize) -> (EcuDefinition, TuneCache) {
+        let mut def = EcuDefinition {
+            page_sizes: vec![page_bytes as u16],
+            n_pages: 1,
+            ..Default::default()
+        };
+        def.constants.insert(
+            "rpmBins".to_string(),
+            Constant {
+                name: "rpmBins".to_string(),
+                page: 0,
+                offset: 0,
+                data_type: DataType::U16,
+                scale: 1.0,
+                translate: 0.0,
+                ..Default::default()
+            },
+        );
+        let mut cache = TuneCache::from_definition(&def);
+        // 500, 1500, 2500 ... U16, big-endian as the INI reader decodes them.
+        let mut page = Vec::with_capacity(page_bytes);
+        for i in 0..(page_bytes / 2) {
+            let rpm = 500u16 + (i as u16 * 1000);
+            page.extend_from_slice(&rpm.to_be_bytes());
+        }
+        page.resize(page_bytes, 0);
+        cache.load_page(0, page);
+        (def, cache)
+    }
+
+    #[test]
+    fn a_full_page_reads_the_real_axis() {
+        let (def, cache) = def_and_cache(16);
+        let bins = read_axis_bins(&def, Some(&cache), "rpmBins", 8, AxisHint::Rpm).unwrap();
+        assert_eq!(bins.len(), 8);
+        assert_eq!(bins[0], 500.0);
+        assert_eq!(bins[7], 7500.0);
+    }
+
+    /// The bug: a page holding only 5 of the 8 bins used to return a 5-entry
+    /// axis. AutoTune then had fewer bins than the table has cells, so samples
+    /// were attributed to the wrong RPM cell entirely - and nothing downstream
+    /// could tell a short axis from a complete one.
+    #[test]
+    fn a_short_page_refuses_rather_than_truncating_or_inventing() {
+        let (def, cache) = def_and_cache(10); // 5 x U16, need 8
+        let err = read_axis_bins(&def, Some(&cache), "rpmBins", 8, AxisHint::Rpm)
+            .expect_err("a page that cannot hold the axis must not answer");
+        assert!(
+            err.contains("rpmBins") && err.contains("page 0"),
+            "the error must name the axis and page: {err}"
+        );
+    }
+
+    /// Refusing is only correct when the page *is* there and falls short.
+    /// An axis the INI never declared has no page to be short, and generated
+    /// bins are the only answer available - that path must keep working.
+    #[test]
+    fn a_missing_constant_still_generates_bins() {
+        let (def, cache) = def_and_cache(16);
+        let bins = read_axis_bins(&def, Some(&cache), "notThere", 8, AxisHint::Rpm).unwrap();
+        assert_eq!(bins.len(), 8);
+        assert!(bins.windows(2).all(|w| w[1] > w[0]));
+    }
 }
 
 #[cfg(test)]
