@@ -91,7 +91,10 @@ runs:
                 abs_zip="$(cd "$(dirname "$zip_name")" && pwd)/$(basename "$zip_name")"
                 (
                   cd "$(dirname "$app")"
-                  zip -r "$abs_zip" "$(basename "$app")"
+                  # ditto preserves bundle metadata and the code signature;
+                  # `zip -r` can invalidate an .app's signature.
+                  ditto -c -k --sequesterRsrc --keepParent \
+                    "$(basename "$app")" "$abs_zip"
                 )
                 echo "zipped: $app -> $zip_name"
                 copied=$((copied + 1))

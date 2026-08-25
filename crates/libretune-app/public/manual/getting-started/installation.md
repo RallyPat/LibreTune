@@ -9,9 +9,15 @@ Download the latest release for your operating system from the [GitHub Releases]
 | Platform | File |
 |----------|------|
 | Windows | `LibreTune_x.x.x_x64-setup.exe` |
-| macOS | `LibreTune_x.x.x_universal.dmg` |
+| macOS (Apple Silicon) | `libretune-app_x.x.x_aarch64.dmg` |
+| macOS (Intel) | `libretune-app_x.x.x_x64.dmg` |
 | Linux (Debian/Ubuntu) | `libretune_x.x.x_amd64.deb` |
 | Linux (AppImage) | `LibreTune_x.x.x_amd64.AppImage` |
+
+macOS builds are **not** universal binaries — download the file matching your
+Mac's processor. Apple Silicon Macs (M1 and newer) need the `aarch64` DMG;
+the `x64` DMG only runs under Rosetta 2 and will fail outright if Rosetta is
+not installed.
 
 ## Windows Installation
 
@@ -29,9 +35,34 @@ For Speeduino and most Arduino-based ECUs, you may need to install USB drivers:
 
 ## macOS Installation
 
-1. Download the `.dmg` file
+1. Download the `.dmg` file for your processor (see the table above)
 2. Open the DMG and drag LibreTune to your Applications folder
-3. On first launch, you may need to allow the app in **System Preferences → Security & Privacy**
+3. On first launch, macOS will refuse to open the app because it is not
+   notarized by Apple — see below
+
+### First Launch on macOS (Gatekeeper)
+
+LibreTune releases are ad-hoc signed but not signed with an Apple Developer ID
+or notarized, so macOS quarantines them after download. Depending on your macOS
+version you will see either *"LibreTune cannot be opened because it is from an
+unidentified developer"* or *"LibreTune is damaged and can't be opened"*.
+
+The app is not actually damaged. To allow it:
+
+1. Try to open LibreTune once (double-click) and dismiss the warning
+2. Open **System Settings → Privacy & Security**
+3. Scroll to the Security section and click **Open Anyway** next to the
+   LibreTune message
+4. Confirm with **Open**
+
+If the **Open Anyway** button does not appear, remove the quarantine flag from
+Terminal instead:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/LibreTune.app
+```
+
+Only run that command on downloads you trust.
 
 ### USB Permissions (macOS)
 

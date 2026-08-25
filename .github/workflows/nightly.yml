@@ -220,7 +220,7 @@ jobs:
       - name: Upload macOS artifacts
         uses: actions/upload-artifact@v6
         with:
-          name: macos-universal-${{ needs.check-changes.outputs.date_stamp }}
+          name: macos-aarch64-x86_64-${{ needs.check-changes.outputs.date_stamp }}
           path: crates/libretune-app/artifacts/macos/*
           if-no-files-found: error
           retention-days: 7
@@ -256,10 +256,10 @@ jobs:
           for f in artifacts/windows-x86_64-*/*.exe; do
             [ -f "$f" ] && cp "$f" "release/LibreTune-nightly-${DATE_STAMP}-windows-x86_64-portable.exe"
           done
-          for f in artifacts/macos-universal-*/*.dmg; do
+          for f in artifacts/macos-aarch64-x86_64-*/*.dmg; do
             [ -f "$f" ] && cp "$f" "release/$(basename "$f" .dmg)-nightly-${DATE_STAMP}.dmg"
           done
-          for f in artifacts/macos-universal-*/*.zip; do
+          for f in artifacts/macos-aarch64-x86_64-*/*.zip; do
             [ -f "$f" ] && cp "$f" "release/$(basename "$f" .zip)-nightly-${DATE_STAMP}.zip"
           done
 
@@ -287,7 +287,18 @@ jobs:
             ### Downloads
             - **Linux**: AppImage (portable), DEB, RPM
             - **Windows**: Portable EXE (no installation required)
-            - **macOS**: DMG (ARM64 and Intel)
+            - **macOS**: separate DMGs per architecture — use `aarch64` for
+              Apple Silicon (M1 and newer) and `x64` for Intel Macs. These are
+              not universal binaries.
+
+            ### macOS first launch
+            These builds are ad-hoc signed but not notarized, so macOS will
+            report the app as damaged or from an unidentified developer. Open
+            **System Settings → Privacy & Security** and click **Open Anyway**,
+            or run:
+            ```
+            xattr -dr com.apple.quarantine /Applications/LibreTune.app
+            ```
 
             ### Notes
             - This release is automatically updated each night when there are new commits
