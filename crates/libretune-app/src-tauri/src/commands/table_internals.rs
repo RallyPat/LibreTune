@@ -8,17 +8,46 @@ use libretune_core::ini::Constant;
 use libretune_core::tune::{TuneFile, TuneValue};
 use serde::Serialize;
 
-/// Mirror a table/axis write into the in-memory tune, so what the screen shows
-/// matches what the ECU was just sent.
+/// Keep the three representations of one constant in step.
 ///
-/// Three things have to move together or the app quietly disagrees with the
-/// engine: the `TuneCache` page bytes, the `TuneFile` page bytes, and
-/// `tune.constants` - offline reads prefer the parsed msq constants over page
-/// data (`read_const_values` checks `tune.constants` first), so leaving those
-/// stale makes an accepted write revert on the next read while the ECU has
-/// already taken it. PR #59 established the invariant for `update_table_data`;
-/// this is the same block the internal helpers and AutoTune's apply each need.
+/// A written value lives in three places and they have to move together: the
+/// `TuneCache` page bytes, the `TuneFile` page bytes, and `tune.constants`.
+/// Offline reads prefer the parsed msq constants over page data
+/// (`read_const_values` checks `tune.constants` first) and `save_msq`
+/// serialises *only* constants - page bytes are never emitted - so leaving the
+/// constants leg out means the value is absent from the file that was just
+/// saved, while the cache and pages both hold it.
 ///
+/// `set_constant_with_page` rather than a bare `constants.insert`: `save_msq`
+/// groups by `constant_pages`, so a constant the tune did not already carry
+/// would otherwise be written out under page 0.
+pub(crate) fn sync_constant_into_tune(
+    cache: &mut libretune_core::tune::TuneCache,
+    tune: &mut TuneFile,
+    constant: &Constant,
+    raw_data: &[u8],
+    default_page_bytes: usize,
+    value: TuneValue,
+) {
+    // TuneCache::write_bytes creates the page if absent and grows it if short,
+    // so it has no failure path to branch on.
+    cache.write_bytes(constant.page, constant.offset, raw_data);
+
+    let page_data = tune
+        .pages
+        .entry(constant.page)
+        .or_insert_with(|| vec![0u8; default_page_bytes]);
+    let start = constant.offset as usize;
+    let end = start + raw_data.len();
+    if end <= page_data.len() {
+        page_data[start..end].copy_from_slice(raw_data);
+    }
+
+    tune.set_constant_with_page(constant.name.clone(), value, constant.page);
+}
+
+/// [`sync_constant_into_tune`] for callers that hold `AppState` rather than the
+/// tune itself, marking the tune modified afterwards.
 pub(crate) async fn mirror_write_into_tune(
     state: &AppState,
     cache: &mut libretune_core::tune::TuneCache,
@@ -27,23 +56,19 @@ pub(crate) async fn mirror_write_into_tune(
     default_page_bytes: usize,
     values: &[f64],
 ) {
-    // TuneCache::write_bytes creates the page if absent and grows it if short,
-    // so it has no failure path to branch on.
-    cache.write_bytes(constant.page, constant.offset, raw_data);
-
     let mut tune_guard = state.current_tune.lock().await;
     if let Some(tune) = tune_guard.as_mut() {
-        let page_data = tune
-            .pages
-            .entry(constant.page)
-            .or_insert_with(|| vec![0u8; default_page_bytes]);
-        let start = constant.offset as usize;
-        let end = start + raw_data.len();
-        if end <= page_data.len() {
-            page_data[start..end].copy_from_slice(raw_data);
-        }
-        tune.constants
-            .insert(constant.name.clone(), TuneValue::Array(values.to_vec()));
+        sync_constant_into_tune(
+            cache,
+            tune,
+            constant,
+            raw_data,
+            default_page_bytes,
+            TuneValue::Array(values.to_vec()),
+        );
+    } else {
+        // No tune open: the cache is still the live view, so keep it current.
+        cache.write_bytes(constant.page, constant.offset, raw_data);
     }
     drop(tune_guard);
 
@@ -544,4 +569,93 @@ pub(crate) async fn update_constant_array_internal(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod sync_constant_into_tune_tests {
+    use super::*;
+    use libretune_core::ini::{DataType, EcuDefinition, Endianness, Shape};
+    use libretune_core::tune::{TuneCache, TuneFile};
+
+    fn def_and_constant() -> (EcuDefinition, Constant) {
+        let mut def = EcuDefinition {
+            page_sizes: vec![0, 0, 0, 64],
+            n_pages: 4,
+            signature: "test".to_string(),
+            ..Default::default()
+        };
+        let c = Constant {
+            name: "veTable".to_string(),
+            page: 3,
+            offset: 2,
+            data_type: DataType::U08,
+            scale: 1.0,
+            translate: 0.0,
+            shape: Shape::Array1D(4),
+            ..Default::default()
+        };
+        def.constants.insert(c.name.clone(), c.clone());
+        (def, c)
+    }
+
+    /// The bug this closes: apply_base_map wrote the cache and tune.pages, then
+    /// saved the msq - and save_msq serialises only `constants`, which nothing
+    /// had written. The generated map was absent from the file it just wrote.
+    #[test]
+    fn a_synced_constant_survives_a_save_and_reload() {
+        let (def, c) = def_and_constant();
+        let mut cache = TuneCache::from_definition(&def);
+        let mut tune = TuneFile::default();
+        tune.signature = "test".to_string();
+
+        sync_constant_into_tune(
+            &mut cache,
+            &mut tune,
+            &c,
+            &[10, 20, 30, 40],
+            64,
+            TuneValue::Array(vec![10.0, 20.0, 30.0, 40.0]),
+        );
+
+        let dir = std::env::temp_dir().join("libretune-sync-test");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("CurrentTune.msq");
+        tune.save(&path).expect("save");
+
+        let reloaded = TuneFile::load(&path).expect("reload");
+        match reloaded.constants.get("veTable") {
+            Some(TuneValue::Array(a)) => assert_eq!(a, &vec![10.0, 20.0, 30.0, 40.0]),
+            other => panic!("veTable did not survive the save: {other:?}"),
+        }
+        assert_eq!(
+            reloaded.constant_pages.get("veTable"),
+            Some(&3),
+            "the page must survive too, or save_msq groups it under page 0"
+        );
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn all_three_representations_move_together() {
+        let (def, c) = def_and_constant();
+        let mut cache = TuneCache::from_definition(&def);
+        let mut tune = TuneFile::default();
+
+        sync_constant_into_tune(
+            &mut cache,
+            &mut tune,
+            &c,
+            &[1, 2, 3, 4],
+            64,
+            TuneValue::Array(vec![1.0, 2.0, 3.0, 4.0]),
+        );
+
+        assert_eq!(
+            cache.read_bytes(3, 2, 4),
+            Some(&[1u8, 2, 3, 4][..]),
+            "cache"
+        );
+        assert_eq!(&tune.pages[&3][2..6], &[1u8, 2, 3, 4], "tune pages");
+        assert!(tune.constants.contains_key("veTable"), "tune constants");
+    }
 }

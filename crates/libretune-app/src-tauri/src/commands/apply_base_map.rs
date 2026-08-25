@@ -95,23 +95,17 @@ pub async fn apply_base_map(
                 .write_to_bytes(&mut raw_data, offset, raw_val, endianness);
         }
 
-        cache.write_bytes(constant.page, constant.offset, &raw_data);
-
-        // Also update tune file page data
-        let page_data = tune.pages.entry(constant.page).or_insert_with(|| {
-            vec![
-                0u8;
-                def.page_sizes
-                    .get(constant.page as usize)
-                    .copied()
-                    .unwrap_or(256) as usize
-            ]
-        });
-        let start = constant.offset as usize;
-        let end = start + raw_data.len();
-        if end <= page_data.len() {
-            page_data[start..end].copy_from_slice(&raw_data);
-        }
+        crate::commands::table_internals::sync_constant_into_tune(
+            cache,
+            tune,
+            constant,
+            &raw_data,
+            def.page_sizes
+                .get(constant.page as usize)
+                .copied()
+                .unwrap_or(256) as usize,
+            libretune_core::tune::TuneValue::Array(flat.clone()),
+        );
 
         Ok(table.title.clone())
     }
@@ -144,22 +138,17 @@ pub async fn apply_base_map(
                 .write_to_bytes(&mut raw_data, offset, raw_val, endianness);
         }
 
-        cache.write_bytes(constant.page, constant.offset, &raw_data);
-
-        let page_data = tune.pages.entry(constant.page).or_insert_with(|| {
-            vec![
-                0u8;
-                def.page_sizes
-                    .get(constant.page as usize)
-                    .copied()
-                    .unwrap_or(256) as usize
-            ]
-        });
-        let start = constant.offset as usize;
-        let end = start + raw_data.len();
-        if end <= page_data.len() {
-            page_data[start..end].copy_from_slice(&raw_data);
-        }
+        crate::commands::table_internals::sync_constant_into_tune(
+            cache,
+            tune,
+            constant,
+            &raw_data,
+            def.page_sizes
+                .get(constant.page as usize)
+                .copied()
+                .unwrap_or(256) as usize,
+            libretune_core::tune::TuneValue::Array(final_values.clone()),
+        );
         Ok(())
     }
 
@@ -325,21 +314,17 @@ pub async fn apply_base_map(
                 constant
                     .data_type
                     .write_to_bytes(&mut raw_data, 0, raw_val, endianness);
-                cache.write_bytes(constant.page, constant.offset, &raw_data);
-                let page_data = tune.pages.entry(constant.page).or_insert_with(|| {
-                    vec![
-                        0u8;
-                        def.page_sizes
-                            .get(constant.page as usize)
-                            .copied()
-                            .unwrap_or(256) as usize
-                    ]
-                });
-                let start = constant.offset as usize;
-                let end = start + raw_data.len();
-                if end <= page_data.len() {
-                    page_data[start..end].copy_from_slice(&raw_data);
-                }
+                crate::commands::table_internals::sync_constant_into_tune(
+                    cache,
+                    tune,
+                    constant,
+                    &raw_data,
+                    def.page_sizes
+                        .get(constant.page as usize)
+                        .copied()
+                        .unwrap_or(256) as usize,
+                    libretune_core::tune::TuneValue::Scalar(rf),
+                );
                 applied.push(format!("reqFuel = {:.1} ms", rf));
                 break;
             }
@@ -357,21 +342,17 @@ pub async fn apply_base_map(
                     constant
                         .data_type
                         .write_to_bytes(&mut raw_data, 0, raw_val, endianness);
-                    cache.write_bytes(constant.page, constant.offset, &raw_data);
-                    let page_data = tune.pages.entry(constant.page).or_insert_with(|| {
-                        vec![
-                            0u8;
-                            def.page_sizes
-                                .get(constant.page as usize)
-                                .copied()
-                                .unwrap_or(256) as usize
-                        ]
-                    });
-                    let start = constant.offset as usize;
-                    let end = start + raw_data.len();
-                    if end <= page_data.len() {
-                        page_data[start..end].copy_from_slice(&raw_data);
-                    }
+                    crate::commands::table_internals::sync_constant_into_tune(
+                        cache,
+                        tune,
+                        constant,
+                        &raw_data,
+                        def.page_sizes
+                            .get(constant.page as usize)
+                            .copied()
+                            .unwrap_or(256) as usize,
+                        libretune_core::tune::TuneValue::Scalar(v),
+                    );
                 }
             }
         }
