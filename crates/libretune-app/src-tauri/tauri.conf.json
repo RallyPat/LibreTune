@@ -49,6 +49,10 @@
         "bundleMediaFramework": false
       }
     },
+    "macOS": {
+      "minimumSystemVersion": "10.15",
+      "signingIdentity": "-"
+    },
     "windows": {
       "nsis": {
         "installerIcon": "icons/icon.ico"

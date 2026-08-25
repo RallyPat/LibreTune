@@ -157,7 +157,7 @@ jobs:
       - name: Upload macOS artifacts
         uses: actions/upload-artifact@v6
         with:
-          name: macos-universal
+          name: macos-aarch64-x86_64
           path: crates/libretune-app/artifacts/macos/*
           if-no-files-found: error
           retention-days: 30
@@ -193,7 +193,7 @@ jobs:
           files: |
             artifacts/linux-x86_64/**/*
             artifacts/windows-x86_64/**/*
-            artifacts/macos-universal/**/*
+            artifacts/macos-aarch64-x86_64/**/*
           draft: false
           prerelease: false
           generate_release_notes: true
