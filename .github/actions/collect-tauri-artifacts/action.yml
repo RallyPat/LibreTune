@@ -40,7 +40,9 @@ runs:
           local matches=($pattern)
           shopt -u nullglob
           local f
-          for f in "${matches[@]}"; do
+          # bash 3.2 (macOS) treats "${arr[@]}" on an empty array as unbound
+          # under `set -u`, so guard the expansion.
+          for f in ${matches[@]+"${matches[@]}"}; do
             if [ -f "$f" ]; then
               if [ -n "$dest_name" ]; then
                 cp "$f" "$DEST/$dest_name"
@@ -82,7 +84,10 @@ runs:
               shopt -u nullglob
               for app in "${apps[@]+"${apps[@]}"}"; do
                 [ -d "$app" ] || continue
-                zip_name="$DEST/$(basename "$app" .app).zip"
+                # .../<target-triple>/release/bundle/macos/<name>.app — keep the
+                # triple in the zip name so per-arch bundles don't clobber each other.
+                triple="$(basename "$(dirname "$(dirname "$(dirname "$(dirname "$app")")")")")"
+                zip_name="$DEST/$(basename "$app" .app)_$triple.zip"
                 abs_zip="$(cd "$(dirname "$zip_name")" && pwd)/$(basename "$zip_name")"
                 (
                   cd "$(dirname "$app")"
