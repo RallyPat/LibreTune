@@ -11,6 +11,7 @@ import { ArrowLeft, Save, Flame, Undo2, Redo2, AlertTriangle } from 'lucide-reac
 import { GaugeLiveReadout } from '../gauges/GaugeLiveReadout';
 import { TsGaugeConfig } from '../dashboards/dashTypes';
 import { valueToHeatmapColor, textColorForBackground } from '../../utils/heatmapColors';
+import { askNumber } from '../../utils/askNumber';
 import { useChannelValue } from '../../stores/realtimeStore';
 import './CurveEditor.css';
 
@@ -634,45 +635,33 @@ export default function CurveEditor({
   };
 
   const setYAxisMin = () => {
-    const value = prompt('Set Y Axis Minimum:', yAxis.min.toString());
+    const value = askNumber('Set Y Axis Minimum:', yAxis.min);
     if (value !== null) {
-      const num = parseFloat(value);
-      if (!isNaN(num)) {
-        setYAxisOverride(prev => ({ ...prev, min: num, auto: false }));
-      }
+      setYAxisOverride(prev => ({ ...prev, min: value, auto: false }));
     }
     closeContextMenu();
   };
 
   const setYAxisMax = () => {
-    const value = prompt('Set Y Axis Maximum:', yAxis.max.toString());
+    const value = askNumber('Set Y Axis Maximum:', yAxis.max);
     if (value !== null) {
-      const num = parseFloat(value);
-      if (!isNaN(num)) {
-        setYAxisOverride(prev => ({ ...prev, max: num, auto: false }));
-      }
+      setYAxisOverride(prev => ({ ...prev, max: value, auto: false }));
     }
     closeContextMenu();
   };
 
   const setXAxisMin = () => {
-    const value = prompt('Set X Axis Minimum:', xAxis.min.toString());
+    const value = askNumber('Set X Axis Minimum:', xAxis.min);
     if (value !== null) {
-      const num = parseFloat(value);
-      if (!isNaN(num)) {
-        setXAxisOverride(prev => ({ ...prev, min: num, auto: false }));
-      }
+      setXAxisOverride(prev => ({ ...prev, min: value, auto: false }));
     }
     closeContextMenu();
   };
 
   const setXAxisMax = () => {
-    const value = prompt('Set X Axis Maximum:', xAxis.max.toString());
+    const value = askNumber('Set X Axis Maximum:', xAxis.max);
     if (value !== null) {
-      const num = parseFloat(value);
-      if (!isNaN(num)) {
-        setXAxisOverride(prev => ({ ...prev, max: num, auto: false }));
-      }
+      setXAxisOverride(prev => ({ ...prev, max: value, auto: false }));
     }
     closeContextMenu();
   };
