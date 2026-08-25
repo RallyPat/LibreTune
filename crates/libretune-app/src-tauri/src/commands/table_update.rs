@@ -65,34 +65,15 @@ pub async fn update_table_data(
 
     // Always write to TuneCache if available (enables offline editing)
     if let Some(cache) = cache_guard.as_mut() {
-        if cache.write_bytes(constant.page, constant.offset, &raw_data) {
-            // Also update TuneFile in memory
-            let mut tune_guard = state.current_tune.lock().await;
-            if let Some(tune) = tune_guard.as_mut() {
-                // Get or create page data
-                let page_data = tune
-                    .pages
-                    .entry(constant.page)
-                    .or_insert_with(|| vec![0u8; default_page_bytes]);
-
-                // Update the page data
-                let start = constant.offset as usize;
-                let end = start + raw_data.len();
-                if end <= page_data.len() {
-                    page_data[start..end].copy_from_slice(&raw_data);
-                }
-
-                // Offline reads prefer the parsed msq constants over page data,
-                // so keep them in sync or edits revert on reload
-                tune.constants.insert(
-                    constant.name.clone(),
-                    libretune_core::tune::TuneValue::Array(flat_values.clone()),
-                );
-            }
-
-            // Mark tune as modified
-            *state.tune_modified.lock().await = true;
-        }
+        crate::commands::table_internals::mirror_write_into_tune(
+            &state,
+            cache,
+            &constant,
+            &raw_data,
+            default_page_bytes,
+            &flat_values,
+        )
+        .await;
     }
 
     // Write to ECU if connected (optional - offline mode works without this)
