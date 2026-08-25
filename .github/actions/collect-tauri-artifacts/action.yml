@@ -42,7 +42,7 @@ runs:
           local f
           # bash 3.2 (macOS) treats "${arr[@]}" on an empty array as unbound
           # under `set -u`, so guard the expansion.
-          for f in ${matches[@]+"${matches[@]}"}; do
+          for f in "${matches[@]+"${matches[@]}"}"; do
             if [ -f "$f" ]; then
               if [ -n "$dest_name" ]; then
                 cp "$f" "$DEST/$dest_name"
