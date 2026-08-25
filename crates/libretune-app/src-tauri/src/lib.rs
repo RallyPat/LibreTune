@@ -87,9 +87,6 @@ use commands::data_logging::{
 };
 use commands::debug_realtime::debug_single_realtime_read;
 use commands::demo::{get_demo_mode, set_demo_mode};
-use commands::diagnostic_loggers::{
-    start_composite_logger, start_tooth_logger, stop_composite_logger, stop_tooth_logger,
-};
 use commands::dyno::{compare_dyno_runs, detect_dyno_headers, load_dyno_run};
 use commands::find_inis::find_matching_inis;
 use commands::firmware_update::{
@@ -402,7 +399,6 @@ pub fn run() {
             read_text_file,
             write_text_file,
             // Diagnostic commands (stubs)
-            start_tooth_logger,
             commands::constant_update::update_constant_array,
             commands::file_io::write_file_contents,
             commands::file_io::read_file_contents,
@@ -411,9 +407,6 @@ pub fn run() {
             commands::tooth_logger::list_diagnostic_loggers,
             commands::ini_meta::list_tunable_tables,
             commands::analyse_log::analyse_log,
-            stop_tooth_logger,
-            start_composite_logger,
-            stop_composite_logger,
             compare_tables,
             reset_tune_to_defaults,
             export_tune_as_csv,

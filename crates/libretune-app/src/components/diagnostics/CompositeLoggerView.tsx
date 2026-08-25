@@ -20,10 +20,56 @@ interface CompositeLogEntry {
   voltage?: number;
 }
 
-interface CompositeLogResult {
-  entries: CompositeLogEntry[];
-  capture_time_ms: number;
-  sample_rate_hz: number;
+/** A record as `start_tooth_capture` emits it: INI field names to scaled values. */
+export interface LoggerRecord {
+  index: number;
+  fields: Record<string, number>;
+}
+
+interface CaptureStatus {
+  logger: string;
+  records: number;
+  reads: number;
+  emptyReads: number;
+  running: boolean;
+  note: string | null;
+}
+
+interface DiagnosticLogger {
+  name: string;
+  label: string;
+  kind: string;
+}
+
+/** A long capture exceeds anything a trigger scope can usefully draw. */
+const MAX_POINTS = 20000;
+
+/**
+ * Map INI-named record fields onto the view's entries.
+ *
+ * The INI declares what each bit of a composite record means - Speeduino and
+ * rusEFI both name them priLevel/secLevel/sync, with `time` as a scaled
+ * running timestamp in milliseconds. Matching by name rather than by position
+ * is what lets this work off the definition instead of a guess.
+ */
+export function toEntries(records: LoggerRecord[]): CompositeLogEntry[] {
+  const out: CompositeLogEntry[] = [];
+  for (const r of records) {
+    // Units differ per field and the INI says which: `time` and `refTime` are
+    // declared scale 0.001 in ms, `toothTime` scale 1.0 already in
+    // microseconds. Converting all three alike puts toothTime out by 1000x.
+    const ms = r.fields.time ?? r.fields.refTime;
+    const timeUs = ms !== undefined ? ms * 1000 : r.fields.toothTime;
+    if (timeUs === undefined) continue;
+    out.push({
+      time_us: Math.round(timeUs),
+      primary: (r.fields.priLevel ?? 0) !== 0,
+      secondary: (r.fields.secLevel ?? 0) !== 0,
+      sync: (r.fields.sync ?? 0) !== 0,
+      voltage: r.fields.voltage,
+    });
+  }
+  return out;
 }
 
 interface CompositeLoggerViewProps {
@@ -33,7 +79,6 @@ interface CompositeLoggerViewProps {
 export const CompositeLoggerView: React.FC<CompositeLoggerViewProps> = ({ onClose }) => {
   const [logData, setLogData] = useState<CompositeLogEntry[]>([]);
   const [isCapturing, setIsCapturing] = useState(false);
-  const [sampleRate, setSampleRate] = useState<number>(10000);
   const [error, setError] = useState<string | null>(null);
   const [zoomLevel, setZoomLevel] = useState(1);
   const [scrollOffset, setScrollOffset] = useState(0);
@@ -44,8 +89,15 @@ export const CompositeLoggerView: React.FC<CompositeLoggerViewProps> = ({ onClos
     let unlisten: (() => void) | null = null;
 
     const setupListener = async () => {
-      unlisten = await listen<CompositeLogEntry[]>("composite_logger:data", (event) => {
-        setLogData(event.payload);
+      // `tooth-log-records` streams batches while a capture runs, decoded
+      // against the record layout the INI declares. Append rather than
+      // replace: batches arrive throughout the capture.
+      unlisten = await listen<LoggerRecord[]>("tooth-log-records", (event) => {
+        const mapped = toEntries(event.payload);
+        setLogData((prev) => {
+          const next = prev.concat(mapped);
+          return next.length > MAX_POINTS ? next.slice(-MAX_POINTS) : next;
+        });
       });
     };
 
@@ -245,11 +297,30 @@ export const CompositeLoggerView: React.FC<CompositeLoggerViewProps> = ({ onClos
   const handleCapture = useCallback(async () => {
     setIsCapturing(true);
     setError(null);
+    setLogData([]);
 
     try {
-      const result = await invoke<CompositeLogResult>("start_composite_logger");
-      setLogData(result.entries);
-      setSampleRate(result.sample_rate_hz);
+      // Ask the definition which logger draws trigger patterns rather than
+      // assuming a command. The previous path sent a hardcoded 'O' - which is
+      // a different logger's START command on Speeduino - then decoded the
+      // reply as one packed byte per sample and stamped it at an invented
+      // 10 kHz. Every waveform it drew was fiction.
+      const loggers = await invoke<DiagnosticLogger[]>("list_diagnostic_loggers");
+      const composite = loggers.find((l) => l.kind === "composite");
+      if (!composite) {
+        setError("This ECU definition declares no composite (trigger) logger.");
+        return;
+      }
+
+      const status = await invoke<CaptureStatus>("start_tooth_capture", {
+        loggerName: composite.name,
+      });
+      if (status.note) setError(status.note);
+      if (status.records === 0) {
+        setError(
+          status.note ?? "No records captured. The logger needs the engine turning."
+        );
+      }
     } catch (err) {
       setError(String(err));
     } finally {
@@ -259,9 +330,9 @@ export const CompositeLoggerView: React.FC<CompositeLoggerViewProps> = ({ onClos
 
   const handleStop = useCallback(async () => {
     try {
-      await invoke("stop_composite_logger");
+      await invoke("stop_tooth_capture");
     } catch (err) {
-      console.error("Failed to stop composite logger:", err);
+      console.error("Failed to stop composite capture:", err);
     }
     setIsCapturing(false);
   }, []);
@@ -283,6 +354,15 @@ export const CompositeLoggerView: React.FC<CompositeLoggerViewProps> = ({ onClos
     a.download = "composite_log.csv";
     a.click();
     URL.revokeObjectURL(url);
+  }, [logData]);
+
+  // Measured from the timestamps the ECU reported, not assumed. The old path
+  // displayed a flat 10 kHz that was never read from anything.
+  const sampleRate = React.useMemo(() => {
+    if (logData.length < 2) return null;
+    const span = logData[logData.length - 1].time_us - logData[0].time_us;
+    if (span <= 0) return null;
+    return ((logData.length - 1) * 1_000_000) / span;
   }, [logData]);
 
   // Calculate statistics
@@ -347,7 +427,9 @@ export const CompositeLoggerView: React.FC<CompositeLoggerViewProps> = ({ onClos
       <div className="composite-logger-stats">
         <div className="stat">
           <span className="stat-label">Sample Rate:</span>
-          <span className="stat-value">{(sampleRate / 1000).toFixed(1)} kHz</span>
+          <span className="stat-value">
+            {sampleRate === null ? "—" : `${(sampleRate / 1000).toFixed(1)} kHz`}
+          </span>
         </div>
         <div className="stat">
           <span className="stat-label">Samples:</span>

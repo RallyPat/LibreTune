@@ -32,7 +32,6 @@ pub mod dash_layout;
 pub mod data_logging;
 pub mod debug_realtime;
 pub mod demo;
-pub mod diagnostic_loggers;
 pub mod dyno;
 pub mod file_io;
 pub mod find_inis;
