@@ -83,9 +83,14 @@ interface AutoTuneFilters {
   min_rpm: number;
   /** Maximum RPM to accept data */
   max_rpm: number;
-  /** Minimum throttle position percentage */
+  /**
+   * Throttle-position bounds, placeholder for a planned TPS window filter.
+   *
+   * No control and no backend field yet - the Rust AutoTuneFilters struct
+   * drops them. Until then, `custom_filter` expresses the same thing
+   * ("tps > 5 && tps < 95"). Keep: the pair is the shape the filter will take.
+   */
   min_tps: number;
-  /** Maximum throttle position percentage */
   max_tps: number;
   /** Minimum coolant temperature (reject cold engine data) */
   min_clt: number;
@@ -95,12 +100,23 @@ interface AutoTuneFilters {
   max_tps_rate: number;
   /** Exclude data when accel enrichment is active */
   exclude_accel_enrich: boolean;
-  /** Require steady-state operation for valid data */
-  require_steady_state: boolean;
-  /** Maximum RPM change for steady-state detection */
+  /**
+   * How long rpm and load must have held steady before a sample counts, in ms.
+   * `0` disables the check, which is the backend default.
+   *
+   * This is the field `AutoTuneFilters` actually reads. The panel used to send
+   * `require_steady_state` / `steady_state_time_ms`, which no longer exist on
+   * the Rust side, so the checkbox has never done anything.
+   */
+  min_steady_ms: number;
+  /**
+   * Placeholder: per-session steadiness tolerance.
+   *
+   * The backend currently judges steadiness against fixed constants
+   * (STEADY_RPM_TOLERANCE 100 rpm, STEADY_LOAD_TOLERANCE 3). Exposing them is
+   * the natural next step; this is the control that would carry the rpm half.
+   */
   steady_state_rpm_delta: number;
-  /** Minimum time at steady-state in milliseconds */
-  steady_state_time_ms: number;
 }
 
 /**
@@ -259,9 +275,24 @@ interface VeAnalyzeConfig {
 /// low-load corrections come back inflated - which is what happened on a
 /// 59-minute drive where the delay had simply never been set.
 ///
-/// Versioned so a future field change discards old state rather than merging a
-/// stale shape into a new one.
-const SETTINGS_KEY = 'libretune.autotune.settings.v1';
+/// Versioned so a field change discards old state rather than merging a stale
+/// shape into a new one.
+
+/**
+ * Steady-state window applied when the box is ticked, in ms.
+ *
+ * Longer than the longest transport delay in use. Across two logged drives
+ * 800 ms lifted the held-out AFR improvement from 34.1% to 39.5% and roughly
+ * halved the largest proposed change, at the cost of covering 52 cells rather
+ * than 131 - a sample has to earn its place.
+ */
+const STEADY_MS_DEFAULT = 800;
+
+/// Bumped to v2 with the steady-state rewiring: a
+/// persisted v1 blob carries require_steady_state / steady_state_time_ms,
+/// which no longer mean anything, and merging it would leave min_steady_ms at
+/// its default while the tuner believes their old setting survived.
+const SETTINGS_KEY = 'libretune.autotune.settings.v2';
 
 function loadPersisted<T>(key: string, fallback: T): T {
   try {
@@ -340,9 +371,12 @@ export function AutoTune({ tableName: initialTableName = '', onClose, isConnecte
     // exclude_accel_enrich.
     max_tps_rate: 50,
     exclude_accel_enrich: true,
-    require_steady_state: true,
-    steady_state_rpm_delta: 50,
-    steady_state_time_ms: 500,
+    // Off, matching the backend default. Turning it on changes which samples
+    // an existing session accepts, and that is the tuner's call - the panel
+    // defaulting it *on* while the backend ignored it is how this came to be
+    // reported as working for so long.
+    min_steady_ms: 0,
+    steady_state_rpm_delta: 100,
   }));
 
   const [authority, setAuthority] = useState<AutoTuneAuthorityLimits>(() =>
@@ -1572,11 +1606,37 @@ export function AutoTune({ tableName: initialTableName = '', onClose, isConnecte
               <label>
                 <input
                   type="checkbox"
-                  checked={filters.require_steady_state}
-                  onChange={(e) => setFilters({ ...filters, require_steady_state: e.target.checked })}
+                  checked={filters.min_steady_ms > 0}
+                  onChange={(e) =>
+                    setFilters({
+                      ...filters,
+                      // 800 ms is the figure that held up across two logged
+                      // drives: held-out AFR improvement 34.1% -> 39.5%, and
+                      // the largest proposed change roughly halved.
+                      min_steady_ms: e.target.checked ? STEADY_MS_DEFAULT : 0,
+                    })
+                  }
                 />
                 Require Steady State
               </label>
+            </div>
+            <div className="setting-row">
+              <label>Steady For (ms):</label>
+              <input
+                type="number"
+                min={0}
+                step={100}
+                disabled={filters.min_steady_ms === 0}
+                value={filters.min_steady_ms}
+                onChange={(e) =>
+                  setFilters({
+                    ...filters,
+                    // u64 on the Rust side - serde rejects a float for it and
+                    // the whole start_autotune call fails, so round here.
+                    min_steady_ms: Math.max(0, Math.round(parseFloat(e.target.value) || 0)),
+                  })
+                }
+              />
             </div>
           </div>
 

@@ -227,7 +227,7 @@ describe('AutoTune settings persistence', () => {
     await userEvent.clear(delay);
     await userEvent.type(delay, '470');
     await waitFor(() =>
-      expect(localStorage.getItem('libretune.autotune.settings.v1.settings'))
+      expect(localStorage.getItem('libretune.autotune.settings.v2.settings'))
         .toContain('470'),
     );
 
@@ -237,7 +237,7 @@ describe('AutoTune settings persistence', () => {
   });
 
   it('falls back to defaults when stored state is corrupt', async () => {
-    localStorage.setItem('libretune.autotune.settings.v1.settings', '{not json');
+    localStorage.setItem('libretune.autotune.settings.v2.settings', '{not json');
     render(<ToastProvider><AutoTune isConnected onClose={() => {}} /></ToastProvider>);
     expect((await delayInput()).value).toBe('0');
   });
