@@ -1872,7 +1872,90 @@ impl Connection {
             // would only double the cost of every bulk page write.
         }
 
+        // Confirm the ECU holds what was just sent. A bulk page write had no
+        // verification of any kind: write_memory is fire-and-forget on legacy,
+        // and write_memory_verified deliberately returns early on the modern
+        // protocol because each frame is acknowledged - but a frame ack says
+        // the bytes arrived, not that the page assembled into what was meant.
+        if let Err(e) = self.verify_page_crc(page, data) {
+            match e {
+                ProtocolError::PageCrcMismatch { .. } => return Err(e),
+                // No declared command, or the ECU would not answer: the write
+                // itself succeeded, so warn rather than failing it. Reporting a
+                // completed write as failed would be its own kind of wrong.
+                other => tracing::warn!(
+                    "write_page: page {} could not be CRC-verified: {}",
+                    page,
+                    other
+                ),
+            }
+        }
+
         Ok(())
+    }
+
+    /// Ask the ECU for a page's CRC32 and compare it with `expected`.
+    ///
+    /// The INI declares the command per page (`crc32CheckCommand = "d%2i"` on
+    /// Speeduino) and the firmware implements it, returning a return code
+    /// followed by a big-endian CRC32 of the page as the ECU currently holds
+    /// it. Nothing called it: `build_crc_command` had no callers anywhere in
+    /// the tree, so a bulk write went out entirely unchecked.
+    ///
+    /// One three-byte command per page against re-reading the page in full -
+    /// 2,592 bytes across fifteen pages on this ECU.
+    ///
+    /// Verified against a Speeduino 202501: the value it returns is a standard
+    /// reflected CRC-32 of exactly the bytes `read_page` gives back, matching
+    /// on every page tested.
+    pub fn verify_page_crc(&mut self, page: u8, expected: &[u8]) -> Result<(), ProtocolError> {
+        let Some(format) = self
+            .protocol_settings
+            .as_ref()
+            .and_then(|p| p.crc32_check_commands.get(page as usize).cloned())
+            .filter(|f| !f.is_empty())
+        else {
+            return Err(ProtocolError::ProtocolError(format!(
+                "no crc32CheckCommand declared for page {page}"
+            )));
+        };
+
+        // Take the identifier the same way the read and write paths do rather
+        // than deriving it. `get_page_identifier` decodes the INI's declared
+        // bytes little-endian and `build_command` re-encodes them the same way,
+        // so the two inversions cancel and the bytes leave in the order the
+        // firmware expects. Computing `page + 1` here instead produced
+        // `[64, 01, 00]` where the ECU wanted `[64, 00, 01]`, and it answered
+        // by not answering at all.
+        let page_id = self.get_page_identifier(page);
+        let cmd =
+            self.command_builder
+                .build_crc_command(&format, page_id, 0, expected.len() as u16)?;
+
+        self.clear_rx_buffer();
+        let reply = self.send_raw_bytes_with_response(&cmd, self.get_effective_timeout())?;
+        if reply.len() < 4 {
+            return Err(ProtocolError::ProtocolError(format!(
+                "page {page} CRC reply was {} bytes, expected at least 4",
+                reply.len()
+            )));
+        }
+        // Big-endian, like every other multi-byte value this firmware writes.
+        let reported = u32::from_be_bytes([reply[0], reply[1], reply[2], reply[3]]);
+
+        let mut hasher = crc32fast::Hasher::new();
+        hasher.update(expected);
+        let local = hasher.finalize();
+
+        if reported == local {
+            Ok(())
+        } else {
+            Err(ProtocolError::PageCrcMismatch {
+                page,
+                expected: local,
+                actual: reported,
+            })
+        }
     }
 
     /// Write memory to ECU using INI-defined command format.
@@ -3613,6 +3696,63 @@ mod burn_page_tests {
         assert_eq!(
             dirty.iter().copied().collect::<Vec<_>>(),
             vec![0, 2, 3, 7, 15]
+        );
+    }
+}
+
+#[cfg(test)]
+mod page_crc_tests {
+    use super::*;
+
+    /// The ECU's `d` command returns a standard reflected CRC-32 of the page
+    /// bytes. Confirmed against a Speeduino 202501 on every page tested: the
+    /// value it reports equals a CRC of exactly what `read_page` gives back.
+    #[test]
+    fn the_local_crc_matches_the_convention_the_ecu_uses() {
+        // Values cross-checked against the firmware's calculatePageCRC32 on a
+        // real ECU, and against zlib.
+        let mut h = crc32fast::Hasher::new();
+        h.update(b"123456789");
+        assert_eq!(
+            h.finalize(),
+            0xCBF4_3926,
+            "not the standard CRC-32 check value"
+        );
+    }
+
+    /// A CRC catches what a per-frame acknowledgement cannot: every frame of a
+    /// chunked page write can be acked while the page still assembles into
+    /// something other than what was sent.
+    #[test]
+    fn one_flipped_bit_changes_the_crc() {
+        let page: Vec<u8> = (0..288u16).map(|i| (i % 251) as u8).collect();
+        let mut corrupt = page.clone();
+        corrupt[144] ^= 0x01;
+
+        let crc = |d: &[u8]| {
+            let mut h = crc32fast::Hasher::new();
+            h.update(d);
+            h.finalize()
+        };
+        assert_ne!(
+            crc(&page),
+            crc(&corrupt),
+            "a single bit flip must not collide"
+        );
+    }
+
+    /// A page with no declared command reports that, rather than silently
+    /// passing - "not checked" must never read as "checked and fine".
+    #[test]
+    fn an_undeclared_page_is_reported_not_skipped() {
+        let mut conn = Connection::new(ConnectionConfig::default());
+        let err = conn
+            .verify_page_crc(3, &[0u8; 8])
+            .expect_err("no protocol settings means no declared command");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("crc32CheckCommand") && msg.contains('3'),
+            "error should name the missing command and the page: {msg}"
         );
     }
 }
