@@ -4506,12 +4506,17 @@ ego_max_lambda = scalar, U08, lastOffset, "Lambda", 0.068, 0, 0.5, 1.7, 3
 #[cfg(test)]
 mod tested_symbol_tests {
     use super::*;
+    use serial_test::serial;
 
     /// A definition records which symbols were *asked about*, separately from
     /// which were active. Without that distinction the app cannot tell "this
     /// INI has no temperature choice to make" from "the choice defaulted", and
     /// would prompt on files that never mention units.
+    // Same process-wide DEFAULT_SYMBOLS seed as the two tests already in
+    // this group. Left out of it, this raced with them and flipped the seed
+    // between set_default_symbols and parse_ini.
     #[test]
+    #[serial(default_symbols)]
     fn a_definition_records_the_symbols_it_tested() {
         set_default_symbols(Vec::<String>::new());
         let ini = "\
@@ -4536,7 +4541,11 @@ mod tested_symbol_tests {
         );
     }
 
+    // Same process-wide DEFAULT_SYMBOLS seed as the two tests already in
+    // this group. Left out of it, this raced with them and flipped the seed
+    // between set_default_symbols and parse_ini.
     #[test]
+    #[serial(default_symbols)]
     fn an_ini_that_never_asks_records_nothing() {
         set_default_symbols(Vec::<String>::new());
         let ini = "\
@@ -4555,7 +4564,11 @@ mod tested_symbol_tests {
 
     /// The arm taken must not change what was recorded as tested: the question
     /// was asked either way.
+    // Same process-wide DEFAULT_SYMBOLS seed as the two tests already in
+    // this group. Left out of it, this raced with them and flipped the seed
+    // between set_default_symbols and parse_ini.
     #[test]
+    #[serial(default_symbols)]
     fn the_symbol_is_recorded_even_when_defined() {
         set_default_symbols(vec!["CELSIUS".to_string()]);
         let ini = "\

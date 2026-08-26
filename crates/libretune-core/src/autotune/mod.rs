@@ -1767,59 +1767,59 @@ mod tests {
     /// Captures `tracing` event messages into a shared Vec so a test can assert
     /// that a specific diagnostic actually fired (the whole point of D9: these
     /// drop paths used to be silent).
-    #[derive(Clone, Default)]
-    struct LogCapture(std::sync::Arc<std::sync::Mutex<Vec<String>>>);
-    impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for LogCapture {
-        fn on_event(&self, e: &tracing::Event<'_>, _c: tracing_subscriber::layer::Context<'_, S>) {
-            struct V(std::sync::Arc<std::sync::Mutex<Vec<String>>>);
-            impl tracing::field::Visit for V {
-                fn record_debug(&mut self, f: &tracing::field::Field, v: &dyn std::fmt::Debug) {
-                    if f.name() == "message" {
-                        self.0.lock().unwrap().push(format!("{v:?}"));
-                    }
-                }
-            }
-            e.record(&mut V(self.0.clone()));
-        }
-    }
-
+    /// A sample the filters throw out must be visible afterwards, not vanish.
+    ///
+    /// Asserted on `rejection_counts` rather than on the `tracing` event the
+    /// same code emits. That is deliberate: `with_default` installs a
+    /// thread-local subscriber but mutates process-global tracing state to do
+    /// it, so in a parallel test binary the capture came back empty about one
+    /// run in eight - and the failure was never reproducible on its own. Three
+    /// attempts to stabilise it (pinning the level filter, rebuilding the
+    /// callsite interest cache before and then inside the dispatcher scope) all
+    /// looked fixed over twenty runs and still failed over forty-five.
+    ///
+    /// `rejection_counts` is the better assertion regardless: it is the same
+    /// information, it is what `autotune_misc` actually surfaces to the UI's
+    /// rejection indicator, and it is deterministic. The log line remains in
+    /// the code for the human reading a session log.
     #[test]
-    fn filter_rejected_sample_is_logged_not_silent() {
-        use tracing_subscriber::layer::SubscriberExt;
-        let cap = LogCapture::default();
-        let logs = cap.0.clone();
-        let sub = tracing_subscriber::registry().with(cap);
-        tracing::subscriber::with_default(sub, || {
-            let mut st = AutoTuneState::new();
-            st.start();
-            let s = AutoTuneSettings::default();
-            let f = AutoTuneFilters::default(); // min_clt = 160
-            let a = AutoTuneAuthorityLimits::default();
-            // clt=20 is far below min_clt: the sample must be rejected AND
-            // logged (before D9 this path returned silently). The throttle
-            // counts per session, so a fresh state logs its first rejection and
-            // one sample is enough. It used to count per process, which made
-            // this depend on what every other test in the binary had already
-            // rejected.
-            let p = VEDataPoint {
-                rpm: 2000.0,
-                load: 50.0,
-                afr: 14.0,
-                ve: 50.0,
-                clt: 20.0,
-                tps: 5.0,
-                tps_rate: 0.0,
-                timestamp_ms: 1000,
-                ..Default::default()
-            };
-            st.add_data_point(p, &[1000.0, 2000.0], &[40.0, 80.0], &s, &f, &a);
-        });
+    fn filter_rejected_sample_is_counted_not_silent() {
+        let mut st = AutoTuneState::new();
+        st.start();
+        let s = AutoTuneSettings::default();
+        let f = AutoTuneFilters::default(); // min_clt = 160
+        let a = AutoTuneAuthorityLimits::default();
+
         assert!(
-            logs.lock()
-                .unwrap()
-                .iter()
-                .any(|m| m.contains("rejected by filters")),
-            "a filtered-out sample must emit a diagnostic, not drop silently"
+            st.rejection_counts().is_empty(),
+            "a fresh session has rejected nothing"
+        );
+
+        // clt = 20 is far below min_clt, so this must be rejected AND recorded.
+        let p = VEDataPoint {
+            rpm: 2000.0,
+            load: 50.0,
+            afr: 14.0,
+            ve: 50.0,
+            clt: 20.0,
+            tps: 5.0,
+            tps_rate: 0.0,
+            timestamp_ms: 1000,
+            ..Default::default()
+        };
+        st.add_data_point(p, &[1000.0, 2000.0], &[40.0, 80.0], &s, &f, &a);
+
+        let counts = st.rejection_counts();
+        assert_eq!(
+            counts.len(),
+            1,
+            "one rejected sample should record exactly one reason, got {counts:?}"
+        );
+        let (reason, n) = counts[0];
+        assert_eq!(n, 1);
+        assert!(
+            reason.contains("clt"),
+            "the reason must name the filter that fired, got {reason:?}"
         );
     }
 
