@@ -14,7 +14,7 @@ fn test_ve_analyze_parsing() {
     veAnalyzeMap = veTableTbl, lambdaTableTbl, lambdaValue, egoCorrectionForVeAnalyze, { 1 }
     lambdaTargetTables = lambdaTableTbl, afrTSCustom
     
-    filter = minRPMFilter, "Minimum RPM", RPMValue, <, 500, true
+    filter = minRPMFilter, "Minimum RPM", RPMValue, <, 500, , true
     filter = minCltFilter, "Minimum CLT", coolant, <, 60, true
     filter = deltaTps, "dTPS", deltaTps, >, 50, true
     filter = std_Custom
@@ -147,7 +147,7 @@ fn test_real_corpus_ve_analyze() {
     veAnalyzeMap = veTableTbl, lambdaTableTbl, lambdaValue, egoCorrectionForVeAnalyze, { 1 }
     lambdaTargetTables = lambdaTableTbl, afrTSCustom
 
-    filter = minRPMFilter, "Minimum RPM", RPMValue, <, 500, true
+    filter = minRPMFilter, "Minimum RPM", RPMValue, <, 500, , true
     filter = minCltFilter, "Minimum CLT", coolant, <, 60, true
     filter = deltaTps, "dTPS", deltaTps, >, 50, true
     filter = VBatt, "VBatt", VBatt, <, 12, true

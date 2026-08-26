@@ -3240,11 +3240,22 @@ fn parse_analysis_filter(value: &str) -> Option<AnalysisFilter> {
         let channel = parts[2].trim().to_string();
         let operator = FilterOperator::from_str(parts[3].trim()).unwrap_or(FilterOperator::Equal);
         let default_value = parts[4].trim().parse().unwrap_or(0.0);
-        let user_adjustable = if parts.len() > 5 {
-            parts[5].trim().to_lowercase() == "true"
-        } else {
-            false
-        };
+        // The documented form is six fields, but the real one is seven: a blank
+        // slot sits between the default value and the flag.
+        //
+        //   filter = minCltFilter, "Minimum CLT", coolant, <, 71, , true
+        //
+        // Reading a fixed parts[5] therefore found the blank and every filter
+        // in the shipping INI parsed as not user-adjustable. The test fixture
+        // used the six-field form, so it agreed with the bug. Scan for the
+        // first field that actually has something in it instead, which handles
+        // both shapes.
+        let user_adjustable = parts
+            .get(5..)
+            .unwrap_or(&[])
+            .iter()
+            .find(|s| !s.trim().is_empty())
+            .is_some_and(|s| parse_ini_bool(s));
 
         return Some(AnalysisFilter {
             name,
@@ -4623,5 +4634,49 @@ mod datalog_entry_tests {
         assert_eq!(e.label, "AFR");
         assert_eq!(e.data_type, "float");
         assert_eq!(e.format, "%.2f");
+    }
+}
+
+#[cfg(test)]
+mod analysis_filter_tests {
+    use super::*;
+
+    fn parse(line: &str) -> AnalysisFilter {
+        parse_analysis_filter(line).expect("parses")
+    }
+
+    /// The shape the shipping Speeduino INI actually uses: seven fields, with a
+    /// blank between the default value and the flag. A fixed parts[5] read the
+    /// blank, so every filter came out not user-adjustable.
+    #[test]
+    fn the_real_seven_field_form_finds_the_flag() {
+        let f = parse(r#"minCltFilter, "Minimum CLT", coolant, <, 71, , true"#);
+        assert_eq!(f.name, "minCltFilter");
+        assert_eq!(f.channel, "coolant");
+        assert_eq!(f.default_value, 71.0);
+        assert!(f.user_adjustable, "the flag is at index 6, not 5");
+    }
+
+    /// The six-field form the INI's own comment documents must still work.
+    #[test]
+    fn the_documented_six_field_form_still_works() {
+        let f = parse(r#"minRPMFilter, "Minimum RPM", RPMValue, <, 500, true"#);
+        assert!(f.user_adjustable);
+    }
+
+    /// A filter genuinely declared false stays false either way round.
+    #[test]
+    fn a_false_flag_is_honoured_in_both_shapes() {
+        assert!(!parse(r#"accelFilter, "Accel Flag", engine, &, 16, , false"#).user_adjustable);
+        assert!(!parse(r#"accelFilter, "Accel Flag", engine, &, 16, false"#).user_adjustable);
+    }
+
+    /// parse_ini_bool accepts the other spellings an INI may use, and strips a
+    /// trailing comment.
+    #[test]
+    fn the_other_truthy_spellings_are_accepted() {
+        assert!(parse(r#"f, "F", coolant, <, 1, , 1"#).user_adjustable);
+        assert!(parse(r#"f, "F", coolant, <, 1, , yes"#).user_adjustable);
+        assert!(parse(r#"f, "F", coolant, <, 1, , true ; adjustable"#).user_adjustable);
     }
 }
