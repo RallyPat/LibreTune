@@ -16,7 +16,7 @@
 use crate::action_scripting::{Action, ActionMetadata, ActionPlayer, ActionSet};
 use crate::agent::safety::clamp_table_edit;
 use crate::agent::tiers::{constant_safety_tier, ConstantSafetyTier};
-use crate::agent::tools;
+use crate::agent::tools::{self, CapabilityTier};
 use crate::autotune::AutoTuneAuthorityLimits;
 use crate::llm::types::{ChatRequest, FinishReason, LlmError, Message, ToolCall};
 use crate::llm::LlmClient;
@@ -81,6 +81,10 @@ pub struct OrchestratorInputs {
     /// Per-cell current values for tables the model might edit, keyed by
     /// table name → `(x,y)` → value. Used for authority clamping.
     pub current_table_values: HashMap<String, HashMap<(u16, u16), f64>>,
+    /// What the model may do this turn (read / tune / config). Filters the
+    /// tool catalogue and gates propose-tool mapping. Defaults to the most
+    /// restrictive tier.
+    pub capability_tier: CapabilityTier,
 }
 
 /// Executes read-only tool calls against the live ECU/tune state.
@@ -102,20 +106,6 @@ pub trait ReadToolExecutor: Send + Sync {
     /// Execute one read tool call, returning a JSON string to feed back to the
     /// model. The string is inserted verbatim into a tool-result message.
     async fn execute(&self, tool_name: &str, arguments: &str) -> String;
-}
-
-/// Is this tool call a read (needs execution + a follow-up turn) vs a propose
-/// (maps directly to an `Action` for the review queue)?
-fn is_read_tool(name: &str) -> bool {
-    matches!(
-        name,
-        tools::tool_names::READ_TABLE
-            | tools::tool_names::READ_CONSTANT
-            | tools::tool_names::LIST_TABLES
-            | tools::tool_names::LIST_FEATURES
-            | tools::tool_names::SUMMARIZE_TUNE
-            | tools::tool_names::TUNE_HEALTH
-    )
 }
 
 /// Maximum number of read→respond round-trips before forcing the loop to stop.
@@ -150,7 +140,8 @@ pub async fn run_turn(
     // 2. Multi-turn loop: read tools are executed and fed back; propose tools
     //    accumulate. Bounded by MAX_READ_ROUNDS to cap cost/runaways.
     for _round in 0..=MAX_READ_ROUNDS {
-        let req = ChatRequest::new(messages.clone()).with_tools(tools::catalogue());
+        let req = ChatRequest::new(messages.clone())
+            .with_tools(tools::catalogue_for_tier(inputs.capability_tier));
         let resp = client.chat(&req).await?;
 
         last_reply = resp.content.clone();
@@ -164,7 +155,7 @@ pub async fn run_turn(
         let (reads, proposes): (Vec<&ToolCall>, Vec<&ToolCall>) = resp
             .tool_calls
             .iter()
-            .partition(|tc| is_read_tool(&tc.name));
+            .partition(|tc| tools::is_read_tool(&tc.name));
 
         // Map propose calls into ProposedActions.
         for tc in &proposes {
@@ -246,6 +237,21 @@ fn map_tool_call(
     inputs: &OrchestratorInputs,
     authority: &AutoTuneAuthorityLimits,
 ) -> ProposedAction {
+    // Tier gate (defense in depth). The catalogue attached to the request
+    // already omits tools above the configured tier, but a model can still
+    // hallucinate a disallowed call — reject it explicitly rather than
+    // mapping it to an action.
+    if !inputs.capability_tier.allows(&tc.name) {
+        return failed(
+            Action::Pause { duration_ms: 0 },
+            vec![format!(
+                "tool '{}' is not permitted at capability tier {:?}",
+                tc.name, inputs.capability_tier
+            )],
+            tc,
+        );
+    }
+
     let args: serde_json::Value = match serde_json::from_str(&tc.arguments) {
         Ok(v) => v,
         Err(e) => {
@@ -486,6 +492,15 @@ mod tests {
         }
     }
 
+    /// Inputs unlocked for everything — most mapping tests want the propose
+    /// tools available; the tier gate itself is covered separately below.
+    fn unlocked_inputs() -> OrchestratorInputs {
+        OrchestratorInputs {
+            capability_tier: CapabilityTier::Config,
+            ..Default::default()
+        }
+    }
+
     #[test]
     fn maps_table_edit_and_clamps() {
         let tc = ToolCall {
@@ -494,7 +509,7 @@ mod tests {
             arguments: r#"{"table_name":"veTable1","x_index":0,"y_index":0,"new_value":60.0}"#
                 .into(),
         };
-        let mut inputs = OrchestratorInputs::default();
+        let mut inputs = unlocked_inputs();
         inputs
             .current_table_values
             .entry("veTable1".into())
@@ -518,7 +533,7 @@ mod tests {
             name: tools::tool_names::PROPOSE_CONSTANT_CHANGE.into(),
             arguments: r#"{"name":"fanOutputPin","value":7}"#.into(),
         };
-        let pa = map_tool_call(&tc, &OrchestratorInputs::default(), &auth());
+        let pa = map_tool_call(&tc, &unlocked_inputs(), &auth());
         assert_eq!(pa.safety_tier, ConstantSafetyTier::Dangerous);
         match pa.validation {
             ValidationResult::Ok { .. } => {}
@@ -533,7 +548,65 @@ mod tests {
             name: tools::tool_names::PROPOSE_TABLE_EDIT.into(),
             arguments: r#"{"table_name":"veTable1"}"#.into(), // missing x_index etc
         };
-        let pa = map_tool_call(&tc, &OrchestratorInputs::default(), &auth());
+        let pa = map_tool_call(&tc, &unlocked_inputs(), &auth());
         assert!(matches!(pa.validation, ValidationResult::Failed { .. }));
+    }
+
+    #[test]
+    fn tier_gate_rejects_propose_tools_below_tier() {
+        // Read tier: every propose tool is rejected, even with valid args.
+        for name in [
+            tools::tool_names::PROPOSE_TABLE_EDIT,
+            tools::tool_names::PROPOSE_BULK_OP,
+            tools::tool_names::PROPOSE_CONSTANT_CHANGE,
+        ] {
+            let tc = ToolCall {
+                id: "1".into(),
+                name: name.into(),
+                arguments: r#"{"table_name":"veTable1","x_index":0,"y_index":0,"new_value":60.0,"name":"x","value":1,"operation":"scale","cells":[[0,0]]}"#.into(),
+            };
+            let pa = map_tool_call(&tc, &OrchestratorInputs::default(), &auth());
+            match pa.validation {
+                ValidationResult::Failed { errors } => {
+                    assert!(
+                        errors.iter().any(|e| e.contains("not permitted")),
+                        "expected tier rejection for {name}: {errors:?}"
+                    );
+                }
+                ValidationResult::Ok { .. } => panic!("{name} should be rejected at Read tier"),
+            }
+        }
+    }
+
+    #[test]
+    fn tier_gate_tune_rejects_constant_proposals() {
+        let tc = ToolCall {
+            id: "1".into(),
+            name: tools::tool_names::PROPOSE_CONSTANT_CHANGE.into(),
+            arguments: r#"{"name":"crankingPct","value":12}"#.into(),
+        };
+        let inputs = OrchestratorInputs {
+            capability_tier: CapabilityTier::Tune,
+            ..Default::default()
+        };
+        let pa = map_tool_call(&tc, &inputs, &auth());
+        assert!(matches!(pa.validation, ValidationResult::Failed { .. }));
+    }
+
+    #[test]
+    fn tier_gate_allows_permitted_tools() {
+        // Tune tier still maps table edits normally.
+        let tc = ToolCall {
+            id: "1".into(),
+            name: tools::tool_names::PROPOSE_TABLE_EDIT.into(),
+            arguments: r#"{"table_name":"veTable1","x_index":0,"y_index":0,"new_value":51.0}"#
+                .into(),
+        };
+        let inputs = OrchestratorInputs {
+            capability_tier: CapabilityTier::Tune,
+            ..Default::default()
+        };
+        let pa = map_tool_call(&tc, &inputs, &auth());
+        assert!(matches!(pa.validation, ValidationResult::Ok { .. }));
     }
 }

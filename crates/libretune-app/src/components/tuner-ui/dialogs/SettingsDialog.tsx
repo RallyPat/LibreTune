@@ -1107,16 +1107,19 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
             )}
           </FormField>
 
-          <FormField label="Capability Tier" help="The scope the assistant is unlocked for">
+          <FormField
+            label="Capability Tier"
+            help="What the assistant may propose. Tiers are cumulative: each level includes the previous one. Every proposal still goes through the review queue — nothing is applied without your approval."
+          >
             {(id) => (
               <select
                 id={id}
                 value={aiCapabilityTier}
                 onChange={(e) => setAiCapabilityTier(e.target.value as 'read' | 'tune' | 'config')}
               >
-                <option value="read">Read / diagnose only</option>
-                <option value="config">Propose ECU configuration changes</option>
-                <option value="tune">Propose tune edits</option>
+                <option value="read">Read — inspect and diagnose only</option>
+                <option value="tune">Tune — read + propose table edits</option>
+                <option value="config">Config — tune + propose constant changes</option>
               </select>
             )}
           </FormField>

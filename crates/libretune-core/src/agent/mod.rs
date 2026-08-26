@@ -15,11 +15,13 @@
 //! - [`safety`] — authority-limit clamping shared by the orchestrator.
 //! - [`context`] — context-gathering helpers that build the prompt payload.
 //! - [`tools`] — tool definitions exposed to the model (read/propose...).
+//! - [`apply`] — pure application of approved table actions to a grid.
 //! - [`orchestrator`] — the per-turn agent loop: gather → call provider →
 //!   validate → clamp → return a `Proposal`.
 //!
 //! The LLM provider client lives in [`crate::llm`].
 
+pub mod apply;
 pub mod context;
 pub mod orchestrator;
 pub mod safety;
@@ -27,5 +29,7 @@ pub mod summarize;
 pub mod tiers;
 pub mod tools;
 
+pub use apply::apply_table_actions_to_grid;
 pub use summarize::{summarize_tune_context, TuneContextSummary};
 pub use tiers::{constant_safety_tier, ConstantSafetyTier};
+pub use tools::CapabilityTier;

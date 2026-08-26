@@ -253,6 +253,8 @@ impl ReadToolExecutor for LiveReadExecutor {
                 | tools::tool_names::READ_CONSTANT
                 | tools::tool_names::LIST_TABLES
                 | tools::tool_names::LIST_FEATURES
+                | tools::tool_names::SUMMARIZE_TUNE
+                | tools::tool_names::TUNE_HEALTH
         )
     }
 
@@ -272,6 +274,20 @@ impl ReadToolExecutor for LiveReadExecutor {
                 match name {
                     Some(n) => self.exec_read_constant(&n).await,
                     None => json_err("read_constant requires 'name'"),
+                }
+            }
+            tools::tool_names::SUMMARIZE_TUNE => {
+                let name = json_str_field(arguments, "table_name");
+                match name {
+                    Some(n) => self.exec_summarize(&n, false).await,
+                    None => json_err("summarize_tune_context requires 'table_name'"),
+                }
+            }
+            tools::tool_names::TUNE_HEALTH => {
+                let name = json_str_field(arguments, "table_name");
+                match name {
+                    Some(n) => self.exec_summarize(&n, true).await,
+                    None => json_err("tune_health_check requires 'table_name'"),
                 }
             }
             _ => json_err(&format!("unhandled read tool '{tool_name}'")),
@@ -386,6 +402,109 @@ impl LiveReadExecutor {
         }))
         .unwrap_or_else(|_| json_err("serialize failed"))
     }
+
+    /// `summarize_tune_context` / `tune_health_check`: aggregate one table
+    /// through the core summary engine (coverage, AFR error, anomalies,
+    /// predicted cells, region health), fed from the live table grid and any
+    /// AutoTune session recommendations for that table.
+    ///
+    /// `health_only` trims the payload to the health fields for the lighter
+    /// `tune_health_check` tool.
+    async fn exec_summarize(&self, name: &str, health_only: bool) -> String {
+        use libretune_core::agent::summarize::{summarize_tune_context, TuneContextInputs};
+        use std::collections::HashMap;
+
+        let state = self.app.state::<AppState>();
+
+        // 1. Current grid + bins via the same reader the table editors use.
+        let t = match crate::commands::table_internals::get_table_data_internal(&state, name).await
+        {
+            Ok(t) => t,
+            Err(e) => return json_err(&format!("could not read table '{name}': {e}")),
+        };
+
+        // 2. Role + dimensionality from the definition.
+        let (role, is_3d) = {
+            let def_guard = state.definition.lock().await;
+            match def_guard
+                .as_ref()
+                .and_then(|d| d.get_table_by_name_or_map(name))
+            {
+                Some(td) => (format!("{:?}", td.role), td.is_3d()),
+                None => return json_err(&format!("table '{name}' not found in definition")),
+            }
+        };
+
+        // 3. AutoTune recommendations, but only when the session was for
+        //    THIS table (primary or configured secondary) — recommendations
+        //    from another table's session would be meaningless here.
+        let (primary_tbl, secondary_tbl) = {
+            let config_guard = state.autotune_config.lock().await;
+            match config_guard.as_ref() {
+                Some(c) => (c.table_name.clone(), c.secondary_table_name.clone()),
+                None => (String::new(), None),
+            }
+        };
+        let recs: HashMap<(usize, usize), libretune_core::autotune::AutoTuneRecommendation> =
+            if primary_tbl == name {
+                state
+                    .autotune_state
+                    .lock()
+                    .await
+                    .get_recommendations()
+                    .into_iter()
+                    .map(|r| ((r.cell_x, r.cell_y), r))
+                    .collect()
+            } else if secondary_tbl.as_deref() == Some(name) {
+                state
+                    .autotune_secondary_state
+                    .lock()
+                    .await
+                    .get_recommendations()
+                    .into_iter()
+                    .map(|r| ((r.cell_x, r.cell_y), r))
+                    .collect()
+            } else {
+                HashMap::new()
+            };
+
+        // 4. Hit-count grid (row-major) from the recommendations.
+        let rows = t.z_values.len();
+        let cols = t.z_values.first().map(|r| r.len()).unwrap_or(0);
+        let mut hit_counts = vec![vec![0u32; cols]; rows];
+        for ((x, y), r) in &recs {
+            if *y < rows && *x < cols {
+                hit_counts[*y][*x] = r.hit_count;
+            }
+        }
+
+        // 5. Summarize. For 2D tables pass empty y-bins so the anomaly /
+        //    prediction engines (which need a real 2-axis grid) are skipped
+        //    instead of running against the 2D placeholder axis.
+        let y_bins: &[f64] = if is_3d { &t.y_bins } else { &[] };
+        let inputs = TuneContextInputs {
+            table_values: &t.z_values,
+            x_bins: &t.x_bins,
+            y_bins,
+            hit_counts: &hit_counts,
+            recommendations: &recs,
+            operating_point: None,
+            max_anomalies: 20,
+        };
+        let summary = summarize_tune_context(name, &role, &inputs);
+
+        if health_only {
+            serde_json::to_string(&serde_json::json!({
+                "table": name,
+                "overall_health_score": summary.overall_health_score,
+                "region_health": summary.region_health,
+                "digest": summary.digest,
+            }))
+            .unwrap_or_else(|_| json_err("serialize failed"))
+        } else {
+            serde_json::to_string(&summary).unwrap_or_else(|_| json_err("serialize failed"))
+        }
+    }
 }
 
 fn json_str_field(arguments: &str, field: &str) -> Option<String> {
@@ -427,6 +546,9 @@ pub async fn agent_send_message(
         user_message: request.user_message,
         system_prompt: request.system_prompt,
         current_table_values: Default::default(),
+        // Gate the tool catalogue (and propose mapping) to the configured
+        // tier. `parse` collapses unknown values to the read-only tier.
+        capability_tier: tools::CapabilityTier::parse(&s.ai_capability_tier),
     };
 
     let authority = default_authority();
@@ -499,10 +621,19 @@ pub struct ApplyResult {
 
 /// Apply a list of approved actions to the working tune.
 ///
-/// Each action is re-validated against the loaded definition; invalid ones are
-/// skipped with an error in the result. **Nothing is burned to the ECU** —
-/// the changes are staged in the working tune and flagged as modified, so the
-/// user must explicitly burn afterward.
+/// Two phases:
+///
+/// 1. Every action is re-validated against the loaded definition (per-action
+///    `ActionSet`); invalid ones are skipped with an error in the result.
+/// 2. Validated actions are *applied*: table edits and bulk operations are
+///    coalesced per table into a single read-modify-write through the same
+///    internal path the table editors use, and constants go through
+///    `update_constant_internal` (which also runs the pin-conflict guard for
+///    bits constants).
+///
+/// **Nothing is burned to the ECU** — writes go to the working tune (and
+/// ECU RAM when connected, exactly like a manual table edit), and the tune
+/// is flagged modified so the user is prompted to burn afterward.
 #[tauri::command]
 pub async fn agent_apply_proposals(
     state: tauri::State<'_, AppState>,
@@ -510,9 +641,8 @@ pub async fn agent_apply_proposals(
 ) -> Result<Vec<ApplyResult>, String> {
     use libretune_core::action_scripting::{ActionMetadata, ActionPlayer, ActionSet};
 
-    // 1. Validate every action while holding the definition lock (read-only).
+    // --- Phase 1: re-validate every action (definition lock, read-only) ---
     let mut results: Vec<ApplyResult> = Vec::with_capacity(request.actions.len());
-    let mut any_applied = false;
     {
         let def = state.definition.lock().await;
         let def_ref = def.as_ref();
@@ -541,33 +671,107 @@ pub async fn agent_apply_proposals(
             };
 
             match ActionPlayer::validate_action_set(&set, def_ref) {
-                Ok(_warnings) => {
-                    any_applied = true;
-                    results.push(ApplyResult {
-                        applied: true,
-                        error: None,
-                        safety_tier: tier,
-                    });
-                }
-                Err(errors) => {
-                    results.push(ApplyResult {
-                        applied: false,
-                        error: Some(errors.join("; ")),
-                        safety_tier: tier,
-                    });
-                }
+                Ok(_warnings) => results.push(ApplyResult {
+                    applied: true,
+                    error: None,
+                    safety_tier: tier,
+                }),
+                Err(errors) => results.push(ApplyResult {
+                    applied: false,
+                    error: Some(errors.join("; ")),
+                    safety_tier: tier,
+                }),
             }
         }
     } // definition lock released here
 
-    // 2. If at least one action applied, flag the tune as modified so the
-    //    user is prompted to burn. The actual table/constant mutation is
-    //    performed by the frontend via the existing update commands (this
-    //    command validates + signals intent; it does not itself write to
-    //    tune state, to avoid duplicating the page-write path).
-    if any_applied {
-        let mut modified = state.tune_modified.lock().await;
-        *modified = true;
+    // --- Phase 2: apply the validated actions -----------------------------
+    //
+    // Table actions (TableEdit + BulkOperation) are grouped per table so a
+    // batch of cell edits costs ONE read + ONE write per table — the same
+    // coalescing a user dragging cells across the editor gets. A group fails
+    // as a unit: if the read, the pure grid application, or the write errors,
+    // every action in the group is marked failed with that error and the
+    // table is left untouched (a partial grid is never written).
+
+    // (table_name, action indexes) preserving first-appearance order.
+    let mut table_groups: Vec<(String, Vec<usize>)> = Vec::new();
+    for (i, action) in request.actions.iter().enumerate() {
+        if !results[i].applied {
+            continue;
+        }
+        match action {
+            Action::TableEdit { table_name, .. } | Action::BulkOperation { table_name, .. } => {
+                match table_groups.iter_mut().find(|(n, _)| n == table_name) {
+                    Some(group) => group.1.push(i),
+                    None => table_groups.push((table_name.clone(), vec![i])),
+                }
+            }
+            _ => {}
+        }
+    }
+
+    for (table_name, indexes) in &table_groups {
+        let outcome: Result<(), String> = async {
+            let mut t =
+                crate::commands::table_internals::get_table_data_internal(&state, table_name)
+                    .await?;
+            let actions: Vec<Action> = indexes
+                .iter()
+                .map(|&i| request.actions[i].clone())
+                .collect();
+            libretune_core::agent::apply_table_actions_to_grid(&mut t.z_values, &actions)?;
+            crate::commands::table_internals::update_table_z_values_internal(
+                &state, table_name, t.z_values,
+            )
+            .await
+        }
+        .await;
+
+        if let Err(e) = outcome {
+            for &i in indexes {
+                results[i] = ApplyResult {
+                    applied: false,
+                    error: Some(e.clone()),
+                    safety_tier: results[i].safety_tier,
+                };
+            }
+        }
+    }
+
+    // Constants apply individually through the standard constant write path
+    // (cache + tune mirror + optional ECU RAM write + pin-conflict guard).
+    for (i, action) in request.actions.iter().enumerate() {
+        if !results[i].applied {
+            continue;
+        }
+        if let Action::ConstantChange {
+            constant_name,
+            new_value,
+            ..
+        } = action
+        {
+            if let Err(e) = crate::commands::constant_update::update_constant_internal(
+                &state,
+                constant_name.clone(),
+                *new_value,
+            )
+            .await
+            {
+                results[i] = ApplyResult {
+                    applied: false,
+                    error: Some(e),
+                    safety_tier: results[i].safety_tier,
+                };
+            }
+        }
+    }
+
+    // The write paths above already set `tune_modified`; keep the explicit
+    // flag so a future write path that forgets cannot silently skip the
+    // "unsaved changes" prompt.
+    if results.iter().any(|r| r.applied) {
+        *state.tune_modified.lock().await = true;
     }
 
     Ok(results)
