@@ -13,6 +13,94 @@ relevant.
 
 ## [Unreleased]
 
+### 2026-08-26 — Online INI listing cache: instant dialog, manual refresh, background TTL refresh
+
+Follow-up to the online-sources work above: the multi-source listing scan
+(rusEFI + epicEFI walks are the slow part, ~8–30 s) no longer runs on every
+dialog open.
+
+#### Added
+- **Persisted listing cache** — the full listing is saved to
+  `<app_data>/online_ini_cache.json` after each successful scan and loaded on
+  the next session, so the "Search for INI Online" dialog opens instantly with
+  the previous results.
+- **"Listing last updated" display** — the dialog shows when the cached
+  listing was last refreshed from the network (RFC 3339 timestamp,
+  locale-formatted).
+- **Manual Refresh button** — `refresh_online_inis` command forces a network
+  re-scan bypassing the TTL; the button shows a spinning icon while running
+  and an amber notice ("Refresh failed — showing the cached listing") when
+  the network fails but a cache exists.
+- **Background TTL refresh** — `refresh_online_inis_if_stale` is polled every
+  30 minutes from the app; it is a no-op while the cache is fresh and refreshes
+  automatically once the 24 h TTL expires (`ONLINE_INI_CACHE_TTL_SECS`). Daily
+  matches the fastest upstream (rusEFI/epicEFI publish daily bundles), so new
+  firmware stays discoverable without a manual refresh.
+- Cache tests: save/load roundtrip (incl. corrupt-file and version-guard
+  cases), staleness by age, plus a live refresh→persist→reload test.
+
+#### Changed
+- **Refresh is non-clobbering** — the new listing is built off to the side and
+  only swapped in when at least one source responded; a total network failure
+  keeps the previous cache and timestamp instead of wiping it (offline-safe).
+  A partial failure (e.g. one of four sources down) keeps the other sources'
+  results and logs a warning.
+- **`search_online_inis` response extended** — now returns
+  `{ entries, last_updated, refreshed }` instead of a bare entry array; the
+  signature-mismatch dialog and connect wizard call sites updated.
+- First-load message now reads "Searching online repositories, please wait…".
+
+### 2026-08-26 — Online INI sources: official rusEFI/epicEFI bundle servers, Speeduino releases
+
+First slice of #181's coverage gap: the online INI repository now downloads
+from each platform's *official* definition source instead of only GitHub
+directory listings, and the auto-search can actually find matches.
+
+#### Added
+- **epicEFI online INI source** — `content.epicefi.com/firmware/ini/`, a
+  rusEFI white-label publishing the same
+  `{branch}/{year}/{month}/{day}/{board}/{hash}.ini` bundle layout. New
+  `IniSource::EpicEFI`, wired through `download_ini` and the browse dialog.
+- **rusEFI/epicEFI direct signature→URL resolution** — a `rusEFI`-style
+  signature (`rusEFI master.2026.08.26.proteus_f4.1739931529`) encodes the
+  exact bundle path, so `search(Some(sig))` now derives the INI URL directly
+  (new `BundleSignature` parser, same format rusEFI's own console uses) and
+  verifies it with a HEAD probe. Works for *any* published firmware, not just
+  the newest day.
+- **Speeduino release INIs** — the `.ini` asset attached to each tagged
+  firmware release (e.g. `202501.7`) is now listed alongside the
+  master-tracking `reference/speeduino.ini`, so released firmware gets its
+  matching definition.
+- **Apache autoindex browse walk** — signature-less search walks each
+  autoindex server down to the newest day and lists every board's INI
+  (concurrently, semaphore-capped at 8) so the "Search for INI Online"
+  dialog shows real, per-board definitions for rusEFI and epicEFI.
+- Live-network tests (ignored by default) for the bundle-URL derivation and
+  the full-source browse walk.
+
+#### Changed
+- **rusEFI source moved from GitHub fragments to the official bundle server**
+  (`rusefi.com/online/ini/rusefi/`) — the old GitHub `contents/firmware/
+  tunerstudio` listing only exposed fragment INIs (`gauge_declarations.ini`,
+  `top_level_menu.ini`, …) that are not loadable definitions.
+- **FOME source now points at `firmware/tunerstudio/generated/`** — the
+  per-board generated INIs (`fome_proteus_f4.ini`, …) instead of the
+  fragment-only parent directory.
+- **Online signature matching rebuilt** — entries used to carry no signature
+  and required the file *name* to contain the full ECU signature verbatim, so
+  the mismatch auto-search could never match anything real. Entries now carry
+  reconstructed signatures (bundle paths, release tags) and match when every
+  file-name identity token (board, hash, version) appears in the ECU
+  signature's tokens.
+- Unit tests updated for the new endpoint structure; new tests cover
+  `BundleSignature` parsing/URL derivation, autoindex HTML link parsing, URL
+  joining, and token-based entry matching.
+
+#### Not yet covered
+- MegaSquirt MS2/MS3: AMP's firmware page is a Shopify portal with no
+  scrapeable direct-download listing (and MS firmware ships as zips); needs a
+  manual URL inventory or zip extraction support.
+
 ### 2026-08-23 — Dashboard performance & readability (issue #82)
 
 The dashboard redraw path was reworked around the three complaints in issue

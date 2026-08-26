@@ -418,6 +418,16 @@ body {
   animation: demo-pulse 1.5s ease-in-out infinite;
 }
 
+/* Rotating icon utility (e.g. refresh-button spinners) */
+.icon-spinning {
+  animation: icon-spin 1s linear infinite;
+}
+
+@keyframes icon-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
 @keyframes demo-pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.5; }

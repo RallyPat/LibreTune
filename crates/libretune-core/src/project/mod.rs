@@ -32,7 +32,7 @@ mod version_control;
 pub use math_channels::{
     load_math_channels, math_channel_evaluation_order, save_math_channels, UserMathChannel,
 };
-pub use online_repository::{IniSource, OnlineIniEntry, OnlineIniRepository};
+pub use online_repository::{BundleSignature, IniSource, OnlineIniEntry, OnlineIniRepository};
 pub use project::{
     ConnectionSettings, Project, ProjectConfig, ProjectInfo, ProjectSettings, RestorePointInfo,
 };

@@ -105,10 +105,10 @@ export default function SignatureMismatchDialog({
     setSearchError(null);
     
     try {
-      const results = await invoke<OnlineIniEntry[]>("search_online_inis", {
+      const response = await invoke<{ entries: OnlineIniEntry[] }>("search_online_inis", {
         signature: mismatchInfo.ecu_signature,
       });
-      setOnlineResults(results);
+      setOnlineResults(response.entries);
     } catch (e) {
       console.error("Failed to search online:", e);
       setSearchError(e instanceof Error ? e.message : String(e));

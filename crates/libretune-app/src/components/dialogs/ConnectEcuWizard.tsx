@@ -227,9 +227,11 @@ export default function ConnectEcuWizard({ isOpen, onClose, inis, onCreateProjec
       }
 
       // 3) Other firmwares: match against the repo listing.
-      const online = await invoke<OnlineIniEntry[]>("search_online_inis", { signature: sig }).catch(
-        () => [],
-      );
+      const online = await invoke<{ entries: OnlineIniEntry[] }>("search_online_inis", {
+        signature: sig,
+      })
+        .then((r) => r.entries)
+        .catch((): OnlineIniEntry[] => []);
       setOnlineResults(online);
     } finally {
       setResolving(false);
