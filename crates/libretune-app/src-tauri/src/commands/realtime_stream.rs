@@ -526,6 +526,16 @@ pub async fn start_realtime_stream(
         let start_time = std::time::Instant::now();
         let mut string_ctx =
             crate::commands::string_context::build_string_context(&app_state).await;
+        // Computed channels are written against the whole tune, not just the
+        // runtime block: the INI defines `lambda = { afr / stoich }`, and
+        // stoich is a [Constants] value. Without it the expression engine
+        // resolves the identifier to 0.0 by design, so lambda becomes afr/0.
+        // Refreshed on the same cadence as the string context, and for the same
+        // reason - the tune can change mid-session but not per tick.
+        let mut numeric_ctx = {
+            let tune = app_state.current_tune.lock().await;
+            crate::commands::string_context::numeric_context_from_tune(tune.as_ref())
+        };
 
         // Cache output channels + endianness once before the loop.
         // These don't change during a session so there's no need to re-lock every tick.
@@ -608,6 +618,10 @@ pub async fn start_realtime_stream(
             if tick_count.is_multiple_of(20) {
                 string_ctx =
                     crate::commands::string_context::build_string_context(&app_state).await;
+                numeric_ctx = {
+                    let tune = app_state.current_tune.lock().await;
+                    crate::commands::string_context::numeric_context_from_tune(tune.as_ref())
+                };
             }
 
             // Trace: log which phase we're in so we can find deadlocks
@@ -783,9 +797,11 @@ pub async fn start_realtime_stream(
                 // Phase 3: Process data outside of any mutex locks
                 match (&raw_result, def_data) {
                     (Ok(raw), Some((output_channels, endianness))) => {
-                        // Two-pass approach for computed channels:
-                        // Pass 1: Parse all non-computed channels
-                        let mut data: HashMap<String, f64> = HashMap::new();
+                        // Pass 1: the tune's own constants, then the runtime
+                        // block over the top. Runtime wins on a name collision:
+                        // a live channel is the current value, a constant is
+                        // what the tune was configured with.
+                        let mut data: HashMap<String, f64> = numeric_ctx.clone();
                         let mut computed_channels = Vec::new();
 
                         for (name, channel) in output_channels.iter() {
@@ -796,15 +812,32 @@ pub async fn start_realtime_stream(
                             }
                         }
 
-                        // Pass 2: Evaluate computed channels using parsed values as context
-                        for (name, channel) in computed_channels {
-                            if let Some(val) = channel.parse_with_contexts(
-                                raw,
-                                *endianness,
-                                &data,
-                                Some(&string_ctx),
-                            ) {
-                                data.insert(name, val);
+                        // Pass 2: computed channels, repeatedly. They form
+                        // chains - rpm -> revolutionTime -> cycleTime ->
+                        // pulseLimit -> dutyCycle is four deep - and a single
+                        // pass in HashMap order only resolves one if the
+                        // iteration order happens to cooperate. Sorted so a
+                        // given tune behaves the same way every run, and capped
+                        // at three passes the way realtime::Evaluator already
+                        // does: enough for the chains this INI declares, and
+                        // proof against a cycle.
+                        computed_channels.sort_by(|a, b| a.0.cmp(&b.0));
+                        for _ in 0..3 {
+                            let mut changed = false;
+                            for (name, channel) in &computed_channels {
+                                if let Some(val) = channel.parse_with_contexts(
+                                    raw,
+                                    *endianness,
+                                    &data,
+                                    Some(&string_ctx),
+                                ) {
+                                    if data.insert(name.clone(), val) != Some(val) {
+                                        changed = true;
+                                    }
+                                }
+                            }
+                            if !changed {
+                                break;
                             }
                         }
 
