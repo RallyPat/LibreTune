@@ -4,6 +4,7 @@ import { open, save } from '@tauri-apps/plugin-dialog';
 import { useChannels } from '../../stores/realtimeStore';
 import { useHeatmapSettings } from '../../utils/useHeatmapSettings';
 import { contrastTextColor } from '../../utils/heatmapColors';
+import { askNumber } from '../../utils/askNumber';
 import { useTableYAxisBottom, useTrailFadeSec } from '../../utils/useTableOrientation';
 import './TableEditor.css';
 import TableEditor3D from '../tables/TableEditor3D';
@@ -941,25 +942,25 @@ export function TableEditor({
           hasClipboard={!!clipboard}
           onResetToOriginal={resetToOriginal}
           onSetValue={() => {
-            const value = prompt('Enter value:');
-            if (value) setEqual(parseFloat(value));
+            const value = askNumber('Enter value:');
+            if (value !== null) setEqual(value);
             closeContextMenu();
           }}
           onStepUp={() => { adjustValues(incrementSettings.stepAmount); closeContextMenu(); }}
           onStepDown={() => { adjustValues(-incrementSettings.stepAmount); closeContextMenu(); }}
           onAddAmount={() => {
-            const amt = prompt('Enter amount to add:');
-            if (amt) adjustValues(parseFloat(amt));
+            const amt = askNumber('Enter amount to add:');
+            if (amt !== null) adjustValues(amt);
             closeContextMenu();
           }}
           onSubtractAmount={() => {
-            const amt = prompt('Enter amount to subtract:');
-            if (amt) adjustValues(-parseFloat(amt));
+            const amt = askNumber('Enter amount to subtract:');
+            if (amt !== null) adjustValues(-amt);
             closeContextMenu();
           }}
           onMultiplyBy={() => {
-            const factor = prompt('Enter multiplier (e.g., 1.02 for +2%):');
-            if (factor) scaleValues(parseFloat(factor));
+            const factor = askNumber('Enter multiplier (e.g., 1.02 for +2%):');
+            if (factor !== null) scaleValues(factor);
             closeContextMenu();
           }}
           onInterpolate={() => { interpolate(); closeContextMenu(); }}
@@ -970,18 +971,18 @@ export function TableEditor({
           onCopy={() => { copySelection(); closeContextMenu(); }}
           onPaste={() => { pasteSelection(); closeContextMenu(); }}
           onSetStepAmount={() => {
-            const amt = prompt('Enter step amount:', String(incrementSettings.stepAmount));
-            if (amt) setIncrementSettings({ ...incrementSettings, stepAmount: parseFloat(amt) });
+            const amt = askNumber('Enter step amount:', incrementSettings.stepAmount);
+            if (amt !== null) setIncrementSettings({ ...incrementSettings, stepAmount: amt });
             closeContextMenu();
           }}
           onSetStepCount={() => {
-            const count = prompt('Enter step multiplier (Ctrl key):', String(incrementSettings.stepCount));
-            if (count) setIncrementSettings({ ...incrementSettings, stepCount: parseInt(count) });
+            const count = askNumber('Enter step multiplier (Ctrl key):', incrementSettings.stepCount);
+            if (count !== null) setIncrementSettings({ ...incrementSettings, stepCount: Math.max(1, Math.round(count)) });
             closeContextMenu();
           }}
           onSetStepPercent={() => {
-            const pct = prompt('Enter step percent (Shift key):', String(incrementSettings.stepPercent));
-            if (pct) setIncrementSettings({ ...incrementSettings, stepPercent: parseFloat(pct) });
+            const pct = askNumber('Enter step percent (Shift key):', incrementSettings.stepPercent);
+            if (pct !== null) setIncrementSettings({ ...incrementSettings, stepPercent: pct });
             closeContextMenu();
           }}
           onToggleHeatmap={() => { setHeatmapEnabled(!heatmapEnabled); closeContextMenu(); }}
@@ -992,16 +993,16 @@ export function TableEditor({
       {/* Toolbar */}
       <TableToolbar
         onSetEqual={() => {
-          const value = prompt('Enter value:');
-          if (value) setEqual(parseFloat(value));
+          const value = askNumber('Enter value:');
+          if (value !== null) setEqual(value);
         }}
         onIncrease={() => adjustValues(0.1)}
         onDecrease={() => adjustValues(-0.1)}
         onIncreaseMore={() => adjustValues(1)}
         onDecreaseMore={() => adjustValues(-1)}
         onScale={() => {
-          const factor = prompt('Enter scale factor (e.g., 1.02 for +2%):');
-          if (factor) scaleValues(parseFloat(factor));
+          const factor = askNumber('Enter scale factor (e.g., 1.02 for +2%):');
+          if (factor !== null) scaleValues(factor);
         }}
         onInterpolate={interpolate}
         onSmooth={smooth}
