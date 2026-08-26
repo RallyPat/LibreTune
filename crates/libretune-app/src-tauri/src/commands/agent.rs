@@ -9,7 +9,8 @@
 use crate::state::AppState;
 use libretune_core::action_scripting::Action;
 use libretune_core::agent::orchestrator::{
-    run_turn, OrchestratorInputs, Proposal, ReadToolExecutor, ValidationResult,
+    run_turn_observed, OrchestratorInputs, Proposal, ReadToolExecutor, TurnObserver,
+    ValidationResult,
 };
 use libretune_core::agent::tiers::ConstantSafetyTier;
 use libretune_core::agent::tools;
@@ -944,11 +945,18 @@ pub async fn agent_send_message(
     // is aborted, the sender drops and the receiver resolves to a RecvError,
     // which we surface as the sentinel "__cancelled__" so the frontend can
     // treat it as a user-initiated stop rather than an error.
+    let progress = AgentProgressEmitter { app: app.clone() };
     let (tx, rx) = tokio::sync::oneshot::channel::<Result<Proposal, String>>();
     let handle = tokio::spawn(async move {
-        let result = run_turn(&client, &inputs, &authority, Some(&executor))
-            .await
-            .map_err(|e| e.to_string());
+        let result = run_turn_observed(
+            &client,
+            &inputs,
+            &authority,
+            Some(&executor),
+            Some(&progress),
+        )
+        .await
+        .map_err(|e| e.to_string());
         let _ = tx.send(result);
     });
 
@@ -978,6 +986,49 @@ pub async fn agent_send_message(
             *guard = None;
             Err("__cancelled__".to_string())
         }
+    }
+}
+
+/// Emit `agent:progress` events while a turn runs, so the chat panel can
+/// show "reading veTable1…" activity instead of a silent pending bubble
+/// through multi-second read rounds. Follows the afr_delay_test:progress
+/// event pattern.
+struct AgentProgressEmitter {
+    app: tauri::AppHandle,
+}
+
+#[derive(serde::Serialize, Clone)]
+#[serde(rename_all = "snake_case", tag = "phase")]
+enum AgentProgress {
+    Thinking { round: usize },
+    ReadingTool { round: usize, tool: String },
+    Done { proposal_count: usize },
+}
+
+impl TurnObserver for AgentProgressEmitter {
+    fn on_model_call(&self, round: usize) {
+        use tauri::Emitter;
+        let _ = self
+            .app
+            .emit("agent:progress", AgentProgress::Thinking { round });
+    }
+
+    fn on_read_tool(&self, round: usize, tool_name: &str, _arguments: &str) {
+        use tauri::Emitter;
+        let _ = self.app.emit(
+            "agent:progress",
+            AgentProgress::ReadingTool {
+                round,
+                tool: tool_name.to_string(),
+            },
+        );
+    }
+
+    fn on_complete(&self, proposal_count: usize) {
+        use tauri::Emitter;
+        let _ = self
+            .app
+            .emit("agent:progress", AgentProgress::Done { proposal_count });
     }
 }
 

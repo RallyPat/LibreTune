@@ -19,6 +19,7 @@ import type {
   ApplyProposalsResponse,
   ChatHistory,
   ChatSummary,
+  LlmUsage,
   ProposedAction,
 } from '../../types/agent';
 import './AgentPanel.css';
@@ -46,6 +47,51 @@ export function AgentSidePanel({ width, onResize, onCollapse, onPopOut }: AgentS
   const [appliedNote, setAppliedNote] = useState<string | null>(null);
   const [queueCollapsed, setQueueCollapsed] = useState(false);
   const isResizing = useRef(false);
+
+  // "Ask AI about this table": context from the table editor's toolbar
+  // button (`agent:ask`). Injected into the next turn's system prompt and
+  // used to pre-fill the input so the user starts from "About <table>: ".
+  const [askContext, setAskContext] = useState<string | null>(null);
+  const [prefill, setPrefill] = useState<{ text: string; nonce: number } | null>(null);
+
+  // Cumulative token usage for this chat (cost transparency).
+  const [tokensUsed, setTokensUsed] = useState(0);
+  const handleUsage = useCallback((u: LlmUsage) => {
+    setTokensUsed((prev) => prev + (u.total_tokens ?? 0));
+  }, []);
+
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    (async () => {
+      try {
+        const { listen } = await import('@tauri-apps/api/event');
+        type AskPayload = {
+          table: string;
+          title: string;
+          cells?: number[][];
+          axes?: { x: string; y: string };
+        };
+        unlisten = await listen<AskPayload>('agent:ask', (event) => {
+          const p = event.payload;
+          const parts = [
+            `The user is asking about table "${p.table}" ("${p.title}")`,
+            p.axes ? `axes: x=${p.axes.x}, y=${p.axes.y}` : null,
+            p.cells && p.cells.length === 2
+              ? `current cell selection: (${p.cells[0][0]},${p.cells[0][1]}) to (${p.cells[1][0]},${p.cells[1][1]})`
+              : null,
+          ];
+          setAskContext(parts.filter(Boolean).join('; '));
+          setPrefill({
+            text: `About ${p.title || p.table}: `,
+            nonce: Date.now(),
+          });
+        });
+      } catch {
+        // non-fatal
+      }
+    })();
+    return () => unlisten?.();
+  }, []);
 
   // --- Chat history state (owned here so it can be saved/switched) ---
   const [transcript, setTranscript] = useState<TranscriptEntry[]>([]);
@@ -84,6 +130,7 @@ export function AgentSidePanel({ width, onResize, onCollapse, onPopOut }: AgentS
     setTranscript([]);
     setCurrentChatId(null);
     setChatListOpen(false);
+    setTokensUsed(0);
   }, []);
 
   /** Switch to an existing chat by id (loads its messages). */
@@ -92,6 +139,7 @@ export function AgentSidePanel({ width, onResize, onCollapse, onPopOut }: AgentS
       const chat = await invoke<ChatHistory>('agent_load_chat', { chatId: id });
       setTranscript(chat.messages.map((m) => ({ role: m.role, content: m.content })));
       setCurrentChatId(id);
+      setTokensUsed(0);
     } catch (e) {
       console.error('Failed to load chat:', e);
     }
@@ -208,7 +256,14 @@ export function AgentSidePanel({ width, onResize, onCollapse, onPopOut }: AgentS
 
       {/* Header */}
       <div className="agent-panel-header">
-        <span className="agent-panel-title">AI Assistant</span>
+        <span className="agent-panel-title">
+          AI Assistant
+          {tokensUsed > 0 && (
+            <span className="agent-panel-tokens" title="Total tokens used in this chat">
+              {' '}· {tokensUsed.toLocaleString()} tok
+            </span>
+          )}
+        </span>
         <div className="agent-panel-header-actions">
           <button
             className="agent-panel-icon-btn"
@@ -289,6 +344,9 @@ export function AgentSidePanel({ width, onResize, onCollapse, onPopOut }: AgentS
         <ChatPanel
           status={status}
           systemPrompt={DEFAULT_SYSTEM_PROMPT}
+          extraContext={askContext}
+          prefill={prefill}
+          onUsage={handleUsage}
           transcript={transcript}
           onTranscriptChange={(next) => {
             setTranscript(next);

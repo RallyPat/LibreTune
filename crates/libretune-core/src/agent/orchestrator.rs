@@ -108,6 +108,24 @@ pub trait ReadToolExecutor: Send + Sync {
     async fn execute(&self, tool_name: &str, arguments: &str) -> String;
 }
 
+/// Progress callbacks for one assistant turn.
+///
+/// The loop is opaque from the outside — a turn can span several
+/// model-call → read-tool → model-call rounds, each taking seconds. The
+/// observer lets the command layer surface "reading veTable1…" activity
+/// without the core knowing anything about Tauri events.
+pub trait TurnObserver: Send + Sync {
+    /// Called before each model call. `round` counts from 0.
+    fn on_model_call(&self, _round: usize) {}
+
+    /// Called before executing a read tool call.
+    fn on_read_tool(&self, _round: usize, _tool_name: &str, _arguments: &str) {}
+
+    /// Called once with the model's accumulated proposal count before the
+    /// final return (useful for "{n} proposals ready" feedback).
+    fn on_complete(&self, _proposal_count: usize) {}
+}
+
 /// Maximum number of read→respond round-trips before forcing the loop to stop.
 /// Caps runaway loops and cost.
 const MAX_READ_ROUNDS: usize = 6;
@@ -123,6 +141,17 @@ pub async fn run_turn(
     inputs: &OrchestratorInputs,
     authority: &AutoTuneAuthorityLimits,
     read_executor: Option<&dyn ReadToolExecutor>,
+) -> Result<Proposal, LlmError> {
+    run_turn_observed(client, inputs, authority, read_executor, None).await
+}
+
+/// [`run_turn`] with an optional [`TurnObserver`] for progress reporting.
+pub async fn run_turn_observed(
+    client: &LlmClient,
+    inputs: &OrchestratorInputs,
+    authority: &AutoTuneAuthorityLimits,
+    read_executor: Option<&dyn ReadToolExecutor>,
+    observer: Option<&dyn TurnObserver>,
 ) -> Result<Proposal, LlmError> {
     // 1. Assemble the initial request.
     let mut messages: Vec<Message> = Vec::with_capacity(inputs.history.len() + 2);
@@ -140,6 +169,9 @@ pub async fn run_turn(
     // 2. Multi-turn loop: read tools are executed and fed back; propose tools
     //    accumulate. Bounded by MAX_READ_ROUNDS to cap cost/runaways.
     for _round in 0..=MAX_READ_ROUNDS {
+        if let Some(obs) = observer {
+            obs.on_model_call(_round);
+        }
         let req = ChatRequest::new(messages.clone())
             .with_tools(tools::catalogue_for_tier(inputs.capability_tier));
         let resp = client.chat(&req).await?;
@@ -183,6 +215,9 @@ pub async fn run_turn(
         });
 
         for tc in &reads {
+            if let Some(obs) = observer {
+                obs.on_read_tool(_round, &tc.name, &tc.arguments);
+            }
             let result = match read_executor {
                 Some(ex) if ex.handles(&tc.name) => ex.execute(&tc.name, &tc.arguments).await,
                 _ => {
@@ -208,6 +243,10 @@ pub async fn run_turn(
                 "I've gathered enough data. Please give me your final analysis and any proposed changes.",
             ));
         }
+    }
+
+    if let Some(obs) = observer {
+        obs.on_complete(proposed.len());
     }
 
     Ok(Proposal {
