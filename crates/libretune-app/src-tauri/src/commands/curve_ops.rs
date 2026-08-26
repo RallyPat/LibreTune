@@ -27,6 +27,148 @@ pub struct CurveData {
 /// * `curve_name` - Curve name from INI definition
 ///
 /// Returns: CurveData with x/y values and metadata
+/// Read one constant's values from the loaded tune (offline) or the ECU.
+///
+/// Every failure returns an error rather than a zero. This used to
+/// substitute `0.0` for an element that would not decode and return
+/// `vec![0.0; element_count]` for a short page, a missing page, a constant
+/// found nowhere, a zero-length read, and the no-tune-no-connection case -
+/// five ways to hand `get_curve_data` a flat zero curve that looks like a
+/// curve someone flattened. CurveEditor then persists whatever it was
+/// shown, so a read that failed becomes a write. A zeroed cranking,
+/// warm-up or dwell curve is the shape most likely to hurt if believed.
+pub(crate) fn read_const_from_source(
+    constant: &Constant,
+    tune: Option<&TuneFile>,
+    conn: &mut Option<&mut Connection>,
+    endianness: libretune_core::ini::Endianness,
+) -> Result<Vec<f64>, String> {
+    let element_count = constant.shape.element_count();
+    let element_size = constant.data_type.size_bytes();
+    let length = constant.size_bytes() as u16;
+
+    /// Decode `element_count` elements or say which one stopped us.
+    fn decode_all(
+        constant: &Constant,
+        bytes: &[u8],
+        base: usize,
+        element_count: usize,
+        element_size: usize,
+        endianness: libretune_core::ini::Endianness,
+        source: &str,
+    ) -> Result<Vec<f64>, String> {
+        let mut values = Vec::with_capacity(element_count);
+        for i in 0..element_count {
+            let elem_offset = base + i * element_size;
+            let raw_val = constant
+                .data_type
+                .read_from_bytes(bytes, elem_offset, endianness)
+                .ok_or_else(|| {
+                    format!(
+                        "Element {i} of {element_count} in '{}' could not be decoded from                              {source}. Re-sync and try again.",
+                        constant.name
+                    )
+                })?;
+            values.push(constant.raw_to_display(raw_val));
+        }
+        Ok(values)
+    }
+
+    // Offline: read from the tune file.
+    if conn.is_none() {
+        let tune_file = tune.ok_or_else(|| {
+            format!(
+                "No tune is loaded and no ECU is connected, so '{}' has no values to show.",
+                constant.name
+            )
+        })?;
+
+        // Named constants parsed from the msq <constant> tags win: they are
+        // values that really are in the tune.
+        if let Some(tune_value) = tune_file.constants.get(&constant.name) {
+            use libretune_core::tune::TuneValue;
+            match tune_value {
+                TuneValue::Array(arr) => return Ok(arr.clone()),
+                TuneValue::Scalar(v) => return Ok(vec![*v]),
+                _ => {}
+            }
+        }
+
+        // Otherwise fall back to raw page data at the INI's offset, for a
+        // constant the msq did not name explicitly.
+        let page_data = tune_file.pages.get(&constant.page).ok_or_else(|| {
+            format!(
+                "'{}' is not named in the tune and lives on page {}, which the tune does                      not contain.",
+                constant.name, constant.page
+            )
+        })?;
+
+        let offset = constant.offset as usize;
+        let total_bytes = element_count * element_size;
+        if offset + total_bytes > page_data.len() {
+            return Err(format!(
+                "'{}' needs {total_bytes} bytes at offset {offset} of page {}, which holds                      only {}. Re-sync the tune and try again.",
+                constant.name,
+                constant.page,
+                page_data.len()
+            ));
+        }
+
+        return decode_all(
+            constant,
+            page_data,
+            offset,
+            element_count,
+            element_size,
+            endianness,
+            "the tune's page data",
+        );
+    }
+
+    if length == 0 {
+        return Err(format!(
+            "'{}' has a zero-byte footprint, so there is nothing to read from the ECU.",
+            constant.name
+        ));
+    }
+
+    let conn_ptr = conn.as_mut().ok_or_else(|| {
+        format!(
+            "No ECU connection is available to read '{}'.",
+            constant.name
+        )
+    })?;
+
+    let params = libretune_core::protocol::commands::ReadMemoryParams {
+        can_id: 0,
+        page: constant.page,
+        offset: constant.offset,
+        length,
+    };
+    let raw_data = conn_ptr.read_memory(params).map_err(|e| e.to_string())?;
+
+    // A short reply is the realistic way to get a partial curve off real
+    // hardware, and it used to become zeros from the truncation point on.
+    if raw_data.len() < element_count * element_size {
+        return Err(format!(
+            "The ECU returned {} bytes for '{}', which needs {}. Re-sync and try again.",
+            raw_data.len(),
+            constant.name,
+            element_count * element_size
+        ));
+    }
+
+    decode_all(
+        constant,
+        &raw_data,
+        0,
+        element_count,
+        element_size,
+        endianness,
+        "the ECU reply",
+    )
+}
+
 #[tauri::command]
 pub async fn get_curve_data(
     state: tauri::State<'_, AppState>,
@@ -93,124 +235,6 @@ pub async fn get_curve_data(
     let gauge = curve.gauge.clone();
 
     drop(def_guard);
-
-    // Helper to read constant data from TuneFile (offline) or ECU (online)
-    fn read_const_from_source(
-        constant: &Constant,
-        tune: Option<&TuneFile>,
-        conn: &mut Option<&mut Connection>,
-        endianness: libretune_core::ini::Endianness,
-    ) -> Result<Vec<f64>, String> {
-        let element_count = constant.shape.element_count();
-        let element_size = constant.data_type.size_bytes();
-        let length = constant.size_bytes() as u16;
-
-        eprintln!(
-            "[DEBUG] read_const_from_source: '{}' - shape={:?}, element_count={}, element_size={}, total_length={}",
-            constant.name, constant.shape, element_count, element_size, length
-        );
-
-        // If offline, read from TuneFile (MSQ file)
-        if conn.is_none() {
-            if let Some(tune_file) = tune {
-                // First try named constants (parsed from MSQ <constant> tags)
-                if let Some(tune_value) = tune_file.constants.get(&constant.name) {
-                    use libretune_core::tune::TuneValue;
-                    eprintln!(
-                        "[DEBUG] read_const_from_source: '{}' found in TuneFile.constants",
-                        constant.name
-                    );
-                    match tune_value {
-                        TuneValue::Array(arr) => {
-                            eprintln!("[DEBUG] read_const_from_source: '{}' returning {} array values from constants", constant.name, arr.len());
-                            return Ok(arr.clone());
-                        }
-                        TuneValue::Scalar(v) => {
-                            return Ok(vec![*v]);
-                        }
-                        _ => {}
-                    }
-                }
-
-                // Fallback: try to read from raw page data using INI offset
-                // This handles cases where the constant wasn't explicitly in the MSQ file
-                if let Some(page_data) = tune_file.pages.get(&constant.page) {
-                    let offset = constant.offset as usize;
-                    let total_bytes = element_count * element_size;
-
-                    if offset + total_bytes <= page_data.len() {
-                        eprintln!("[DEBUG] read_const_from_source: '{}' reading from TuneFile.pages[{}] at offset {}", 
-                            constant.name, constant.page, offset);
-
-                        let mut values = Vec::with_capacity(element_count);
-                        for i in 0..element_count {
-                            let elem_offset = offset + i * element_size;
-                            if let Some(raw_val) = constant.data_type.read_from_bytes(
-                                page_data,
-                                elem_offset,
-                                endianness,
-                            ) {
-                                values.push(constant.raw_to_display(raw_val));
-                            } else {
-                                values.push(0.0);
-                            }
-                        }
-                        eprintln!("[DEBUG] read_const_from_source: '{}' returning {} values from page data", constant.name, values.len());
-                        return Ok(values);
-                    } else {
-                        eprintln!("[WARN] read_const_from_source: '{}' offset {} + size {} exceeds page {} length {}", 
-                            constant.name, offset, total_bytes, constant.page, page_data.len());
-                    }
-                } else {
-                    eprintln!("[WARN] read_const_from_source: '{}' page {} not found in TuneFile.pages (available: {:?})", 
-                        constant.name, constant.page, tune_file.pages.keys().collect::<Vec<_>>());
-                }
-            }
-            // If not found anywhere, return zeros
-            eprintln!(
-                "[DEBUG] read_const_from_source: '{}' returning {} zeros (not in TuneFile)",
-                constant.name, element_count
-            );
-            return Ok(vec![0.0; element_count]);
-        }
-
-        // For ECU reads, we need valid length
-        if length == 0 {
-            eprintln!(
-                "[WARN] read_const_from_source: '{}' has length=0, cannot read from ECU",
-                constant.name
-            );
-            return Ok(vec![0.0; element_count]);
-        }
-
-        // If connected to ECU, read from ECU (live data)
-        if let Some(ref mut conn_ptr) = conn {
-            let params = libretune_core::protocol::commands::ReadMemoryParams {
-                can_id: 0,
-                page: constant.page,
-                offset: constant.offset,
-                length,
-            };
-
-            let raw_data = conn_ptr.read_memory(params).map_err(|e| e.to_string())?;
-
-            let mut values = Vec::new();
-            for i in 0..element_count {
-                let offset = i * element_size;
-                if let Some(raw_val) = constant
-                    .data_type
-                    .read_from_bytes(&raw_data, offset, endianness)
-                {
-                    values.push(constant.raw_to_display(raw_val));
-                } else {
-                    values.push(0.0);
-                }
-            }
-            return Ok(values);
-        }
-
-        Ok(vec![0.0; element_count])
-    }
 
     // Get tune and connection
     // Lock order: connection before current_tune, matching the convention used
@@ -419,4 +443,76 @@ pub async fn update_curve_data(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod read_const_from_source_tests {
+    use super::*;
+    use libretune_core::ini::{DataType, Endianness, Shape};
+    use libretune_core::tune::{TuneFile, TuneValue};
+
+    /// A 4-element U08 curve at offset 2 of page 3.
+    fn constant() -> Constant {
+        Constant {
+            name: "wueCurve".to_string(),
+            page: 3,
+            offset: 2,
+            data_type: DataType::U08,
+            scale: 1.0,
+            translate: 0.0,
+            shape: Shape::Array1D(4),
+            ..Default::default()
+        }
+    }
+
+    fn tune_with_page(bytes: Vec<u8>) -> TuneFile {
+        let mut t = TuneFile::default();
+        t.pages.insert(3, bytes);
+        t
+    }
+
+    /// Offline reads take no connection, which is where four of the five
+    /// fabrication paths lived.
+    fn offline(tune: Option<&TuneFile>) -> Result<Vec<f64>, String> {
+        let mut none: Option<&mut Connection> = None;
+        read_const_from_source(&constant(), tune, &mut none, Endianness::Big)
+    }
+
+    #[test]
+    fn a_complete_page_reads_the_real_values() {
+        let t = tune_with_page(vec![0, 0, 10, 20, 30, 40]);
+        assert_eq!(offline(Some(&t)).unwrap(), vec![10.0, 20.0, 30.0, 40.0]);
+    }
+
+    /// The bug: each of these returned a flat zero curve that CurveEditor
+    /// showed as real and would persist on the next save.
+    #[test]
+    fn every_unreadable_case_refuses_instead_of_returning_zeros() {
+        // Page present but too short for the curve.
+        let short = tune_with_page(vec![0, 0, 10, 20]);
+        let e = offline(Some(&short)).expect_err("short page must not answer");
+        assert!(e.contains("wueCurve") && e.contains("page 3"), "{e}");
+
+        // Tune loaded, but not the page this curve lives on.
+        let mut elsewhere = TuneFile::default();
+        elsewhere.pages.insert(9, vec![0; 64]);
+        let e = offline(Some(&elsewhere)).expect_err("missing page must not answer");
+        assert!(e.contains("page 3"), "{e}");
+
+        // Neither a tune nor a connection.
+        let e = offline(None).expect_err("nothing loaded must not answer");
+        assert!(e.contains("wueCurve"), "{e}");
+    }
+
+    /// Values that really are in the tune still come from there - that path
+    /// never fabricated anything and is deliberately unchanged.
+    #[test]
+    fn a_named_constant_is_served_from_the_tune() {
+        let mut t = tune_with_page(vec![0, 0, 10, 20, 30, 40]);
+        t.constants.insert(
+            "wueCurve".to_string(),
+            TuneValue::Array(vec![1.0, 2.0, 3.0, 4.0]),
+        );
+        assert_eq!(offline(Some(&t)).unwrap(), vec![1.0, 2.0, 3.0, 4.0]);
+    }
 }
