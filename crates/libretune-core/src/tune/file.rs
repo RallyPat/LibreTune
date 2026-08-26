@@ -40,6 +40,21 @@ pub struct TuneFile {
     /// Page number for each constant (constant name -> page number)
     /// This preserves the MSQ file structure where constants are organized by page
     pub constant_pages: HashMap<String, u8>,
+    /// Per-constant display metadata, preserved across a load/save cycle.
+    #[serde(default)]
+    pub constant_attrs: HashMap<String, ConstantAttrs>,
+    /// Declared byte size of each page, from `<page number="N" size="M">`.
+    #[serde(default)]
+    pub page_sizes: HashMap<u8, String>,
+    /// The `<settings>` block, verbatim.
+    ///
+    /// Records which `#if` symbols the values were authored under - `CELSIUS`,
+    /// `AFR` and so on. Those decide scale AND translate for about thirty
+    /// temperature constants, so a file without it cannot be re-read correctly
+    /// on its own. The reference writer emits it with the comment "These
+    /// setting are only used if this msq is opened without a project."
+    #[serde(default)]
+    pub ecu_settings: Vec<String>,
 
     /// PC Variables (local-only, not stored on ECU)
     /// These are stored on page "-1" in TunerStudio format
@@ -126,8 +141,68 @@ pub struct IniMetadata {
     pub saved_at: String,
 }
 
-/// A single constant's metadata for the manifest
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Display metadata a `.msq` carries on each `<constant>` tag.
+///
+/// Held as strings and written back verbatim: this is round-trip preservation,
+/// not interpretation. The writer used to emit `<constant name="...">` and
+/// nothing else, so a tune saved by LibreTune lost all 403 `digits`, 361
+/// `units` and 138 `rows`/`cols` attributes its source file carried - about
+/// thirty per cent of the file. A reader holding the matching INI can re-derive
+/// them; one without it cannot, which is what makes the file self-describing.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct ConstantAttrs {
+    /// Decimal places to show, from the INI's `digits` column.
+    pub digits: Option<String>,
+    /// Display units.
+    pub units: Option<String>,
+    /// Array rows, for a table or curve.
+    pub rows: Option<String>,
+    /// Array columns.
+    pub cols: Option<String>,
+}
+
+impl ConstantAttrs {
+    fn is_empty(&self) -> bool {
+        self.digits.is_none() && self.units.is_none() && self.rows.is_none() && self.cols.is_none()
+    }
+
+    /// Render as XML attributes, alphabetical and including the element's own
+    /// name, which is the order the reference writer emits - so the two files
+    /// diff cleanly against each other.
+    fn to_xml_with_name(&self, name: &str) -> String {
+        let mut attrs: Vec<(&str, String)> = vec![("name", name.to_string())];
+        for (k, v) in [
+            ("cols", &self.cols),
+            ("digits", &self.digits),
+            ("rows", &self.rows),
+            ("units", &self.units),
+        ] {
+            if let Some(v) = v {
+                attrs.push((k, v.clone()));
+            }
+        }
+        attrs.sort_by_key(|(k, _)| *k);
+        attrs.iter().map(|(k, v)| format!(" {k}=\"{v}\"")).collect()
+    }
+}
+
+/// Pull `digits`, `units`, `rows` and `cols` off an opening tag.
+fn parse_constant_attrs(tag: &str) -> ConstantAttrs {
+    let attr = |key: &str| -> Option<String> {
+        let needle = format!("{key}=\"");
+        let start = tag.find(&needle)? + needle.len();
+        let end = tag[start..].find('"')?;
+        Some(tag[start..start + end].to_string())
+    };
+    ConstantAttrs {
+        digits: attr("digits"),
+        units: attr("units"),
+        rows: attr("rows"),
+        cols: attr("cols"),
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct ConstantManifestEntry {
     /// Constant name
     pub name: String,
@@ -162,6 +237,9 @@ impl TuneFile {
             pages: HashMap::new(),
             constants: HashMap::new(),
             constant_pages: HashMap::new(),
+            constant_attrs: HashMap::new(),
+            page_sizes: HashMap::new(),
+            ecu_settings: Vec::new(),
             pc_variables: HashMap::new(),
             ini_metadata: None,
             constant_manifest: None,
@@ -561,6 +639,44 @@ impl TuneFile {
             }
         }
 
+        // Page sizes ride on the opening tag: <page number="1" size="288">.
+        // Kept so a saved file still declares them.
+        for cap in content.match_indices("<page ") {
+            let tail = &content[cap.0..];
+            let Some(tag_end) = tail.find('>') else {
+                continue;
+            };
+            let tag = &tail[..tag_end];
+            let attr = |key: &str| -> Option<String> {
+                let needle = format!("{key}=\"");
+                let start = tag.find(&needle)? + needle.len();
+                let end = tag[start..].find('"')?;
+                Some(tag[start..start + end].to_string())
+            };
+            if let (Some(num), Some(size)) = (attr("number"), attr("size")) {
+                if let Ok(n) = num.parse::<u8>() {
+                    tune.page_sizes.insert(n, size);
+                }
+            }
+        }
+
+        // The <settings> block records which #if symbols the values were
+        // authored under. Names only; the reference writer emits one per line.
+        if let Some(start) = content.find("<settings") {
+            if let Some(end) = content[start..].find("</settings>") {
+                let block = &content[start..start + end];
+                let mut pos = 0;
+                while let Some(i) = block[pos..].find("<setting name=\"") {
+                    let abs = pos + i + 15;
+                    let Some(q) = block[abs..].find('"') else {
+                        break;
+                    };
+                    tune.ecu_settings.push(block[abs..abs + q].to_string());
+                    pos = abs + q;
+                }
+            }
+        }
+
         // Parse page structure and extract constants/pcVariables with their page numbers
         // MSQ format: <page number="0"> ... <constant name="...">...</constant> ... </page>
         let mut current_page: u8 = 0; // Default to page 0 if no page tags found
@@ -606,6 +722,10 @@ impl TuneFile {
                                     // Check for self-closing tag: <constant name="..."/> or <constant name="..." />
                                     // Look at the content before '>' to see if it contains '/'
                                     let tag_content = &const_remaining[..tag_end];
+                                    let attrs = parse_constant_attrs(tag_content);
+                                    if !attrs.is_empty() {
+                                        tune.constant_attrs.insert(name.clone(), attrs);
+                                    }
                                     if tag_content.trim_end().ends_with('/') {
                                         // Self-closing tag - value is empty
                                         let value = TuneValue::String(String::new());
@@ -650,6 +770,14 @@ impl TuneFile {
                                 if let Some(tag_end) = pc_remaining.find('>') {
                                     // Check for self-closing tag: <pcVariable name="..."/> or <pcVariable name="..." />
                                     let tag_content = &pc_remaining[..tag_end];
+                                    // pcVariables carry the same display
+                                    // metadata as constants: 27 of this file's
+                                    // 37 declare digits, and the six array ones
+                                    // declare rows/cols.
+                                    let attrs = parse_constant_attrs(tag_content);
+                                    if !attrs.is_empty() {
+                                        tune.constant_attrs.insert(name.clone(), attrs);
+                                    }
                                     if tag_content.trim_end().ends_with('/') {
                                         // Self-closing tag - value is empty
                                         let value = TuneValue::String(String::new());
@@ -895,12 +1023,46 @@ impl TuneFile {
                 .push(name.clone());
         }
 
+        // The <settings> block, before the pages, as the reference writer places
+        // it. Without it a standalone .msq does not say which #if branch its
+        // numbers were authored under, and roughly thirty temperature
+        // constants change scale AND translate between the Celsius and
+        // Fahrenheit arms.
+        if !self.ecu_settings.is_empty() {
+            xml.push_str(
+                "  <settings Comment=\"These setting are only used if this msq is opened without a project.\">
+",
+            );
+            for name in &self.ecu_settings {
+                xml.push_str(&format!(
+                    "    <setting name=\"{}\"/>
+",
+                    name
+                ));
+            }
+            xml.push_str(
+                "  </settings>
+",
+            );
+        }
+
         // Sort page numbers and constants within each page
         let mut page_numbers: Vec<u8> = constants_by_page.keys().copied().collect();
         page_numbers.sort();
 
         for page_num in page_numbers {
-            xml.push_str(&format!("  <page number=\"{}\">\n", page_num));
+            match self.page_sizes.get(&page_num) {
+                Some(size) => xml.push_str(&format!(
+                    "  <page number=\"{}\" size=\"{}\">
+",
+                    page_num, size
+                )),
+                None => xml.push_str(&format!(
+                    "  <page number=\"{}\">
+",
+                    page_num
+                )),
+            }
 
             let mut const_names = constants_by_page.remove(&page_num).unwrap_or_default();
             const_names.sort();
@@ -939,9 +1101,16 @@ impl TuneFile {
                         TuneValue::String(s) => format!("\"{}\"", s),
                         TuneValue::Bool(b) => if *b { "true" } else { "false" }.to_string(),
                     };
+                    let attrs = self
+                        .constant_attrs
+                        .get(&name)
+                        .cloned()
+                        .unwrap_or_default()
+                        .to_xml_with_name(&name);
                     xml.push_str(&format!(
-                        "    <constant name=\"{}\">{}</constant>\n",
-                        name, value_str
+                        "    <constant{}>{}</constant>
+",
+                        attrs, value_str
                     ));
                 }
             }
@@ -1006,9 +1175,16 @@ impl TuneFile {
                         TuneValue::String(s) => format!("\"{}\"", s),
                         TuneValue::Bool(b) => if *b { "true" } else { "false" }.to_string(),
                     };
+                    let attrs = self
+                        .constant_attrs
+                        .get(name)
+                        .cloned()
+                        .unwrap_or_default()
+                        .to_xml_with_name(name);
                     xml.push_str(&format!(
-                        "    <pcVariable name=\"{}\">{}</pcVariable>\n",
-                        name, value_str
+                        "    <pcVariable{}>{}</pcVariable>
+",
+                        attrs, value_str
                     ));
                 }
             }
@@ -1207,6 +1383,9 @@ impl Default for TuneFile {
             pages: HashMap::new(),
             constants: HashMap::new(),
             constant_pages: HashMap::new(),
+            constant_attrs: HashMap::new(),
+            page_sizes: HashMap::new(),
+            ecu_settings: Vec::new(),
             pc_variables: HashMap::new(),
             ini_metadata: None,
             constant_manifest: None,
@@ -1462,5 +1641,134 @@ mod tests {
 
         let _ = std::fs::remove_file(&temp_path);
         let _ = std::fs::remove_file(&out_path);
+    }
+}
+
+#[cfg(test)]
+mod msq_metadata_tests {
+    use super::*;
+
+    /// A cut-down file in the shape the reference writer produces.
+    const SAMPLE: &str = r#"<?xml version="1.0" encoding="ISO-8859-1"?>
+<msq xmlns="http://www.msefi.com/:msq">
+<bibliography author="LibreTune" writeDate="Sun May 03 20:46:57 NZST 2026"/>
+<versionInfo fileFormat="5.0" firmwareInfo="Speeduino+2025.01.4" nPages="2" signature="speeduino 202501"/>
+<settings Comment="These setting are only used if this msq is opened without a project.">
+<setting name="CELSIUS"/>
+<setting name="AFR"/>
+</settings>
+<page number="1" size="288">
+<constant cols="1" digits="0" name="wueRates" rows="10" units="%">150 136 131 126 120 115 110 105 100 100</constant>
+<constant digits="1" name="reqFuel" units="ms">12.6</constant>
+</page>
+<page number="-1">
+<pcVariable digits="0" name="rpmhigh" units="rpm">7000</pcVariable>
+</page>
+</msq>
+"#;
+
+    /// Unique per call: these tests run in parallel and fixed names in a shared
+    /// directory make them clobber each other.
+    fn round_trip_at(src: &str, tag: &str) -> (TuneFile, String) {
+        static SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!("libretune-msq-meta-{tag}-{n}"));
+        std::fs::create_dir_all(&dir).unwrap();
+        let inp = dir.join("in.msq");
+        let outp = dir.join("out.msq");
+        std::fs::write(&inp, src).unwrap();
+        let tune = TuneFile::load(&inp).expect("parse");
+        tune.save(&outp).expect("save");
+        let written = std::fs::read_to_string(&outp).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+        (tune, written)
+    }
+
+    fn round_trip(src: &str) -> (TuneFile, String) {
+        round_trip_at(src, "rt")
+    }
+
+    /// The writer used to emit `<constant name="...">` and nothing else, so a
+    /// saved tune lost every digits/units/rows/cols attribute its source
+    /// carried - 403, 361, 138 and 138 of them respectively on a real file,
+    /// about thirty per cent of its bytes.
+    #[test]
+    fn per_constant_metadata_survives_a_round_trip() {
+        let (tune, written) = round_trip(SAMPLE);
+        assert_eq!(
+            tune.constant_attrs.len(),
+            3,
+            "two constants and one pcVariable"
+        );
+
+        for attr in ["cols=\"1\"", "digits=\"0\"", "rows=\"10\"", "units=\"%\""] {
+            assert!(written.contains(attr), "lost {attr}:\n{written}");
+        }
+        // Alphabetical including the name, matching the reference writer, so the
+        // two files diff cleanly.
+        assert!(written
+            .contains(r#"<constant cols="1" digits="0" name="wueRates" rows="10" units="%">"#));
+        // pcVariables carry them too.
+        assert!(written.contains(r#"<pcVariable digits="0" name="rpmhigh" units="rpm">"#));
+    }
+
+    /// Without <settings> a standalone .msq does not record which #if branch
+    /// its numbers were authored under, and CELSIUS changes scale AND translate
+    /// on roughly thirty temperature constants.
+    #[test]
+    fn the_settings_block_survives_a_round_trip() {
+        let (tune, written) = round_trip(SAMPLE);
+        assert_eq!(tune.ecu_settings, vec!["CELSIUS", "AFR"]);
+        assert!(written.contains("<settings"));
+        assert!(written.contains(r#"<setting name="CELSIUS"/>"#));
+        assert!(written.contains(r#"<setting name="AFR"/>"#));
+    }
+
+    #[test]
+    fn declared_page_sizes_survive_a_round_trip() {
+        let (tune, written) = round_trip(SAMPLE);
+        assert_eq!(tune.page_sizes.get(&1).map(String::as_str), Some("288"));
+        assert!(written.contains(r#"<page number="1" size="288">"#));
+    }
+
+    /// The output must still parse as our own input, with the same values.
+    #[test]
+    fn our_own_output_reads_back_identically() {
+        let (first, written) = round_trip_at(SAMPLE, "first");
+        let (second, _) = round_trip_at(&written, "second");
+        assert_eq!(first.constants.len(), second.constants.len());
+        assert_eq!(first.constant_attrs.len(), second.constant_attrs.len());
+        assert_eq!(first.ecu_settings, second.ecu_settings);
+        assert_eq!(first.page_sizes, second.page_sizes);
+        for (k, v) in &first.constants {
+            assert_eq!(
+                format!("{:?}", second.constants.get(k)),
+                format!("{:?}", Some(v)),
+                "{k} changed"
+            );
+        }
+    }
+
+    /// A file with none of this metadata must still save - the fields are
+    /// preserved when present, not required.
+    #[test]
+    fn a_file_without_metadata_still_saves() {
+        let bare = r#"<?xml version="1.0"?>
+<msq>
+<versionInfo signature="speeduino 202501"/>
+<page number="0">
+<constant name="reqFuel">12.6</constant>
+</page>
+</msq>
+"#;
+        let (tune, written) = round_trip(bare);
+        assert!(
+            tune.constant_attrs.is_empty(),
+            "unexpected attrs: {:?}",
+            tune.constant_attrs
+        );
+        assert!(tune.ecu_settings.is_empty());
+        assert!(written.contains(r#"<constant name="reqFuel">"#));
+        assert!(!written.contains("<settings"));
     }
 }
