@@ -287,7 +287,7 @@ pub async fn send_autotune_recommendations(
     // starves every other command that needs the definition (e.g. load_tune,
     // table views) for the duration of both serial transactions.
     let mut conn_guard = state.connection.lock().await;
-    let (constant, endianness, x_size, y_size, current_signature) = {
+    let (constant, endianness, x_size, y_size, current_signature, default_page_bytes) = {
         let def_guard = state.definition.lock().await;
         let def = def_guard.as_ref().ok_or("Definition not loaded")?;
         let table = def
@@ -298,12 +298,18 @@ pub async fn send_autotune_recommendations(
             .get(&table.map)
             .ok_or_else(|| format!("Constant {} not found for table {}", table.map, table_name))?
             .clone();
+        let default_page_bytes = def
+            .page_sizes
+            .get(constant.page as usize)
+            .copied()
+            .unwrap_or(256) as usize;
         (
             constant,
             def.endianness,
             table.x_size,
             table.y_size,
             def.signature.clone(),
+            default_page_bytes,
         )
     };
     let conn = conn_guard.as_mut().ok_or("Not connected to ECU")?;
@@ -383,15 +389,36 @@ pub async fn send_autotune_recommendations(
         can_id: 0,
         page: constant.page,
         offset: constant.offset,
-        data: raw_out,
+        data: raw_out.clone(),
     };
 
     conn.write_memory(write_params).map_err(|e| e.to_string())?;
+    drop(conn_guard);
+
+    // The ECU is now running these values, so the app has to be showing them.
+    // This used to stop at the write: the engine took the new VE table while
+    // every table view, the AFR-target resolver and the next AutoTune session
+    // all kept serving the pre-apply numbers out of the cache until something
+    // unrelated triggered a re-sync. A tuner comparing screen against engine
+    // had no way to tell which was current - and the doc comment on this
+    // function has always claimed it updated both.
+    let mut cache_guard = state.tune_cache.lock().await;
+    if let Some(cache) = cache_guard.as_mut() {
+        crate::commands::table_internals::mirror_write_into_tune(
+            &state,
+            cache,
+            &constant,
+            &raw_out,
+            default_page_bytes,
+            &values,
+        )
+        .await;
+    }
 
     tracing::info!(
         table = %table_name,
         cells_written = recs.len(),
-        "send_autotune_recommendations: written to ECU RAM (burn separately to persist)"
+        "send_autotune_recommendations: written to ECU RAM and mirrored into the tune (burn separately to persist)"
     );
     Ok(())
 }

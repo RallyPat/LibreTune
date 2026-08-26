@@ -8,6 +8,48 @@ use libretune_core::ini::Constant;
 use libretune_core::tune::{TuneFile, TuneValue};
 use serde::Serialize;
 
+/// Mirror a table/axis write into the in-memory tune, so what the screen shows
+/// matches what the ECU was just sent.
+///
+/// Three things have to move together or the app quietly disagrees with the
+/// engine: the `TuneCache` page bytes, the `TuneFile` page bytes, and
+/// `tune.constants` - offline reads prefer the parsed msq constants over page
+/// data (`read_const_values` checks `tune.constants` first), so leaving those
+/// stale makes an accepted write revert on the next read while the ECU has
+/// already taken it. PR #59 established the invariant for `update_table_data`;
+/// this is the same block the internal helpers and AutoTune's apply each need.
+///
+pub(crate) async fn mirror_write_into_tune(
+    state: &AppState,
+    cache: &mut libretune_core::tune::TuneCache,
+    constant: &Constant,
+    raw_data: &[u8],
+    default_page_bytes: usize,
+    values: &[f64],
+) {
+    // TuneCache::write_bytes creates the page if absent and grows it if short,
+    // so it has no failure path to branch on.
+    cache.write_bytes(constant.page, constant.offset, raw_data);
+
+    let mut tune_guard = state.current_tune.lock().await;
+    if let Some(tune) = tune_guard.as_mut() {
+        let page_data = tune
+            .pages
+            .entry(constant.page)
+            .or_insert_with(|| vec![0u8; default_page_bytes]);
+        let start = constant.offset as usize;
+        let end = start + raw_data.len();
+        if end <= page_data.len() {
+            page_data[start..end].copy_from_slice(raw_data);
+        }
+        tune.constants
+            .insert(constant.name.clone(), TuneValue::Array(values.to_vec()));
+    }
+    drop(tune_guard);
+
+    *state.tune_modified.lock().await = true;
+}
+
 #[derive(Serialize)]
 pub(crate) struct TableData {
     pub name: String,
@@ -365,33 +407,15 @@ pub(crate) async fn update_table_z_values_internal(
 
     // Write to TuneCache if available
     if let Some(cache) = cache_guard.as_mut() {
-        if cache.write_bytes(constant.page, constant.offset, &raw_data) {
-            // Also update TuneFile in memory
-            let mut tune_guard = state.current_tune.lock().await;
-            if let Some(tune) = tune_guard.as_mut() {
-                let page_data = tune
-                    .pages
-                    .entry(constant.page)
-                    .or_insert_with(|| vec![0u8; default_page_bytes]);
-                let start = constant.offset as usize;
-                let end = start + raw_data.len();
-                if end <= page_data.len() {
-                    page_data[start..end].copy_from_slice(&raw_data);
-                }
-
-                // Offline reads prefer the parsed msq constants over page
-                // data (read_const_values checks tune.constants first), so
-                // keep them in sync or every toolbar op silently reverts on
-                // the next read while a connected ECU has already taken the
-                // write. Same invariant PR #59 established for
-                // update_table_data; these internal helpers were missed.
-                tune.constants.insert(
-                    constant.name.clone(),
-                    libretune_core::tune::TuneValue::Array(flat_values.clone()),
-                );
-            }
-            *state.tune_modified.lock().await = true;
-        }
+        mirror_write_into_tune(
+            state,
+            cache,
+            &constant,
+            &raw_data,
+            default_page_bytes,
+            &flat_values,
+        )
+        .await;
     }
 
     // Write to ECU if connected (optional)
@@ -493,32 +517,15 @@ pub(crate) async fn update_constant_array_internal(
     }
 
     if let Some(cache) = cache_guard.as_mut() {
-        if cache.write_bytes(constant.page, constant.offset, &raw_data) {
-            let mut tune_guard = state.current_tune.lock().await;
-            if let Some(tune) = tune_guard.as_mut() {
-                let page_data = tune
-                    .pages
-                    .entry(constant.page)
-                    .or_insert_with(|| vec![0u8; default_page_bytes]);
-
-                let start = constant.offset as usize;
-                let end = start + raw_data.len();
-                if end <= page_data.len() {
-                    page_data[start..end].copy_from_slice(&raw_data);
-                }
-
-                // Same tune.constants sync as above: without it, rebin_table's
-                // axis write "succeeds", the next get_table_data serves the old
-                // bins from tune.constants, and the new axis is lost — while
-                // the ECU already received it.
-                tune.constants.insert(
-                    constant.name.clone(),
-                    libretune_core::tune::TuneValue::Array(values.clone()),
-                );
-            }
-
-            *state.tune_modified.lock().await = true;
-        }
+        mirror_write_into_tune(
+            state,
+            cache,
+            &constant,
+            &raw_data,
+            default_page_bytes,
+            &values,
+        )
+        .await;
     }
 
     if let Some(conn) = conn_guard.as_mut() {
