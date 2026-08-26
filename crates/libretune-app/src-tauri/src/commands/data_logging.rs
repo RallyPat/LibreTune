@@ -101,7 +101,24 @@ pub async fn start_logging(
     let def_guard = state.definition.lock().await;
     let def = def_guard.as_ref().ok_or("Definition not loaded")?;
 
-    let mut channels: Vec<String> = def.output_channels.keys().cloned().collect();
+    // Prefer the channel list the INI declares in [Datalog]: it names the
+    // fields this ECU expects logged, in the order it expects them. The
+    // fallback is every output channel, which came out of a HashMap - so the
+    // column order differed between runs of the same binary, and the columns
+    // themselves were raw channel names rather than the declared labels. Other
+    // log tools key off those names and that order; the INI says so itself
+    // ("programs like MSLVV and MSTweak key off specific column names").
+    let mut channels: Vec<String> = if def.datalog_entries.is_empty() {
+        let mut all: Vec<String> = def.output_channels.keys().cloned().collect();
+        all.sort();
+        all
+    } else {
+        def.datalog_entries
+            .iter()
+            .filter(|e| e.enabled)
+            .map(|e| e.channel.clone())
+            .collect()
+    };
 
     // Also log the canonical alias names (RPM, MAP, TPS, …) that the realtime
     // stream adds via apply_channel_aliases, so recorded logs and saved CSVs

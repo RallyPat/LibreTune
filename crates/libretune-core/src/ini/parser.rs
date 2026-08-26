@@ -1500,25 +1500,49 @@ fn substitute_variables(
     result
 }
 
-/// Parse [Datalog] section entries
+/// Parse a `[Datalog]` entry.
+///
+/// The columns are `Channel, Label, Type, Format[, {condition}]`, as the INI's
+/// own header comment states:
+///
+/// ```text
+/// ;       Channel          Label               Type    Format
+/// entry = rpm,             "RPM",              int,    "%d"
+/// entry = stagingActive,   "Fuel Staging",     int,    "onOff", { stagingEnabled }
+/// ```
+///
+/// This used to read `parts[2]` - the type - as the format, and `parts[3]` -
+/// the format - as an enabled flag, which is never the string "0" and so was
+/// always true. The condition was dropped entirely.
+///
+/// `split_ini_line` rather than `split(',')`: a condition expression can
+/// contain commas, and the naive split shatters it.
 fn parse_datalog_entry(def: &mut EcuDefinition, _key: &str, value: &str) {
-    // Format: entry = channel, "Label", "%.1f", 1
-    let parts: Vec<&str> = value.split(',').map(|s| s.trim()).collect();
-    if !parts.is_empty() {
-        let entry = DatalogEntry {
-            channel: parts[0].trim_matches('"').to_string(),
-            label: parts
-                .get(1)
-                .map(|s| s.trim_matches('"').to_string())
-                .unwrap_or_default(),
-            format: parts
-                .get(2)
-                .map(|s| s.trim_matches('"').to_string())
-                .unwrap_or_else(|| "%.2f".to_string()),
-            enabled: parts.get(3).map(|s| *s != "0").unwrap_or(true),
-        };
-        def.datalog_entries.push(entry);
+    let parts = crate::ini::split_ini_line(value);
+    if parts.is_empty() {
+        return;
     }
+    let field = |i: usize| -> Option<String> {
+        parts
+            .get(i)
+            .map(|s| s.trim().trim_matches('"').to_string())
+            .filter(|s| !s.is_empty())
+    };
+    let entry = DatalogEntry {
+        channel: parts[0].trim().trim_matches('"').to_string(),
+        label: field(1).unwrap_or_default(),
+        data_type: field(2).unwrap_or_else(|| "float".to_string()),
+        format: field(3).unwrap_or_else(|| "%.2f".to_string()),
+        condition: field(4).and_then(|s| {
+            s.strip_prefix('{')
+                .and_then(|s| s.strip_suffix('}'))
+                .map(|s| s.trim().to_string())
+        }),
+        // The INI has no disabled-by-default form; every declared entry is one
+        // the ECU offers. A condition, where present, decides at runtime.
+        enabled: true,
+    };
+    def.datalog_entries.push(entry);
 }
 
 /// Parse [FrontPage] section entries
@@ -4536,5 +4560,68 @@ mod tested_symbol_tests {
         set_default_symbols(Vec::<String>::new());
         assert!(def.tests_symbol("CELSIUS"));
         assert!(def.symbol_is_active("CELSIUS"));
+    }
+}
+
+#[cfg(test)]
+mod datalog_entry_tests {
+    use super::*;
+
+    fn parse(line: &str) -> DatalogEntry {
+        let mut def = EcuDefinition::default();
+        parse_datalog_entry(&mut def, "entry", line);
+        def.datalog_entries.pop().expect("one entry")
+    }
+
+    /// Columns are Channel, Label, Type, Format - per the INI's own header
+    /// comment. The type used to be read as the format, and the format as an
+    /// enabled flag that was never the string "0".
+    #[test]
+    fn the_type_and_format_columns_are_not_swapped() {
+        let e = parse(r#"rpm, "RPM", int, "%d""#);
+        assert_eq!(e.channel, "rpm");
+        assert_eq!(e.label, "RPM");
+        assert_eq!(e.data_type, "int");
+        assert_eq!(e.format, "%d");
+        assert!(e.condition.is_none());
+
+        let e = parse(r#"time, "Time", float, "%.3f""#);
+        assert_eq!(e.data_type, "float");
+        assert_eq!(e.format, "%.3f");
+    }
+
+    /// 62 of the 112 entries in the Speeduino 202501 INI carry a condition.
+    #[test]
+    fn a_declared_condition_is_kept() {
+        let e = parse(r#"stagingActive, "Fuel Staging", int, "onOff", { stagingEnabled }"#);
+        assert_eq!(e.channel, "stagingActive");
+        assert_eq!(e.format, "onOff");
+        assert_eq!(e.condition.as_deref(), Some("stagingEnabled"));
+    }
+
+    /// A condition can contain commas, which is why this uses split_ini_line
+    /// rather than split(','). The naive split shattered the expression and
+    /// left the tail as extra fields.
+    #[test]
+    fn a_condition_containing_commas_survives() {
+        let e = parse(
+            r#"boostDuty, "Boost Duty", int, "%d", { bitStringValue(boostLabels, boostType) }"#,
+        );
+        assert_eq!(e.channel, "boostDuty");
+        assert_eq!(e.format, "%d");
+        assert_eq!(
+            e.condition.as_deref(),
+            Some("bitStringValue(boostLabels, boostType)")
+        );
+    }
+
+    /// A short line must still yield a usable entry rather than a panic.
+    #[test]
+    fn a_two_field_entry_falls_back_sensibly() {
+        let e = parse(r#"afr, "AFR""#);
+        assert_eq!(e.channel, "afr");
+        assert_eq!(e.label, "AFR");
+        assert_eq!(e.data_type, "float");
+        assert_eq!(e.format, "%.2f");
     }
 }

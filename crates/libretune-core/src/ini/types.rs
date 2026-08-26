@@ -679,8 +679,15 @@ pub struct DatalogEntry {
     pub channel: String,
     /// Display label
     pub label: String,
-    /// Format string
+    /// Declared type - `int`, `float` or a bit-option name like `onOff`.
+    pub data_type: String,
+    /// Printf-style format string, e.g. `%.3f` or `%d`.
     pub format: String,
+    /// Optional `{expression}` gating whether the entry is logged at all.
+    ///
+    /// 62 of the 112 entries in the Speeduino 202501 INI carry one, e.g.
+    /// `entry = knockEventCount, "Current Knock Events", int, "%d", { knock_mode }`.
+    pub condition: Option<String>,
     /// Whether enabled by default
     pub enabled: bool,
 }
