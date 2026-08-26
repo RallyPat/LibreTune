@@ -100,6 +100,78 @@ impl From<&TableSizeInfo> for TableSizeInfoDto {
 }
 
 // Tune health/anomaly/predicted_fills/dyno_overlay extracted to commands/tune_health.rs
+/// Read one constant's values out of the loaded tune.
+///
+/// Every failure returns an error rather than a zero. This used to
+/// substitute `0.0` for an element that would not decode and
+/// `vec![0.0; element_count]` for a missing or short page, then hand the
+/// result to the editor as though it had come from the tune. A table of
+/// zeros is not a recognisable failure - it looks like a table someone
+/// zeroed - and the first edit sends those zeros back down
+/// `update_table_data`, so a display fault becomes a written one. A zero
+/// VE or dwell table is also the shape most likely to hurt if it is
+/// believed. `read_axis_bins` and `read_table_z_values` already refuse the
+/// same conditions.
+///
+/// The `tune.constants` path below is left alone: it returns values that
+/// really are in the tune, so nothing is fabricated there.
+pub(crate) fn read_const_values(
+    constant: &Constant,
+    tune: Option<&TuneFile>,
+    endianness: libretune_core::ini::Endianness,
+) -> Result<Vec<f64>, String> {
+    let element_count = constant.shape.element_count();
+    let element_size = constant.data_type.size_bytes();
+    let tune_file = tune.ok_or_else(|| {
+        format!(
+            "No tune is loaded, so '{}' has no values to show.",
+            constant.name
+        )
+    })?;
+
+    if let Some(tune_value) = tune_file.constants.get(&constant.name) {
+        match tune_value {
+            TuneValue::Array(arr) => return Ok(arr.clone()),
+            TuneValue::Scalar(v) => return Ok(vec![*v]),
+            _ => {}
+        }
+    }
+
+    let page_data = tune_file.pages.get(&constant.page).ok_or_else(|| {
+        format!(
+            "'{}' lives on page {}, which the loaded tune does not contain.",
+            constant.name, constant.page
+        )
+    })?;
+
+    let offset = constant.offset as usize;
+    let total_bytes = element_count * element_size;
+    if offset + total_bytes > page_data.len() {
+        return Err(format!(
+            "'{}' needs {total_bytes} bytes at offset {offset} of page {}, which holds                  only {}. Re-sync the tune and try again.",
+            constant.name,
+            constant.page,
+            page_data.len()
+        ));
+    }
+
+    let mut values = Vec::with_capacity(element_count);
+    for i in 0..element_count {
+        let elem_offset = offset + i * element_size;
+        let raw_val = constant
+            .data_type
+            .read_from_bytes(page_data, elem_offset, endianness)
+            .ok_or_else(|| {
+                format!(
+                    "Element {i} of {element_count} in '{}' could not be decoded from                          page {}. Re-sync the tune and try again.",
+                    constant.name, constant.page
+                )
+            })?;
+        values.push(constant.raw_to_display(raw_val));
+    }
+    Ok(values)
+}
+
 /// Helper function to get table data internally (avoids code duplication)
 pub(crate) async fn get_table_data_internal(
     state: &tauri::State<'_, AppState>,
@@ -158,53 +230,15 @@ pub(crate) async fn get_table_data_internal(
     // Read from tune file (offline mode)
     let tune_guard = state.current_tune.lock().await;
 
-    fn read_const_values(
-        constant: &Constant,
-        tune: Option<&TuneFile>,
-        endianness: libretune_core::ini::Endianness,
-    ) -> Vec<f64> {
-        let element_count = constant.shape.element_count();
-        let element_size = constant.data_type.size_bytes();
-        if let Some(tune_file) = tune {
-            if let Some(tune_value) = tune_file.constants.get(&constant.name) {
-                match tune_value {
-                    TuneValue::Array(arr) => return arr.clone(),
-                    TuneValue::Scalar(v) => return vec![*v],
-                    _ => {}
-                }
-            }
-
-            if let Some(page_data) = tune_file.pages.get(&constant.page) {
-                let offset = constant.offset as usize;
-                let total_bytes = element_count * element_size;
-                if offset + total_bytes <= page_data.len() {
-                    let mut values = Vec::with_capacity(element_count);
-                    for i in 0..element_count {
-                        let elem_offset = offset + i * element_size;
-                        if let Some(raw_val) =
-                            constant
-                                .data_type
-                                .read_from_bytes(page_data, elem_offset, endianness)
-                        {
-                            values.push(constant.raw_to_display(raw_val));
-                        } else {
-                            values.push(0.0);
-                        }
-                    }
-                    return values;
-                }
-            }
-        }
-        vec![0.0; element_count]
-    }
-
-    let x_bins_full = read_const_values(&x_const, tune_guard.as_ref(), endianness);
+    let x_bins_full = read_const_values(&x_const, tune_guard.as_ref(), endianness)?;
     let y_bins_full = if let Some(ref y) = y_const {
-        read_const_values(y, tune_guard.as_ref(), endianness)
+        read_const_values(y, tune_guard.as_ref(), endianness)?
     } else {
+        // A 2D table has no Y axis to read; this placeholder is not a value
+        // standing in for one that could not be read.
         vec![0.0]
     };
-    let z_flat = read_const_values(&z_const, tune_guard.as_ref(), endianness);
+    let z_flat = read_const_values(&z_const, tune_guard.as_ref(), endianness)?;
 
     let size_info = size_snapshot.map(|(mut info, cols_c, rows_c, defaults, max_elements)| {
         info.active_cols = dynamic_table::resolve_axis_count(
@@ -544,4 +578,78 @@ pub(crate) async fn update_constant_array_internal(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod read_const_values_tests {
+    use super::*;
+    use libretune_core::ini::{DataType, Endianness};
+    use libretune_core::tune::TuneFile;
+
+    /// One 4-element U08 constant at offset 2 of page 3.
+    fn constant() -> Constant {
+        Constant {
+            name: "veTable".to_string(),
+            page: 3,
+            offset: 2,
+            data_type: DataType::U08,
+            scale: 1.0,
+            translate: 0.0,
+            shape: libretune_core::ini::Shape::Array1D(4),
+            ..Default::default()
+        }
+    }
+
+    fn tune_with_page(bytes: Vec<u8>) -> TuneFile {
+        let mut t = TuneFile::default();
+        t.pages.insert(3, bytes);
+        t
+    }
+
+    #[test]
+    fn a_complete_page_reads_the_real_values() {
+        let t = tune_with_page(vec![0, 0, 10, 20, 30, 40]);
+        let v = read_const_values(&constant(), Some(&t), Endianness::Big).unwrap();
+        assert_eq!(v, vec![10.0, 20.0, 30.0, 40.0]);
+    }
+
+    /// The bug: a page too short for the constant used to return
+    /// `vec![0.0; element_count]`, which the editor showed as a real table of
+    /// zeros and sent back down update_table_data on the first edit.
+    #[test]
+    fn a_short_page_refuses_rather_than_returning_zeros() {
+        let t = tune_with_page(vec![0, 0, 10, 20]); // 2 of the 4 elements
+        let err = read_const_values(&constant(), Some(&t), Endianness::Big)
+            .expect_err("a page that cannot hold the constant must not answer");
+        assert!(err.contains("veTable") && err.contains("page 3"), "{err}");
+    }
+
+    #[test]
+    fn a_missing_page_refuses() {
+        let mut t = TuneFile::default();
+        t.pages.insert(9, vec![0; 64]); // some other page
+        let err = read_const_values(&constant(), Some(&t), Endianness::Big)
+            .expect_err("a tune without the page must not answer");
+        assert!(err.contains("page 3"), "{err}");
+    }
+
+    #[test]
+    fn no_tune_loaded_refuses() {
+        let err = read_const_values(&constant(), None, Endianness::Big)
+            .expect_err("no tune means no values");
+        assert!(err.contains("veTable"), "{err}");
+    }
+
+    /// Values that really are in the tune are still served from there - that
+    /// path never fabricated anything and is deliberately unchanged.
+    #[test]
+    fn a_stored_constant_is_served_from_the_tune() {
+        let mut t = tune_with_page(vec![0, 0, 10, 20, 30, 40]);
+        t.constants.insert(
+            "veTable".to_string(),
+            TuneValue::Array(vec![1.0, 2.0, 3.0, 4.0]),
+        );
+        let v = read_const_values(&constant(), Some(&t), Endianness::Big).unwrap();
+        assert_eq!(v, vec![1.0, 2.0, 3.0, 4.0], "the stored array wins");
+    }
 }
