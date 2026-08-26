@@ -22,6 +22,13 @@ pub struct OutputChannel {
 
     /// For bits type: bit position
     pub bit_position: Option<u8>,
+    /// How many bits the field spans, from [`OutputChannel::bit_position`].
+    ///
+    /// `[5:7]` is three bits, not one. Speeduino packs `nSquirts` there and a
+    /// four-cylinder reports 2, which is `010` - so reading only the start bit
+    /// returns 0, and the INI's `pulseLimit = { cycleTime / nSquirts }` then
+    /// divides by zero and takes injector duty cycle with it.
+    pub bit_count: Option<u8>,
 
     /// Unit of measurement
     pub units: String,
@@ -49,6 +56,7 @@ impl OutputChannel {
             data_type,
             offset,
             bit_position: None,
+            bit_count: None,
             units: String::new(),
             scale: 1.0,
             translate: 0.0,
@@ -101,12 +109,18 @@ impl OutputChannel {
         if self.data_type == DataType::Bits {
             if let Some(pos) = self.bit_position {
                 // Prevent shift overflow - if bit position >= 8, treat as invalid
+                let count = self.bit_count.unwrap_or(1).clamp(1, 64);
+                let mask: u64 = if count >= 64 {
+                    u64::MAX
+                } else {
+                    (1u64 << count) - 1
+                };
                 if pos < 8 {
-                    let bit_val = (raw as u8 >> pos) & 1;
+                    let bit_val = ((raw as u64) >> pos) & mask;
                     return Some(self.raw_to_display(bit_val as f64));
                 } else {
                     // For larger bit positions, use u64 shift
-                    let bit_val = ((raw as u64) >> (pos as u64)) & 1;
+                    let bit_val = ((raw as u64) >> (pos as u64)) & mask;
                     return Some(self.raw_to_display(bit_val as f64));
                 }
             }
@@ -173,6 +187,7 @@ impl Default for OutputChannel {
             data_type: DataType::U08,
             offset: 0,
             bit_position: None,
+            bit_count: None,
             units: String::new(),
             scale: 1.0,
             translate: 0.0,
@@ -210,6 +225,7 @@ pub fn parse_output_channel_line(name: &str, value: &str) -> Option<OutputChanne
                 data_type: DataType::F32, // Computed channels are float
                 offset: 0,
                 bit_position: None,
+                bit_count: None,
                 units: units.to_string(),
                 scale: 1.0,
                 translate: 0.0,
@@ -255,8 +271,21 @@ pub fn parse_output_channel_line(name: &str, value: &str) -> Option<OutputChanne
                 let range = p2.trim_matches(|c| c == '[' || c == ']');
                 let bit_parts: Vec<&str> = range.split(':').collect();
                 if let Some(bit_str) = bit_parts.first() {
-                    channel.bit_position = bit_str.parse().ok();
+                    channel.bit_position = bit_str.trim().parse().ok();
                 }
+                // `[start:end]` is inclusive both ends, the same arithmetic
+                // parse_bit_range_spec already does for [Constants].
+                channel.bit_count = match (channel.bit_position, bit_parts.get(1)) {
+                    (Some(start), Some(end)) => end
+                        .trim()
+                        .parse::<u8>()
+                        .ok()
+                        .filter(|e| *e >= start)
+                        .map(|e| e - start + 1),
+                    // A bare `[n]` is a single bit.
+                    (Some(_), None) => Some(1),
+                    _ => None,
+                };
             } else {
                 channel.units = p2.trim_matches('"').to_string();
             }
@@ -301,5 +330,62 @@ mod tests {
         assert!(ch.is_computed());
         assert_eq!(ch.expression.unwrap(), "ego1 / 10.0");
         assert_eq!(ch.units, "AFR");
+    }
+}
+
+#[cfg(test)]
+mod multibit_channel_tests {
+    use super::*;
+    use crate::ini::Endianness;
+
+    fn parse_line(line: &str) -> OutputChannel {
+        let (name, rest) = line.split_once('=').expect("name = spec");
+        parse_output_channel_line(name.trim(), rest).expect("parses")
+    }
+
+    /// Speeduino packs nSquirts into three bits. A four-cylinder reports 2,
+    /// which is `010` - so reading only the start bit returns 0, and the INI's
+    /// `pulseLimit = { cycleTime / nSquirts }` divides by zero. Injector duty
+    /// cycle then reads a permanent 0, which was confirmed against a live ECU:
+    /// byte 84 held 0b01000000 while LibreTune reported 0.0.
+    #[test]
+    fn a_multi_bit_field_reads_all_of_its_bits() {
+        let c = parse_line("nSquirts = bits, U08, 84, [5:7]");
+        assert_eq!(c.bit_position, Some(5));
+        assert_eq!(c.bit_count, Some(3));
+
+        let mut block = vec![0u8; 130];
+        block[84] = 0b0100_0000; // bits [5:7] = 010 = 2
+        assert_eq!(c.parse(&block, Endianness::Little), Some(2.0));
+
+        block[84] = 0b1110_0000; // = 7, the widest the field holds
+        assert_eq!(c.parse(&block, Endianness::Little), Some(7.0));
+    }
+
+    /// A six-bit error code must not collapse to one bit, or the Datalog
+    /// "Error ID" column can never name a fault.
+    #[test]
+    fn adjacent_fields_do_not_bleed_into_each_other() {
+        let err_num = parse_line("errorNum = bits, U08, 75, [0:1]");
+        let current = parse_line("currentError = bits, U08, 75, [2:7]");
+        assert_eq!(current.bit_count, Some(6));
+
+        let mut block = vec![0u8; 130];
+        // errorNum = 3, currentError = 42 -> 42<<2 | 3
+        block[75] = (42u8 << 2) | 3;
+        assert_eq!(err_num.parse(&block, Endianness::Little), Some(3.0));
+        assert_eq!(current.parse(&block, Endianness::Little), Some(42.0));
+    }
+
+    /// Single-bit flags keep working - most channels are these.
+    #[test]
+    fn a_single_bit_flag_is_unchanged() {
+        let c = parse_line("hasSync = bits, U08, 31, [7:7]");
+        assert_eq!(c.bit_count, Some(1));
+        let mut block = vec![0u8; 130];
+        block[31] = 0b1000_0000;
+        assert_eq!(c.parse(&block, Endianness::Little), Some(1.0));
+        block[31] = 0;
+        assert_eq!(c.parse(&block, Endianness::Little), Some(0.0));
     }
 }
