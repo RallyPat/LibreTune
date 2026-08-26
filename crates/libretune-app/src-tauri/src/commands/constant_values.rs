@@ -173,6 +173,9 @@ mod tests {
             dynamic_size: None,
             scale_expr: None,
             translate_expr: None,
+            min_expr: None,
+            max_expr: None,
+            range_resolved: true,
         };
 
         // Build a cache with a single page, load raw bytes, write reqFuel=126.
@@ -235,6 +238,9 @@ mod tests {
             dynamic_size: None,
             scale_expr: None,
             translate_expr: None,
+            min_expr: None,
+            max_expr: None,
+            range_resolved: true,
         };
 
         let mut def = EcuDefinition::default();
