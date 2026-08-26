@@ -1046,11 +1046,19 @@ pub struct ApplyResult {
 
 /// Response for [`agent_apply_proposals`]: per-action results plus
 /// batch-level warnings that only make sense across actions (e.g. the
-/// accepted edits collectively shift a table's mean by a large amount).
+/// accepted edits collectively shift a table's mean by a large amount),
+/// and traceability fields (pre-apply restore point, git outcome).
 #[derive(Debug, Serialize)]
 pub struct ApplyProposalsResponse {
     pub results: Vec<ApplyResult>,
     pub batch_warnings: Vec<String>,
+    /// Pre-apply restore point file name, when one could be created.
+    pub restore_point: Option<String>,
+    /// Commit sha when `auto_commit_on_save = "always"` committed the apply.
+    pub auto_committed: Option<String>,
+    /// Prepared commit message when `auto_commit_on_save = "ask"` — the
+    /// frontend offers a one-click commit after the user saves.
+    pub suggest_commit: Option<String>,
 }
 
 /// Apply a list of approved actions to the working tune.
@@ -1070,6 +1078,7 @@ pub struct ApplyProposalsResponse {
 /// is flagged modified so the user is prompted to burn afterward.
 #[tauri::command]
 pub async fn agent_apply_proposals(
+    app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
     request: ApplyProposalsRequest,
 ) -> Result<ApplyProposalsResponse, String> {
@@ -1147,6 +1156,21 @@ pub async fn agent_apply_proposals(
 
     let mut batch_warnings: Vec<String> = Vec::new();
 
+    // --- Pre-apply restore point ------------------------------------------
+    // Snapshot the tune BEFORE any write so the user can roll the whole
+    // apply back from Restore Points. Only when something will actually be
+    // written; failure is a warning, not a blocker (the writes themselves
+    // are still validated and user-approved).
+    let mut restore_point: Option<String> = None;
+    if results.iter().any(|r| r.applied) {
+        match crate::commands::restore_points::create_restore_point_internal(&state).await {
+            Ok(rp) => restore_point = Some(rp.filename),
+            Err(e) => {
+                batch_warnings.push(format!("could not create a pre-apply restore point: {e}"))
+            }
+        }
+    }
+
     for (table_name, indexes) in &table_groups {
         let outcome: Result<(), String> = async {
             let mut t =
@@ -1222,10 +1246,78 @@ pub async fn agent_apply_proposals(
         *state.tune_modified.lock().await = true;
     }
 
+    // --- Git traceability (per auto_commit_on_save) ------------------------
+    // "always": save the tune to the project file and commit — the AI
+    // changes only exist on disk after a save, so committing without saving
+    // would record the previous state. "ask": hand the frontend a prepared
+    // commit message to offer after the user saves. "never": nothing.
+    let mut auto_committed: Option<String> = None;
+    let mut suggest_commit: Option<String> = None;
+    if results.iter().any(|r| r.applied) {
+        let settings = crate::load_settings(&app);
+        let applied: Vec<Action> = results
+            .iter()
+            .enumerate()
+            .filter(|(_, r)| r.applied)
+            .map(|(i, _)| request.actions[i].clone())
+            .collect();
+        let message = ai_commit_message(&applied);
+        match settings.auto_commit_on_save.as_str() {
+            "always" => {
+                match crate::commands::project_tune_sync::save_tune_to_project_internal(&state)
+                    .await
+                {
+                    Ok(()) => {
+                        match crate::commands::git::commit_project_state(&state, &message).await {
+                            Ok(sha) => auto_committed = Some(sha),
+                            // "no git repository" is a skip, not a failure.
+                            Err(e) if e.contains("no git repository") => {}
+                            Err(e) => {
+                                batch_warnings
+                                    .push(format!("tune saved, but the auto-commit failed: {e}"));
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        batch_warnings.push(format!(
+                            "auto-commit skipped — could not save the tune: {e}"
+                        ));
+                    }
+                }
+            }
+            "ask" => suggest_commit = Some(message),
+            _ => {}
+        }
+    }
+
     Ok(ApplyProposalsResponse {
         results,
         batch_warnings,
+        restore_point,
+        auto_committed,
+        suggest_commit,
     })
+}
+
+/// Build the git commit message for an applied AI batch: change count plus
+/// per-target tallies (e.g. "table:veTable1 × 12, const:crankingPct × 1").
+fn ai_commit_message(actions: &[Action]) -> String {
+    let targets = libretune_core::agent::context::group_actions_by_target(actions);
+    let tally = targets
+        .iter()
+        .map(|(name, count)| format!("{name} ×{count}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(
+        "AI assistant: {} change{}{}",
+        actions.len(),
+        if actions.len() == 1 { "" } else { "s" },
+        if tally.is_empty() {
+            String::new()
+        } else {
+            format!(" ({tally})")
+        }
+    )
 }
 
 /// Append a warning when the accepted TableEdits for one table shift the

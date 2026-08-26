@@ -16,6 +16,14 @@ pub struct RestorePointResponse {
 pub async fn create_restore_point(
     state: tauri::State<'_, AppState>,
 ) -> Result<RestorePointResponse, String> {
+    create_restore_point_internal(&state).await
+}
+
+/// Internal (non-command) restore-point creation, shared with the AI
+/// assistant apply path so approved proposals get a pre-apply snapshot.
+pub(crate) async fn create_restore_point_internal(
+    state: &AppState,
+) -> Result<RestorePointResponse, String> {
     // `Project::create_restore_point` serializes `project.current_tune`, but
     // that field is only refreshed on load/save — every edit command
     // (update_constant, update_table_data and the table-op helpers) writes

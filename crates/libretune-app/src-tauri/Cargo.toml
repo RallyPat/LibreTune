@@ -33,6 +33,13 @@ chrono = { workspace = true }
 byteorder = "1"
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
+# OS keychain storage for the AI assistant API key (graceful fallback to the
+# settings file when no keychain backend is available, e.g. headless Linux).
+keyring = { version = "3", features = [
+    "windows-native",
+    "apple-native",
+    "linux-native",
+] }
 
 [dev-dependencies]
 tempfile = "3"

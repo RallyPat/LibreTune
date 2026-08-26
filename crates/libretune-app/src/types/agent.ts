@@ -105,6 +105,9 @@ export interface ApplyResult {
 export interface ApplyProposalsResponse {
   results: ApplyResult[];
   batch_warnings: string[];
+  restore_point: string | null;
+  auto_committed: string | null;
+  suggest_commit: string | null;
 }
 
 /** Status returned by `agent_status`. */

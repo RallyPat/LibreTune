@@ -9,7 +9,7 @@ import { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { ChatPanel, type TranscriptEntry } from './ChatPanel';
 import { ProposalQueue } from './ProposalQueue';
-import type { AgentStatus, ApplyResult, ProposedAction } from '../../types/agent';
+import type { AgentStatus, ApplyProposalsResponse, ProposedAction } from '../../types/agent';
 import './AgentPanel.css';
 
 export interface AgentDockProps {
@@ -56,14 +56,21 @@ export function AgentDock({ buildSystemPrompt }: AgentDockProps) {
     };
   }, []);
 
-  const handleApplied = (results: ApplyResult[]) => {
-    const ok = results.filter((r) => r.applied).length;
-    const fail = results.length - ok;
-    setAppliedNote(
+  const handleApplied = (response: ApplyProposalsResponse) => {
+    const ok = response.results.filter((r) => r.applied).length;
+    const fail = response.results.length - ok;
+    const parts: string[] = [
       fail === 0
         ? `Staged ${ok} change${ok === 1 ? '' : 's'} to the working tune. Burn to the ECU when ready.`
-        : `Staged ${ok}, rejected ${fail} (failed validation).`
-    );
+        : `Staged ${ok}, rejected ${fail} (failed validation).`,
+    ];
+    if (response.restore_point) {
+      parts.push(`Restore point: ${response.restore_point}`);
+    }
+    if (response.auto_committed) {
+      parts.push(`Committed ${response.auto_committed.slice(0, 7)}`);
+    }
+    setAppliedNote(parts.join(' — '));
     window.setTimeout(() => setAppliedNote(null), 6000);
   };
 

@@ -13,7 +13,6 @@ import { Button } from '../common';
 import type {
   AgentAction,
   ApplyProposalsResponse,
-  ApplyResult,
   ProposedAction,
 } from '../../types/agent';
 import './AgentPanel.css';
@@ -23,8 +22,8 @@ export interface ProposalQueueProps {
   proposed: ProposedAction[];
   /** Clear the queue (after applying / dismissing). */
   onClear: () => void;
-  /** Notified when an item is applied (so the parent can refresh views). */
-  onApplied?: (results: ApplyResult[]) => void;
+  /** Notified when items are applied (so the parent can refresh views / report). */
+  onApplied?: (response: ApplyProposalsResponse) => void;
 }
 
 /** Render a human-readable label for an action. */
@@ -86,7 +85,7 @@ export function ProposalQueue({ proposed, onClear, onApplied }: ProposalQueuePro
         request: { actions: acceptedActions },
       });
       setBatchWarnings(response.batch_warnings ?? []);
-      onApplied?.(response.results);
+      onApplied?.(response);
       onClear();
       setDecisions({});
     } catch (e) {

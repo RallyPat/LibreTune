@@ -16,7 +16,7 @@ import { ChatPanel, type TranscriptEntry } from './ChatPanel';
 import { ProposalQueue } from './ProposalQueue';
 import type {
   AgentStatus,
-  ApplyResult,
+  ApplyProposalsResponse,
   ChatHistory,
   ChatSummary,
   ProposedAction,
@@ -176,15 +176,24 @@ export function AgentSidePanel({ width, onResize, onCollapse, onPopOut }: AgentS
     [width, onResize]
   );
 
-  const handleApplied = (results: ApplyResult[]) => {
-    const ok = results.filter((r) => r.applied).length;
-    const fail = results.length - ok;
-    setAppliedNote(
+  const handleApplied = (response: ApplyProposalsResponse) => {
+    const ok = response.results.filter((r) => r.applied).length;
+    const fail = response.results.length - ok;
+    const parts: string[] = [
       fail === 0
         ? `Staged ${ok} change${ok === 1 ? '' : 's'}. Burn to the ECU when ready.`
-        : `Staged ${ok}, rejected ${fail} (failed validation).`
-    );
-    window.setTimeout(() => setAppliedNote(null), 6000);
+        : `Staged ${ok}, rejected ${fail} (failed validation).`,
+    ];
+    if (response.restore_point) {
+      parts.push(`Restore point: ${response.restore_point}`);
+    }
+    if (response.auto_committed) {
+      parts.push(`Committed ${response.auto_committed.slice(0, 7)}`);
+    } else if (response.suggest_commit) {
+      parts.push('Save the tune, then commit from Tune History to keep this batch in git');
+    }
+    setAppliedNote(parts.join(' — '));
+    window.setTimeout(() => setAppliedNote(null), 8000);
   };
 
   return (

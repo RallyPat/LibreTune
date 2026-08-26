@@ -1081,7 +1081,10 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
             )}
           </FormField>
 
-          <FormField label="API Key" help="Stored locally in settings. Optional for local/no-auth providers">
+          <FormField
+            label="API Key"
+            help="Stored in your OS keychain when available (never written to the settings file). Optional for local/no-auth providers"
+          >
             {(id) => (
               <input
                 id={id}

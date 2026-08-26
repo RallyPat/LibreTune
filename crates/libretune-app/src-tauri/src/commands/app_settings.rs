@@ -7,7 +7,7 @@ use std::fs::File;
 use std::io::{self, Write};
 use std::path::Path;
 
-#[derive(Serialize, Deserialize, Default)]
+#[derive(Serialize, Deserialize, Default, Clone)]
 pub(crate) struct Settings {
     #[serde(default)]
     pub(crate) last_ini_path: Option<String>,
@@ -254,7 +254,15 @@ fn save_settings_locked(app: &tauri::AppHandle, settings: &Settings) {
     if let Some(parent) = settings_path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    if let Err(e) = write_settings_atomic(&settings_path, settings) {
+    // The AI API key lives in the OS keychain when one is available; the
+    // settings file then keeps an empty string so the secret never rests on
+    // disk. (When no keychain backend exists the plaintext fallback is
+    // intentionally preserved — losing the key would lock the user out.)
+    let mut to_write = settings.clone();
+    if !to_write.ai_api_key.is_empty() && crate::commands::ai_keychain::load().is_some() {
+        to_write.ai_api_key = String::new();
+    }
+    if let Err(e) = write_settings_atomic(&settings_path, &to_write) {
         eprintln!("[WARN] Failed to save settings: {}", e);
     }
 }
@@ -483,6 +491,7 @@ pub(crate) fn load_settings(app: &tauri::AppHandle) -> Settings {
             if settings.runtime_packet_mode.trim().is_empty() {
                 settings.runtime_packet_mode = default_runtime_packet_mode();
             }
+            migrate_ai_key_to_keychain(&mut settings);
             apply_unit_symbols(&settings);
             return settings;
         }
@@ -494,6 +503,26 @@ pub(crate) fn load_settings(app: &tauri::AppHandle) -> Settings {
     }
     apply_unit_symbols(&s);
     s
+}
+
+/// Move a plaintext AI API key into the OS keychain (one-time migration),
+/// and fill the in-memory key from the keychain when the file has none.
+/// Graceful on every failure path: no keychain → keep plaintext as-is, so
+/// the assistant keeps working exactly as before this hardening existed.
+fn migrate_ai_key_to_keychain(settings: &mut Settings) {
+    if !settings.ai_api_key.is_empty() {
+        // Plaintext found in the file: try to move it to the keychain. On
+        // success the in-memory value stays (callers use it at runtime) but
+        // the next save writes an empty string in its place.
+        if crate::commands::ai_keychain::store(&settings.ai_api_key).is_ok() {
+            tracing::info!("migrated AI API key from settings.json to the OS keychain");
+        }
+        return; // keep the in-memory value regardless
+    }
+    // File has no key: the authoritative copy (if any) is the keychain.
+    if let Some(key) = crate::commands::ai_keychain::load() {
+        settings.ai_api_key = key;
+    }
 }
 
 /// Parse `content` (the text of `path`) as `Settings`. On failure, renames

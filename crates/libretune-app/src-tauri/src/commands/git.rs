@@ -114,6 +114,29 @@ pub async fn git_commit(
     Ok(sha)
 }
 
+/// Commit the project's current on-disk state with `message`. Internal —
+/// used by the AI-assistant apply path after it saves the tune. Returns
+/// `Err("no git repository")` when the project has no repo (the caller
+/// treats that as "skip", never auto-initializes one).
+pub(crate) async fn commit_project_state(
+    state: &AppState,
+    message: &str,
+) -> Result<String, String> {
+    let proj_guard = state.current_project.lock().await;
+    let project = proj_guard
+        .as_ref()
+        .ok_or_else(|| "No project open".to_string())?;
+
+    if !VersionControl::is_git_repo(&project.path) {
+        return Err("no git repository".to_string());
+    }
+    let vc = VersionControl::open(&project.path)
+        .map_err(|e| format!("Git repository not initialized: {}", e))?;
+
+    vc.commit(message)
+        .map_err(|e| format!("Failed to commit: {}", e))
+}
+
 /// Get commit history for current project
 #[tauri::command]
 pub async fn git_history(
