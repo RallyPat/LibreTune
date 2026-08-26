@@ -372,12 +372,36 @@ fn autoindex_entry(
     })
 }
 
+/// How long (seconds) a cached online-INI listing stays fresh before the
+/// next search refreshes it from the network. rusEFI and epicEFI publish new
+/// bundles daily, so a day matches the fastest-moving upstream; longer TTLs
+/// would leave brand-new firmware undiscoverable.
+pub const ONLINE_INI_CACHE_TTL_SECS: u64 = 24 * 60 * 60;
+
+/// On-disk representation of the cached listing (`online_ini_cache.json`).
+#[derive(Debug, Serialize, Deserialize)]
+pub struct OnlineIniCacheFile {
+    /// Bump when the format changes; loaders reject other versions.
+    pub version: u32,
+    /// RFC 3339 timestamp of the last successful network refresh.
+    pub last_updated: String,
+    /// The cached listing entries.
+    pub entries: Vec<OnlineIniEntry>,
+}
+
+impl OnlineIniCacheFile {
+    /// Version of the cache format this build writes and reads.
+    pub const CURRENT_VERSION: u32 = 1;
+}
+
 /// Online INI repository client
 pub struct OnlineIniRepository {
     /// HTTP client for API requests
     client: reqwest::Client,
     /// Cache of known INI entries (signature -> entry)
     cache: Vec<OnlineIniEntry>,
+    /// When the cache was last refreshed from the network (None = never).
+    last_updated: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 impl OnlineIniRepository {
@@ -397,6 +421,7 @@ impl OnlineIniRepository {
         OnlineIniRepository {
             client,
             cache: Vec::new(),
+            last_updated: None,
         }
     }
 
@@ -438,22 +463,131 @@ impl OnlineIniRepository {
         Ok(results)
     }
 
-    /// Refresh the cache by fetching INI lists from all sources
+    /// Refresh the cache by fetching INI lists from all sources.
+    ///
+    /// Builds the new listing off to the side and only swaps it in when at
+    /// least one source answered — a total failure (e.g. offline) keeps the
+    /// previous cache and its timestamp intact instead of wiping it.
     async fn refresh_cache(&mut self) -> Result<(), io::Error> {
-        self.cache.clear();
+        let mut fresh = Vec::new();
+        let mut failures = Vec::new();
 
         for &source in IniSource::online_sources() {
-            let entries = match self.list_source(source).await {
-                Ok(v) => v,
+            match self.list_source(source).await {
+                Ok(entries) => fresh.extend(entries),
                 Err(e) => {
-                    eprintln!("Warning: Failed to fetch INIs from {:?}: {e}", source);
-                    Vec::new()
+                    eprintln!("Warning: Failed to fetch INIs from {source:?}: {e}");
+                    failures.push((source, e));
                 }
-            };
-            self.cache.extend(entries);
+            }
         }
 
+        if fresh.is_empty() {
+            let detail = failures
+                .iter()
+                .map(|(s, e)| format!("{s:?}: {e}"))
+                .collect::<Vec<_>>()
+                .join("; ");
+            return Err(io::Error::other(format!(
+                "No online INI source responded ({detail})"
+            )));
+        }
+        if !failures.is_empty() {
+            eprintln!(
+                "Warning: online INI refresh incomplete, {} of {} sources failed",
+                failures.len(),
+                IniSource::online_sources().len()
+            );
+        }
+
+        self.cache = fresh;
+        self.last_updated = Some(chrono::Utc::now());
         Ok(())
+    }
+
+    /// Force a network refresh of the cached listing (see [`Self::refresh_cache`]).
+    pub async fn refresh(&mut self) -> Result<(), io::Error> {
+        self.refresh_cache().await
+    }
+
+    /// The cached listing entries.
+    pub fn entries(&self) -> &[OnlineIniEntry] {
+        &self.cache
+    }
+
+    /// When the cache was last refreshed (None = never refreshed).
+    pub fn last_updated(&self) -> Option<chrono::DateTime<chrono::Utc>> {
+        self.last_updated
+    }
+
+    /// `last_updated` formatted as RFC 3339, for display in the frontend.
+    pub fn last_updated_rfc3339(&self) -> Option<String> {
+        self.last_updated.map(|t| t.to_rfc3339())
+    }
+
+    /// True when the cache is empty or older than [`ONLINE_INI_CACHE_TTL_SECS`].
+    pub fn is_stale(&self) -> bool {
+        match self.last_updated {
+            None => true,
+            Some(t) => {
+                self.cache.is_empty()
+                    || (chrono::Utc::now() - t).num_seconds() > ONLINE_INI_CACHE_TTL_SECS as i64
+            }
+        }
+    }
+
+    /// Load a previously saved cache file. Returns `Ok(false)` when the file
+    /// does not exist yet (first run); a corrupt or unsupported file is an
+    /// error. Loading a stale-but-present cache is fine — callers decide
+    /// whether to refresh.
+    pub fn load_cache(&mut self, path: &Path) -> io::Result<bool> {
+        let bytes = match std::fs::read(path) {
+            Ok(b) => b,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(false),
+            Err(e) => return Err(e),
+        };
+        let file: OnlineIniCacheFile = serde_json::from_slice(&bytes)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+        if file.version != OnlineIniCacheFile::CURRENT_VERSION {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "unsupported cache version {} (expected {})",
+                    file.version,
+                    OnlineIniCacheFile::CURRENT_VERSION
+                ),
+            ));
+        }
+        let parsed = chrono::DateTime::parse_from_rfc3339(&file.last_updated)
+            .map(|t| t.with_timezone(&chrono::Utc))
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+        self.cache = file.entries;
+        self.last_updated = Some(parsed);
+        Ok(true)
+    }
+
+    /// Persist the cache so the next session starts without a network scan.
+    pub fn save_cache(&self, path: &Path) -> io::Result<()> {
+        let file = OnlineIniCacheFile {
+            version: OnlineIniCacheFile::CURRENT_VERSION,
+            last_updated: self
+                .last_updated
+                .map(|t| t.to_rfc3339())
+                .unwrap_or_else(|| chrono::Utc::now().to_rfc3339()),
+            entries: self.cache.clone(),
+        };
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let bytes = serde_json::to_vec_pretty(&file)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+        std::fs::write(path, bytes)
+    }
+
+    /// Test hook: set the cache timestamp without sleeping.
+    #[cfg(test)]
+    fn set_last_updated_for_test(&mut self, t: chrono::DateTime<chrono::Utc>) {
+        self.last_updated = Some(t);
     }
 
     /// Fetch the current INI list from a single source (no caching). Exposed
@@ -878,6 +1012,64 @@ mod tests {
         assert_eq!(IniSource::Fome.display_name(), "FOME");
     }
 
+    fn sample_entry() -> OnlineIniEntry {
+        OnlineIniEntry {
+            source: IniSource::Speeduino,
+            name: "speeduino.ini".to_string(),
+            signature: None,
+            download_url: "https://example.com/speeduino.ini".to_string(),
+            repo_path: "reference/speeduino.ini".to_string(),
+            size: Some(1234),
+        }
+    }
+
+    #[test]
+    fn test_cache_save_load_roundtrip() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("sub").join("online_ini_cache.json");
+
+        let mut repo = OnlineIniRepository::new();
+        // Missing file: Ok(false), repo stays empty and stale.
+        assert!(!repo.load_cache(&path).unwrap());
+        assert!(repo.is_stale());
+        assert!(repo.entries().is_empty());
+
+        repo.cache = vec![sample_entry()];
+        repo.last_updated = Some(chrono::Utc::now());
+        repo.save_cache(&path).unwrap();
+
+        let mut loaded = OnlineIniRepository::new();
+        assert!(loaded.load_cache(&path).unwrap());
+        assert_eq!(loaded.entries().len(), 1);
+        assert_eq!(loaded.entries()[0].name, "speeduino.ini");
+        assert!(!loaded.is_stale());
+        assert!(loaded.last_updated().is_some());
+
+        // A corrupt file must be an error, not silently ignored.
+        std::fs::write(&path, b"{ not json").unwrap();
+        assert!(loaded.load_cache(&path).is_err());
+    }
+
+    #[test]
+    fn test_cache_staleness_by_age() {
+        let mut repo = OnlineIniRepository::new();
+        repo.cache = vec![sample_entry()];
+
+        // Older than the TTL -> stale.
+        let old =
+            chrono::Utc::now() - chrono::Duration::seconds(ONLINE_INI_CACHE_TTL_SECS as i64 + 60);
+        repo.set_last_updated_for_test(old);
+        assert!(repo.is_stale());
+
+        // Fresh timestamp with non-empty entries -> not stale.
+        repo.set_last_updated_for_test(chrono::Utc::now());
+        assert!(!repo.is_stale());
+
+        // An empty cache is always stale, whatever the timestamp says.
+        repo.cache.clear();
+        assert!(repo.is_stale());
+    }
+
     #[test]
     fn test_bundle_signature_parse_and_url() {
         let sig =
@@ -1023,5 +1215,28 @@ mod tests {
         assert!(results.iter().any(|e| e.source == IniSource::EpicEFI));
         assert!(results.iter().any(|e| e.source == IniSource::Speeduino));
         assert!(results.iter().any(|e| e.source == IniSource::Fome));
+    }
+
+    #[tokio::test]
+    #[ignore = "live network call"]
+    async fn live_refresh_then_cache_roundtrip_serves_next_instance() {
+        // Mirrors the app's ensure-cache flow: refresh from the network,
+        // persist, then a fresh repository instance loads the cache and is
+        // not stale (no second scan needed).
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("online_ini_cache.json");
+
+        let mut first = OnlineIniRepository::new();
+        assert!(first.is_stale());
+        first.refresh().await.unwrap();
+        assert!(!first.is_stale());
+        assert!(!first.entries().is_empty());
+        assert!(first.last_updated().is_some());
+        first.save_cache(&path).unwrap();
+
+        let mut second = OnlineIniRepository::new();
+        assert!(second.load_cache(&path).unwrap());
+        assert!(!second.is_stale());
+        assert_eq!(second.entries().len(), first.entries().len());
     }
 }

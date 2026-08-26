@@ -430,6 +430,24 @@ function AppContent() {
     }
   }, [isTauri]);
 
+  // Keep the online INI listing cache fresh in the background. The TTL is
+  // enforced backend-side (24h — rusEFI/epicEFI publish daily bundles); this
+  // timer just polls `refresh_online_inis_if_stale`, which is a no-op while
+  // the cache is fresh and only hits the network once it has expired. That
+  // keeps the "Search for INI Online" dialog and the connect-wizard auto-match
+  // instant instead of paying a full multi-source scan on open.
+  useEffect(() => {
+    if (!isTauri) return;
+    const ONLINE_INI_REFRESH_CHECK_MS = 30 * 60 * 1000; // 30 min
+    const tick = () => {
+      invoke("refresh_online_inis_if_stale").catch((e) => {
+        console.warn("Background online-INI refresh failed:", e);
+      });
+    };
+    const interval = setInterval(tick, ONLINE_INI_REFRESH_CHECK_MS);
+    return () => clearInterval(interval);
+  }, [isTauri]);
+
   // Update window title with project name
   // Persist active tab state
   // Listen for reconnect:request, ini:changed, demo:changed events

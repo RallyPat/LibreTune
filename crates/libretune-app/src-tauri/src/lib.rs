@@ -125,7 +125,10 @@ use commands::math_channels::{
 };
 use commands::menu::{get_menu_tree, get_searchable_index};
 use commands::metrics::stop_metrics_task;
-use commands::online_ini::{check_internet_connectivity, download_ini, search_online_inis};
+use commands::online_ini::{
+    check_internet_connectivity, download_ini, refresh_online_inis, refresh_online_inis_if_stale,
+    search_online_inis,
+};
 use commands::pin_conflicts::check_pin_conflicts;
 use commands::project_lifecycle::{create_project, open_project};
 use commands::project_listing::{get_projects_path, list_projects};
@@ -458,6 +461,8 @@ pub fn run() {
             // Online INI repository commands
             check_internet_connectivity,
             search_online_inis,
+            refresh_online_inis,
+            refresh_online_inis_if_stale,
             download_ini,
             // AI assistant
             agent_status,

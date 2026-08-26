@@ -13,6 +13,43 @@ relevant.
 
 ## [Unreleased]
 
+### 2026-08-26 — Online INI listing cache: instant dialog, manual refresh, background TTL refresh
+
+Follow-up to the online-sources work above: the multi-source listing scan
+(rusEFI + epicEFI walks are the slow part, ~8–30 s) no longer runs on every
+dialog open.
+
+#### Added
+- **Persisted listing cache** — the full listing is saved to
+  `<app_data>/online_ini_cache.json` after each successful scan and loaded on
+  the next session, so the "Search for INI Online" dialog opens instantly with
+  the previous results.
+- **"Listing last updated" display** — the dialog shows when the cached
+  listing was last refreshed from the network (RFC 3339 timestamp,
+  locale-formatted).
+- **Manual Refresh button** — `refresh_online_inis` command forces a network
+  re-scan bypassing the TTL; the button shows a spinning icon while running
+  and an amber notice ("Refresh failed — showing the cached listing") when
+  the network fails but a cache exists.
+- **Background TTL refresh** — `refresh_online_inis_if_stale` is polled every
+  30 minutes from the app; it is a no-op while the cache is fresh and refreshes
+  automatically once the 24 h TTL expires (`ONLINE_INI_CACHE_TTL_SECS`). Daily
+  matches the fastest upstream (rusEFI/epicEFI publish daily bundles), so new
+  firmware stays discoverable without a manual refresh.
+- Cache tests: save/load roundtrip (incl. corrupt-file and version-guard
+  cases), staleness by age, plus a live refresh→persist→reload test.
+
+#### Changed
+- **Refresh is non-clobbering** — the new listing is built off to the side and
+  only swapped in when at least one source responded; a total network failure
+  keeps the previous cache and timestamp instead of wiping it (offline-safe).
+  A partial failure (e.g. one of four sources down) keeps the other sources'
+  results and logs a warning.
+- **`search_online_inis` response extended** — now returns
+  `{ entries, last_updated, refreshed }` instead of a bare entry array; the
+  signature-mismatch dialog and connect wizard call sites updated.
+- First-load message now reads "Searching online repositories, please wait…".
+
 ### 2026-08-26 — Online INI sources: official rusEFI/epicEFI bundle servers, Speeduino releases
 
 First slice of #181's coverage gap: the online INI repository now downloads
