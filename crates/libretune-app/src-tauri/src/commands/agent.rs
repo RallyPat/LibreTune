@@ -9,7 +9,7 @@
 use crate::state::AppState;
 use libretune_core::action_scripting::Action;
 use libretune_core::agent::orchestrator::{
-    run_turn, OrchestratorInputs, Proposal, ReadToolExecutor,
+    run_turn, OrchestratorInputs, Proposal, ReadToolExecutor, ValidationResult,
 };
 use libretune_core::agent::tiers::ConstantSafetyTier;
 use libretune_core::agent::tools;
@@ -183,6 +183,21 @@ impl From<SerializedMessage> for Message {
     }
 }
 
+/// The user's display-unit preferences, passed per-request from the
+/// frontend (they live in localStorage there). Only the categories the
+/// assistant can currently convert are carried.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct UnitPrefs {
+    /// "C" | "F" | "K"
+    pub temperature: Option<String>,
+    /// "kPa" | "PSI" | "bar" | "inHg"
+    pub pressure: Option<String>,
+    /// "AFR" | "Lambda"
+    pub afr: Option<String>,
+    /// Stoichiometric AFR fuel key for AFR↔lambda ("gasoline", "e85", ...).
+    pub fuel_type: Option<String>,
+}
+
 /// Request payload from the frontend for one assistant turn.
 #[derive(Debug, Deserialize)]
 pub struct AgentTurnRequest {
@@ -193,6 +208,10 @@ pub struct AgentTurnRequest {
     /// Pre-rendered system prompt describing the ECU/tune context. The
     /// frontend builds this from the current view (tables loaded, etc.).
     pub system_prompt: String,
+    /// Display-unit preferences for read-tool results (optional; raw values
+    /// are returned when absent).
+    #[serde(default)]
+    pub unit_prefs: Option<UnitPrefs>,
 }
 
 /// Build a default authority-limit envelope for clamping proposals.
@@ -242,6 +261,8 @@ pub struct AgentStatus {
 /// without borrowing the `tauri::State` lifetime into the executor.
 struct LiveReadExecutor {
     app: tauri::AppHandle,
+    /// Display-unit preferences for read results (None = raw values).
+    unit_prefs: Option<UnitPrefs>,
 }
 
 #[async_trait::async_trait]
@@ -255,6 +276,8 @@ impl ReadToolExecutor for LiveReadExecutor {
                 | tools::tool_names::LIST_FEATURES
                 | tools::tool_names::SUMMARIZE_TUNE
                 | tools::tool_names::TUNE_HEALTH
+                | tools::tool_names::REALTIME_SNAPSHOT
+                | tools::tool_names::QUERY_DATALOG
         )
     }
 
@@ -290,6 +313,8 @@ impl ReadToolExecutor for LiveReadExecutor {
                     None => json_err("tune_health_check requires 'table_name'"),
                 }
             }
+            tools::tool_names::REALTIME_SNAPSHOT => self.exec_realtime_snapshot().await,
+            tools::tool_names::QUERY_DATALOG => self.exec_query_datalog(arguments).await,
             _ => json_err(&format!("unhandled read tool '{tool_name}'")),
         }
     }
@@ -390,6 +415,27 @@ impl LiveReadExecutor {
             }
         };
 
+        // 3. Convert to the user's preferred display unit (best-effort;
+        //    min/max follow the value so the model never mixes units).
+        let (current, min, max, units, original) = {
+            let mut original = serde_json::Value::Null;
+            let converted = current.and_then(|v| self.convert_unit(v, &units));
+            match converted {
+                Some((v, ref label)) => {
+                    original = serde_json::json!({ "value": current, "units": units });
+                    let (cmin, cmax) = match (
+                        self.convert_unit(min, &units),
+                        self.convert_unit(max, &units),
+                    ) {
+                        (Some((mn, _)), Some((mx, _))) => (mn, mx),
+                        _ => (min, max),
+                    };
+                    (Some(v), cmin, cmax, label.clone(), original)
+                }
+                None => (current, min, max, units, original),
+            }
+        };
+
         serde_json::to_string(&serde_json::json!({
             "name": name,
             "label": label,
@@ -397,10 +443,76 @@ impl LiveReadExecutor {
             "min": min,
             "max": max,
             "current_value": current,
+            "original_value": original,
             "options": bit_options,
             "help": help,
         }))
         .unwrap_or_else(|_| json_err("serialize failed"))
+    }
+
+    /// Convert a scalar value from its INI unit to the user's preferred
+    /// display unit. Returns `(converted_value, new_unit_label)` or `None`
+    /// when no conversion applies (unknown unit, same unit, or no prefs).
+    fn convert_unit(&self, value: f64, units: &str) -> Option<(f64, String)> {
+        let prefs = self.unit_prefs.as_ref()?;
+        let u = units.trim();
+        let lower = u.to_lowercase();
+
+        // Temperature (INI uses "C" / "°C" / "F" / "°F").
+        let is_c = u == "C" || u == "°C" || lower == "celsius";
+        let is_f = u == "F" || u == "°F" || lower == "fahrenheit";
+        if is_c || is_f {
+            let target = prefs.temperature.as_deref()?;
+            let c_value = if is_c {
+                value
+            } else {
+                libretune_core::unit_conversion::fahrenheit_to_celsius(value)
+            };
+            return match target {
+                "F" if !is_f => Some((
+                    libretune_core::unit_conversion::celsius_to_fahrenheit(c_value),
+                    "°F".into(),
+                )),
+                "C" if !is_c => Some((c_value, "°C".into())),
+                // Same unit (or unsupported K target): no conversion.
+                _ => None,
+            };
+        }
+
+        // Pressure (INI uses "kPa" / "PSI" / "bar").
+        if lower == "kpa" || lower == "psi" || lower == "bar" {
+            let target = prefs.pressure.as_deref()?.to_lowercase();
+            let kpa_value = match lower.as_str() {
+                "kpa" => value,
+                "psi" => libretune_core::unit_conversion::psi_to_kpa(value),
+                _ => libretune_core::unit_conversion::psi_to_kpa(
+                    libretune_core::unit_conversion::bar_to_psi(value),
+                ),
+            };
+            return match target.as_str() {
+                "psi" if lower != "psi" => Some((
+                    libretune_core::unit_conversion::kpa_to_psi(kpa_value),
+                    "PSI".into(),
+                )),
+                "kpa" if lower != "kpa" => Some((kpa_value, "kPa".into())),
+                "bar" if lower != "bar" => Some((
+                    libretune_core::unit_conversion::psi_to_bar(
+                        libretune_core::unit_conversion::kpa_to_psi(kpa_value),
+                    ),
+                    "bar".into(),
+                )),
+                _ => None,
+            };
+        }
+
+        // AFR → lambda.
+        if lower == "afr" && prefs.afr.as_deref() == Some("Lambda") {
+            let fuel = prefs.fuel_type.as_deref().unwrap_or("gasoline");
+            let lambda = libretune_core::unit_conversion::afr_to_lambda(value, fuel);
+            return Some((lambda, "λ".into()));
+        }
+
+        None
     }
 
     /// `summarize_tune_context` / `tune_health_check`: aggregate one table
@@ -482,13 +594,21 @@ impl LiveReadExecutor {
         //    prediction engines (which need a real 2-axis grid) are skipped
         //    instead of running against the 2D placeholder axis.
         let y_bins: &[f64] = if is_3d { &t.y_bins } else { &[] };
+        // Operating point from a one-shot realtime poll. Best-effort: no
+        // connection / no rpm channel just means no operating point.
+        let operating_point = crate::commands::realtime_get::realtime_snapshot_internal(&state)
+            .await
+            .ok()
+            .and_then(|data| {
+                build_operating_point(&data, &t.x_bins, &t.y_bins, &t.x_axis_name, &t.y_axis_name)
+            });
         let inputs = TuneContextInputs {
             table_values: &t.z_values,
             x_bins: &t.x_bins,
             y_bins,
             hit_counts: &hit_counts,
             recommendations: &recs,
-            operating_point: None,
+            operating_point,
             max_anomalies: 20,
         };
         let summary = summarize_tune_context(name, &role, &inputs);
@@ -505,12 +625,275 @@ impl LiveReadExecutor {
             serde_json::to_string(&summary).unwrap_or_else(|_| json_err("serialize failed"))
         }
     }
+
+    /// `get_realtime_snapshot`: one poll of the ECU's current channels,
+    /// curated to the tuning-relevant subset so the payload stays small.
+    async fn exec_realtime_snapshot(&self) -> String {
+        let state = self.app.state::<AppState>();
+        match crate::commands::realtime_get::realtime_snapshot_internal(&state).await {
+            Ok(data) => {
+                let curated = curate_snapshot_channels(&data);
+                serde_json::to_string(&serde_json::json!({
+                    "channels": curated,
+                    "total_channels_available": data.len(),
+                }))
+                .unwrap_or_else(|_| json_err("serialize failed"))
+            }
+            Err(e) => json_err(&format!("no realtime data ({e})")),
+        }
+    }
+
+    /// `query_datalog`: summary stats or tail rows over a saved log (by
+    /// name, from the project's `datalogs/` folder) or the current
+    /// in-memory session. Responses are bounded (≤50 channels for summary,
+    /// ≤50 rows × ≤12 columns for tail) to control token cost.
+    async fn exec_query_datalog(&self, arguments: &str) -> String {
+        let state = self.app.state::<AppState>();
+        let log_name = json_str_field(arguments, "log");
+        let mode = json_str_field(arguments, "mode").unwrap_or_else(|| "summary".into());
+        let channel_filter = json_str_array(arguments, "channels");
+
+        let data = match log_name {
+            Some(name) => {
+                match crate::commands::data_logging::load_datalog_file(&state, &name).await {
+                    Ok(d) => d,
+                    Err(e) => {
+                        // Self-healing: hand back the available log names so
+                        // the model can retry with a real one.
+                        let logs = crate::commands::data_logging::list_datalog_files(&state).await;
+                        return serde_json::to_string(&serde_json::json!({
+                            "error": e,
+                            "available_logs": logs.iter().map(|l| &l.name).collect::<Vec<_>>(),
+                        }))
+                        .unwrap_or_else(|_| json_err("serialize failed"));
+                    }
+                }
+            }
+            None => crate::commands::data_logging::current_session_datalog(&state).await,
+        };
+
+        if data.entries.is_empty() {
+            return serde_json::to_string(&serde_json::json!({
+                "source": data.source,
+                "entry_count": 0,
+                "note": "no entries recorded; start datalogging or name a saved log ('log' parameter)",
+            }))
+            .unwrap_or_else(|_| json_err("serialize failed"));
+        }
+
+        // Resolve the channel column indexes the caller asked for (or all).
+        let indexes: Vec<usize> = data
+            .channels
+            .iter()
+            .enumerate()
+            .filter(|(_, name)| match &channel_filter {
+                Some(f) if !f.is_empty() => f.iter().any(|want| want.eq_ignore_ascii_case(name)),
+                _ => true,
+            })
+            .map(|(i, _)| i)
+            .collect();
+
+        let entry_count = data.entries.len();
+        let duration_s = data
+            .entries
+            .last()
+            .map(|e| e.timestamp.as_secs_f64())
+            .unwrap_or(0.0);
+
+        if mode == "tail" {
+            let tail_start = entry_count.saturating_sub(50);
+            let columns: Vec<(String, usize)> = indexes
+                .into_iter()
+                .take(12)
+                .map(|i| (data.channels[i].clone(), i))
+                .collect();
+            let rows: Vec<serde_json::Value> = data.entries[tail_start..]
+                .iter()
+                .map(|e| {
+                    let mut row = serde_json::json!({ "t": e.timestamp.as_secs_f64() });
+                    for (name, i) in &columns {
+                        row[name] = serde_json::json!(e.values.get(*i).copied());
+                    }
+                    row
+                })
+                .collect();
+            return serde_json::to_string(&serde_json::json!({
+                "source": data.source,
+                "mode": "tail",
+                "entry_count": entry_count,
+                "duration_s": duration_s,
+                "rows": rows,
+            }))
+            .unwrap_or_else(|_| json_err("serialize failed"));
+        }
+
+        // summary (default)
+        let mut channel_stats: Vec<serde_json::Value> = Vec::new();
+        for &i in indexes.iter().take(50) {
+            let mut min = f64::INFINITY;
+            let mut max = f64::NEG_INFINITY;
+            let mut sum = 0.0;
+            let mut n = 0u64;
+            let mut last = None;
+            for e in &data.entries {
+                if let Some(v) = e.values.get(i) {
+                    if v.is_finite() {
+                        min = min.min(*v);
+                        max = max.max(*v);
+                        sum += *v;
+                        n += 1;
+                        last = Some(*v);
+                    }
+                }
+            }
+            if n == 0 {
+                continue;
+            }
+            channel_stats.push(serde_json::json!({
+                "channel": data.channels[i],
+                "min": min,
+                "max": max,
+                "mean": sum / n as f64,
+                "last": last,
+                "samples": n,
+            }));
+        }
+        serde_json::to_string(&serde_json::json!({
+            "source": data.source,
+            "mode": "summary",
+            "entry_count": entry_count,
+            "duration_s": duration_s,
+            "channels": channel_stats,
+            "channels_available": data.channels.len(),
+        }))
+        .unwrap_or_else(|_| json_err("serialize failed"))
+    }
 }
 
 fn json_str_field(arguments: &str, field: &str) -> Option<String> {
     serde_json::from_str::<serde_json::Value>(arguments)
         .ok()
         .and_then(|v| v.get(field)?.as_str().map(|s| s.to_string()))
+}
+
+fn json_str_array(arguments: &str, field: &str) -> Option<Vec<String>> {
+    let parsed = serde_json::from_str::<serde_json::Value>(arguments).ok()?;
+    let arr = parsed.get(field)?.as_array()?;
+    Some(
+        arr.iter()
+            .filter_map(|v| v.as_str().map(str::to_string))
+            .collect(),
+    )
+}
+
+/// Case-insensitive channel lookup with the first alias-style fallback.
+fn channel_value(data: &std::collections::HashMap<String, f64>, names: &[&str]) -> Option<f64> {
+    for want in names {
+        if let Some((_, v)) = data.iter().find(|(k, _)| k.eq_ignore_ascii_case(want)) {
+            return Some(*v);
+        }
+    }
+    None
+}
+
+/// Push a (name, value) pair into `out` unless it is already there or the
+/// cap is reached.
+fn push_capped(out: &mut Vec<(String, f64)>, name: &str, value: f64, cap: usize) {
+    if out.len() < cap && !out.iter().any(|(n, _)| n == name) {
+        out.push((name.to_string(), value));
+    }
+}
+
+/// Curate a realtime snapshot down to the tuning-relevant channels: exact
+/// canonical names first, then substring matches, capped at 24 entries.
+fn curate_snapshot_channels(data: &std::collections::HashMap<String, f64>) -> Vec<(String, f64)> {
+    const EXACT: &[&str] = &[
+        "rpm", "map", "tps", "clt", "iat", "afr", "lambda", "batt", "baro", "fuelLoad",
+    ];
+    const PATTERNS: &[&str] = &[
+        "rpm", "map", "tps", "throttle", "clt", "coolant", "iat", "afr", "lambda", "batt", "volt",
+        "baro", "ego", "duty", "advance", "spark", "dwell", "enrich", "load", "temp",
+    ];
+    const CAP: usize = 24;
+
+    let mut out: Vec<(String, f64)> = Vec::new();
+    for want in EXACT {
+        if let Some((k, v)) = data.iter().find(|(k, _)| k.eq_ignore_ascii_case(want)) {
+            push_capped(&mut out, k, *v, CAP);
+        }
+    }
+    for (name, value) in data {
+        let lower = name.to_lowercase();
+        if PATTERNS.iter().any(|p| lower.contains(p)) {
+            push_capped(&mut out, name, *value, CAP);
+        }
+    }
+    out
+}
+
+/// Locate the value in a bin axis (last bin whose start is ≤ value; clamped
+/// to the first bin when below it).
+fn bin_index(bins: &[f64], value: f64) -> Option<usize> {
+    if bins.is_empty() {
+        return None;
+    }
+    let mut idx = 0;
+    for (i, &b) in bins.iter().enumerate() {
+        if value >= b {
+            idx = i;
+        } else {
+            break;
+        }
+    }
+    Some(idx)
+}
+
+/// Build an [`OperatingPoint`] from a realtime snapshot and a table's axes.
+///
+/// The RPM axis is identified by its label; the other axis is treated as
+/// load (MAP by default, TPS when the axis label says so). Returns `None`
+/// when there is no RPM channel (engine off / different INI / no ECU
+/// formula).
+fn build_operating_point(
+    data: &std::collections::HashMap<String, f64>,
+    x_bins: &[f64],
+    y_bins: &[f64],
+    x_axis_name: &str,
+    y_axis_name: &str,
+) -> Option<libretune_core::agent::summarize::OperatingPoint> {
+    let rpm = channel_value(data, &["rpm"])?;
+    let afr = channel_value(data, &["afr", "lambda"]);
+
+    let y_is_tps = {
+        let y = y_axis_name.to_lowercase();
+        y.contains("tps") || y.contains("throttle")
+    };
+    let load = if y_is_tps {
+        channel_value(data, &["tps", "throttle"]).unwrap_or(0.0)
+    } else {
+        channel_value(data, &["map", "fuelload", "load"]).unwrap_or(0.0)
+    };
+
+    // Which axis is RPM? Default layout: x = RPM, y = load.
+    let x_lower = x_axis_name.to_lowercase();
+    let cell = if x_lower.contains("rpm") {
+        match (bin_index(x_bins, rpm), bin_index(y_bins, load)) {
+            (Some(c), Some(r)) => Some((c, r)),
+            _ => None,
+        }
+    } else {
+        match (bin_index(x_bins, load), bin_index(y_bins, rpm)) {
+            (Some(c), Some(r)) => Some((c, r)),
+            _ => None,
+        }
+    };
+
+    Some(libretune_core::agent::summarize::OperatingPoint {
+        rpm,
+        load,
+        cell,
+        afr,
+    })
 }
 
 fn json_err(msg: &str) -> String {
@@ -538,7 +921,10 @@ pub async fn agent_send_message(
     }
 
     let client = build_client(&s).map_err(|e| e.to_string())?;
-    let executor = LiveReadExecutor { app: app.clone() };
+    let executor = LiveReadExecutor {
+        app: app.clone(),
+        unit_prefs: request.unit_prefs.clone(),
+    };
 
     let history: Vec<Message> = request.history.into_iter().map(Into::into).collect();
     let inputs = OrchestratorInputs {
@@ -578,13 +964,52 @@ pub async fn agent_send_message(
 
     // Await the result. A RecvError means the task was aborted (cancelled).
     match rx.await {
-        Ok(result) => result,
+        Ok(Ok(mut proposal)) => {
+            // Post-process: attach pin-conflict warnings to any constant
+            // proposals (the model cannot see pin state; the user must).
+            append_pin_conflict_warnings(&app, &mut proposal).await;
+            Ok(proposal)
+        }
+        Ok(Err(e)) => Err(e),
         Err(_) => {
             // Clear the now-finished handle.
             let state = app.state::<AppState>();
             let mut guard = state.agent_task.lock().await;
             *guard = None;
             Err("__cancelled__".to_string())
+        }
+    }
+}
+
+/// Attach pin-conflict warnings to proposed constant changes.
+///
+/// The orchestrator (core, state-free) cannot check pin assignments — only
+/// the command layer can read the live tune. A proposal that would move a
+/// function onto a pin another live function already uses gets a warning
+/// appended to its validation; it is NOT failed, because the user may
+/// intend to clear the other assignment first. The review queue shows the
+/// warning next to the Accept button.
+async fn append_pin_conflict_warnings(app: &tauri::AppHandle, proposal: &mut Proposal) {
+    let state = app.state::<AppState>();
+    for pa in proposal.proposed.iter_mut() {
+        let Action::ConstantChange {
+            constant_name,
+            new_value,
+            ..
+        } = &pa.action
+        else {
+            continue;
+        };
+        if let Some(warning) =
+            crate::commands::pin_conflicts::pin_conflict_warning(&state, constant_name, *new_value)
+                .await
+        {
+            match &mut pa.validation {
+                ValidationResult::Ok { warnings } => warnings.push(warning),
+                // Failed proposals already block acceptance; an extra
+                // warning would only duplicate noise.
+                ValidationResult::Failed { .. } => {}
+            }
         }
     }
 }
@@ -619,6 +1044,15 @@ pub struct ApplyResult {
     pub safety_tier: Option<ConstantSafetyTier>,
 }
 
+/// Response for [`agent_apply_proposals`]: per-action results plus
+/// batch-level warnings that only make sense across actions (e.g. the
+/// accepted edits collectively shift a table's mean by a large amount).
+#[derive(Debug, Serialize)]
+pub struct ApplyProposalsResponse {
+    pub results: Vec<ApplyResult>,
+    pub batch_warnings: Vec<String>,
+}
+
 /// Apply a list of approved actions to the working tune.
 ///
 /// Two phases:
@@ -638,7 +1072,7 @@ pub struct ApplyResult {
 pub async fn agent_apply_proposals(
     state: tauri::State<'_, AppState>,
     request: ApplyProposalsRequest,
-) -> Result<Vec<ApplyResult>, String> {
+) -> Result<ApplyProposalsResponse, String> {
     use libretune_core::action_scripting::{ActionMetadata, ActionPlayer, ActionSet};
 
     // --- Phase 1: re-validate every action (definition lock, read-only) ---
@@ -711,11 +1145,25 @@ pub async fn agent_apply_proposals(
         }
     }
 
+    let mut batch_warnings: Vec<String> = Vec::new();
+
     for (table_name, indexes) in &table_groups {
         let outcome: Result<(), String> = async {
             let mut t =
                 crate::commands::table_internals::get_table_data_internal(&state, table_name)
                     .await?;
+
+            // Batch drift check (before mutating): individually-bounded edits
+            // can still walk a whole table. Warn — do not block — when the
+            // accepted cell edits for this table shift their mean by >10%.
+            push_drift_warning(
+                &mut batch_warnings,
+                &t.z_values,
+                table_name,
+                indexes,
+                &request.actions,
+            );
+
             let actions: Vec<Action> = indexes
                 .iter()
                 .map(|&i| request.actions[i].clone())
@@ -774,5 +1222,108 @@ pub async fn agent_apply_proposals(
         *state.tune_modified.lock().await = true;
     }
 
-    Ok(results)
+    Ok(ApplyProposalsResponse {
+        results,
+        batch_warnings,
+    })
+}
+
+/// Append a warning when the accepted TableEdits for one table shift the
+/// mean of the edited cells by more than 10% of their current mean.
+/// Pure helper (unit-testable): takes the current grid, not app state.
+fn push_drift_warning(
+    warnings: &mut Vec<String>,
+    z_values: &[Vec<f64>],
+    table_name: &str,
+    indexes: &[usize],
+    actions: &[Action],
+) {
+    let mut sum_delta = 0.0;
+    let mut sum_current = 0.0;
+    let mut n = 0usize;
+    for &i in indexes {
+        let Action::TableEdit {
+            x_index,
+            y_index,
+            new_value,
+            ..
+        } = &actions[i]
+        else {
+            continue;
+        };
+        let Some(current) = z_values
+            .get(*y_index as usize)
+            .and_then(|r| r.get(*x_index as usize))
+        else {
+            continue;
+        };
+        sum_delta += (new_value - current).abs();
+        sum_current += current.abs();
+        n += 1;
+    }
+    if n == 0 {
+        return;
+    }
+    let mean_current = sum_current / n as f64;
+    let mean_delta = sum_delta / n as f64;
+    if mean_current > f64::MIN_POSITIVE && mean_delta > mean_current * 0.10 {
+        warnings.push(format!(
+            "table '{table_name}': the {n} accepted edits shift the edited cells' mean by {:.0}% (mean {:.2}, mean |Δ| {:.2}) — make sure that is intended",
+            100.0 * mean_delta / mean_current,
+            mean_current,
+            mean_delta
+        ));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn edit(x: u16, y: u16, new_value: f64) -> Action {
+        Action::TableEdit {
+            table_name: "veTable1".into(),
+            x_index: x,
+            y_index: y,
+            new_value,
+            old_value: None,
+        }
+    }
+
+    #[test]
+    fn drift_warning_fires_on_large_shift() {
+        let z = vec![vec![100.0; 4]; 4];
+        let actions = vec![edit(0, 0, 120.0), edit(1, 0, 125.0)];
+        let mut warnings = Vec::new();
+        push_drift_warning(&mut warnings, &z, "veTable1", &[0, 1], &actions);
+        assert_eq!(warnings.len(), 1, "should warn: mean shift ~22%");
+        assert!(warnings[0].contains("veTable1"));
+    }
+
+    #[test]
+    fn drift_warning_silent_on_small_shift() {
+        let z = vec![vec![100.0; 4]; 4];
+        let actions = vec![edit(0, 0, 105.0), edit(1, 0, 103.0)];
+        let mut warnings = Vec::new();
+        push_drift_warning(&mut warnings, &z, "veTable1", &[0, 1], &actions);
+        assert!(warnings.is_empty(), "4% shift should not warn");
+    }
+
+    #[test]
+    fn drift_warning_ignores_bulk_ops_and_out_of_range() {
+        let z = vec![vec![100.0; 2]; 2];
+        let actions = vec![
+            edit(9, 9, 500.0), // out of range — skipped, no panic
+            Action::BulkOperation {
+                operation: "scale".into(),
+                table_name: "veTable1".into(),
+                cells: vec![(0, 0)],
+                parameters: Default::default(),
+                old_values: None,
+            },
+        ];
+        let mut warnings = Vec::new();
+        push_drift_warning(&mut warnings, &z, "veTable1", &[0, 1], &actions);
+        assert!(warnings.is_empty());
+    }
 }

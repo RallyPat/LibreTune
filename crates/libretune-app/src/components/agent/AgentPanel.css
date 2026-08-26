@@ -479,6 +479,13 @@
   color: #f0a0a0;
 }
 
+.proposal-batch-warnings {
+  font-size: 11px;
+  color: #f0c070;
+  opacity: 0.9;
+  margin-top: 4px;
+}
+
 .proposal-queue-footer {
   display: flex;
   justify-content: flex-end;

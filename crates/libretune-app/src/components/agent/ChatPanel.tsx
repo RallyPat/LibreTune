@@ -10,6 +10,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { Button } from '../common';
+import { useUnitPreferences } from '../../contexts/useUnitPreferences';
 import type {
   AgentStatus,
   Proposal,
@@ -47,6 +48,7 @@ export function ChatPanel({
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const { preferences } = useUnitPreferences();
 
   // Auto-scroll to the latest message.
   useEffect(() => {
@@ -87,6 +89,14 @@ export function ChatPanel({
           user_message: message,
           history,
           system_prompt: systemPrompt,
+          // Read-tool results are converted to the user's display units so
+          // the model's answers match what the UI shows.
+          unit_prefs: {
+            temperature: preferences.temperature,
+            pressure: preferences.pressure,
+            afr: preferences.afr,
+            fuel_type: preferences.fuelType,
+          },
         },
       });
       // Replace the pending placeholder with the real reply.

@@ -21,6 +21,8 @@ pub mod tool_names {
     pub const LIST_FEATURES: &str = "list_features";
     pub const SUMMARIZE_TUNE: &str = "summarize_tune_context";
     pub const TUNE_HEALTH: &str = "tune_health_check";
+    pub const REALTIME_SNAPSHOT: &str = "get_realtime_snapshot";
+    pub const QUERY_DATALOG: &str = "query_datalog";
 
     // Propose tools (write, staged for approval — never applied directly)
     pub const PROPOSE_TABLE_EDIT: &str = "propose_table_edit";
@@ -92,6 +94,31 @@ pub fn catalogue() -> Vec<ToolDef> {
             }),
         },
         ToolDef {
+            name: tool_names::REALTIME_SNAPSHOT.into(),
+            description: "Read the ECU's current sensor values (RPM, MAP, TPS, \
+                          CLT, AFR, ...) as one snapshot. Requires a live \
+                          connection."
+                .into(),
+            parameters: json!({"type": "object", "properties": {}}),
+        },
+        ToolDef {
+            name: tool_names::QUERY_DATALOG.into(),
+            description: "Query recorded datalogs. Without 'log' uses the \
+                          current in-memory session. mode: 'summary' returns \
+                          per-channel min/max/mean/last over up to 50 channels; \
+                          'tail' returns the last rows (up to 50) of the \
+                          requested channels."
+                .into(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "log": {"type": "string", "description": "Optional log file name from the project's datalogs folder"},
+                    "channels": {"type": "array", "items": {"type": "string"}, "description": "Optional channel-name filter"},
+                    "mode": {"type": "string", "enum": ["summary", "tail"]}
+                }
+            }),
+        },
+        ToolDef {
             name: tool_names::PROPOSE_TABLE_EDIT.into(),
             description: "Propose changing one cell of a table. The change is staged for \
                           explicit user approval — it is never applied automatically."
@@ -158,6 +185,8 @@ pub fn is_read_tool(name: &str) -> bool {
             | tool_names::LIST_FEATURES
             | tool_names::SUMMARIZE_TUNE
             | tool_names::TUNE_HEALTH
+            | tool_names::REALTIME_SNAPSHOT
+            | tool_names::QUERY_DATALOG
     )
 }
 

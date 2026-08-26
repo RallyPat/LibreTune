@@ -78,11 +78,20 @@ export interface SerializedMessage {
   content: string;
 }
 
+/** Display-unit preferences passed with each turn (read results convert to these). */
+export interface AgentUnitPrefs {
+  temperature?: string; // 'C' | 'F' | 'K'
+  pressure?: string; // 'kPa' | 'PSI' | 'bar' | 'inHg'
+  afr?: string; // 'AFR' | 'Lambda'
+  fuel_type?: string;
+}
+
 /** Request payload for `agent_send_message`. */
 export interface AgentTurnRequest {
   user_message: string;
   history: SerializedMessage[];
   system_prompt: string;
+  unit_prefs?: AgentUnitPrefs;
 }
 
 /** Result of applying one action via `agent_apply_proposals`. */
@@ -90,6 +99,12 @@ export interface ApplyResult {
   applied: boolean;
   error: string | null;
   safety_tier: ConstantSafetyTier | null;
+}
+
+/** Response from `agent_apply_proposals`: per-action results + batch warnings. */
+export interface ApplyProposalsResponse {
+  results: ApplyResult[];
+  batch_warnings: string[];
 }
 
 /** Status returned by `agent_status`. */
