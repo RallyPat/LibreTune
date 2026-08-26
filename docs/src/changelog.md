@@ -45,7 +45,7 @@ All notable changes to LibreTune will be documented in this file.
 - Dashboard tab protection (cannot be accidentally closed; recoverable via View → Dashboard)
 - Configurable status bar channels (Settings → Status Bar Channels, max 8)
 - INI signature mismatch dialog with local and online INI search (the online search now runs automatically when a mismatch is reported; downloading still requires an explicit click)
-- Online INI repository search from Speeduino, rusEFI, and FOME GitHub repos
+- Online INI repository search from official sources: Speeduino (GitHub + Releases), rusEFI and epicEFI (official bundle servers), FOME (generated per-board INIs)
 - Per-table `.table` file import/export (TunerStudio-compatible "Save/Load Table to File" from the table toolbar)
 - AFR Delay Test (Tools → AFR Delay Test…) — automated exhaust transport-delay measurement that steps fuel and reports the delay to enter as AutoTune's lambda delay
 - Resilient ECU sync with partial failure handling and status bar indicator

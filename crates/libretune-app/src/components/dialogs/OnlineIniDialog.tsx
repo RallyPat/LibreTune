@@ -90,8 +90,9 @@ export default function OnlineIniDialog({ isOpen, onClose }: OnlineIniDialogProp
     <Dialog open={isOpen} onClose={onClose} title="Search for INI Online" size="lg">
       <Dialog.Body>
         <p style={{ marginTop: 0, opacity: 0.8 }}>
-          Browse and download ECU definitions from the online repositories
-          (Speeduino, rusEFI, …). The selected file becomes the project's INI.
+          Browse and download ECU definitions from the official online sources
+          (Speeduino, rusEFI, epicEFI, FOME). The selected file becomes the
+          project's INI.
         </p>
 
         <div style={{ display: "flex", gap: "0.5rem", marginBottom: "0.75rem" }}>

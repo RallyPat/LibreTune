@@ -71,6 +71,7 @@ pub async fn download_ini(
         "speeduino" => IniSource::Speeduino,
         "rusefi" => IniSource::RusEFI,
         "fome" => IniSource::Fome,
+        "epicefi" => IniSource::EpicEFI,
         _ => IniSource::Custom,
     };
 

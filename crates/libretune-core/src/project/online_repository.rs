@@ -1,20 +1,28 @@
 //! Online INI Repository
 //!
-//! Provides functionality to search for and download INI files from online
-//! repositories like GitHub (Speeduino, rusEFI, etc.).
+//! Provides functionality to search for and download INI files from the
+//! official per-platform definition sources:
 //!
-//! ## Supported Sources
-//!
-//! - Speeduino: https://github.com/noisymime/speeduino/tree/master/reference/tunerstudio
-//! - rusEFI: https://github.com/rusefi/rusefi/tree/master/firmware/tunerstudio
+//! - **Speeduino** — GitHub `reference/` (tracks master) plus the `.ini`
+//!   assets attached to each tagged firmware release on GitHub Releases
+//!   (what released firmware actually matches).
+//! - **rusEFI** — `https://rusefi.com/online/ini/rusefi/`, the same Apache
+//!   directory index the rusEFI console downloads from. Every published
+//!   bundle is addressable as
+//!   `{branch}/{year}/{month}/{day}/{board}/{hash}.ini`, and the firmware
+//!   signature encodes exactly those components.
+//! - **epicEFI** — `https://content.epicefi.com/firmware/ini/`, a rusEFI
+//!   white-label using the identical layout.
+//! - **FOME** — GitHub `firmware/tunerstudio/generated/` (the per-board
+//!   generated definitions; the parent directory only holds fragments).
 //!
 //! ## Usage
 //!
 //! ```ignore
 //! let online = OnlineIniRepository::new();
-//! let results = online.search("speeduino 202305").await?;
+//! let results = online.search(Some("rusEFI master.2026.06.07.proteus_f4.753206531")).await?;
 //! for entry in results {
-//!     println!("{}: {}", entry.name, entry.signature);
+//!     println!("{}: {:?}", entry.name, entry.signature);
 //! }
 //! online.download(&results[0], "./definitions/").await?;
 //! ```
@@ -30,11 +38,13 @@ pub struct OnlineIniEntry {
     pub source: IniSource,
     /// Display name
     pub name: String,
-    /// Firmware signature (if known)
+    /// Firmware signature (if known). For autoindex bundles this is
+    /// reconstructed from the path components; for release assets it is the
+    /// release tag.
     pub signature: Option<String>,
-    /// GitHub raw download URL
+    /// Direct download URL
     pub download_url: String,
-    /// File path within the repository
+    /// Path within the source repository / bundle tree
     pub repo_path: String,
     /// File size in bytes (if known)
     pub size: Option<u64>,
@@ -46,9 +56,14 @@ pub struct OnlineIniEntry {
 pub enum IniSource {
     Speeduino,
     RusEFI,
-    /// FOME — a rusEFI fork; its TunerStudio INIs live under
-    /// `FOME-Tech/fome-fw/firmware/tunerstudio`.
+    /// FOME — a rusEFI fork; its per-board TunerStudio INIs are generated
+    /// under `FOME-Tech/fome-fw/firmware/tunerstudio/generated`.
     Fome,
+    /// epicEFI — a rusEFI white-label for epicECU boards. Publishes its
+    /// TunerStudio INIs on `content.epicefi.com` in the same
+    /// `{branch}/{year}/{month}/{day}/{board}/{hash}.ini` layout as rusEFI,
+    /// with `epicEFI`-branded signatures.
+    EpicEFI,
     Custom,
 }
 
@@ -57,42 +72,60 @@ impl IniSource {
     ///
     /// `Custom` is intentionally excluded — it has no upstream URL and is only
     /// used to tag user-imported files. Add new upstream platforms here (and
-    /// give them URLs below) to widen auto-discovery coverage.
+    /// give them a listing endpoint below) to widen auto-discovery coverage.
     pub fn online_sources() -> &'static [IniSource] {
-        &[IniSource::Speeduino, IniSource::RusEFI, IniSource::Fome]
+        &[
+            IniSource::Speeduino,
+            IniSource::RusEFI,
+            IniSource::EpicEFI,
+            IniSource::Fome,
+        ]
     }
 
-    /// Get the GitHub API URL for searching this source
-    pub fn github_api_url(&self) -> Option<&'static str> {
+    /// Root of the Apache autoindex tree for platforms that publish their
+    /// TunerStudio INIs as
+    /// `{root}/{branch}/{year}/{month}/{day}/{board}/{hash}.ini`.
+    ///
+    /// - rusEFI: the same server the rusEFI console itself downloads from
+    ///   (their `RealIniFileProvider` resolves this exact URL shape).
+    /// - epicEFI: `content.epicefi.com`, identical layout.
+    pub fn autoindex_root(&self) -> Option<&'static str> {
         match self {
-            // The .ini used to live under reference/tunerstudio/, which no longer
-            // exists; the single canonical definition is reference/speeduino.ini.
-            IniSource::Speeduino => {
-                Some("https://api.github.com/repos/noisymime/speeduino/contents/reference")
-            }
-            IniSource::RusEFI => {
-                Some("https://api.github.com/repos/rusefi/rusefi/contents/firmware/tunerstudio")
-            }
-            IniSource::Fome => {
-                Some("https://api.github.com/repos/FOME-Tech/fome-fw/contents/firmware/tunerstudio")
-            }
-            IniSource::Custom => None,
+            IniSource::RusEFI => Some("https://rusefi.com/online/ini/rusefi"),
+            IniSource::EpicEFI => Some("https://content.epicefi.com/firmware/ini"),
+            _ => None,
         }
     }
 
-    /// Get the raw content URL prefix for this source
-    pub fn raw_url_prefix(&self) -> Option<&'static str> {
+    /// GitHub contents-API URL listing a flat directory of `.ini` files.
+    pub fn github_contents_url(&self) -> Option<&'static str> {
+        match self {
+            // The .ini used to live under reference/tunerstudio/, which no
+            // longer exists; the single canonical definition is
+            // reference/speeduino.ini (master-tracking).
+            IniSource::Speeduino => {
+                Some("https://api.github.com/repos/speeduino/speeduino/contents/reference")
+            }
+            // The real per-board definitions are generated into this
+            // subdirectory; the parent only holds fragment INIs (menus,
+            // gauges) that are not loadable definitions.
+            IniSource::Fome => Some(
+                "https://api.github.com/repos/FOME-Tech/fome-fw/contents/firmware/tunerstudio/generated",
+            ),
+            _ => None,
+        }
+    }
+
+    /// GitHub releases API URL for platforms that attach `.ini` assets to
+    /// firmware releases. Speeduino tags every release (e.g. `202501.7`)
+    /// with the matching `speeduino.ini` — that is the definition users
+    /// running released firmware need, since `reference/` tracks master.
+    pub fn github_releases_url(&self) -> Option<&'static str> {
         match self {
             IniSource::Speeduino => {
-                Some("https://raw.githubusercontent.com/noisymime/speeduino/master/reference")
+                Some("https://api.github.com/repos/speeduino/speeduino/releases?per_page=30")
             }
-            IniSource::RusEFI => {
-                Some("https://raw.githubusercontent.com/rusefi/rusefi/master/firmware/tunerstudio")
-            }
-            IniSource::Fome => Some(
-                "https://raw.githubusercontent.com/FOME-Tech/fome-fw/master/firmware/tunerstudio",
-            ),
-            IniSource::Custom => None,
+            _ => None,
         }
     }
 
@@ -101,8 +134,72 @@ impl IniSource {
             IniSource::Speeduino => "Speeduino",
             IniSource::RusEFI => "rusEFI",
             IniSource::Fome => "FOME",
+            IniSource::EpicEFI => "epicEFI",
             IniSource::Custom => "Custom",
         }
+    }
+}
+
+/// A parsed `rusEFI`-style firmware signature:
+/// `{brand} {branch}.{year}.{month}.{day}.{board}.{hash}`.
+///
+/// This is the same format rusEFI's own tooling parses (`SignatureHelper`
+/// and `upload_ini.sh`), and the online-INI URL is derivable directly from
+/// it as `{autoindex_root}/{branch}/{year}/{month}/{day}/{board}/{hash}.ini`.
+/// epicEFI is a white-label rusEFI build and uses the identical layout with
+/// the `epicEFI` brand word.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BundleSignature {
+    pub branch: String,
+    pub year: String,
+    pub month: String,
+    pub day: String,
+    pub board: String,
+    pub hash: String,
+}
+
+impl BundleSignature {
+    /// Parse the dot-separated signature body after the brand word.
+    /// Returns `None` for signatures that don't follow the 6-part format
+    /// (Speeduino, MegaSquirt, ...).
+    pub fn parse(signature: &str) -> Option<Self> {
+        let (_, rest) = signature.split_once(' ')?;
+        let parts: Vec<&str> = rest.trim().split('.').collect();
+        if parts.len() != 6 {
+            return None;
+        }
+        let [branch, year, month, day, board, hash] =
+            [parts[0], parts[1], parts[2], parts[3], parts[4], parts[5]];
+        // Upstream (upload_ini.sh) allows alnum, '-' and '_' in the free-form
+        // components, and zero-padded digits for the date components.
+        let token = |s: &str| {
+            !s.is_empty()
+                && s.bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+        };
+        let numeric = |s: &str, len: usize| s.len() == len && s.bytes().all(|b| b.is_ascii_digit());
+        if !token(branch) || !token(board) || !token(hash) {
+            return None;
+        }
+        if !numeric(year, 4) || !numeric(month, 2) || !numeric(day, 2) {
+            return None;
+        }
+        Some(BundleSignature {
+            branch: branch.to_string(),
+            year: year.to_string(),
+            month: month.to_string(),
+            day: day.to_string(),
+            board: board.to_string(),
+            hash: hash.to_string(),
+        })
+    }
+
+    /// URL of this bundle's INI under an autoindex root.
+    pub fn ini_url(&self, root: &str) -> String {
+        format!(
+            "{}/{}/{}/{}/{}/{}/{}.ini",
+            root, self.branch, self.year, self.month, self.day, self.board, self.hash
+        )
     }
 }
 
@@ -115,6 +212,164 @@ struct GitHubFile {
     download_url: Option<String>,
     #[serde(rename = "type")]
     file_type: String,
+}
+
+/// GitHub API response for a release
+#[derive(Debug, Deserialize)]
+struct GitHubRelease {
+    tag_name: String,
+    #[serde(default)]
+    draft: bool,
+    #[serde(default)]
+    assets: Vec<GitHubAsset>,
+}
+
+/// GitHub API response for a release asset
+#[derive(Debug, Deserialize)]
+struct GitHubAsset {
+    name: String,
+    browser_download_url: String,
+    #[serde(default)]
+    size: Option<u64>,
+}
+
+/// Render a reqwest error together with its full `source()` chain — the
+/// outer Display ("error sending request for url (...)") hides whether the
+/// cause was DNS, connect, TLS or a timeout.
+fn error_chain(e: &reqwest::Error) -> String {
+    use std::fmt::Write;
+    let mut out = String::new();
+    let _ = write!(out, "{e}");
+    let mut cur = std::error::Error::source(e);
+    while let Some(c) = cur {
+        let _ = write!(out, ": {c}");
+        cur = c.source();
+    }
+    out
+}
+
+/// One link extracted from an Apache `mod_autoindex` directory listing.
+#[derive(Debug, Clone)]
+struct AutoindexLink {
+    /// href exactly as it appeared in the HTML (`board/`, `1234567890.ini`)
+    href: String,
+    is_dir: bool,
+}
+
+/// Extract relative directory and `.ini` file links from an Apache
+/// autoindex page. Drops parent links, sort links (`?C=N;O=D`), icons and
+/// off-site URLs.
+fn parse_autoindex_links(html: &str) -> Vec<AutoindexLink> {
+    let marker = "href=\"";
+    let mut out = Vec::new();
+    let mut cursor = 0;
+    while let Some(found) = html[cursor..].find(marker) {
+        let start = cursor + found + marker.len();
+        let Some(end) = html[start..].find('"') else {
+            break;
+        };
+        let href = html[start..start + end].to_string();
+        cursor = start + end;
+        if href.starts_with("..") || href.contains("://") || href.contains('?') {
+            continue;
+        }
+        if let Some(name) = href.strip_suffix('/') {
+            if !name.is_empty() {
+                out.push(AutoindexLink { href, is_dir: true });
+            }
+        } else if href.to_ascii_lowercase().ends_with(".ini") {
+            out.push(AutoindexLink {
+                href,
+                is_dir: false,
+            });
+        }
+    }
+    out
+}
+
+/// The lexicographically-greatest sub-directory link. Autoindex date
+/// directories are zero-padded, so this is the newest date available.
+fn newest_dir(links: &[AutoindexLink]) -> Option<String> {
+    links
+        .iter()
+        .filter(|l| l.is_dir)
+        .map(|l| l.href.clone())
+        .max()
+}
+
+/// Join an autoindex href onto a base URL. Relative hrefs (`board/`,
+/// `123.ini`) append to the base; root-relative hrefs (`/icons/...`)
+/// resolve against the host root.
+fn join_url(base: &str, href: &str) -> String {
+    let base = base.trim_end_matches('/');
+    if href.starts_with('/') {
+        // Root-relative: keep only scheme://host from the base.
+        let root = match (
+            base.find("://"),
+            base[base.find("://").unwrap() + 3..].find('/'),
+        ) {
+            (Some(scheme_end), Some(host_slash)) => &base[..scheme_end + 3 + host_slash],
+            _ => base,
+        };
+        format!("{root}{href}")
+    } else {
+        format!("{base}/{href}")
+    }
+}
+
+/// Lowercased alphanumeric tokens of length >= 2 — the identity vocabulary
+/// used to match online file names against ECU signatures.
+fn identity_tokens(s: &str) -> std::collections::HashSet<String> {
+    s.split(|c: char| !c.is_ascii_alphanumeric())
+        .filter(|t| t.len() >= 2)
+        .map(|t| t.to_ascii_lowercase())
+        .collect()
+}
+
+/// Online listings can't carry the INI's real signature without downloading
+/// every file, so an entry matches when all of its file-name identity tokens
+/// (board, hash, version — e.g. `proteus_f4-1739931529.ini`) appear in the
+/// ECU signature's tokens.
+fn entry_matches_signature(
+    entry: &OnlineIniEntry,
+    sig_tokens: &std::collections::HashSet<String>,
+) -> bool {
+    let stem = entry.name.strip_suffix(".ini").unwrap_or(&entry.name);
+    let stem_tokens = identity_tokens(stem);
+    !stem_tokens.is_empty() && stem_tokens.iter().all(|t| sig_tokens.contains(t))
+}
+
+/// Build an entry for a bundle described by a parsed path / signature. The
+/// file name inside a board directory is the bundle hash.
+fn autoindex_entry(
+    source: IniSource,
+    root: &str,
+    bundle: &BundleSignature,
+) -> Option<OnlineIniEntry> {
+    if bundle.hash.is_empty() {
+        return None;
+    }
+    let repo_path = format!(
+        "{}/{}/{}/{}/{}/{}.ini",
+        bundle.branch, bundle.year, bundle.month, bundle.day, bundle.board, bundle.hash
+    );
+    Some(OnlineIniEntry {
+        source,
+        name: format!("{}-{}.ini", bundle.board, bundle.hash),
+        signature: Some(format!(
+            "{} {}.{}.{}.{}.{}.{}",
+            source.display_name(),
+            bundle.branch,
+            bundle.year,
+            bundle.month,
+            bundle.day,
+            bundle.board,
+            bundle.hash
+        )),
+        download_url: format!("{root}/{repo_path}"),
+        repo_path,
+        size: None,
+    })
 }
 
 /// Online INI repository client
@@ -147,65 +402,98 @@ impl OnlineIniRepository {
 
     /// Search for INI files matching a signature
     ///
-    /// If signature is None, returns all known INIs from all sources.
+    /// If signature is `None`, returns every INI found in the newest
+    /// published bundles of every source. With a signature, returns
+    /// (a) cache entries whose file-name identity tokens (board, hash,
+    /// version) all appear in the signature, plus (b) for `rusEFI`-style
+    /// 6-part signatures, the exact bundle INI derived directly from the
+    /// signature's own path components — older firmware included, no
+    /// directory walk needed.
     pub async fn search(
         &mut self,
         signature: Option<&str>,
     ) -> Result<Vec<OnlineIniEntry>, io::Error> {
-        // Refresh cache if empty
         if self.cache.is_empty() {
             self.refresh_cache().await?;
         }
 
-        match signature {
-            Some(sig) => {
-                let sig_lower = sig.to_lowercase();
-                Ok(self
-                    .cache
-                    .iter()
-                    .filter(|e| {
-                        if let Some(ref entry_sig) = e.signature {
-                            entry_sig.to_lowercase().contains(&sig_lower)
-                                || sig_lower.contains(&entry_sig.to_lowercase())
-                        } else {
-                            // Match by name if no signature
-                            e.name.to_lowercase().contains(&sig_lower)
-                        }
-                    })
-                    .cloned()
-                    .collect())
+        let Some(sig) = signature else {
+            return Ok(self.cache.clone());
+        };
+
+        let sig_tokens = identity_tokens(sig);
+        let mut results: Vec<OnlineIniEntry> = self
+            .cache
+            .iter()
+            .filter(|e| entry_matches_signature(e, &sig_tokens))
+            .cloned()
+            .collect();
+
+        for entry in self.fetch_signature_derived_entries(sig).await {
+            if !results.iter().any(|e| e.download_url == entry.download_url) {
+                results.push(entry);
             }
-            None => Ok(self.cache.clone()),
         }
+
+        Ok(results)
     }
 
     /// Refresh the cache by fetching INI lists from all sources
     async fn refresh_cache(&mut self) -> Result<(), io::Error> {
         self.cache.clear();
 
-        // Fetch from each upstream source
         for &source in IniSource::online_sources() {
-            match self.fetch_source_inis(source).await {
-                Ok(entries) => self.cache.extend(entries),
+            let entries = match self.list_source(source).await {
+                Ok(v) => v,
                 Err(e) => {
-                    eprintln!("Warning: Failed to fetch INIs from {:?}: {}", source, e);
-                    // Continue with other sources
+                    eprintln!("Warning: Failed to fetch INIs from {:?}: {e}", source);
+                    Vec::new()
                 }
-            }
+            };
+            self.cache.extend(entries);
         }
 
         Ok(())
     }
 
-    /// Fetch INI list from a specific source
-    async fn fetch_source_inis(&self, source: IniSource) -> Result<Vec<OnlineIniEntry>, io::Error> {
-        let api_url = source
-            .github_api_url()
-            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "No API URL for source"))?;
+    /// Fetch the current INI list from a single source (no caching). Exposed
+    /// for targeted refresh and diagnostics.
+    pub async fn list_source(&self, source: IniSource) -> io::Result<Vec<OnlineIniEntry>> {
+        match source {
+            IniSource::Speeduino => self.fetch_speeduino().await,
+            IniSource::RusEFI | IniSource::EpicEFI => self.fetch_autoindex_latest(source).await,
+            IniSource::Fome => self.fetch_github_contents(source).await,
+            IniSource::Custom => Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "Custom source has no upstream listing",
+            )),
+        }
+    }
+
+    /// Speeduino lists both the master-tracking `reference/` INI and the INI
+    /// assets attached to tagged firmware releases.
+    async fn fetch_speeduino(&self) -> io::Result<Vec<OnlineIniEntry>> {
+        let mut entries = self.fetch_github_contents(IniSource::Speeduino).await?;
+        entries.extend(
+            self.fetch_github_release_assets(IniSource::Speeduino)
+                .await?,
+        );
+        Ok(entries)
+    }
+
+    /// Fetch the INI list from a GitHub contents-API directory
+    async fn fetch_github_contents(&self, source: IniSource) -> io::Result<Vec<OnlineIniEntry>> {
+        let api_url = source.github_contents_url().ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "No GitHub contents URL for source",
+            )
+        })?;
 
         let response = self
             .client
             .get(api_url)
+            .timeout(std::time::Duration::from_secs(15))
             .send()
             .await
             .map_err(|e| io::Error::other(e.to_string()))?;
@@ -220,13 +508,12 @@ impl OnlineIniRepository {
         let files: Vec<GitHubFile> = response
             .json()
             .await
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
 
         let mut entries = Vec::new();
-
         for file in files {
             // Only include .ini files
-            if file.file_type == "file" && file.name.to_lowercase().ends_with(".ini") {
+            if file.file_type == "file" && file.name.to_ascii_lowercase().ends_with(".ini") {
                 if let Some(download_url) = file.download_url {
                     entries.push(OnlineIniEntry {
                         source,
@@ -241,6 +528,241 @@ impl OnlineIniRepository {
         }
 
         Ok(entries)
+    }
+
+    /// Fetch `.ini` assets attached to GitHub releases.
+    async fn fetch_github_release_assets(
+        &self,
+        source: IniSource,
+    ) -> io::Result<Vec<OnlineIniEntry>> {
+        let api_url = source.github_releases_url().ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "No GitHub releases URL for source",
+            )
+        })?;
+
+        let response = self
+            .client
+            .get(api_url)
+            .timeout(std::time::Duration::from_secs(15))
+            .send()
+            .await
+            .map_err(|e| io::Error::other(e.to_string()))?;
+
+        if !response.status().is_success() {
+            return Err(io::Error::other(format!(
+                "GitHub API error: {}",
+                response.status()
+            )));
+        }
+
+        let releases: Vec<GitHubRelease> = response
+            .json()
+            .await
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+
+        let mut entries = Vec::new();
+        for release in releases {
+            if release.draft {
+                continue;
+            }
+            for asset in release.assets {
+                if !asset.name.to_ascii_lowercase().ends_with(".ini") {
+                    continue;
+                }
+                entries.push(OnlineIniEntry {
+                    source,
+                    name: format!(
+                        "{}-{}.ini",
+                        source.display_name().to_lowercase(),
+                        release.tag_name
+                    ),
+                    // Release-tagged INIs match firmware of the same tag.
+                    signature: Some(format!("{} {}", source.display_name(), release.tag_name)),
+                    download_url: asset.browser_download_url,
+                    repo_path: format!("releases/{}", release.tag_name),
+                    size: asset.size,
+                });
+            }
+        }
+
+        Ok(entries)
+    }
+
+    /// Fetch the link list of an Apache autoindex page.
+    async fn fetch_autoindex_links(&self, url: &str) -> io::Result<Vec<AutoindexLink>> {
+        // Always fetch directory indexes with a trailing slash: some hosts
+        // answer the slashless form with a 301 whose Location is an
+        // *internal* address (epicEFI's nginx behind Docker redirects to
+        // http://172.18.0.60/...), which the client then follows into an
+        // unroutable black hole until the timeout fires.
+        let url = if url.ends_with('/') {
+            url.to_string()
+        } else {
+            format!("{url}/")
+        };
+        let response = self
+            .client
+            .get(&url)
+            .timeout(std::time::Duration::from_secs(15))
+            .send()
+            .await
+            .map_err(|e| io::Error::other(error_chain(&e)))?;
+        if !response.status().is_success() {
+            return Err(io::Error::other(format!(
+                "Autoindex error: {} for {url}",
+                response.status()
+            )));
+        }
+        let html = response
+            .text()
+            .await
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+        Ok(parse_autoindex_links(&html))
+    }
+
+    /// Walk an autoindex tree to its newest day directory and list every
+    /// board's INI: `{root}/{branch}/{year}/{month}/{day}/{board}/{hash}.ini`.
+    /// Directory names are zero-padded dates, so the lexicographically newest
+    /// link is the chronologically newest.
+    async fn fetch_autoindex_latest(&self, source: IniSource) -> io::Result<Vec<OnlineIniEntry>> {
+        let root = source.autoindex_root().ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidInput, "Not an autoindex source")
+        })?;
+
+        let root_links = self.fetch_autoindex_links(root).await?;
+        let branch = root_links
+            .iter()
+            .filter(|l| l.is_dir)
+            .find(|l| l.href == "master/")
+            .map(|l| l.href.clone())
+            .or_else(|| newest_dir(&root_links))
+            .ok_or_else(|| io::Error::other(format!("No branch directory under {root}")))?;
+        let branch_url = join_url(root, &branch);
+
+        let year = newest_dir(&self.fetch_autoindex_links(&branch_url).await?)
+            .ok_or_else(|| io::Error::other(format!("No year directory under {branch_url}")))?;
+        let year_url = join_url(&branch_url, &year);
+
+        let month = newest_dir(&self.fetch_autoindex_links(&year_url).await?)
+            .ok_or_else(|| io::Error::other(format!("No month directory under {year_url}")))?;
+        let month_url = join_url(&year_url, &month);
+
+        let day = newest_dir(&self.fetch_autoindex_links(&month_url).await?)
+            .ok_or_else(|| io::Error::other(format!("No day directory under {month_url}")))?;
+        let day_url = join_url(&month_url, &day);
+
+        let day_links = self.fetch_autoindex_links(&day_url).await?;
+        let boards: Vec<String> = day_links
+            .iter()
+            .filter(|l| l.is_dir)
+            .map(|l| l.href.clone())
+            .collect();
+
+        // One request per board (~40-50 per day); run them concurrently but
+        // capped, to keep the browse dialog fast without hammering the host.
+        let semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(8));
+        let client = self.client.clone();
+        let mut set = tokio::task::JoinSet::new();
+        for board in boards {
+            let client = client.clone();
+            let semaphore = semaphore.clone();
+            let board_url = join_url(&day_url, &board);
+            let board_name = board.trim_end_matches('/').to_string();
+            let root = root.to_string();
+            let branch = branch.trim_end_matches('/').to_string();
+            let year = year.trim_end_matches('/').to_string();
+            let month = month.trim_end_matches('/').to_string();
+            let day = day.trim_end_matches('/').to_string();
+            set.spawn(async move {
+                let _permit = semaphore.acquire_owned().await;
+                let mut entries = Vec::new();
+                if let Ok(resp) = client
+                    .get(&board_url)
+                    .timeout(std::time::Duration::from_secs(15))
+                    .send()
+                    .await
+                {
+                    if resp.status().is_success() {
+                        if let Ok(html) = resp.text().await {
+                            for link in parse_autoindex_links(&html) {
+                                if link.is_dir {
+                                    continue;
+                                }
+                                let Some(hash) = link.href.strip_suffix(".ini") else {
+                                    continue;
+                                };
+                                let bundle = BundleSignature {
+                                    branch: branch.clone(),
+                                    year: year.clone(),
+                                    month: month.clone(),
+                                    day: day.clone(),
+                                    board: board_name.clone(),
+                                    hash: hash.to_string(),
+                                };
+                                if let Some(entry) = autoindex_entry(source, &root, &bundle) {
+                                    entries.push(entry);
+                                }
+                            }
+                        }
+                    }
+                }
+                entries
+            });
+        }
+
+        let mut out = Vec::new();
+        while let Some(joined) = set.join_next().await {
+            if let Ok(entries) = joined {
+                out.extend(entries);
+            }
+        }
+        out.sort_by(|a, b| a.name.cmp(&b.name));
+        Ok(out)
+    }
+
+    /// Derive download entries directly from a `rusEFI`-style signature.
+    ///
+    /// The signature encodes the exact bundle path, so any firmware — not
+    /// just the newest day the browse walk covers — resolves with a single
+    /// existence probe per platform root.
+    async fn fetch_signature_derived_entries(&self, signature: &str) -> Vec<OnlineIniEntry> {
+        let Some(bundle) = BundleSignature::parse(signature) else {
+            return Vec::new();
+        };
+        // The brand word usually identifies the platform, but the same board
+        // can exist on both, so probe the other root too when the first miss.
+        let lower = signature.to_ascii_lowercase();
+        let ordered = if lower.starts_with("epicefi") {
+            [IniSource::EpicEFI, IniSource::RusEFI]
+        } else {
+            [IniSource::RusEFI, IniSource::EpicEFI]
+        };
+        for source in ordered {
+            let Some(root) = source.autoindex_root() else {
+                continue;
+            };
+            let url = bundle.ini_url(root);
+            if self.url_exists(&url).await {
+                return autoindex_entry(source, root, &bundle).into_iter().collect();
+            }
+        }
+        Vec::new()
+    }
+
+    /// Probe whether a URL exists (HEAD, short timeout).
+    async fn url_exists(&self, url: &str) -> bool {
+        match self
+            .client
+            .head(url)
+            .timeout(std::time::Duration::from_secs(8))
+            .send()
+            .await
+        {
+            Ok(resp) => resp.status().is_success(),
+            Err(_) => false,
+        }
     }
 
     /// Download an INI file to the specified directory
@@ -320,35 +842,186 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_ini_source_urls() {
-        assert!(IniSource::Speeduino.github_api_url().is_some());
-        assert!(IniSource::RusEFI.github_api_url().is_some());
-        assert!(IniSource::Fome.github_api_url().is_some());
-        assert!(IniSource::Custom.github_api_url().is_none());
+    fn test_ini_source_endpoints() {
+        assert!(IniSource::Speeduino.github_contents_url().is_some());
+        assert!(IniSource::Speeduino.github_releases_url().is_some());
+        assert!(IniSource::Fome.github_contents_url().is_some());
+        assert!(IniSource::RusEFI.autoindex_root().is_some());
+        assert!(IniSource::EpicEFI.autoindex_root().is_some());
+        assert!(IniSource::Custom.autoindex_root().is_none());
+        assert!(IniSource::Custom.github_contents_url().is_none());
+        assert!(IniSource::Custom.github_releases_url().is_none());
     }
 
     #[test]
-    fn test_online_sources_all_have_urls() {
-        // Every source the search iterates over must have both a GitHub API URL
-        // and a raw-content prefix, and must not be the Custom (no-upstream) tag.
+    fn test_online_sources_have_a_listing_endpoint() {
+        // Every source the search iterates over must have at least one
+        // listing endpoint and must not be the Custom (no-upstream) tag.
         for &source in IniSource::online_sources() {
             assert_ne!(source, IniSource::Custom);
-            assert!(
-                source.github_api_url().is_some(),
-                "{:?} has no github_api_url",
-                source
-            );
-            assert!(
-                source.raw_url_prefix().is_some(),
-                "{:?} has no raw_url_prefix",
-                source
-            );
+            let endpoints = source.autoindex_root().is_some() as usize
+                + source.github_contents_url().is_some() as usize
+                + source.github_releases_url().is_some() as usize;
+            assert!(endpoints >= 1, "{source:?} has no listing endpoint");
         }
+    }
+
+    #[test]
+    fn test_epicefi_is_an_online_source() {
+        assert!(IniSource::online_sources().contains(&IniSource::EpicEFI));
+        assert_eq!(IniSource::EpicEFI.display_name(), "epicEFI");
     }
 
     #[test]
     fn test_fome_is_an_online_source() {
         assert!(IniSource::online_sources().contains(&IniSource::Fome));
         assert_eq!(IniSource::Fome.display_name(), "FOME");
+    }
+
+    #[test]
+    fn test_bundle_signature_parse_and_url() {
+        let sig =
+            BundleSignature::parse("rusEFI master.2026.06.07.purple-gateway.753206531").unwrap();
+        assert_eq!(sig.branch, "master");
+        assert_eq!(sig.year, "2026");
+        assert_eq!(sig.month, "06");
+        assert_eq!(sig.day, "07");
+        assert_eq!(sig.board, "purple-gateway");
+        assert_eq!(sig.hash, "753206531");
+        assert_eq!(
+            sig.ini_url("https://rusefi.com/online/ini/rusefi"),
+            "https://rusefi.com/online/ini/rusefi/master/2026/06/07/purple-gateway/753206531.ini"
+        );
+
+        // epicEFI white-label signatures use the same layout.
+        let epic = BundleSignature::parse("epicEFI master.2026.08.26.epicECU.4128885531").unwrap();
+        assert_eq!(epic.board, "epicECU");
+        assert_eq!(
+            epic.ini_url("https://content.epicefi.com/firmware/ini"),
+            "https://content.epicefi.com/firmware/ini/master/2026/08/26/epicECU/4128885531.ini"
+        );
+
+        // Non-bundle signatures must not parse.
+        assert!(BundleSignature::parse("Speeduino 202501.7").is_none());
+        assert!(BundleSignature::parse("rusEFI master.2026.06").is_none());
+        assert!(BundleSignature::parse("rusEFI master.202X.06.07.board.123").is_none());
+        assert!(BundleSignature::parse("nospaces").is_none());
+    }
+
+    #[test]
+    fn test_autoindex_link_parsing() {
+        let html = concat!(
+            "<html><body><h1>Index of /firmware/ini/master/2026/08/26</h1>\n",
+            "<pre><img src=\"/icons/blank.gif\" alt=\"[ICO]\">",
+            "<a href=\"../\">Parent Directory</a>",
+            "<a href=\"2025/\">2025/</a>",
+            "<a href=\"2026/\">2026/</a>",
+            "<a href=\"epicECU/\">epicECU/</a>",
+            "<a href=\"4128885531.ini\">4128885531.ini</a>",
+            "<a href=\"/spicons/folder.gif\">icon</a>",
+            "<a href=\"?C=N;O=D\">Name</a>",
+            "<a href=\"readme.md\">readme.md</a></pre></body></html>"
+        );
+        let links = parse_autoindex_links(html);
+        let dirs: Vec<&str> = links
+            .iter()
+            .filter(|l| l.is_dir)
+            .map(|l| l.href.as_str())
+            .collect();
+        assert_eq!(dirs, vec!["2025/", "2026/", "epicECU/"]);
+        let files: Vec<&str> = links
+            .iter()
+            .filter(|l| !l.is_dir)
+            .map(|l| l.href.as_str())
+            .collect();
+        assert_eq!(files, vec!["4128885531.ini"]);
+        // Zero-padded dates: lexicographically newest == chronologically newest.
+        assert_eq!(newest_dir(&links).as_deref(), Some("epicECU/"));
+    }
+
+    #[test]
+    fn test_join_url() {
+        assert_eq!(
+            join_url("https://example.com/ini", "master/"),
+            "https://example.com/ini/master/"
+        );
+        assert_eq!(
+            join_url("https://example.com/ini/", "123.ini"),
+            "https://example.com/ini/123.ini"
+        );
+        assert_eq!(
+            join_url("https://example.com/ini", "/abs/path.ini"),
+            "https://example.com/abs/path.ini"
+        );
+    }
+
+    #[test]
+    fn test_entry_matches_signature_by_name_tokens() {
+        let entry = |name: &str| OnlineIniEntry {
+            source: IniSource::RusEFI,
+            name: name.to_string(),
+            signature: None,
+            download_url: String::new(),
+            repo_path: String::new(),
+            size: None,
+        };
+
+        let proteus_sig = identity_tokens("rusEFI master.2026.08.26.proteus_f4.1739931529");
+        assert!(entry_matches_signature(
+            &entry("proteus_f4-1739931529.ini"),
+            &proteus_sig
+        ));
+        // Wrong board or wrong hash must not match.
+        assert!(!entry_matches_signature(
+            &entry("mre_f4-1739931529.ini"),
+            &proteus_sig
+        ));
+        assert!(!entry_matches_signature(
+            &entry("proteus_f4-999999999.ini"),
+            &proteus_sig
+        ));
+
+        let speeduino_sig = identity_tokens("Speeduino 202501.7");
+        assert!(entry_matches_signature(
+            &entry("speeduino-202501.7.ini"),
+            &speeduino_sig
+        ));
+        // The master-tracking definition matches any Speeduino (dev INI).
+        assert!(entry_matches_signature(
+            &entry("speeduino.ini"),
+            &speeduino_sig
+        ));
+        assert!(!entry_matches_signature(
+            &entry("fome_proteus_f4.ini"),
+            &speeduino_sig
+        ));
+    }
+
+    #[tokio::test]
+    #[ignore = "live network call"]
+    async fn live_search_derives_rusefi_bundle_url() {
+        let mut repo = OnlineIniRepository::new();
+        // Real bundle published on rusefi.com (verified 2026-08-26).
+        let results = repo
+            .search(Some("rusEFI master.2026.08.26.proteus_f4.1739931529"))
+            .await
+            .unwrap();
+        assert!(
+            results.iter().any(|e| e
+                .download_url
+                .ends_with("/master/2026/08/26/proteus_f4/1739931529.ini")),
+            "{results:?}"
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "live network call"]
+    async fn live_browse_lists_all_sources() {
+        let mut repo = OnlineIniRepository::new();
+        let results = repo.search(None).await.unwrap();
+        assert!(results.iter().any(|e| e.source == IniSource::RusEFI));
+        assert!(results.iter().any(|e| e.source == IniSource::EpicEFI));
+        assert!(results.iter().any(|e| e.source == IniSource::Speeduino));
+        assert!(results.iter().any(|e| e.source == IniSource::Fome));
     }
 }
