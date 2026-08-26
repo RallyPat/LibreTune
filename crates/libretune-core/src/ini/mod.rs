@@ -592,11 +592,23 @@ impl EcuDefinition {
             }
         }
 
+        /// Which deferred field an expression resolves into.
+        enum Field {
+            Scale,
+            Translate,
+            Min,
+            Max,
+        }
+
         let mut updated = 0;
         for constant in self.constants.values_mut() {
+            let mut min_done = constant.min_expr.is_none();
+            let mut max_done = constant.max_expr.is_none();
             for (source, target) in [
-                (constant.scale_expr.clone(), true),
-                (constant.translate_expr.clone(), false),
+                (constant.scale_expr.clone(), Field::Scale),
+                (constant.translate_expr.clone(), Field::Translate),
+                (constant.min_expr.clone(), Field::Min),
+                (constant.max_expr.clone(), Field::Max),
             ] {
                 let Some(src) = source else { continue };
                 let mut parser = expression::Parser::new(&src);
@@ -608,18 +620,41 @@ impl EcuDefinition {
                 if !v.is_finite() {
                     continue;
                 }
-                if target {
-                    // A zero scale would render every value as 0; treat it as
-                    // an unresolved expression rather than trusting it.
-                    if v != 0.0 && constant.scale != v {
-                        constant.scale = v;
-                        updated += 1;
+                match target {
+                    Field::Scale => {
+                        // A zero scale would render every value as 0; treat it
+                        // as an unresolved expression rather than trusting it.
+                        if v != 0.0 && constant.scale != v {
+                            constant.scale = v;
+                            updated += 1;
+                        }
                     }
-                } else if constant.translate != v {
-                    constant.translate = v;
-                    updated += 1;
+                    Field::Translate => {
+                        if constant.translate != v {
+                            constant.translate = v;
+                            updated += 1;
+                        }
+                    }
+                    Field::Min => {
+                        if constant.min != v {
+                            constant.min = v;
+                            updated += 1;
+                        }
+                        min_done = true;
+                    }
+                    Field::Max => {
+                        if constant.max != v {
+                            constant.max = v;
+                            updated += 1;
+                        }
+                        max_done = true;
+                    }
                 }
             }
+            // Only trust the range for clamping once every declared bound has
+            // actually produced a number. A half-resolved range is the raw-byte
+            // fallback wearing the INI's clothes.
+            constant.range_resolved = min_done && max_done;
         }
         updated
     }
