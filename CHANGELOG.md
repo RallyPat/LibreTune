@@ -13,6 +13,101 @@ relevant.
 
 ## [Unreleased]
 
+### 2026-08-26 — AI Assistant: the apply path made real, analyst tools, trust & traceability, UX
+
+Four-phase enhancement of the bring-your-own-LLM assistant. The headline
+fix: **approved proposals previously never reached the tune** —
+`agent_apply_proposals` only validated and flagged `tune_modified`; nothing
+wrote values (no frontend fallback either). The safety model is unchanged
+and strictly strengthened: everything below adds validation, traceability,
+or gating; nothing widens what the model can do.
+
+#### Fixed
+- **Apply path** — `agent_apply_proposals` now applies validated actions:
+  table edits / bulk ops are coalesced per table into one read-modify-write
+  through `update_table_z_values_internal` (the exact path the table editors
+  use — cache + tune mirror + ECU RAM write, no burn), constants go through
+  `update_constant_internal` (which runs the pin-conflict guard for bits
+  constants). A table group fails as a unit; partial grids are never
+  written. Pure grid application lives in core `agent::apply`
+  (`apply_table_actions_to_grid`, unit-tested; converts the model's `(x,y)`
+  cell convention to `table_ops`' `(row,col)`).
+- **The two dead read tools** — `summarize_tune_context` and
+  `tune_health_check` were in the catalogue but unhandled by
+  `LiveReadExecutor` (the model got "no executor available"). Both now run
+  against the live grid + AutoTune session recommendations (per-table
+  matched, primary vs configured secondary), with the live operating point
+  (RPM / load / AFR + located cell) from a realtime poll. 2D tables skip
+  the anomaly/prediction engines instead of feeding them the placeholder
+  axis.
+
+#### Added
+- **Capability tier enforcement** — `ai_capability_tier` was stored but
+  gated nothing. New `CapabilityTier` in core (`read` ⊂ `tune` ⊂ `config`):
+  `catalogue_for_tier` filters the tools attached to every request AND
+  `map_tool_call` hard-rejects out-of-tier propose calls (defense in depth
+  against hallucinated tool calls). Unknown settings values collapse to
+  read-only. Settings copy now documents the cumulative semantics.
+- **`get_realtime_snapshot` read tool** — one-shot ECU poll (factored
+  `realtime_snapshot_internal`, shared with the command), curated to
+  tuning-relevant channels (canonical names first, substring matches after,
+  capped at 24 entries).
+- **`query_datalog` read tool** — summary stats (min/max/mean/last, ≤50
+  channels) or tail rows (≤50 rows × ≤12 cols) over a saved project datalog
+  or the in-memory session; bounded to control token cost. Unknown log
+  names return the available list (self-healing retry). New `read_csv` in
+  core `datalog::format` handles the streaming format and the manual-save
+  `Time (ms)` format, BOMs, and malformed rows (tests included);
+  `datalog::format` is now a public module.
+- **Pin-conflict warnings on proposals** — constant proposals are
+  post-processed in `agent_send_message` via `pin_conflict_warning` (a
+  non-blocking variant of `deny_if_pin_conflict`); conflicts surface as
+  validation warnings in the review queue instead of silently passing.
+- **Batch drift warnings** — the apply path warns (does not block) when the
+  accepted cell edits for a table shift the edited cells' mean by >10%:
+  individually-bounded edits can still walk a whole table. New
+  `ApplyProposalsResponse { results, batch_warnings, restore_point,
+  auto_committed, suggest_commit }`; ProposalQueue shows batch warnings.
+- **Unit-aware reads** — the frontend passes its display-unit preferences
+  (localStorage) per request; `read_constant` converts temperature /
+  pressure / AFR values and min/max to the user's units (original preserved
+  as `original_value`).
+- **Pre-apply restore point** — a restore point is created (factored
+  `create_restore_point_internal`) before any write, so every AI apply is a
+  one-click rollback; the filename is returned and shown to the user.
+- **Git traceability** — per `auto_commit_on_save`: `"always"` saves the
+  tune (factored `save_tune_to_project_internal`) and commits via the new
+  `commit_project_state` (skips silently when the project has no repo —
+  never auto-initializes one); `"ask"` returns a prepared commit message
+  (`AI assistant: N changes (table:x ×n, …)`) for the UI to offer after
+  the user saves.
+- **API key → OS keychain** — new `ai_keychain` module (keyring crate;
+  Windows Credential Manager / macOS Keychain / Linux Secret Service).
+  Plaintext keys migrate to the keychain on first load; saves blank the
+  file copy when the keychain holds the key; clearing the key deletes it.
+  Graceful plaintext fallback when no keychain backend exists (headless
+  Linux, locked sessions) — the assistant never breaks.
+- **`agent:progress` events** — new `TurnObserver` trait in core
+  (`run_turn_observed`); the command layer emits thinking / reading_tool /
+  done, and the chat's pending bubble shows live "reading veTable1…"
+  activity through multi-second read rounds.
+- **"Ask AI" table button** — table editors' toolbar emits `agent:ask`
+  with table/title/axes/selection; App opens the panel, which injects the
+  context into the next turn's system prompt and pre-fills the input.
+- **Token usage display** — per-turn `Proposal.usage` accumulated per chat
+  and shown in the panel header (resets on chat switch).
+- **Provider presets** — Settings gains a preset picker (OpenAI / Anthropic
+  / Google / **Ollama local** / **LM Studio local**) that sets provider +
+  base URL + suggested model; local presets carry an explicit
+  data-stays-on-this-machine note.
+
+#### Changed
+- `OrchestratorInputs` gains `capability_tier` (default: read-only);
+  `run_turn` delegates to `run_turn_observed` (observer optional).
+- `LiveReadExecutor` handles all 8 read tools; `is_read_tool` moved to
+  core `agent::tools` (shared by orchestrator + tier checks).
+- `Settings` derives `Clone` (keychain blank-on-write needs a copy).
+
 ### 2026-08-26 — Online INI listing cache: instant dialog, manual refresh, background TTL refresh
 
 Follow-up to the online-sources work above: the multi-source listing scan
