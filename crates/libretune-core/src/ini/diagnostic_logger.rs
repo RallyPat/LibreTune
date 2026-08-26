@@ -72,9 +72,8 @@ pub struct DiagnosticLogger {
 impl DiagnosticLogger {
     /// Decode one record into its declared fields.
     ///
-    /// Bit offsets are taken from the start of the record and read
-    /// little-endian, matching how Speeduino packs `refTime` and the composite
-    /// flag bits into the same 5 bytes.
+    /// Bit offsets count from the record's least significant bit, the record
+    /// being a big-endian integer - see [`read_bits`].
     pub fn decode(&self, record: &[u8]) -> Vec<(String, f64)> {
         self.fields
             .iter()
@@ -111,6 +110,24 @@ impl DiagnosticLogger {
 }
 
 /// Read `bit_count` bits starting at `start_bit`, little-endian within the record.
+/// Read `bit_count` bits starting at `start_bit` out of one log record.
+///
+/// The record is a big-endian integer and bit offsets count from its least
+/// significant bit - the last byte on the wire. Both loggers this INI declares
+/// fall out of that one rule, which is how it was arrived at: captures from a
+/// Speeduino 202501 at a known 1427 rpm, 36 teeth, so 1168 us per tooth.
+///
+/// Tooth records are four bytes, `toothTime` at bit 0 for 32 bits:
+///   `[00 00 04 94]` -> 0x494 = 1172 us. Read the other way round it is
+///   2,483,290,112 us, or forty-one minutes between two teeth.
+///
+/// Composite records are five, `priLevel`..`cycle` at bits 0-5 and `refTime` at
+/// bit 8 for 32 bits:
+///   `[00 01 eb e8 10]` -> flags 0x10 from the last byte, refTime 0x0001ebe8 =
+///   125,928 us. The flag bits genuinely are at the low end and the timestamp
+///   above them, which is only true when the record is read big-endian; the
+///   firmware writes that timestamp with `serialWrite(uint32_t)`, which calls
+///   `reverse_bytes` before writing, i.e. big-endian on the wire.
 fn read_bits(record: &[u8], start_bit: u32, bit_count: u32) -> Option<u64> {
     if bit_count == 0 || bit_count > 64 {
         return None;
@@ -122,7 +139,8 @@ fn read_bits(record: &[u8], start_bit: u32, bit_count: u32) -> Option<u64> {
     let mut out: u64 = 0;
     for i in 0..bit_count as u64 {
         let bit = start_bit as u64 + i;
-        let byte = record[(bit / 8) as usize];
+        // Bit 0 is the low bit of the LAST byte, so index back from the end.
+        let byte = record[record.len() - 1 - (bit / 8) as usize];
         if byte >> (bit % 8) & 1 == 1 {
             out |= 1 << i;
         }
@@ -320,14 +338,30 @@ mod tests {
         assert_eq!(l[1].record_count(635), 127);
     }
 
+    /// Bytes captured from a Speeduino 202501 turning a 36-1 wheel at a known
+    /// 1427 rpm, which is 1168 us per tooth. The fixture is real wire data
+    /// rather than a constructed value: the previous one assumed the record was
+    /// little-endian and, being synthetic, agreed with itself.
     #[test]
     fn a_tooth_record_decodes_as_one_32_bit_microsecond_value() {
         let l = parse();
-        // 0x00012345 = 74565 us, little-endian
-        let got = l[0].decode(&[0x45, 0x23, 0x01, 0x00]);
-        assert_eq!(got.len(), 1);
-        assert_eq!(got[0].0, "toothTime");
-        assert!((got[0].1 - 74565.0).abs() < 1e-6, "got {}", got[0].1);
+        for (bytes, want) in [
+            ([0x00, 0x00, 0x04, 0x94], 1172.0),
+            ([0x00, 0x00, 0x04, 0x90], 1168.0),
+            // The gap. A 36-1 wheel reports one double-length tooth per
+            // revolution, and 2336 is exactly twice 1168 - which is what makes
+            // this fixture self-checking.
+            ([0x00, 0x00, 0x09, 0x20], 2336.0),
+        ] {
+            let got = l[0].decode(&bytes);
+            assert_eq!(got.len(), 1);
+            assert_eq!(got[0].0, "toothTime");
+            assert!(
+                (got[0].1 - want).abs() < 1e-6,
+                "{bytes:02x?} decoded to {} us, expected {want}",
+                got[0].1
+            );
+        }
     }
 
     /// The composite record packs flags and a 32-bit time into five bytes; the
@@ -335,19 +369,36 @@ mod tests {
     #[test]
     fn a_composite_record_splits_flags_from_the_timestamp() {
         let l = parse();
-        // byte0 bits: pri=1, sec=0, sync=1  -> 0b0001_0001 = 0x11
-        // bytes 1..5: refTime = 1000 -> 1.000 ms after the 0.001 scale
+        // Captured from the same run as the tooth fixture above: a 32-bit
+        // big-endian timestamp in bytes 0..4 and the flags in the last byte,
+        // which is the low end of the record.
+        //   0x0001ed28 = 126248 us -> 126.248 ms at the declared 0.001 scale
+        //   0x19 = 0b0001_1001 -> priLevel, trigger, sync
         let got: std::collections::HashMap<_, _> = l[1]
-            .decode(&[0x11, 0xE8, 0x03, 0x00, 0x00])
+            .decode(&[0x00, 0x01, 0xED, 0x28, 0x19])
             .into_iter()
             .collect();
         assert_eq!(got["priLevel"], 1.0);
         assert_eq!(got["secLevel"], 0.0);
         assert_eq!(got["sync"], 1.0);
         assert!(
-            (got["refTime"] - 1.0).abs() < 1e-9,
+            (got["refTime"] - 126.248).abs() < 1e-6,
             "got {}",
             got["refTime"]
+        );
+
+        // The next edge, half a tooth later: primary has gone low and the
+        // timestamp has advanced by ~584 us, half of 1168.
+        let next: std::collections::HashMap<_, _> = l[1]
+            .decode(&[0x00, 0x01, 0xEE, 0xF4, 0x10])
+            .into_iter()
+            .collect();
+        assert_eq!(next["priLevel"], 0.0);
+        assert_eq!(next["sync"], 1.0);
+        assert!(
+            (next["refTime"] - 126.708).abs() < 1e-6,
+            "got {}",
+            next["refTime"]
         );
     }
 

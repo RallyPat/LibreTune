@@ -2223,11 +2223,56 @@ impl Connection {
     /// Sends command bytes, waits up to `timeout` for the response, using an
     /// inter-character timeout of 50ms to detect end of transmission.
     /// Returns the raw response bytes.
+    /// Send a raw command and return the reply payload.
+    ///
+    /// Frames the command when the INI declares an envelope
+    /// (`messageEnvelopeFormat`), exactly as [`Self::send_raw_bytes`] already
+    /// does. The two used to disagree, and the consequences were not subtle.
+    ///
+    /// Speeduino locks legacy commands out for the rest of the session the
+    /// first time a CRC-framed command parses (`BIT_STATUS4_ALLOW_LEGACY_COMMS`),
+    /// so on a modern link an unframed `T` was not read as a command at all -
+    /// its `0x54` became the high byte of a two-byte length, and the firmware
+    /// then waited on a payload thousands of bytes long that was never coming.
+    ///
+    /// On a legacy link it reached `legacySerialCommand`, which answers a tooth
+    /// log from `sendToothLog_legacy` - marked `/* Blocking */` in the firmware,
+    /// and measured on the bench at 45 ms of stalled main loop for 508 bytes.
+    /// Ignition schedules are set from that loop, so a capture repeating every
+    /// 250 ms stops spark for 45 ms out of every 250, which is what a misfire
+    /// on a running engine looks like. The framed path yields every four bytes
+    /// (`SERIAL_TRANSMIT_TOOTH_INPROGRESS`) and does not stall it.
+    ///
+    /// Framing also fixes the read length. The envelope carries its own
+    /// two-byte count, so the reply is read to a declared size instead of
+    /// guessed at by the inter-character silence timer below - which ended a
+    /// chunked transfer at the first pause and returned 137 bytes of 508.
+    ///
+    /// The INI's own `dataLength` is deliberately NOT used for this: the
+    /// Speeduino 202501 file declares it as 508 for the tooth logger ("in
+    /// bytes ... (not used)") and 127 for the composite logger ("Number of
+    /// records"), so the same key carries different units on adjacent blocks.
     pub fn send_raw_bytes_with_response(
         &mut self,
         bytes: &[u8],
         timeout: Duration,
     ) -> Result<Vec<u8>, ProtocolError> {
+        if self.use_modern_protocol {
+            let reply = self.send_packet(Packet::new(bytes.to_vec()))?;
+            // A framed reply leads with a return code; the legacy answer to the
+            // same command does not. Strip it here so both paths hand callers
+            // the same thing - otherwise every record is shifted one byte and
+            // the whole log decodes as garbage. `expected_data_len` is unknown
+            // for a raw command, so 0 selects the helper's leading-zero rule.
+            let payload = strip_status_byte(&reply.payload, 0, "raw command");
+            tracing::debug!(
+                "send_raw_bytes_with_response: framed reply, {} payload bytes -> {} after status byte",
+                reply.payload.len(),
+                payload.len()
+            );
+            return Ok(payload);
+        }
+
         let baud_rate = self.config.baud_rate;
         let min_wait = Some(self.get_effective_min_wait());
 
