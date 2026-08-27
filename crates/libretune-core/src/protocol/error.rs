@@ -67,6 +67,21 @@ pub enum ProtocolError {
         actual: u8,
     },
 
+    /// A whole page was written and the ECU's own CRC32 of it disagrees with a
+    /// CRC of the bytes that were sent. Distinct from
+    /// [`ProtocolError::WriteVerificationFailed`], which compares one byte
+    /// read straight back: this compares an entire page as the ECU assembled
+    /// it, which is the failure a chunked bulk write can produce while every
+    /// individual frame is acknowledged.
+    #[error(
+        "ECU's CRC32 of page {page} does not match what was written:          sent {expected:08X}, ECU reports {actual:08X}"
+    )]
+    PageCrcMismatch {
+        page: u8,
+        expected: u32,
+        actual: u32,
+    },
+
     /// A write went out but the read-back could not complete, so the write is
     /// unverified. On a legacy ECU this is itself the corruption signature: a
     /// buffer-overrun ECU consumes the read command as table data and answers
