@@ -90,6 +90,19 @@ pub struct Constant {
     /// Same as [`Constant::scale_expr`], for the translate field.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub translate_expr: Option<String>,
+    /// Same as [`Constant::scale_expr`], for the min field.
+    pub min_expr: Option<String>,
+    /// Same as [`Constant::scale_expr`], for the max field.
+    pub max_expr: Option<String>,
+    /// Are [`Constant::min`] and [`Constant::max`] the range the INI declares?
+    ///
+    /// False while a `{expression}` bound is unresolved, because the numeric
+    /// fallback is then the raw-byte span rather than the real range.
+    /// `advTable2` declares `{ ign2ValuesMin }` / `{ ign2ValuesMax }` and would
+    /// otherwise fall back to 0..255 - which on a table with `translate = -40`
+    /// refuses every retard value while still waving through an advance far
+    /// past the real maximum. Not clamping is better than clamping to a lie.
+    pub range_resolved: bool,
 }
 
 /// Extract a deferred expression from an INI numeric field.
@@ -132,6 +145,9 @@ impl Constant {
             dynamic_size: None,
             scale_expr: None,
             translate_expr: None,
+            min_expr: None,
+            max_expr: None,
+            range_resolved: true,
         }
     }
 
@@ -154,8 +170,29 @@ impl Constant {
     }
 
     /// Convert a display value to raw value
+    /// Convert a display value to raw storage, clamped to the declared range.
+    ///
+    /// The clamp lives here because this is the one funnel every write path
+    /// already passes through - tables, curves, scalars and bit fields alike.
+    /// Without it `advTable1`, declared `min -40, max 70`, accepted 200 degrees
+    /// of ignition advance: `(200 - -40) / 1.0` is 240, a perfectly legal U08,
+    /// so nothing downstream had cause to object. Confirmed on a bench ECU -
+    /// written and read back as 200 degrees. The only ceiling was the byte
+    /// itself, at 215.
+    ///
+    /// Skipped when the range is not trustworthy; see
+    /// [`Constant::range_resolved`].
     pub fn display_to_raw(&self, display: f64) -> f64 {
-        (display - self.translate) / self.scale
+        let value = if self.range_resolved {
+            // Ordered rather than trusted: f64::clamp panics when lo > hi and a
+            // hand-edited INI can declare them either way round.
+            let lo = self.min.min(self.max);
+            let hi = self.min.max(self.max);
+            display.clamp(lo, hi)
+        } else {
+            display
+        };
+        (value - self.translate) / self.scale
     }
 
     /// Check if a display value is within allowed range
@@ -190,6 +227,9 @@ impl Default for Constant {
             dynamic_size: None,
             scale_expr: None,
             translate_expr: None,
+            min_expr: None,
+            max_expr: None,
+            range_resolved: true,
         }
     }
 }
@@ -293,11 +333,14 @@ pub fn parse_constant_line(
         constant.translate = parts[scale_idx + 1].parse().unwrap_or(0.0);
     }
     if parts.len() > scale_idx + 2 {
+        constant.min_expr = deferred_expr(parts[scale_idx + 2]);
         constant.min = parts[scale_idx + 2].parse().unwrap_or(0.0);
     }
     if parts.len() > scale_idx + 3 {
+        constant.max_expr = deferred_expr(parts[scale_idx + 3]);
         constant.max = parts[scale_idx + 3].parse().unwrap_or(255.0);
     }
+    constant.range_resolved = constant.min_expr.is_none() && constant.max_expr.is_none();
     if parts.len() > scale_idx + 4 {
         constant.digits = parts[scale_idx + 4].parse().unwrap_or(0);
     }
@@ -608,5 +651,64 @@ mod tests {
         assert_eq!(c.bit_options[1], "INVALID");
         assert_eq!(c.bit_options[2], "INVALID");
         assert_eq!(c.bit_options[3], "Advanced");
+    }
+}
+
+#[cfg(test)]
+mod declared_range_tests {
+    use super::*;
+
+    fn spark_table() -> Constant {
+        // advTable1 = array, U08, 0,[16x16], "deg", 1.0, -40, -40, 70.0, 0
+        let mut c = Constant::new("advTable1", 2, 0, DataType::U08);
+        c.scale = 1.0;
+        c.translate = -40.0;
+        c.min = -40.0;
+        c.max = 70.0;
+        c.range_resolved = true;
+        c
+    }
+
+    /// Confirmed on a bench Speeduino before this clamp existed: 90 and 200
+    /// degrees of advance were both written and read back intact, because
+    /// (200 - -40) / 1.0 is 240 and a U08 holds that happily.
+    #[test]
+    fn an_out_of_range_value_cannot_reach_the_ecu() {
+        let c = spark_table();
+        assert_eq!(c.display_to_raw(200.0), c.display_to_raw(70.0));
+        assert_eq!(c.display_to_raw(90.0), c.display_to_raw(70.0));
+        assert_eq!(c.display_to_raw(-500.0), c.display_to_raw(-40.0));
+        // The declared edges themselves must still pass through untouched.
+        assert_eq!(c.display_to_raw(70.0), 110.0);
+        assert_eq!(c.display_to_raw(-40.0), 0.0);
+        assert_eq!(c.display_to_raw(20.0), 60.0);
+    }
+
+    /// `advTable2` declares `{ ign2ValuesMin }` / `{ ign2ValuesMax }`. Until
+    /// those resolve, min/max hold the raw-byte fallback of 0..255 - clamping
+    /// to that would refuse every retard value on a table whose real minimum is
+    /// -40, while still allowing an advance well past the real maximum.
+    #[test]
+    fn an_unresolved_expression_range_does_not_clamp() {
+        let mut c = spark_table();
+        c.min_expr = Some("ign2ValuesMin".into());
+        c.max_expr = Some("ign2ValuesMax".into());
+        c.min = 0.0;
+        c.max = 255.0;
+        c.range_resolved = false;
+
+        // -20 degrees of retard survives rather than being clamped up to 0.
+        assert_eq!(c.display_to_raw(-20.0), 20.0);
+    }
+
+    /// A hand-edited INI can declare the bounds either way round, and
+    /// f64::clamp panics when lo > hi.
+    #[test]
+    fn a_reversed_range_is_ordered_not_trusted() {
+        let mut c = spark_table();
+        c.min = 70.0;
+        c.max = -40.0;
+        assert_eq!(c.display_to_raw(200.0), c.display_to_raw(70.0));
+        assert_eq!(c.display_to_raw(-500.0), c.display_to_raw(-40.0));
     }
 }
