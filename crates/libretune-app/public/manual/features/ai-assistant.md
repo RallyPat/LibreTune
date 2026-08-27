@@ -21,11 +21,18 @@ What the assistant can do:
 
 - **Explain** tables, constants, and gauges in plain English.
 - **Diagnose** problems from tune data and table health.
-- **Propose ECU configuration changes** (feature enablement, scalar constants).
-- **Propose tune edits** to individual cells or bulk regions.
 - **Read tables live** and analyze them in the same conversation — when it says
   "let me look at your VE table," it actually reads the data and comes back with
   an analysis.
+- **Summarize tune health** — data coverage, suspect cells, unexplored regions
+  the assistant could estimate, and per-region health scores for a table.
+- **See live sensor data** — a realtime snapshot of RPM, MAP, TPS, CLT, AFR and
+  other channels, so you can ask "what's happening right now?"
+- **Analyze datalogs** — per-channel statistics or recent rows from the current
+  logging session or a saved log, so you can ask "here's my drive log, what
+  should I change?"
+- **Propose ECU configuration changes** (feature enablement, scalar constants).
+- **Propose tune edits** to individual cells or bulk regions.
 
 The assistant is **not** a closed-loop controller. It does not run every
 realtime tick — that remains the job of the algorithmic [AutoTune](./autotune.md)
@@ -48,11 +55,19 @@ existing tools.
 
 ### Capability Tiers
 
+Tiers are **cumulative** — each level includes everything the previous one
+allows:
+
 | Tier | What it allows |
 |------|----------------|
-| **Read / diagnose only** | Explain and analyze. Cannot propose changes. Start here until you trust the assistant. |
-| **Propose ECU configuration changes** | Propose constant changes (feature toggles, scalars). |
-| **Propose tune edits** | Propose table-cell edits and bulk operations. |
+| **Read — inspect and diagnose only** | Explain and analyze; read tables, constants, realtime data, and datalogs. Cannot propose changes. Start here until you trust the assistant. |
+| **Tune — read + propose table edits** | Additionally propose table-cell edits and bulk operations (scale, smooth, interpolate, set equal). |
+| **Config — tune + propose constant changes** | Additionally propose constant changes (feature toggles, scalars). Pin-affecting constants are flagged **Dangerous**. |
+
+The tier is enforced on both ends: the assistant is not even *offered* the
+propose tools above the configured tier, and an out-of-tier tool call is
+rejected if a model emits one anyway. Every proposal still goes through the
+review queue — nothing is applied without your approval.
 
 ## Using the Assistant
 
@@ -60,10 +75,19 @@ existing tools.
 2. Type a message in the chat input. Examples:
    - "Can you review my ignition table?"
    - "How does my VE table look? Any glaring issues?"
+   - "What's the engine doing right now?"
+   - "Summarize my last datalog — where was AFR off target?"
    - "Enable launch control."
    - "Explain the fuelAlgorithm setting."
+
+Values the assistant reads back (constants, realtime channels) are converted
+to your **display units** (Settings → Units), so its answers match what the
+UI shows.
 3. The assistant may **read data first** (it will say "Let me pull up…"), then
-   reply with an analysis. This is normal — it's gathering context.
+   reply with an analysis. This is normal — it's gathering context. While it
+   works, the pending message shows **live activity** such as
+   "reading veTable1…" or "thinking (round 2)…", so you can see what it is
+   doing instead of watching a silent spinner.
 4. If the assistant wants to make changes, it emits a **proposal** that appears
    in the **Review queue** at the bottom of the panel.
 5. Each proposed item shows:
@@ -72,9 +96,22 @@ existing tools.
    - **Safety tier** (Safe / Caution / Dangerous) for configuration changes.
    - **Validation status** — whether the proposal is within the INI's declared bounds.
    - **Clamp notice** — if a tuning proposal exceeded the authority limit.
+   - **Pin-conflict warning** — if a configuration change would assign a pin
+     another live function already uses.
 6. Accept or reject each item, or click **Accept all valid**.
-7. Click **Stage accepted changes** to apply them to the working tune.
+7. Click **Stage accepted changes** to apply them to the working tune. When
+   you do:
+   - A **restore point** is created first, so you can roll the whole batch
+     back from **Tools → Restore Points** if you change your mind.
+   - If a table's accepted edits shift its cells by a large amount on average,
+     a **batch warning** tells you — individually-valid edits can still walk a
+     table too far in one direction.
+   - With version control's auto-commit set to *Always*, the tune is saved and
+     committed automatically (the commit hash is shown); with *Ask*, you get a
+     ready-made commit message to use after saving.
 8. **Burn** the tune to the ECU separately, only when you are satisfied.
+   Staging writes to the ECU's RAM (exactly like a manual table edit) but never
+   burns.
 
 ### The Side Panel
 
@@ -88,6 +125,18 @@ existing tools.
   red **Stop** button. Click it to cancel the in-flight request (useful if a
   provider is slow or stuck). A cancelled request shows `_(stopped)_` in the
   transcript rather than an error.
+- **Token counter** — the panel header shows the total tokens used by the
+  current chat (cost transparency for hosted providers). It resets when you
+  switch or start a new chat.
+
+### Ask AI from a Table Editor
+
+Every table editor's toolbar has an **Ask AI** button (the robot icon). Click
+it to open the assistant with that table already in context: the assistant
+knows which table you're looking at, its axes, and your current cell
+selection, and the input is pre-filled with "About *table name*: " — just
+finish the question. This is the quickest way to go from "this cell looks
+wrong" to a diagnosed, proposed fix.
 
 ### Chat History
 
@@ -129,6 +178,10 @@ OpenAI-compatible shim):
 | **Anthropic** | `anthropic` | Claude models (`claude-3-5-sonnet-…`, etc.). |
 | **Google** | `google` | Gemini models (`gemini-1.5-pro`, etc.). |
 
+The settings dialog also offers **presets** — a one-click dropdown that fills
+in the provider, base URL, and a suggested model for OpenAI, Anthropic,
+Google, and the local options below.
+
 ### Provider Settings
 
 - **Base URL** — leave empty for the provider default. For a local model, point
@@ -156,10 +209,14 @@ The assistant is deliberately constrained at multiple layers:
 | Layer | What it does |
 |-------|--------------|
 | **Propose only** | The model emits tool calls that become a proposal list. It has no apply/burn command. |
+| **Capability tiers** | The configured tier (read / tune / config) determines which tools the model is even offered; out-of-tier calls are rejected if a model emits them anyway. |
 | **INI validation** | Every proposal is checked against the loaded INI: table/constant existence, cell-index bounds, `min`/`max`, `DataType` storage range, and bits-type enum values. |
 | **Authority clamping** | Tune edits are clamped to the same per-cell and percentage limits used by AutoTune (`AutoTuneAuthorityLimits`). |
+| **Pin-conflict warnings** | Constant proposals that would move a function onto a pin another live function already uses are flagged in the review queue. |
+| **Batch drift warnings** | A batch of individually-valid edits that collectively shifts a table's mean by more than 10% triggers a warning at apply time. |
 | **Human approval** | Accepted proposals are staged; they do not burn automatically. |
 | **Dangerous-constant flagging** | Constants that affect pins, triggers, output inversion, or hard limits are marked **Dangerous** and require explicit per-item confirmation. |
+| **Pre-apply restore point** | Staging creates a restore point first, so any AI apply is a one-click rollback. |
 | **No ECU burn** | The assistant has no burn command. You must click Burn yourself. |
 | **Read-loop bounded** | Multi-turn read interactions are capped (6 rounds) to prevent runaway cost. |
 
@@ -180,6 +237,10 @@ When the assistant proposes a value, the validator checks three things:
 - **Start with the Read tier** until you understand how the assistant reasons.
 - **Ask it to read first**: "Read my VE table and tell me which cells have good
   data coverage" gives it context before it proposes edits.
+- **Use the Ask AI button** on a table editor when a specific table is what
+  you want to talk about — it starts the conversation with the right context.
+- **Point it at your datalog**: "Summarize my last datalog and tell me where
+  AFR was off target" pairs well with a VE-table proposal request.
 - **Be specific**: "Lean out the 3000 RPM / 80 kPa cell by 2%" is safer than
   "fix my tune."
 - **Review every clamp**: if a value was authority-clamped, the original
@@ -198,7 +259,10 @@ When the assistant proposes a value, the validator checks three things:
 | "Could not parse provider response" | The model may not support tool/function calling. Use a model that does (e.g. `gpt-4o`, `claude-3-5-sonnet`). |
 | Proposals fail validation | The model asked for an out-of-bounds value or a non-existent table/constant. Reject it and rephrase your request. |
 | Assistant does not propose changes | You may be in Read tier, or the model chose not to call a tool. Ask more specifically, or raise the capability tier. |
+| Pin-conflict warning on a proposal | The change would assign a pin another enabled function already uses. Clear the other assignment first, or reject the proposal. |
+| Batch warning about a large mean shift | The accepted edits move the table further than 10% on average. Confirm that is intended, or reject some items and re-apply. |
 | Assistant stalls after "let me look at…" | This should not happen — the read loop executes reads and feeds results back. If it does, the model may be returning no tool calls; check the provider/model supports tool calling. |
+| Datalog queries return "no entries recorded" | Start datalogging first, or pass the saved log's file name (the assistant is told which logs are available when it guesses wrong). |
 | Settings don't save when I hit Apply | Look at the footer of the settings dialog — it shows which setting failed (hover for details). |
 
 ## Privacy & Data Handling
@@ -207,7 +271,11 @@ When the assistant proposes a value, the validator checks three things:
   are sent over HTTPS to that provider. Do not use them with sensitive data
   unless you trust their policies.
 - **Local providers** (Ollama, LM Studio, vLLM): data stays on your machine.
-- **API key storage**: the key is stored locally in LibreTune's settings file
-  (plaintext in v1). OS-keychain storage is planned as a follow-up.
+- **API key storage**: the key is stored in your **operating system's
+  keychain** (Windows Credential Manager, macOS Keychain, Linux Secret
+  Service) whenever one is available — never in the settings file. If no
+  keychain backend exists (e.g. some headless Linux sessions), LibreTune
+  falls back to storing it in the settings file so the assistant keeps
+  working.
 - Changing the provider or API key resets the risk acknowledgement, so you
   re-confirm before the assistant is re-enabled.

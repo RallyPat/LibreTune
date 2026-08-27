@@ -314,6 +314,10 @@ usage details.
 - **Anthropic** — Claude models.
 - **Google** — Gemini models.
 
+A **Preset** dropdown fills in the provider, base URL, and a suggested model
+in one click — including local presets (Ollama, LM Studio) that keep your
+tune data on this machine.
+
 ### Base URL
 
 Leave empty for the provider default. For a local model, set this to the local
@@ -321,8 +325,11 @@ endpoint, e.g. `http://localhost:11434/v1` for Ollama.
 
 ### API Key
 
-Your provider key. Optional for local/no-auth endpoints. Stored locally in the
-settings file.
+Your provider key. Optional for local/no-auth endpoints. Stored in your
+operating system's keychain when one is available (Windows Credential Manager,
+macOS Keychain, Linux Secret Service) — never in the settings file. If no
+keychain backend exists, LibreTune falls back to the settings file so the
+assistant keeps working.
 
 ### Model
 
@@ -331,9 +338,13 @@ A tool/function-calling-capable model (e.g. `gpt-4o`,
 
 ### Capability Tier
 
-- **Read / diagnose only** — explain and analyze; cannot propose changes.
-- **Propose ECU configuration changes** — propose constant changes.
-- **Propose tune edits** — propose table-cell and bulk edits.
+Tiers are cumulative — each includes the previous one:
+
+- **Read — inspect and diagnose only** — explain and analyze; cannot propose
+  changes.
+- **Tune — read + propose table edits** — table-cell and bulk edits.
+- **Config — tune + propose constant changes** — constants and feature
+  toggles; pin-affecting changes are flagged **Dangerous**.
 
 ---
 
