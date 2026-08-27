@@ -13,6 +13,16 @@ use std::sync::Arc;
 pub async fn get_realtime_data(
     state: tauri::State<'_, AppState>,
 ) -> Result<HashMap<String, f64>, String> {
+    realtime_snapshot_internal(&state).await
+}
+
+/// One-shot realtime poll shared by the [`get_realtime_data`] command and the
+/// AI assistant's `get_realtime_snapshot` read tool: reads the ECU's current
+/// frame, evaluates computed channels, and applies canonical channel aliases
+/// (RPM, MAP, ...).
+pub(crate) async fn realtime_snapshot_internal(
+    state: &AppState,
+) -> Result<HashMap<String, f64>, String> {
     // Use cached output channels to avoid expensive cloning.
     // IMPORTANT: acquire each lock independently to avoid deadlocks.
     let (channels_arc, endianness) = {

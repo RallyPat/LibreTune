@@ -320,3 +320,104 @@ pub async fn read_text_file(path: String) -> Result<String, String> {
 pub async fn write_text_file(path: String, contents: String) -> Result<(), String> {
     std::fs::write(&path, contents).map_err(|e| format!("Failed to write file: {}", e))
 }
+
+// --- AI assistant read-tool support ---------------------------------------
+//
+// Helpers for the agent's `query_datalog` tool: list the project's saved
+// logs and load one (or the in-memory session) as channels + entries. Not
+// Tauri commands themselves — only the agent executor calls them.
+
+/// One saved datalog file, as listed for the assistant.
+#[derive(Serialize)]
+pub(crate) struct DatalogListing {
+    pub name: String,
+    pub size_bytes: u64,
+    pub modified: String,
+}
+
+/// List the CSVs in the current project's `datalogs/` folder, newest first.
+/// Returns an empty list when no project is open or the folder doesn't
+/// exist yet.
+pub(crate) async fn list_datalog_files(state: &AppState) -> Vec<DatalogListing> {
+    let dir = {
+        let proj = state.current_project.lock().await;
+        match proj.as_ref() {
+            Some(p) => p.path.join("datalogs"),
+            None => return Vec::new(),
+        }
+    };
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return Vec::new();
+    };
+    let mut listings: Vec<(std::time::SystemTime, DatalogListing)> = entries
+        .flatten()
+        .filter_map(|e| {
+            let path = e.path();
+            if path.extension().and_then(|x| x.to_str())? != "csv" {
+                return None;
+            }
+            let meta = e.metadata().ok()?;
+            let modified = meta
+                .modified()
+                .ok()
+                .map(|t| {
+                    let dt: chrono::DateTime<chrono::Utc> = t.into();
+                    dt.to_rfc3339()
+                })
+                .unwrap_or_default();
+            Some((
+                meta.modified().ok().unwrap_or(std::time::UNIX_EPOCH),
+                DatalogListing {
+                    name: path.file_name()?.to_string_lossy().to_string(),
+                    size_bytes: meta.len(),
+                    modified,
+                },
+            ))
+        })
+        .collect();
+    listings.sort_by_key(|(modified, _)| std::cmp::Reverse(*modified));
+    listings.into_iter().map(|(_, l)| l).collect()
+}
+
+/// The data the `query_datalog` tool works over: channel names plus the
+/// entries (timestamp + values) of either a saved log file or the current
+/// in-memory session.
+pub(crate) struct DatalogData {
+    pub channels: Vec<String>,
+    pub entries: Vec<libretune_core::datalog::LogEntry>,
+    /// Where the data came from (for error messages / payload labels).
+    pub source: String,
+}
+
+/// Load a saved log by file name from the project's `datalogs/` folder.
+/// Rejects names that contain path separators — the tool only ever names
+/// files inside that folder.
+pub(crate) async fn load_datalog_file(state: &AppState, name: &str) -> Result<DatalogData, String> {
+    if name.contains('/') || name.contains('\\') || name.contains("..") {
+        return Err(format!("invalid log name '{name}'"));
+    }
+    let dir = {
+        let proj = state.current_project.lock().await;
+        proj.as_ref()
+            .map(|p| p.path.join("datalogs"))
+            .ok_or_else(|| "No project loaded".to_string())?
+    };
+    let path = dir.join(name);
+    let (channels, entries) = libretune_core::datalog::format::read_csv(&path)
+        .map_err(|e| format!("could not read log '{name}': {e}"))?;
+    Ok(DatalogData {
+        channels,
+        entries,
+        source: name.to_string(),
+    })
+}
+
+/// Snapshot the current in-memory logging session (may be empty).
+pub(crate) async fn current_session_datalog(state: &AppState) -> DatalogData {
+    let logger = state.data_logger.lock().await;
+    DatalogData {
+        channels: logger.channels().to_vec(),
+        entries: logger.entries().cloned().collect(),
+        source: "current session".to_string(),
+    }
+}

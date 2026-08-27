@@ -16,7 +16,8 @@ import {
   Scaling,
   Wand2,
   Upload,
-  Download
+  Download,
+  Bot
 } from 'lucide-react';
 
 interface TableToolbarProps {
@@ -47,6 +48,8 @@ interface TableToolbarProps {
   /** TunerStudio-compatible per-table .table file import/export. */
   onImportTable?: () => void;
   onExportTable?: () => void;
+  /** Open the AI assistant with this table's context pre-loaded. */
+  onAskAi?: () => void;
 }
 
 export default function TableToolbar({ 
@@ -75,6 +78,7 @@ export default function TableToolbar({
   generatableLabel,
   onImportTable,
   onExportTable,
+  onAskAi,
 }: TableToolbarProps) {
   return (
     <div className="ts-toolbar">
@@ -257,6 +261,20 @@ export default function TableToolbar({
                 <Download size={14} />
               </button>
             )}
+          </div>
+        </>
+      )}
+      {onAskAi && (
+        <>
+          <div className="ts-toolbar-divider" />
+          <div className="ts-toolbar-group">
+            <button
+              className="ts-toolbar-btn"
+              title="Ask the AI assistant about this table"
+              onClick={onAskAi}
+            >
+              <Bot size={14} />
+            </button>
           </div>
         </>
       )}

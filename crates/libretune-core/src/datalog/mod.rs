@@ -3,7 +3,7 @@
 //! Records and plays back ECU real-time data.
 
 pub mod dyno;
-mod format;
+pub mod format;
 mod playback;
 mod recorder;
 

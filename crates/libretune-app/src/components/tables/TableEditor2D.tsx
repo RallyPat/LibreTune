@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { open, save } from '@tauri-apps/plugin-dialog';
+import { emit } from '@tauri-apps/api/event';
 import { ArrowLeft, Save, Zap, ExternalLink, AlertTriangle, Palette, MapPin, Crosshair, Box, Scaling } from 'lucide-react';
 import TableToolbar from './TableToolbar';
 import TableGrid, { SelectionRange } from './TableGrid';
@@ -774,6 +775,28 @@ export default function TableEditor2D({
     }
   }, [table_name, showToast, pushHistory, onValuesChange]);
 
+  /**
+   * "Ask AI about this table": open the assistant panel with the table's
+   * name/title and the current selection as context. The panel listens for
+   * `agent:ask` (App.tsx opens the panel on the same event), so no props
+   * need threading through the layout.
+   */
+  const handleAskAi = useCallback(() => {
+    const cells =
+      selectionRange == null
+        ? []
+        : [
+            [selectionRange.start[0], selectionRange.start[1]],
+            [selectionRange.end[0], selectionRange.end[1]],
+          ];
+    void emit('agent:ask', {
+      table: table_name,
+      title,
+      cells,
+      axes: { x: x_axis_name, y: y_axis_name },
+    });
+  }, [table_name, title, selectionRange, x_axis_name, y_axis_name]);
+
   const handleSetEqual = async () => {
     const values = selectedCellsCoords.map(([x, y]) => {
       return { x, y, value: localZValues[y][x] };
@@ -1392,6 +1415,7 @@ export default function TableEditor2D({
           generatableLabel={generatableKind ? generatableTableLabel(generatableKind) : undefined}
           onImportTable={handleImportTable}
           onExportTable={handleExportTable}
+          onAskAi={handleAskAi}
         />
       )}
 

@@ -25,11 +25,12 @@ Yes. LibreTune uses the same INI format as TunerStudio. Your existing INI files 
 ### Can the AI Assistant tune my car for me?
 
 No — and that's deliberate. The AI Assistant is a **co-pilot**: it can read your
-tables, diagnose problems, and *propose* changes, but it never applies or burns
-anything automatically. Every proposal flows to a review queue where you accept
-or reject each change before it's staged to the working tune. Burning to the ECU
-is always a separate manual step. See [AI Assistant](./features/ai-assistant.md)
-for the full safety model.
+tables, analyze your datalogs, and *propose* changes, but it never applies
+anything without your explicit approval. Every proposal flows to a review
+queue where you accept or reject each change; accepted changes go to the
+working tune (with a restore point created first, so you can roll back), and
+burning to the ECU is always a separate manual step. See
+[AI Assistant](./features/ai-assistant.md) for the full safety model.
 
 ### Do I need an OpenAI account to use the AI Assistant?
 

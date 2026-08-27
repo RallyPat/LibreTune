@@ -30,9 +30,9 @@ Pure domain logic, no UI, no Tauri, no async runtime in the public API.
 Public modules (post-Phase 7):
 
 - `action_scripting` — Lua-driven controller-command scripts.
-- `agent`, `llm` — AI-assistant orchestrator (tools, context, safety tiers)
-  and the LLM `Provider` trait with native OpenAI/Anthropic/Google
-  implementations over reqwest.
+- `agent`, `llm` — AI-assistant orchestrator (tools, capability tiers,
+  context, safety tiers, pure apply) and the LLM `Provider` trait with
+  native OpenAI/Anthropic/Google implementations over reqwest.
 - `autotune` — VE / AFR / dwell adaptation algorithms; recommendations and
   authority limits live in `autotune/anomaly.rs`, the AFR transport-delay
   step test in `autotune/delay_measure.rs`.

@@ -167,6 +167,13 @@ pub async fn write_project_tune_to_ecu(
 /// Save the current tune to the project's tune file
 #[tauri::command]
 pub async fn save_tune_to_project(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    save_tune_to_project_internal(&state).await
+}
+
+/// Internal (non-command) project-tune save, shared with the AI-assistant
+/// apply path: syncs the cache into the in-memory tune, stamps the INI
+/// signature, writes the project's tune file, and clears the modified flag.
+pub(crate) async fn save_tune_to_project_internal(state: &AppState) -> Result<(), String> {
     let project_guard = state.current_project.lock().await;
     let project = project_guard.as_ref().ok_or("No project open")?;
     let tune_path = project.current_tune_path();

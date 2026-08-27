@@ -1054,6 +1054,53 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
             acknowledgementText="I understand the assistant only proposes changes, that I must approve them, and that I am responsible for verifying every change before it is applied or burned."
           />
 
+          <FormField
+            label="Preset"
+            help="One-click provider setup. Local presets (Ollama / LM Studio) keep your tune data on this machine — nothing is sent to a cloud service."
+          >
+            {(id) => (
+              <select
+                id={id}
+                value=""
+                onChange={(e) => {
+                  const preset = e.target.value;
+                  if (!preset) return;
+                  const apply = (provider: string, baseUrl: string, model: string) => {
+                    setAiProvider(provider);
+                    setAiBaseUrl(baseUrl);
+                    setAiModel(model);
+                  };
+                  switch (preset) {
+                    case 'openai':
+                      apply('openai', '', 'gpt-4o');
+                      break;
+                    case 'anthropic':
+                      apply('anthropic', '', 'claude-3-5-sonnet-20241022');
+                      break;
+                    case 'google':
+                      apply('google', '', 'gemini-1.5-pro');
+                      break;
+                    case 'ollama':
+                      apply('openai', 'http://localhost:11434/v1', 'llama3.1');
+                      break;
+                    case 'lmstudio':
+                      apply('openai', 'http://localhost:1234/v1', '');
+                      break;
+                    default:
+                      break;
+                  }
+                }}
+              >
+                <option value="">Choose a preset…</option>
+                <option value="openai">OpenAI (cloud)</option>
+                <option value="anthropic">Anthropic Claude (cloud)</option>
+                <option value="google">Google Gemini (cloud)</option>
+                <option value="ollama">Ollama (local — data stays on this machine)</option>
+                <option value="lmstudio">LM Studio (local — data stays on this machine)</option>
+              </select>
+            )}
+          </FormField>
+
           <FormField label="Provider" help="OpenAI = most hosted/local-compatible endpoints; Anthropic & Google are native protocols">
             {(id) => (
               <select
@@ -1081,7 +1128,10 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
             )}
           </FormField>
 
-          <FormField label="API Key" help="Stored locally in settings. Optional for local/no-auth providers">
+          <FormField
+            label="API Key"
+            help="Stored in your OS keychain when available (never written to the settings file). Optional for local/no-auth providers"
+          >
             {(id) => (
               <input
                 id={id}
@@ -1107,16 +1157,19 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
             )}
           </FormField>
 
-          <FormField label="Capability Tier" help="The scope the assistant is unlocked for">
+          <FormField
+            label="Capability Tier"
+            help="What the assistant may propose. Tiers are cumulative: each level includes the previous one. Every proposal still goes through the review queue — nothing is applied without your approval."
+          >
             {(id) => (
               <select
                 id={id}
                 value={aiCapabilityTier}
                 onChange={(e) => setAiCapabilityTier(e.target.value as 'read' | 'tune' | 'config')}
               >
-                <option value="read">Read / diagnose only</option>
-                <option value="config">Propose ECU configuration changes</option>
-                <option value="tune">Propose tune edits</option>
+                <option value="read">Read — inspect and diagnose only</option>
+                <option value="tune">Tune — read + propose table edits</option>
+                <option value="config">Config — tune + propose constant changes</option>
               </select>
             )}
           </FormField>

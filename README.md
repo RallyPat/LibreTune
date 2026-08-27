@@ -41,7 +41,7 @@ Data logger with configurable sample rates, playback controls, CSV import/export
 Project-based workflow with restore points, Git-based tune versioning, CSV export/import, TunerStudio-compatible per-table `.table` import/export, TunerStudio project import, INI version tracking with automatic tune migration, and change annotations. Online INI search from Speeduino, rusEFI, and FOME GitHub repos, offered automatically on ECU signature mismatch.
 
 ### Additional
-- **AI Assistant**: Bring-your-own-LLM co-pilot (OpenAI / Anthropic / Google / local Ollama) that reads your tables, diagnoses problems, and *proposes* validated, authority-clamped changes for explicit review — nothing burns automatically. Docked side panel, pop-out-able.
+- **AI Assistant**: Bring-your-own-LLM co-pilot (OpenAI / Anthropic / Google / local Ollama or LM Studio, with one-click presets) that reads your tables, realtime data, and datalogs, diagnoses problems, and *proposes* validated, authority-clamped changes for explicit review — applied only after your approval (restore point first) and never burned automatically. OS-keychain API-key storage, capability tiers, pin-conflict warnings, and an "Ask AI" button on every table editor.
 - **Multi-monitor**: Pop out any tab to its own window with bidirectional sync
 - **Unit preferences**: Temperature (°C/°F/K), pressure (kPa/PSI/bar/inHg), AFR/Lambda
 - **Performance calculator**: Estimated HP/torque curves and acceleration times

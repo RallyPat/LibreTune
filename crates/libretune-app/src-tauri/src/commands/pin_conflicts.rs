@@ -100,15 +100,30 @@ pub(crate) async fn deny_if_pin_conflict(
     name: &str,
     value: f64,
 ) -> Result<(), String> {
+    match pin_conflict_warning(state, name, value).await {
+        Some(w) => Err(w),
+        None => Ok(()),
+    }
+}
+
+/// Non-blocking variant of [`deny_if_pin_conflict`]: returns the pin
+/// conflict (if any) as a human-readable warning instead of an error. Used
+/// by the AI proposal queue, where a risky-but-reviewable proposal is
+/// surfaced with a warning rather than silently dropped.
+pub(crate) async fn pin_conflict_warning(
+    state: &AppState,
+    name: &str,
+    value: f64,
+) -> Option<String> {
     let def_guard = state.definition.lock().await;
-    let def = def_guard.as_ref().ok_or("Definition not loaded")?;
+    let def = def_guard.as_ref().ok_or("Definition not loaded").ok()?;
     let cache_guard = state.tune_cache.lock().await;
     let tune_guard = state.current_tune.lock().await;
     let endianness = def.endianness;
     let new_index = value as usize;
     let live = disabled_pin_constants(def, tune_guard.as_ref());
 
-    if let Some(conflict) = conflict_if_assigning(def, name, new_index, |other_name, constant| {
+    let conflict = conflict_if_assigning(def, name, new_index, |other_name, constant| {
         if other_name == name {
             return None;
         }
@@ -125,20 +140,19 @@ pub(crate) async fn deny_if_pin_conflict(
             cache_guard.as_ref(),
         );
         Some(v as usize)
-    }) {
-        return Err(format!(
-            "Pin '{}' is already used by {}. Clear that assignment first.",
-            conflict.pin_label,
-            conflict
-                .constants
-                .iter()
-                .filter(|c| c.as_str() != name)
-                .cloned()
-                .collect::<Vec<_>>()
-                .join(", ")
-        ));
-    }
-    Ok(())
+    })?;
+
+    Some(format!(
+        "Pin '{}' is already used by {}. Clear that assignment first.",
+        conflict.pin_label,
+        conflict
+            .constants
+            .iter()
+            .filter(|c| c.as_str() != name)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(", ")
+    ))
 }
 
 #[cfg(test)]

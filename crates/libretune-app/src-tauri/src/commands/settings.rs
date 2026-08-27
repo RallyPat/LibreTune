@@ -186,6 +186,15 @@ fn apply_setting(settings: &mut Settings, key: &str, value: &str) -> Result<(), 
                 settings.ai_risk_acknowledged = false;
                 settings.ai_assistant_enabled = false;
             }
+            // Prefer the OS keychain for the secret; when no backend is
+            // available, fall back to the settings file (previous behavior).
+            if value.is_empty() {
+                crate::commands::ai_keychain::delete();
+            } else if crate::commands::ai_keychain::store(value).is_err() {
+                eprintln!(
+                    "[WARN] no OS keychain available; storing the AI API key in settings.json"
+                );
+            }
             settings.ai_api_key = value.to_string();
         }
         "ai_model" => settings.ai_model = value.to_string(),

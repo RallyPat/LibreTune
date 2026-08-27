@@ -12,7 +12,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { Button } from '../common';
 import type {
   AgentAction,
-  ApplyResult,
+  ApplyProposalsResponse,
   ProposedAction,
 } from '../../types/agent';
 import './AgentPanel.css';
@@ -22,8 +22,8 @@ export interface ProposalQueueProps {
   proposed: ProposedAction[];
   /** Clear the queue (after applying / dismissing). */
   onClear: () => void;
-  /** Notified when an item is applied (so the parent can refresh views). */
-  onApplied?: (results: ApplyResult[]) => void;
+  /** Notified when items are applied (so the parent can refresh views / report). */
+  onApplied?: (response: ApplyProposalsResponse) => void;
 }
 
 /** Render a human-readable label for an action. */
@@ -63,6 +63,7 @@ export function ProposalQueue({ proposed, onClear, onApplied }: ProposalQueuePro
   const [decisions, setDecisions] = useState<Record<number, boolean>>({});
   const [applying, setApplying] = useState(false);
   const [applyError, setApplyError] = useState<string | null>(null);
+  const [batchWarnings, setBatchWarnings] = useState<string[]>([]);
 
   const setDecision = (idx: number, accept: boolean) => {
     setDecisions((prev) => ({ ...prev, [idx]: accept }));
@@ -78,11 +79,13 @@ export function ProposalQueue({ proposed, onClear, onApplied }: ProposalQueuePro
     if (acceptedActions.length === 0) return;
     setApplying(true);
     setApplyError(null);
+    setBatchWarnings([]);
     try {
-      const results = await invoke<ApplyResult[]>('agent_apply_proposals', {
+      const response = await invoke<ApplyProposalsResponse>('agent_apply_proposals', {
         request: { actions: acceptedActions },
       });
-      onApplied?.(results);
+      setBatchWarnings(response.batch_warnings ?? []);
+      onApplied?.(response);
       onClear();
       setDecisions({});
     } catch (e) {
@@ -186,6 +189,14 @@ export function ProposalQueue({ proposed, onClear, onApplied }: ProposalQueuePro
       </ul>
 
       {applyError && <div className="proposal-apply-error">{applyError}</div>}
+
+      {batchWarnings.length > 0 && (
+        <div className="proposal-batch-warnings">
+          {batchWarnings.map((w, i) => (
+            <div key={i}>• {w}</div>
+          ))}
+        </div>
+      )}
 
       <div className="proposal-queue-footer">
         <Button

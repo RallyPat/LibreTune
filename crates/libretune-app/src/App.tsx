@@ -1571,17 +1571,21 @@ function AppContent() {
 
   // Listen for the agent pop-out window's "dock back" signal: re-show the
   // docked side panel. (Mirrors the tab:dock handling in useTabPopout.)
+  // `agent:ask` (the table editors' "Ask AI" button) also opens the panel;
+  // the panel itself listens for the payload to pre-fill context.
   useEffect(() => {
     let unlisten: (() => void) | undefined;
+    let unlistenAsk: (() => void) | undefined;
     (async () => {
       try {
         const { listen } = await import('@tauri-apps/api/event');
         unlisten = await listen('agent:dock', () => setAgentPanelVisible(true));
+        unlistenAsk = await listen('agent:ask', () => setAgentPanelVisible(true));
       } catch {
         // non-fatal
       }
     })();
-    return () => { unlisten?.(); };
+    return () => { unlisten?.(); unlistenAsk?.(); };
   }, []);
 
   // Toolbar items

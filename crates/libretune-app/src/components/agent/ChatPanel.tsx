@@ -10,8 +10,10 @@
 import { useState, useRef, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { Button } from '../common';
+import { useUnitPreferences } from '../../contexts/useUnitPreferences';
 import type {
   AgentStatus,
+  LlmUsage,
   Proposal,
   ProposedAction,
   SerializedMessage,
@@ -22,8 +24,15 @@ export interface ChatPanelProps {
   status: AgentStatus | null;
   /** When the assistant proposes changes, hand them to the review queue. */
   onProposals: (proposed: ProposedAction[]) => void;
+  /** Token usage for each completed turn (cost transparency). */
+  onUsage?: (usage: LlmUsage) => void;
   /** System prompt describing current ECU/tune context. */
   systemPrompt: string;
+  /** One-shot extra context (e.g. "asking about table X") appended to the
+   * system prompt — set by the "Ask AI" table-editor button. */
+  extraContext?: string | null;
+  /** Prefill the input (nonce forces re-application of identical text). */
+  prefill?: { text: string; nonce: number } | null;
   /** Controlled transcript (owned by the parent for chat history). */
   transcript: TranscriptEntry[];
   /** Update the transcript. */
@@ -39,14 +48,47 @@ export interface TranscriptEntry {
 export function ChatPanel({
   status,
   onProposals,
+  onUsage,
   systemPrompt,
+  extraContext,
+  prefill,
   transcript,
   onTranscriptChange,
 }: ChatPanelProps) {
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [activity, setActivity] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const { preferences } = useUnitPreferences();
+
+  // Listen for backend progress events (agent:progress) so the pending
+  // bubble shows live activity — "reading veTable1…" — instead of silence
+  // through multi-second read rounds.
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    (async () => {
+      try {
+        const { listen } = await import('@tauri-apps/api/event');
+        unlisten = await listen<{ phase: string; round?: number; tool?: string }>(
+          'agent:progress',
+          (event) => {
+            const p = event.payload;
+            if (p.phase === 'thinking') {
+              setActivity(
+                p.round && p.round > 0 ? `thinking (round ${p.round + 1})…` : 'thinking…'
+              );
+            } else if (p.phase === 'reading_tool') {
+              setActivity(`reading ${p.tool}…`);
+            }
+          }
+        );
+      } catch {
+        // Non-fatal: events are a nicety, the turn still works without them.
+      }
+    })();
+    return () => unlisten?.();
+  }, []);
 
   // Auto-scroll to the latest message.
   useEffect(() => {
@@ -55,6 +97,13 @@ export function ChatPanel({
     }
   }, [transcript]);
 
+  // Apply an external prefill ("Ask AI" button) into the input box.
+  useEffect(() => {
+    if (prefill) {
+      setInput(prefill.text);
+    }
+  }, [prefill]);
+
   const enabled = status?.enabled && status?.risk_acknowledged && status?.configured;
 
   const send = async () => {
@@ -62,6 +111,7 @@ export function ChatPanel({
     if (!message || sending || !enabled) return;
     setInput('');
     setError(null);
+    setActivity('thinking…');
 
     // Snapshot the transcript at the START of this turn. We build the updated
     // transcript from this snapshot rather than re-reading the `transcript`
@@ -86,7 +136,17 @@ export function ChatPanel({
         request: {
           user_message: message,
           history,
-          system_prompt: systemPrompt,
+          system_prompt: extraContext
+            ? `${systemPrompt}\n\nCurrent focus: ${extraContext}`
+            : systemPrompt,
+          // Read-tool results are converted to the user's display units so
+          // the model's answers match what the UI shows.
+          unit_prefs: {
+            temperature: preferences.temperature,
+            pressure: preferences.pressure,
+            afr: preferences.afr,
+            fuel_type: preferences.fuelType,
+          },
         },
       });
       // Replace the pending placeholder with the real reply.
@@ -94,6 +154,9 @@ export function ChatPanel({
         e.pending ? { role: 'assistant' as const, content: proposal.reply || '(no reply)' } : e
       );
       onTranscriptChange(afterReply);
+      if (proposal.usage) {
+        onUsage?.(proposal.usage);
+      }
       if (proposal.proposed.length > 0) {
         onProposals(proposal.proposed);
       }
@@ -113,6 +176,7 @@ export function ChatPanel({
       }
     } finally {
       setSending(false);
+      setActivity(null);
     }
   };
 
@@ -173,7 +237,7 @@ export function ChatPanel({
               {entry.role === 'user' ? 'You' : 'Assistant'}
             </span>
             <span className="agent-chat-content">
-              {entry.pending ? 'Thinking…' : entry.content}
+              {entry.pending ? (activity ?? 'Thinking…') : entry.content}
             </span>
           </div>
         ))}
