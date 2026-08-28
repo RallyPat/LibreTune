@@ -99,6 +99,11 @@ struct Pipe {
     /// hardcoded signature would only ever match Speeduino.
     signature: String,
     version: String,
+    /// The command this ECU answers with its signature. Speeduino asks with
+    /// `Q` and uses `S` for the version; the rusEFI family asks with `S`.
+    /// Taken from the INI so the simulator matches whichever it was built
+    /// from.
+    query_cmd: u8,
     /// Whether realtime requests advance the engine off the wall clock.
     /// Permanently disabled once a caller drives time explicitly, so tests
     /// never race the clock.
@@ -129,6 +134,9 @@ impl Pipe {
                 .map(|d| d.signature.clone())
                 .filter(|s| !s.is_empty())
                 .unwrap_or_else(|| EcuSimulator::DEFAULT_SIGNATURE.to_string()),
+            query_cmd: def
+                .and_then(|d| d.protocol.query_command.bytes().next())
+                .unwrap_or(b'Q'),
             version: def
                 .map(|d| d.version_info.clone())
                 .filter(|s| !s.is_empty())
@@ -249,17 +257,15 @@ fn respond(cmd: &[u8], pipe: &mut Pipe, enveloped: bool) -> Vec<u8> {
             body
         }
     };
-    match cmd.first().copied().unwrap_or(0) {
-        b'Q' => {
-            let mut v = pipe.signature.as_bytes().to_vec();
-            v.push(0);
-            ok(v)
-        }
-        b'S' => {
-            let mut v = pipe.version.as_bytes().to_vec();
-            v.push(0);
-            ok(v)
-        }
+    let cmd_byte = cmd.first().copied().unwrap_or(0);
+    // The INI's own query command wins: answering `S` with a version string
+    // would fail every rusEFI-family handshake, which asks with `S`.
+    if cmd_byte == pipe.query_cmd {
+        return ok(pipe.signature.as_bytes().to_vec());
+    }
+    match cmd_byte {
+        b'Q' => ok(pipe.signature.as_bytes().to_vec()),
+        b'S' => ok(pipe.version.as_bytes().to_vec()),
         b'A' => ok(vec![pipe.secl]),
         b'p' => match parse_page_offset_count(cmd) {
             Some((page, offset, count)) => ok(pipe.memory.read(page, offset, count)),
@@ -552,11 +558,7 @@ mod tests {
         channel.write_all(b"Q").expect("write succeeds");
 
         let response = read_n(&mut channel, 64);
-        assert_eq!(
-            &response[..response.len() - 1],
-            EcuSimulator::DEFAULT_SIGNATURE.as_bytes(),
-            "signature is NUL-terminated"
-        );
+        assert_eq!(response, EcuSimulator::DEFAULT_SIGNATURE.as_bytes());
     }
 
     #[test]
@@ -571,7 +573,7 @@ mod tests {
         channel.write_all(b"Q").expect("write succeeds");
 
         let response = read_n(&mut channel, 64);
-        assert_eq!(&response[..response.len() - 1], b"epicEFI 1.2.3");
+        assert_eq!(response, b"epicEFI 1.2.3");
     }
 
     #[test]
@@ -663,7 +665,7 @@ mod tests {
             "enveloped replies carry a return code"
         );
         assert_eq!(
-            &packet.payload[1..packet.payload.len() - 1],
+            &packet.payload[1..],
             EcuSimulator::DEFAULT_SIGNATURE.as_bytes(),
             "the signature follows the return code"
         );
@@ -722,7 +724,7 @@ mod tests {
         channel.write_all(b"Q").expect("write succeeds");
 
         let waiting = channel.bytes_to_read().expect("query succeeds") as usize;
-        assert_eq!(waiting, EcuSimulator::DEFAULT_SIGNATURE.len() + 1);
+        assert_eq!(waiting, EcuSimulator::DEFAULT_SIGNATURE.len());
     }
 
     #[test]

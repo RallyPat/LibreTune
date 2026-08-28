@@ -10,6 +10,10 @@
 use crate::ini::{DataType, EcuDefinition, Endianness, OutputChannel};
 use std::collections::HashMap;
 
+/// Stoichiometric AFR for petrol, used to report lambda where an INI asks
+/// for it instead of AFR.
+const STOICH_AFR: f64 = 14.7;
+
 /// One tick's physical values, produced by the engine model.
 ///
 /// Field semantics follow the Speeduino `[OutputChannels]` names they feed.
@@ -40,26 +44,34 @@ pub(crate) struct ChannelValues {
 }
 
 impl ChannelValues {
-    /// Physical value for a named scalar channel, per the Speeduino
-    /// `[OutputChannels]` naming. Unknown names are `None` — their block
-    /// bytes are left untouched.
+    /// Physical value for a named scalar channel.
+    ///
+    /// Covers both naming conventions LibreTune sees: Speeduino's short
+    /// names and the rusEFI/FOME/epicEFI family's longer ones. Getting this
+    /// wrong is silent — an unmatched name simply leaves its bytes at zero —
+    /// so the demo INI's names are covered by an integration test.
     fn scalar(&self, name: &str) -> Option<f64> {
         Some(match name {
             "secl" => f64::from(self.secl),
-            "rpm" => f64::from(self.rpm),
-            "map" => f64::from(self.map_kpa),
-            "baro" => f64::from(self.baro_kpa),
+            "rpm" | "RPMValue" => f64::from(self.rpm),
+            "map" | "MAPValue" => f64::from(self.map_kpa),
+            "baro" | "baroPressure" => f64::from(self.baro_kpa),
             // Raw temperature sensors carry the firmware's +40 °C offset
             // (the INI pairs them with `{ raw - 40 }` computed channels).
             "coolantRaw" => f64::from(self.coolant_c + 40),
             "iatRaw" => f64::from(self.iat_c + 40),
             "coolant" => f64::from(self.coolant_c),
-            "iat" => f64::from(self.iat_c),
-            "tps" | "throttle" => f64::from(self.tps_percent),
-            "batteryVoltage" => f64::from(self.battery_dv) / 10.0,
-            "advance" => f64::from(self.advance_deg),
+            "iat" | "intake" => f64::from(self.iat_c),
+            "tps" | "throttle" | "TPSValue" | "throttlePedalPosition" => {
+                f64::from(self.tps_percent)
+            }
+            "batteryVoltage" | "VBatt" => f64::from(self.battery_dv) / 10.0,
+            "advance" | "ignitionAdvance" => f64::from(self.advance_deg),
             "afrTarget" => self.afr_target,
             "afr" => self.afr,
+            // The rusEFI family reports lambda, not AFR.
+            "lambdaValue" => self.afr / STOICH_AFR,
+            "targetLambda" | "lambdaTarget" => self.afr_target / STOICH_AFR,
             "egoCorrection" => self.ego_correction,
             // Speeduino `engine` bitfield: BIT_ENGINE_RUN=0, BIT_ENGINE_CRANK=1.
             "engine" => f64::from(u8::from(self.running) | (u8::from(self.cranking) << 1)),

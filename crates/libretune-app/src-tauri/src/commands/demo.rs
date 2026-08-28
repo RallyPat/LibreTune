@@ -109,7 +109,13 @@ pub async fn set_demo_mode(
 /// handshake doesn't come up.
 fn connect_simulator(def: &EcuDefinition) -> Option<Connection> {
     let simulator = EcuSimulator::from_definition(def);
-    let mut connection = Connection::new(ConnectionConfig::default());
+    // The handshake has to use the INI's own query command and endianness,
+    // or it falls back to a generic probe and misreads the reply.
+    let mut connection = Connection::with_protocol(
+        ConnectionConfig::default(),
+        def.protocol.clone(),
+        def.endianness,
+    );
     match connection.connect_with_channel(Box::new(simulator.channel())) {
         Ok(()) => Some(connection),
         Err(error) => {
