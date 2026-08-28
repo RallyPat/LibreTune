@@ -11,7 +11,7 @@
 use super::engine::{EngineMode, SimEngine};
 use super::ve_model::{self, VeContext};
 use crate::ecu::EcuMemory;
-use crate::ini::EcuDefinition;
+use crate::ini::{EcuDefinition, Endianness};
 use crate::protocol::{CommunicationChannel, EnvelopeOrder, Packet};
 use std::collections::VecDeque;
 use std::io::{self, Read, Write};
@@ -104,6 +104,10 @@ struct Pipe {
     /// Taken from the INI so the simulator matches whichever it was built
     /// from.
     query_cmd: u8,
+    /// Whether `%2o`/`%2c`/`%2i` command parameters are little-endian. The
+    /// rusEFI family declares `endianness = little` and sends them that way;
+    /// Speeduino and MS2/MS3 send them big-endian.
+    cmd_le: bool,
     /// Whether realtime requests advance the engine off the wall clock.
     /// Permanently disabled once a caller drives time explicitly, so tests
     /// never race the clock.
@@ -134,6 +138,9 @@ impl Pipe {
                 .map(|d| d.signature.clone())
                 .filter(|s| !s.is_empty())
                 .unwrap_or_else(|| EcuSimulator::DEFAULT_SIGNATURE.to_string()),
+            cmd_le: def
+                .map(|d| d.endianness == Endianness::Little)
+                .unwrap_or(false),
             query_cmd: def
                 .and_then(|d| d.protocol.query_command.bytes().next())
                 .unwrap_or(b'Q'),
@@ -187,17 +194,39 @@ impl Pipe {
     }
 }
 
+/// Whether `b` starts a plain-protocol command this ECU understands.
+///
+/// This is how a frame is told apart from a bare command. Sniffing for a
+/// leading `0x00` — the high byte of the envelope's length field — only works
+/// while payloads stay under 256 bytes, and a page write chunk is thousands,
+/// so that test silently misreads every large write as a command byte.
+fn is_command_byte(b: u8) -> bool {
+    matches!(
+        b,
+        b'Q' | b'S' | b'A' | b'p' | b'M' | b'b' | b'r' | b'R' | b'C' | b'B' | b'k' | b'O'
+    )
+}
+
 /// Total byte length of the plain-protocol command at the front of `buf`, or
 /// `None` when too few bytes have arrived to even tell.
-fn plain_command_len(buf: &VecDeque<u8>) -> Option<usize> {
+fn plain_command_len(buf: &VecDeque<u8>, cmd_le: bool) -> Option<usize> {
     match *buf.front()? {
-        b'p' | b'r' => Some(7),
-        b'b' => Some(3),
-        b'M' => {
+        // cmd + %2i + %2o + %2c, and 'r' + canId + subcmd + %2o + %2c.
+        b'p' | b'r' | b'R' | b'k' => Some(7),
+        // 'O' + %2o + %2c
+        b'O' => Some(5),
+        // cmd + %2i
+        b'b' | b'B' => Some(3),
+        // cmd + %2i + %2o + %2c + %v
+        b'M' | b'C' => {
             if buf.len() < 7 {
                 return None;
             }
-            let count = u16::from_le_bytes([buf[5], buf[6]]) as usize;
+            let count = if cmd_le {
+                u16::from_le_bytes([buf[5], buf[6]])
+            } else {
+                u16::from_be_bytes([buf[5], buf[6]])
+            } as usize;
             Some(7 + count)
         }
         // 'Q' / 'S' / 'A' and anything unrecognized.
@@ -205,28 +234,46 @@ fn plain_command_len(buf: &VecDeque<u8>) -> Option<usize> {
     }
 }
 
-/// `(page, offset, count)` from a `p`/`M` command. The page identifier's
-/// high byte is always zero on this protocol, so only the low byte is read.
-fn parse_page_offset_count(bytes: &[u8]) -> Option<(u8, u16, u16)> {
-    let page = *bytes.get(2)?;
-    let offset = u16::from_le_bytes([*bytes.get(3)?, *bytes.get(4)?]);
-    let count = u16::from_le_bytes([*bytes.get(5)?, *bytes.get(6)?]);
-    Some((page, offset, count))
+/// Decode a two-byte command parameter at `at`, honouring the dialect's
+/// command-parameter byte order.
+fn param_u16(bytes: &[u8], at: usize, cmd_le: bool) -> Option<u16> {
+    let pair = [*bytes.get(at)?, *bytes.get(at + 1)?];
+    Some(if cmd_le {
+        u16::from_le_bytes(pair)
+    } else {
+        u16::from_be_bytes(pair)
+    })
 }
 
-fn parse_page(bytes: &[u8]) -> Option<u8> {
-    bytes.get(2).copied()
+/// `(page, offset, count)` from a `p`/`M` command, or their rusEFI-family
+/// spellings `R`/`C`. The page identifier's
+/// high byte is always zero on this protocol, so only the low byte is read.
+fn parse_page_offset_count(bytes: &[u8], cmd_le: bool) -> Option<(u8, u16, u16)> {
+    let page = u8::try_from(param_u16(bytes, 1, cmd_le)?).ok()?;
+    Some((
+        page,
+        param_u16(bytes, 3, cmd_le)?,
+        param_u16(bytes, 5, cmd_le)?,
+    ))
+}
+
+fn parse_page(bytes: &[u8], cmd_le: bool) -> Option<u8> {
+    u8::try_from(param_u16(bytes, 1, cmd_le)?).ok()
 }
 
 /// `(offset, len)` from an `r` command: `['r', canId, 0x30, offset, len]`.
 /// Byte 1 is the CAN id, discarded exactly as the firmware discards it.
-fn parse_och_window(bytes: &[u8]) -> Option<(u16, u16)> {
+fn parse_och_window(bytes: &[u8], cmd_le: bool) -> Option<(u16, u16)> {
     if *bytes.get(2)? != SUBCMD_OUTPUT_CHANNELS {
         return None;
     }
-    let offset = u16::from_le_bytes([*bytes.get(3)?, *bytes.get(4)?]);
-    let len = u16::from_le_bytes([*bytes.get(5)?, *bytes.get(6)?]);
-    Some((offset, len))
+    Some((param_u16(bytes, 3, cmd_le)?, param_u16(bytes, 5, cmd_le)?))
+}
+
+/// `(offset, len)` from an `O%2o%2c` command — the realtime request the
+/// rusEFI family's INIs declare via `ochGetCommand`.
+fn parse_och_get(bytes: &[u8], cmd_le: bool) -> Option<(u16, u16)> {
+    Some((param_u16(bytes, 1, cmd_le)?, param_u16(bytes, 3, cmd_le)?))
 }
 
 /// Window `len` bytes at `offset` out of the realtime block, zero-padding
@@ -266,13 +313,24 @@ fn respond(cmd: &[u8], pipe: &mut Pipe, enveloped: bool) -> Vec<u8> {
     match cmd_byte {
         b'Q' => ok(pipe.signature.as_bytes().to_vec()),
         b'S' => ok(pipe.version.as_bytes().to_vec()),
-        b'A' => ok(vec![pipe.secl]),
-        b'p' => match parse_page_offset_count(cmd) {
+        // Speeduino's 'A' is a whole-frame realtime request, and it is also
+        // the default burst command when an INI declares none. Answering one
+        // byte would starve any client that falls back to it.
+        b'A' => {
+            pipe.on_och_request();
+            pipe.auto_tick();
+            if pipe.och_block.is_empty() {
+                ok(vec![pipe.secl])
+            } else {
+                ok(pipe.och_block.clone())
+            }
+        }
+        b'p' | b'R' => match parse_page_offset_count(cmd, pipe.cmd_le) {
             Some((page, offset, count)) => ok(pipe.memory.read(page, offset, count)),
             None => ok(Vec::new()),
         },
-        b'M' => {
-            if let Some((page, offset, count)) = parse_page_offset_count(cmd) {
+        b'M' | b'C' => {
+            if let Some((page, offset, count)) = parse_page_offset_count(cmd, pipe.cmd_le) {
                 let value = cmd.get(7..7 + count as usize).unwrap_or(&[]);
                 pipe.memory.write(page, offset, value);
             }
@@ -282,8 +340,8 @@ fn respond(cmd: &[u8], pipe: &mut Pipe, enveloped: bool) -> Vec<u8> {
                 Vec::new()
             }
         }
-        b'b' => {
-            if let Some(page) = parse_page(cmd) {
+        b'b' | b'B' => {
+            if let Some(page) = parse_page(cmd, pipe.cmd_le) {
                 pipe.memory.burn(page);
             }
             if enveloped {
@@ -292,7 +350,23 @@ fn respond(cmd: &[u8], pipe: &mut Pipe, enveloped: bool) -> Vec<u8> {
                 Vec::new()
             }
         }
-        b'r' => match parse_och_window(cmd) {
+        b'k' => match parse_page_offset_count(cmd, pipe.cmd_le) {
+            Some((page, offset, count)) => {
+                let mut hasher = crc32fast::Hasher::new();
+                hasher.update(&pipe.memory.read(page, offset, count));
+                ok(hasher.finalize().to_be_bytes().to_vec())
+            }
+            None => ok(Vec::new()),
+        },
+        b'O' => match parse_och_get(cmd, pipe.cmd_le) {
+            Some((offset, len)) => {
+                pipe.on_och_request();
+                pipe.auto_tick();
+                ok(och_window(&pipe.och_block, offset, len))
+            }
+            None => ok(Vec::new()),
+        },
+        b'r' => match parse_och_window(cmd, pipe.cmd_le) {
             Some((offset, len)) => {
                 pipe.on_och_request();
                 pipe.auto_tick();
@@ -311,7 +385,7 @@ fn process(pipe: &Arc<Mutex<Pipe>>) {
         return;
     }
     while !p.cmd_buf.is_empty() {
-        if *p.cmd_buf.front().unwrap() == 0x00 {
+        if !is_command_byte(*p.cmd_buf.front().unwrap()) {
             // CRC envelope: [len(2), payload.., crc(4)]
             if p.cmd_buf.len() < 2 {
                 break;
@@ -329,9 +403,13 @@ fn process(pipe: &Arc<Mutex<Pipe>>) {
             let order = p.envelope;
             let framed = Packet::new(response).to_bytes_ordered(order);
             p.rsp_buf.extend(framed);
-            return;
+            // Keep draining: a client that pipelines several frames before
+            // reading must get an answer to every one of them, not just the
+            // first.
+            continue;
         }
-        let Some(len) = plain_command_len(&p.cmd_buf) else {
+        let cmd_le = p.cmd_le;
+        let Some(len) = plain_command_len(&p.cmd_buf, cmd_le) else {
             break;
         };
         if p.cmd_buf.len() < len {
@@ -578,11 +656,13 @@ mod tests {
 
     #[test]
     fn page_writes_are_readable_back_at_the_same_offset() {
+        // Page ids are two-byte command parameters, so they follow the
+        // definition's endianness — little here, hence [page, 0].
         let sim = EcuSimulator::from_definition(&definition());
         let mut channel = sim.channel();
 
         // 'M': page 1, offset 2, count 3, then the value bytes.
-        let mut write = vec![b'M', 0, 1, 2, 0, 3, 0];
+        let mut write = vec![b'M', 1, 0, 2, 0, 3, 0];
         write.extend([0xAA, 0xBB, 0xCC]);
         channel.write_all(&write).expect("write succeeds");
         assert_eq!(
@@ -592,7 +672,7 @@ mod tests {
         );
 
         channel
-            .write_all(&[b'p', 0, 1, 2, 0, 3, 0])
+            .write_all(&[b'p', 1, 0, 2, 0, 3, 0])
             .expect("write succeeds");
         assert_eq!(read_n(&mut channel, 3), vec![0xAA, 0xBB, 0xCC]);
     }
@@ -669,6 +749,49 @@ mod tests {
             EcuSimulator::DEFAULT_SIGNATURE.as_bytes(),
             "the signature follows the return code"
         );
+    }
+
+    #[test]
+    fn an_enveloped_payload_over_255_bytes_is_still_read_as_a_frame() {
+        // The length field's high byte is only zero while payloads stay
+        // small. A page-write chunk is thousands of bytes, so telling frames
+        // apart by that byte misreads every real write as a command.
+        let sim = EcuSimulator::from_definition(&definition());
+        let mut channel = sim.channel();
+        let count: u16 = 300;
+        let mut payload = vec![b'M', 0, 0];
+        payload.extend(0u16.to_le_bytes());
+        payload.extend(count.to_le_bytes());
+        payload.extend(std::iter::repeat_n(0xABu8, count as usize));
+        assert!(
+            payload.len() > 255,
+            "the payload must cross the byte boundary"
+        );
+
+        channel
+            .write_all(&Packet::new(payload).to_bytes())
+            .expect("write succeeds");
+
+        let response = read_n(&mut channel, 64);
+        let packet = Packet::from_bytes(&response).expect("a frame comes back");
+        assert_eq!(packet.payload, vec![RC_OK], "the write is acknowledged");
+    }
+
+    #[test]
+    fn the_rusefi_command_spellings_reach_the_same_handlers() {
+        // The rusEFI family declares R/C/B where Speeduino uses p/M/b; an
+        // INI-driven client sends whichever its definition names.
+        let sim = EcuSimulator::from_definition(&definition());
+        let mut channel = sim.channel();
+
+        channel
+            .write_all(&[b'C', 1, 0, 0, 0, 1, 0, 0x5A])
+            .expect("write succeeds");
+        channel
+            .write_all(&[b'R', 1, 0, 0, 0, 1, 0])
+            .expect("read succeeds");
+
+        assert_eq!(read_n(&mut channel, 1), vec![0x5A]);
     }
 
     #[test]

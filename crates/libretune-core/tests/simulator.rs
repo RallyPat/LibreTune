@@ -42,6 +42,44 @@ fn a_connection_handshakes_against_the_simulator_and_reports_its_signature() {
 }
 
 #[test]
+fn a_connection_reads_the_whole_realtime_block_the_way_the_app_does() {
+    // Driven through Connection rather than raw bytes: the demo INI asks for
+    // realtime with `ochGetCommand = "O%2o%2c"`, and a simulator that only
+    // answered the other realtime command would hand back a single byte here
+    // while every raw-bytes test still passed.
+    let def = demo_definition();
+    let mut connection = connect(&def);
+
+    let block = connection
+        .get_realtime_data()
+        .expect("the simulator answers the INI's own realtime command");
+
+    assert_eq!(
+        block.len(),
+        def.protocol.och_block_size as usize,
+        "a short frame means the realtime command was not understood"
+    );
+}
+
+#[test]
+fn a_connection_reads_back_a_page_it_wrote() {
+    let def = demo_definition();
+    let mut connection = connect(&def);
+    let page = 0u8;
+    let original = connection.read_page(page).expect("page reads");
+    let mut changed = original.clone();
+    changed[0] = original[0].wrapping_add(1);
+
+    connection.write_page(page, &changed).expect("page writes");
+
+    assert_eq!(
+        connection.read_page(page).expect("page reads back"),
+        changed,
+        "the simulator must store what was written to it"
+    );
+}
+
+#[test]
 fn the_realtime_block_animates_over_time() {
     let def = demo_definition();
     let simulator = EcuSimulator::from_definition(&def);
