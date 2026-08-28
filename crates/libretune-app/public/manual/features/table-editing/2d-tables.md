@@ -70,9 +70,14 @@ The color scale is based on the table's min/max range.
 ## Follow Mode
 
 When connected to ECU:
-1. Click the crosshair icon
+1. Click the crosshair icon (or press `F`)
 2. Current operating cell is highlighted
 3. Values update in real-time
+
+A **trace line** through the recently visited cells is drawn over the grid,
+ending in a bright dot on the current cell. Older segments fade according to
+the *Trail fade* setting; if the table's INI declares no axis channels, the
+standard `rpm` / `map` channels drive the cursor.
 
 ## Tips
 
