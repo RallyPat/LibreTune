@@ -90,7 +90,7 @@ describe('AfrCalibrationDialog preset preview', () => {
     expect(await screen.findByText('0 V → 10.00')).toBeInTheDocument();
     expect(screen.getByText('5 V → 20.00')).toBeInTheDocument();
 
-    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'Innovate LC-2' } });
+    fireEvent.change(screen.getByLabelText(/wideband controller/i), { target: { value: 'Innovate LC-2' } });
 
     // Exact argument name: `preset`, not a paraphrase of it.
     await waitFor(() => expect(previewCalls()).toContainEqual({ preset: 'Innovate LC-2' }));
@@ -112,7 +112,7 @@ describe('AfrCalibrationDialog preset preview', () => {
     render(<AfrCalibrationDialog isOpen onClose={() => {}} connected showToast={vi.fn()} />);
 
     await screen.findByRole('option', { name: /14Point7 Spartan/ });
-    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'custom' } });
+    fireEvent.change(screen.getByLabelText(/wideband controller/i), { target: { value: 'custom' } });
 
     // linear_defaults = (xLow, xHigh, yLow, yHigh) → (1 V, 9.7) and (4 V, 18.7).
     await waitFor(() =>

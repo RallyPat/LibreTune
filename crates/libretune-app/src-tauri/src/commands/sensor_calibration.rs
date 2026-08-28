@@ -283,29 +283,49 @@ pub async fn preview_afr_calibration(
     state: tauri::State<'_, AppState>,
     preset: Option<String>,
     linear: Option<((f64, f64), (f64, f64))>,
+    correction: Option<Vec<(f64, f64)>>,
 ) -> Result<AfrCurve, String> {
-    if let Some((p1, p2)) = linear {
+    // The base curve: the INI preset, or the manual two-point line.
+    let (mut afr, mut transfer): (Vec<f64>, Option<String>) = if let Some((p1, p2)) = linear {
         let cal = LinearWideband::new(p1, p2).map_err(|e| e.to_string())?;
-        let mut curve = describe_curve(&cal.curve());
-        curve.transfer_function = cal.describe();
-        return Ok(curve);
+        (cal.curve(), Some(cal.describe()))
+    } else {
+        let label = preset.ok_or("no preset or custom linear points given")?;
+        let mut cache = inc_table_cache(&state).await;
+
+        let def_guard = state.definition.lock().await;
+        let def = def_guard.as_ref().ok_or("Definition not loaded")?;
+        let block = def
+            .reference_tables
+            .values()
+            .find(|t| t.has_identifier(O2_TABLE_ID))
+            .ok_or("this INI declares no AFR calibration table")?;
+
+        let curve = calibration::solution_curve(block, &label, &mut cache)
+            .ok_or_else(|| format!("no calibration preset named '{label}'"))?
+            .map_err(|e| e.to_string())?;
+        (curve, None)
+    };
+
+    // An optional reference correction over the base: one (measured, expected)
+    // pair shifts offset, two solve gain and offset. Applied HERE rather than
+    // in the dialog so the plotted curve and the written curve cannot drift
+    // apart - the dialog writes exactly what this returns.
+    if let Some(points) = correction.filter(|p| !p.is_empty()) {
+        let corr = calibration::AfrCorrection::from_points(&points).map_err(|e| e.to_string())?;
+        corr.apply(&mut afr);
+        let suffix = corr.describe();
+        transfer = Some(match transfer {
+            Some(t) => format!("{t}; {suffix}"),
+            None => suffix,
+        });
     }
 
-    let label = preset.ok_or("no preset or custom linear points given")?;
-    let mut cache = inc_table_cache(&state).await;
-
-    let def_guard = state.definition.lock().await;
-    let def = def_guard.as_ref().ok_or("Definition not loaded")?;
-    let block = def
-        .reference_tables
-        .values()
-        .find(|t| t.has_identifier(O2_TABLE_ID))
-        .ok_or("this INI declares no AFR calibration table")?;
-
-    let afr = calibration::solution_curve(block, &label, &mut cache)
-        .ok_or_else(|| format!("no calibration preset named '{label}'"))?
-        .map_err(|e| e.to_string())?;
-    Ok(describe_curve(&afr))
+    let mut curve = describe_curve(&afr);
+    if let Some(t) = transfer {
+        curve.transfer_function = t;
+    }
+    Ok(curve)
 }
 
 /// The corrected calibration solved from a captured key-on trace.

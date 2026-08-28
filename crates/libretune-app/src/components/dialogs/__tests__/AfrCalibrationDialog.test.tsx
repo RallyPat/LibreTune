@@ -107,3 +107,103 @@ describe('AfrCalibrationDialog', () => {
     expect(screen.getByText(/not connected/i)).toBeInTheDocument();
   });
 });
+
+describe('reference correction', () => {
+  beforeEach(() => {
+    localStorage.removeItem('lt.afrCalibration');
+    setupTauriMocks({
+      list_calibration_presets: PRESETS,
+      preview_afr_calibration: curveOf(10, 20),
+      write_afr_calibration: {
+        table: 'o2',
+        verified: true,
+        verify_note: null,
+        transfer_function: '10.00–20.00 AFR over 0–5 V',
+      },
+    });
+  });
+
+  afterEach(() => {
+    tearDownTauriMocks();
+    localStorage.removeItem('lt.afrCalibration');
+  });
+
+  function correctionSentToPreview(): unknown {
+    const calls = (invoke as any).mock.calls.filter(
+      (c: any[]) => c[0] === 'preview_afr_calibration',
+    );
+    return calls.length ? calls[calls.length - 1][1].correction : undefined;
+  }
+
+  it('is off by default and sends no correction', async () => {
+    render(
+      <AfrCalibrationDialog isOpen onClose={() => {}} connected showToast={vi.fn()} />,
+    );
+    await screen.findByLabelText(/correct against a reference/i);
+    await waitFor(() => expect(correctionSentToPreview()).toBeUndefined());
+    expect(screen.queryByLabelText(/measured \(ecu\)/i)).toBeNull();
+  });
+
+  it('single point sends one measured/expected pair to the preview', async () => {
+    render(
+      <AfrCalibrationDialog isOpen onClose={() => {}} connected showToast={vi.fn()} />,
+    );
+    const mode = await screen.findByLabelText(/correct against a reference/i);
+    fireEvent.change(mode, { target: { value: 'one' } });
+
+    const measured = await screen.findByLabelText(/^measured \(ecu\)/i);
+    const expected = screen.getByLabelText(/^expected \(reference\)/i);
+    fireEvent.change(measured, { target: { value: '14.2' } });
+    fireEvent.change(expected, { target: { value: '14.7' } });
+
+    await waitFor(() => expect(correctionSentToPreview()).toEqual([[14.2, 14.7]]));
+    // Two-point rows must not be shown in single-point mode.
+    expect(screen.queryByLabelText(/point 2 measured/i)).toBeNull();
+  });
+
+  it('two point sends both pairs, in order', async () => {
+    render(
+      <AfrCalibrationDialog isOpen onClose={() => {}} connected showToast={vi.fn()} />,
+    );
+    const mode = await screen.findByLabelText(/correct against a reference/i);
+    fireEvent.change(mode, { target: { value: 'two' } });
+
+    fireEvent.change(await screen.findByLabelText(/point 1 measured/i), {
+      target: { value: '12.5' },
+    });
+    fireEvent.change(screen.getByLabelText(/point 1 expected/i), {
+      target: { value: '12.08' },
+    });
+    fireEvent.change(screen.getByLabelText(/point 2 measured/i), {
+      target: { value: '19' },
+    });
+    fireEvent.change(screen.getByLabelText(/point 2 expected/i), {
+      target: { value: '18.25' },
+    });
+
+    await waitFor(() =>
+      expect(correctionSentToPreview()).toEqual([
+        [12.5, 12.08],
+        [19, 18.25],
+      ]),
+    );
+  });
+
+  it('writes exactly the previewed (corrected) curve, never a local recomputation', async () => {
+    // The backend owns the correction math; the dialog must write curve.afr
+    // verbatim. If the dialog ever starts correcting locally, the mock curve
+    // here would differ from what write receives.
+    render(
+      <AfrCalibrationDialog isOpen onClose={() => {}} connected showToast={vi.fn()} />,
+    );
+    const mode = await screen.findByLabelText(/correct against a reference/i);
+    fireEvent.change(mode, { target: { value: 'one' } });
+
+    const write = await screen.findByRole('button', { name: /write calibration/i });
+    await waitFor(() => expect(write).not.toBeDisabled());
+    fireEvent.click(write);
+
+    await waitFor(() => expect(writeCall()).not.toBeNull());
+    expect(writeCall()!.afrValues).toEqual(curveOf(10, 20).afr);
+  });
+});

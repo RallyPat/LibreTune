@@ -86,6 +86,11 @@ interface StoredSettings {
   customAfr1: number;
   customV2: number;
   customAfr2: number;
+  corrMode: "off" | "one" | "two";
+  corrM1: number;
+  corrE1: number;
+  corrM2: number;
+  corrE2: number;
 }
 
 function loadStored(): Partial<StoredSettings> {
@@ -114,6 +119,15 @@ export default function AfrCalibrationDialog({
   const [customAfr1, setCustomAfr1] = useState(stored.customAfr1 ?? 10);
   const [customV2, setCustomV2] = useState(stored.customV2 ?? 5);
   const [customAfr2, setCustomAfr2] = useState(stored.customAfr2 ?? 20);
+  /** Reference correction over the selected base curve. "off" hides the
+   *  section; one point corrects offset only; two solve gain and offset. */
+  const [corrMode, setCorrMode] = useState<"off" | "one" | "two">(
+    stored.corrMode ?? "off",
+  );
+  const [corrM1, setCorrM1] = useState(stored.corrM1 ?? 14.2);
+  const [corrE1, setCorrE1] = useState(stored.corrE1 ?? 14.7);
+  const [corrM2, setCorrM2] = useState(stored.corrM2 ?? 19.0);
+  const [corrE2, setCorrE2] = useState(stored.corrE2 ?? 18.25);
   const [curve, setCurve] = useState<AfrCurve | null>(null);
   const [autoCal, setAutoCal] = useState<AutoCalResult | null>(null);
   const [captureLeft, setCaptureLeft] = useState(0);
@@ -177,9 +191,18 @@ export default function AfrCalibrationDialog({
   useEffect(() => {
     if (!isOpen || !presetId) return;
     let live = true;
+    const correction =
+      corrMode === "one"
+        ? [[corrM1, corrE1]]
+        : corrMode === "two"
+          ? [
+              [corrM1, corrE1],
+              [corrM2, corrE2],
+            ]
+          : undefined;
     const args = isCustom
-      ? { linear: [[customV1, customAfr1], [customV2, customAfr2]] }
-      : { preset: presetId };
+      ? { linear: [[customV1, customAfr1], [customV2, customAfr2]], correction }
+      : { preset: presetId, correction };
     invoke<AfrCurve>("preview_afr_calibration", args)
       .then((c) => {
         if (!live) return;
@@ -194,7 +217,7 @@ export default function AfrCalibrationDialog({
     return () => {
       live = false;
     };
-  }, [isOpen, presetId, isCustom, customV1, customAfr1, customV2, customAfr2]);
+  }, [isOpen, presetId, isCustom, customV1, customAfr1, customV2, customAfr2, corrMode, corrM1, corrE1, corrM2, corrE2]);
 
   const previewPath = useMemo(() => {
     if (!curve) return "";
@@ -275,6 +298,11 @@ export default function AfrCalibrationDialog({
           customAfr1,
           customV2,
           customAfr2,
+          corrMode,
+          corrM1,
+          corrE1,
+          corrM2,
+          corrE2,
         } satisfies StoredSettings),
       );
       const result = await invoke<CalibrationWriteResult>("write_afr_calibration", {
@@ -367,6 +395,77 @@ export default function AfrCalibrationDialog({
                 onChange={(e) => setCustomAfr2(parseFloat(e.target.value) || 0)}
               />
             </div>
+          </div>
+        )}
+
+        <div className="afrcal-field">
+          <label htmlFor="afrcal-corr">Correct against a reference</label>
+          <select
+            id="afrcal-corr"
+            value={corrMode}
+            onChange={(e) => setCorrMode(e.target.value as "off" | "one" | "two")}
+          >
+            <option value="off">Off — use the curve as-is</option>
+            <option value="one">Single point (offset)</option>
+            <option value="two">Two point (gain + offset)</option>
+          </select>
+          {corrMode !== "off" && (
+            <span className="afrcal-hint">
+              Measured is what the ECU shows on this curve; expected is what a
+              trusted reference reads at the same moment — the controller's own
+              gauge, a second meter, or span gas. One point shifts the whole
+              curve; two points also correct an error that grows across the
+              range. The corrected curve is what previews and writes.
+            </span>
+          )}
+        </div>
+
+        {corrMode !== "off" && (
+          <div className="afrcal-custom-grid">
+            <div className="afrcal-field">
+              <label htmlFor="afrcal-corrm1">{corrMode === "two" ? "Point 1 measured (ECU)" : "Measured (ECU)"}</label>
+              <input
+                id="afrcal-corrm1"
+                type="number"
+                step="0.01"
+                value={corrM1}
+                onChange={(e) => setCorrM1(parseFloat(e.target.value) || 0)}
+              />
+            </div>
+            <div className="afrcal-field">
+              <label htmlFor="afrcal-corre1">{corrMode === "two" ? "Point 1 expected (reference)" : "Expected (reference)"}</label>
+              <input
+                id="afrcal-corre1"
+                type="number"
+                step="0.01"
+                value={corrE1}
+                onChange={(e) => setCorrE1(parseFloat(e.target.value) || 0)}
+              />
+            </div>
+            {corrMode === "two" && (
+              <>
+                <div className="afrcal-field">
+                  <label htmlFor="afrcal-corrm2">Point 2 measured (ECU)</label>
+                  <input
+                    id="afrcal-corrm2"
+                    type="number"
+                    step="0.01"
+                    value={corrM2}
+                    onChange={(e) => setCorrM2(parseFloat(e.target.value) || 0)}
+                  />
+                </div>
+                <div className="afrcal-field">
+                  <label htmlFor="afrcal-corre2">Point 2 expected (reference)</label>
+                  <input
+                    id="afrcal-corre2"
+                    type="number"
+                    step="0.01"
+                    value={corrE2}
+                    onChange={(e) => setCorrE2(parseFloat(e.target.value) || 0)}
+                  />
+                </div>
+              </>
+            )}
           </div>
         )}
 
