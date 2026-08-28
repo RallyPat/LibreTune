@@ -1,51 +1,33 @@
 //! `SimEngine` — the animated engine model behind the simulator's realtime
-//! (`'r'`/0x30) responses.
+//! (`r`/0x30) responses.
 //!
-//! # Port note (ADR-0006, sub-step 5.1)
+//! # Attribution
 //!
 //! The mode state machine and parameter correlations (here and in
-//! [`physics`]) are **ported** from
+//! [`physics`]) are ported from
 //! [`askrejans/speeduino-serial-sim`](https://github.com/askrejans/speeduino-serial-sim)
-//! (**MIT license**, Copyright (c) 2026 Arvis Skrējāns — confirmed against
-//! the repo's `LICENSE` via the GitHub license API; this notice is preserved
-//! as MIT requires): `include/EngineSimulator.h` + `src/EngineSimulator.cpp` —
-//! the STARTUP → WARMUP_IDLE → IDLE → LIGHT_LOAD → ACCELERATION → HIGH_RPM
-//! → DECELERATION → WOT machine, the `simulateRPM`/`simulateThermal`/
-//! `simulateThrottle`/`simulateMAP`/`simulateIgnition`/`simulateVoltage`
-//! correlations, sensor noise, and the 50 ms (20 Hz) update cadence, with
-//! tuning constants from `include/Config.h`. That code is **separable**
-//! from the repo's `SpeeduinoProtocol.cpp`: its only output is the
-//! `EngineStatus` struct (`include/EngineStatus.h`), which is the seam —
-//! the simulator writes fields, the protocol serializes them.
+//! (MIT license, Copyright (c) 2026 Arvis Skrējāns — this notice is
+//! preserved as MIT requires): `include/EngineSimulator.h` and
+//! `src/EngineSimulator.cpp` give the STARTUP → WARMUP_IDLE → IDLE →
+//! LIGHT_LOAD → ACCELERATION → HIGH_RPM → DECELERATION → WOT machine, the
+//! RPM/thermal/throttle/MAP/ignition/voltage correlations, the sensor noise
+//! and the 50 ms (20 Hz) cadence, with tuning constants from
+//! `include/Config.h`.
 //!
-//! **Fresh, not ported:** the reference fills a fixed 130-byte
-//! `EngineStatus`; this port instead encodes each value at the offset/type
-//! the loaded INI's `[OutputChannels]` declares — see [`super::och_codec`]
-//! (definition-driven), so the sim animates whatever block layout the INI
-//! describes. The `'r'` wire dispatch is also fresh — see [`super::ecu`]
-//! and [`crate::memory`]'s port-note, both written against Speeduino
-//! `comms.cpp`.
+//! Written fresh rather than ported: the reference fills a fixed 130-byte
+//! status struct, whereas this model encodes each value at the offset and
+//! type the loaded INI declares (see [`super::och_codec`]), so it animates
+//! whatever block layout the definition describes.
 //!
-//! **M4 Task 9 (fresh):** [`Self::set_ve_context`] hands the engine a
-//! decoded [`VeContext`] (see [`super::ve_model`]) each tick — refreshed by
-//! [`super::ecu`] from the INI's `[VeAnalyze]`-bound `veTable`, wherever it
-//! lives in page memory. [`Self::snapshot`] uses it to compute a "measured"
-//! `afr` that drifts away from `afr_target` exactly where that table
-//! disagrees with the hidden [`super::ve_model::true_ve`] surface — the
-//! ground truth the M4 auto-tune demo (Task 12) must flatten. No new
-//! randomness and no wall clock: the whole computation is a pure function
-//! of `rpm`/`map_kpa` (already-ticked engine state) and the current
-//! `VeContext`, so determinism (see below) is unaffected.
+//! # Measured AFR
 //!
-//! # Determinism
-//!
-//! No wall clock and no OS RNG *in the engine itself*: time advances only
-//! through [`SimEngine::tick`], and sensor noise comes from a fixed-seed
-//! xorshift — a given tick sequence always produces the same block bytes.
-//! The wall clock lives one layer up: [`super::ecu`]'s `Pipe` feeds
-//! `tick` a real `dt` on every production `'r'` request (auto-tick) so the
-//! app's live gauges actually animate, while tests keep calling `tick`
-//! with hand-picked durations for exact, reproducible assertions.
+//! [`SimEngine::set_ve_context`] takes a decoded [`VeContext`] each tick,
+//! refreshed from the INI's `[VeAnalyze]`-bound veTable wherever it lives in
+//! page memory. [`SimEngine::snapshot`] uses it to report a measured `afr`
+//! that drifts off target exactly where that table disagrees with the hidden
+//! [`super::ve_model::true_ve`] surface — which is what gives AutoTune a
+//! real error to correct in demo mode. Without a `[VeAnalyze]` binding the
+//! context is `None` and measured AFR simply equals the target.
 
 mod physics;
 
@@ -146,7 +128,7 @@ pub struct SimEngine {
     battery_dv: i32,
     advance_deg: i32,
     rng: XorShift32,
-    /// M4 Task 9: the currently-decoded `veTable` context, refreshed each
+    /// the currently-decoded `veTable` context, refreshed each
     /// tick by [`super::ecu`] via [`Self::set_ve_context`]. `None` for INIs
     /// with no `[VeAnalyze]` binding (or before the first refresh) — the
     /// simulator then behaves exactly as before M4 (`afr == afr_target`).
@@ -223,7 +205,7 @@ impl SimEngine {
         self.transition(mode);
     }
 
-    /// M4 Task 9: install (or clear) the decoded `veTable` context used to
+    /// install (or clear) the decoded `veTable` context used to
     /// compute the "measured" `afr` channel — see the module doc comment.
     /// Re-encodes immediately so a caller that sets the context and reads
     /// [`Self::och_block`] without an intervening [`Self::tick`] still sees
@@ -260,7 +242,7 @@ impl SimEngine {
 
     /// This tick's physical values, handed to [`super::och_codec`].
     ///
-    /// M4 Task 9 (locked decision 11): the loop closes as
+    /// the loop closes as
     /// `afr = afr_target × true_ve / current_ve` — a `veTable` reading too
     /// low means too little fuel is scheduled, i.e. lean, i.e. measured AFR
     /// *above* target; correcting a cell to `VE_new = VE_old × afr/target =
