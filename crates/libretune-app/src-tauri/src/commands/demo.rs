@@ -2,6 +2,8 @@
 
 use crate::AppState;
 use libretune_core::ini::EcuDefinition;
+use libretune_core::protocol::{Connection, ConnectionConfig};
+use libretune_core::simulator::EcuSimulator;
 use libretune_core::tune::TuneCache;
 use std::path::PathBuf;
 use tauri::{Emitter, Manager};
@@ -103,6 +105,22 @@ pub async fn set_demo_mode(
 }
 
 /// Internal helper: apply demo enable with a provided definition and cache
+/// Build a connection onto a simulator backed by `def`, or `None` if the
+/// handshake doesn't come up.
+fn connect_simulator(def: &EcuDefinition) -> Option<Connection> {
+    let simulator = EcuSimulator::from_definition(def);
+    let mut connection = Connection::new(ConnectionConfig::default());
+    match connection.connect_with_channel(Box::new(simulator.channel())) {
+        Ok(()) => Some(connection),
+        Err(error) => {
+            tracing::warn!(
+                "demo: simulator handshake failed ({error}); falling back to generated values"
+            );
+            None
+        }
+    }
+}
+
 pub(crate) async fn apply_demo_enable(
     state: &AppState,
     def: EcuDefinition,
@@ -116,10 +134,14 @@ pub(crate) async fn apply_demo_enable(
         }
     }
 
-    // Disconnect any existing connection
+    // Replace any existing connection with one onto the in-process
+    // simulator, so demo mode reads pages, writes and burns through the same
+    // protocol path as real hardware instead of side-stepping it. If the
+    // simulator can't be reached for any reason, demo mode still runs — the
+    // realtime stream falls back to generating values directly.
     {
         let mut conn_guard = state.connection.lock().await;
-        *conn_guard = None;
+        *conn_guard = connect_simulator(&def);
     }
 
     // Close and clear any open project/tune to ensure a clean demo state

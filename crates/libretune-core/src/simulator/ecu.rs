@@ -94,6 +94,11 @@ struct Pipe {
     /// against current page memory.
     definition: Option<EcuDefinition>,
     envelope: EnvelopeOrder,
+    /// What `Q` and `S` answer. Taken from the definition so a handshake
+    /// against the very INI the simulator was built from succeeds; a
+    /// hardcoded signature would only ever match Speeduino.
+    signature: String,
+    version: String,
     /// Whether realtime requests advance the engine off the wall clock.
     /// Permanently disabled once a caller drives time explicitly, so tests
     /// never race the clock.
@@ -120,6 +125,14 @@ impl Pipe {
             engine,
             definition: def.cloned(),
             envelope: EnvelopeOrder::BigEndian,
+            signature: def
+                .map(|d| d.signature.clone())
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| EcuSimulator::DEFAULT_SIGNATURE.to_string()),
+            version: def
+                .map(|d| d.version_info.clone())
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| EcuSimulator::DEFAULT_VERSION.to_string()),
             auto_tick: true,
             last_auto_tick: None,
         }
@@ -238,12 +251,12 @@ fn respond(cmd: &[u8], pipe: &mut Pipe, enveloped: bool) -> Vec<u8> {
     };
     match cmd.first().copied().unwrap_or(0) {
         b'Q' => {
-            let mut v = EcuSimulator::SIGNATURE.as_bytes().to_vec();
+            let mut v = pipe.signature.as_bytes().to_vec();
             v.push(0);
             ok(v)
         }
         b'S' => {
-            let mut v = EcuSimulator::VERSION.as_bytes().to_vec();
+            let mut v = pipe.version.as_bytes().to_vec();
             v.push(0);
             ok(v)
         }
@@ -414,8 +427,10 @@ pub struct EcuSimulator {
 }
 
 impl EcuSimulator {
-    pub const SIGNATURE: &'static str = "speeduino 202504-dev";
-    pub const VERSION: &'static str = "Speeduino 2025.04-dev";
+    /// Answered by a simulator built without a definition, or when the INI
+    /// declares no signature of its own.
+    pub const DEFAULT_SIGNATURE: &'static str = "speeduino 202504-dev";
+    pub const DEFAULT_VERSION: &'static str = "Speeduino 2025.04-dev";
 
     /// A handshake-only simulator with no pages and no engine: page commands
     /// are no-ops and realtime windows zero-fill. Use
@@ -539,9 +554,24 @@ mod tests {
         let response = read_n(&mut channel, 64);
         assert_eq!(
             &response[..response.len() - 1],
-            EcuSimulator::SIGNATURE.as_bytes(),
+            EcuSimulator::DEFAULT_SIGNATURE.as_bytes(),
             "signature is NUL-terminated"
         );
+    }
+
+    #[test]
+    fn a_definition_backed_simulator_answers_that_definitions_signature() {
+        // A hardcoded signature would fail the handshake for every ECU that
+        // isn't Speeduino, silently taking demo mode down its fallback path.
+        let mut def = definition();
+        def.signature = "epicEFI 1.2.3".to_string();
+        let sim = EcuSimulator::from_definition(&def);
+        let mut channel = sim.channel();
+
+        channel.write_all(b"Q").expect("write succeeds");
+
+        let response = read_n(&mut channel, 64);
+        assert_eq!(&response[..response.len() - 1], b"epicEFI 1.2.3");
     }
 
     #[test]
@@ -634,7 +664,7 @@ mod tests {
         );
         assert_eq!(
             &packet.payload[1..packet.payload.len() - 1],
-            EcuSimulator::SIGNATURE.as_bytes(),
+            EcuSimulator::DEFAULT_SIGNATURE.as_bytes(),
             "the signature follows the return code"
         );
     }
@@ -692,7 +722,7 @@ mod tests {
         channel.write_all(b"Q").expect("write succeeds");
 
         let waiting = channel.bytes_to_read().expect("query succeeds") as usize;
-        assert_eq!(waiting, EcuSimulator::SIGNATURE.len() + 1);
+        assert_eq!(waiting, EcuSimulator::DEFAULT_SIGNATURE.len() + 1);
     }
 
     #[test]
