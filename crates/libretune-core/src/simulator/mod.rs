@@ -6,5 +6,6 @@
 //! channels from an engine model. Client code connects to it exactly as it
 //! connects to hardware.
 
+mod engine;
 mod och_codec;
 mod ve_model;
