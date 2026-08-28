@@ -6,6 +6,10 @@
 //! channels from an engine model. Client code connects to it exactly as it
 //! connects to hardware.
 
+mod ecu;
 mod engine;
 mod och_codec;
 mod ve_model;
+
+pub use ecu::{EcuSimulator, SimulatorChannel};
+pub use engine::EngineMode;
