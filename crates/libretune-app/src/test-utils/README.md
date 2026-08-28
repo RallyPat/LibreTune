@@ -31,5 +31,3 @@ if (unlisten) unlisten();
 ## Notes
 - The helper patches `@tauri-apps/api/event.listen` so code that imports `listen` from that module will use the mocked implementation automatically (tests still may use `h.listen` directly).
 - `emit` queues events when listeners are not yet registered; use `getQueued`/`drainQueued` to inspect/deliver queued payloads in complex test flows.
-
-If you'd like, I can add example tests that use `setupTauriMocks` across more test files.

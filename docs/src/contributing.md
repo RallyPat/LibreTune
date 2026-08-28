@@ -78,7 +78,7 @@ cargo test -p libretune-core
 
 # TypeScript type checking
 cd crates/libretune-app
-npx tsc --noEmit
+npm run typecheck
 ```
 
 ### Documentation

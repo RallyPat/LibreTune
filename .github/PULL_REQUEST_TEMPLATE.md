@@ -25,7 +25,7 @@ Closes #(issue number)
 - [ ] Code compiles without errors
 - [ ] No new clippy warnings (`cargo clippy`)
 - [ ] Code is formatted (`cargo fmt`)
-- [ ] TypeScript compiles without errors (`npx tsc --noEmit`)
+- [ ] TypeScript compiles without errors (`npm run typecheck`)
 - [ ] Documentation updated if needed
 - [ ] Commit messages follow conventional format
 

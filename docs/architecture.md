@@ -217,8 +217,8 @@ cd crates/libretune-app
 npm install
 npm run dev          # Vite only
 ./scripts/tauri-dev.sh  # Full Tauri dev (preferred)
-npx tsc --noEmit     # Typecheck
-npm test -- --run    # Vitest
+npm run typecheck    # Typecheck
+npm run test:run     # Vitest
 npm run build        # Production bundle
 ```
 
