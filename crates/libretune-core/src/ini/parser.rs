@@ -3725,6 +3725,47 @@ veAnalyzeMap = veTable1Tbl, afrTable1Tbl, afr, egoCorrection
         assert_eq!(role("sparkTbl"), crate::ini::TableRole::Ignition);
     }
 
+    /// Dual-table INIs define a numbered family (`veTable1Tbl`,
+    /// `veTable2Tbl`, …) but `[VeAnalyze]` names only the first, since the
+    /// analyzer runs one table at a time. The siblings used to fall through
+    /// to `Other`, so the fuel-tune guard refused them and the AutoTune
+    /// pickers no longer offered the second VE table (issue #132).
+    #[test]
+    fn numbered_siblings_inherit_the_labeled_role() {
+        let ini = "[TableEditor]
+table = veTable1Tbl, veTable1, \"VE Table 1\", 2
+table = veTable2Tbl, veTable2, \"VE Table 2\", 2
+table = afrTable1Tbl, afrTable1, \"AFR Table 1\", 2
+table = afrTable2Tbl, afrTable2, \"AFR Table 2\", 2
+table = veTableMafTbl, veTableMaf, \"MAF trim\", 2
+table = sparkTbl, spark, \"Spark Table\", 2
+[VeAnalyze]
+veAnalyzeMap = veTable1Tbl, afrTable1Tbl, afr, egoCorrection
+";
+        let def = parse_ini(ini).expect("parses");
+        let role = |n: &str| {
+            def.tables
+                .values()
+                .find(|t| t.name == n)
+                .map(|t| t.role)
+                .unwrap_or(crate::ini::TableRole::Other)
+        };
+        assert_eq!(role("veTable1Tbl"), crate::ini::TableRole::Ve);
+        assert_eq!(
+            role("veTable2Tbl"),
+            crate::ini::TableRole::Ve,
+            "numbered sibling of the labeled VE table"
+        );
+        assert_eq!(role("afrTable1Tbl"), crate::ini::TableRole::AfrTarget);
+        assert_eq!(role("afrTable2Tbl"), crate::ini::TableRole::AfrTarget);
+        assert_eq!(
+            role("veTableMafTbl"),
+            crate::ini::TableRole::Other,
+            "no number to vary, and the INI does not label it"
+        );
+        assert_eq!(role("sparkTbl"), crate::ini::TableRole::Ignition);
+    }
+
     /// Speeduino declares these in `[Constants]`, where the section parser had
     /// no arm for either — `delayAfterPortOpen` stayed 0 (handshake raced the
     /// port open) and `tsWriteBlocks` was never matched at all because only the

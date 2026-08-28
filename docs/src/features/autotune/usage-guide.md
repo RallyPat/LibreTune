@@ -41,8 +41,9 @@ Or keyboard: Ctrl+Shift+A
 
 **Step 2: Select Table**
 - Default: VE Table 1 (most common)
-- Alternative: Choose different table if your ECU uses different tables
-- Secondary: Enable if you want to tune multiple tables simultaneously
+- Only fuel (VE) tables are offered: AutoTune scales fuel quantity, so ignition, AFR-target and other table types are deliberately not selectable
+- On dual-fuel setups (e.g. Speeduino's second fuel algorithm), **VE Table 2** is listed alongside VE Table 1
+- Secondary: Tick the checkbox to tune a second VE table simultaneously; if the tune has only one fuel table, the selector shows "No other fuel tables"
 
 **Step 3: Configure Basic Settings**
 ```
@@ -232,16 +233,21 @@ Click: Start again (with same or adjusted authority limits)
 
 ### Multi-Table Tuning
 
-Tune fuel and ignition tables together for best results:
+On dual-fuel setups, tune both VE tables in one session:
 
 ```
-1. Enable "Secondary Table"
-2. Select AFR Target table
-3. Primary: VE Table 1
-4. Secondary: AFR Table 1
+1. Tick "Secondary:"
+2. Primary: VE Table 1
+3. Secondary: VE Table 2
 
-Drive normally - both tables get tuned simultaneously
+Drive normally - both tables collect hits and recommendations independently
 ```
+
+The AFR target table is **not** tuned here — it is the reference AutoTune
+measures against, chosen during the preflight check. Ignition timing is a
+separate, manual workflow: scaling degrees of advance by AFR error would add
+timing in exactly the lean, high-load cells where detonation lives, so
+AutoTune refuses ignition tables entirely.
 
 ### Cell Locking
 

@@ -368,18 +368,33 @@ export default function TableGrid({
 
     if (centers.length === 0) return null;
 
+    // `centers` runs oldest → newest, so the live end of the trail is the
+    // last entry. Issue #132 asked for a clearly visible current position:
+    // at 2 px stroke / 3 px dots the line was hard to place on the active
+    // cell. The newest point gets a halo + solid dot so it reads as "you
+    // are here" even over a busy heatmap.
+    const newest = centers[centers.length - 1];
+
     return (
       <svg className="history-trail-svg">
         <polyline
           points={centers.map((c) => `${c.cx},${c.cy}`).join(' ')}
           fill="none"
           style={{ stroke: 'var(--cursor-trail, #4A90E2)' }}
-          strokeWidth="2"
-          strokeOpacity="0.7"
+          strokeWidth="3"
+          strokeOpacity="0.75"
+          strokeLinejoin="round"
+          strokeLinecap="round"
         />
         {centers.map((c, i) => (
-          <circle key={i} cx={c.cx} cy={c.cy} r="3" style={{ fill: 'var(--cursor-trail, #4A90E2)' }} fillOpacity="0.8" />
+          <circle key={i} cx={c.cx} cy={c.cy} r="4" style={{ fill: 'var(--cursor-trail, #4A90E2)' }} fillOpacity="0.85" />
         ))}
+        {newest && (
+          <>
+            <circle cx={newest.cx} cy={newest.cy} r="9" style={{ fill: 'var(--cursor-trail, #4A90E2)' }} fillOpacity="0.3" />
+            <circle cx={newest.cx} cy={newest.cy} r="6" style={{ fill: 'var(--cursor-trail, #4A90E2)' }} fillOpacity="1" />
+          </>
+        )}
       </svg>
     );
   };

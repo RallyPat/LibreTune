@@ -35,6 +35,7 @@ import { open, save } from '@tauri-apps/plugin-dialog';
 import { valueToHeatmapColor } from '../../utils/heatmapColors';
 import { TuneHealthCard } from './TuneHealth';
 import { useToast } from '../../contexts/ToastContext';
+import { useChannels } from '../../stores/realtimeStore';
 import './AutoTune.css';
 
 // =============================================================================
@@ -314,6 +315,27 @@ function persist(key: string, value: unknown) {
   }
 }
 
+/** Stable empty list so the axis-channel subscription below can skip
+ * subscribing entirely when the table declares no channels. */
+const NO_CHANNELS: string[] = [];
+
+/**
+ * Index of the bin nearest to `value` — the cell a live reading falls into.
+ * Matches the nearest-bin logic the table editors use for their cursors.
+ */
+function nearestBinIndex(value: number, bins: number[]): number {
+  let best = 0;
+  let diff = Infinity;
+  bins.forEach((bin, i) => {
+    const d = Math.abs(bin - value);
+    if (d < diff) {
+      diff = d;
+      best = i;
+    }
+  });
+  return best;
+}
+
 export function AutoTune({ tableName: initialTableName = '', onClose, isConnected }: AutoTuneProps) {
   const { showToast } = useToast();
 
@@ -331,7 +353,6 @@ export function AutoTune({ tableName: initialTableName = '', onClose, isConnecte
   const [veAnalyzeConfig, setVeAnalyzeConfig] = useState<VeAnalyzeConfig | null>(null);
   const [lockedCells, setLockedCells] = useState<Set<string>>(new Set());
   const [selectedCells, _setSelectedCells] = useState<Set<string>>(new Set());
-  const [currentCell, _setCurrentCell] = useState<{ x: number; y: number } | null>(null);
   const [showHeatmap, setShowHeatmap] = useState<'weighting' | 'change' | 'none'>('weighting');
   const [error, setError] = useState<string | null>(null);
   const [loadSource, setLoadSource] = useState<AutoTuneLoadSource>('map');
@@ -342,6 +363,34 @@ export function AutoTune({ tableName: initialTableName = '', onClose, isConnecte
   // lets async detection re-fire after e.g. the MAF-verify demotion and flip
   // the dropdown back (issue #132).
   const manualLoadSourceRef = useRef(false);
+
+  // Current operating cell for the grid's "current" highlight, derived from
+  // the table's own axis channels (issue #132: "no indication of the current
+  // position"). A `currentCell` state used to sit here but its setter was
+  // never called, so the highlight never fired. x indexes columns (x_bins),
+  // y indexes rows (y_bins) — matching how the grid iterates them. A missing
+  // Y channel (1-D curves) pins the row at 0, same as the table editors.
+  const currentXChannel = tableData?.x_output_channel ?? undefined;
+  const currentYChannel = tableData?.y_output_channel ?? undefined;
+  const liveAxisValues = useChannels(
+    currentXChannel
+      ? currentYChannel
+        ? [currentXChannel, currentYChannel]
+        : [currentXChannel]
+      : NO_CHANNELS
+  );
+  const currentCell = useMemo<{ x: number; y: number } | null>(() => {
+    if (!tableData || !currentXChannel) return null;
+    const xv = liveAxisValues[currentXChannel];
+    if (xv === undefined) return null;
+    const x = nearestBinIndex(xv, tableData.x_bins);
+    if (!currentYChannel || tableData.y_bins.length <= 1) {
+      return { x, y: 0 };
+    }
+    const yv = liveAxisValues[currentYChannel];
+    if (yv === undefined) return { x, y: 0 };
+    return { x, y: nearestBinIndex(yv, tableData.y_bins) };
+  }, [tableData, currentXChannel, currentYChannel, liveAxisValues]);
 
   // Settings state
   const [settings, setSettings] = useState<AutoTuneSettings>(() =>
@@ -487,12 +536,16 @@ export function AutoTune({ tableName: initialTableName = '', onClose, isConnecte
         }
       }
 
-      if (!secondaryTable && tables.length > 1) {
+      // Only a *different* fuel table is a valid secondary pick. The old
+      // `|| tables[0]` fallback made the secondary selector echo the primary
+      // when only one table is tunable — and an empty picker looks exactly
+      // like a broken one (issue #132). '' selects the placeholder below.
+      if (!secondaryTable) {
         const preferredSecondary = veAnalyzeConfig?.lambda_target_tables
           ?.map((name) => tables.find((t) => t.name === name))
           .find((t) => t && t.name !== selectedTable);
-        const fallbackSecondary = preferredSecondary || tables.find((t) => t.name !== selectedTable) || tables[0];
-        setSecondaryTable(fallbackSecondary.name);
+        const fallbackSecondary = preferredSecondary || tables.find((t) => t.name !== selectedTable);
+        setSecondaryTable(fallbackSecondary ? fallbackSecondary.name : '');
       }
     } catch (e) {
       console.error('Failed to load available tables:', e);
@@ -1297,9 +1350,15 @@ export function AutoTune({ tableName: initialTableName = '', onClose, isConnecte
                 onChange={(e) => setSecondaryTable(e.target.value)}
                 disabled={!secondaryTableEnabled || isRunning}
               >
-                {secondaryOptions.map((t) => (
-                  <option key={t.name} value={t.name}>{t.title || t.name}</option>
-                ))}
+                {secondaryOptions.length === 0 ? (
+                  <option value="" disabled>
+                    No other fuel tables
+                  </option>
+                ) : (
+                  secondaryOptions.map((t) => (
+                    <option key={t.name} value={t.name}>{t.title || t.name}</option>
+                  ))
+                )}
               </select>
             </div>
             <div className="autotune-table-group">

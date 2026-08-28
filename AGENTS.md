@@ -308,6 +308,27 @@ Based on analysis of common ECU tuning software patterns:
 Detailed session-by-session history has moved to [CHANGELOG.md](CHANGELOG.md).
 What follows is a high-level pointer to the most recent cleanup pass.
 
+### AutoTune second-table picker & table trace line (Aug 2026)
+
+- **Numbered-sibling role inference** — `EcuDefinition::infer_table_roles`
+  extends Ve/AfrTarget roles to digit-siblings of the `[VeAnalyze]`-labelled
+  table (`veTable1Tbl` → `veTable2Tbl`), so dual-fuel Speeduino tunes can pick
+  the second VE table in AutoTune again. The fuel-tune guard
+  (`fuel_tune_refusal`) is unchanged and stays authoritative for both the
+  picker list and `start_autotune`. See `is_digit_sibling` in
+  `crates/libretune-core/src/ini/mod.rs` (issue #132 follow-up).
+- **Trace line in the tab-view table editor** — `tuner-ui/TableEditor.tsx` now
+  draws the SVG trail overlay (measured grid geometry, `yAxisBottom`-aware,
+  layered under sticky headers) that the dialog-embedded `TableGrid` always
+  had; the dialog trail was bumped to 3 px stroke / 4 px dots with a
+  current-position halo.
+- **AutoTune current-cell highlight wired** — derived live from the table's
+  axis channels via `useChannels` (was dead state); tab-view tables fall back
+  to `rpm`/`map` when the INI declares no axis channels; the secondary-table
+  selector shows a "No other fuel tables" placeholder instead of echoing the
+  primary.
+- See the `2026-08-28` CHANGELOG block for details.
+
 ### AI Assistant enhancement pass (Aug 2026)
 
 Four phases; see the `2026-08-26` "AI Assistant" CHANGELOG block for the

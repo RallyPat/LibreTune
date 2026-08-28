@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect, KeyboardEvent, useMemo } from 'react';
+import { useState, useCallback, useRef, useEffect, useLayoutEffect, KeyboardEvent, useMemo } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { open, save } from '@tauri-apps/plugin-dialog';
 import { useChannels } from '../../stores/realtimeStore';
@@ -37,6 +37,27 @@ export interface TableData {
 export interface CellPosition {
   row: number;
   col: number;
+}
+
+/** Measured on-screen geometry of the grid, for the trail overlay. */
+interface GridGeometry {
+  /** Table origin within the scroll container's content space. */
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+  /** Column header rects, table-relative. */
+  cols: Array<{ left: number; width: number }>;
+  /** Row header rects, table-relative, in DOM (display) order. */
+  rows: Array<{ top: number; height: number }>;
+}
+
+/**
+ * Display row for a data-space row. `yAxisBottom` renders rows reversed;
+ * geometry arrays follow the DOM, so the overlay must flip back.
+ */
+export function trailDisplayRow(row: number, rowCount: number, yAxisBottom: boolean): number {
+  return yAxisBottom ? rowCount - 1 - row : row;
 }
 
 interface TableEditorProps {
@@ -80,9 +101,11 @@ export function TableEditor({
   const outputChannels = useMemo(() => {
     const channels: string[] = [];
     if (data.xOutputChannel) channels.push(data.xOutputChannel);
+    else channels.push('rpm'); // canonical fallback, matches the cursor below
     if (data.yOutputChannel) channels.push(data.yOutputChannel);
+    else if (data.yAxis.length > 1) channels.push('map');
     return channels;
-  }, [data.xOutputChannel, data.yOutputChannel]);
+  }, [data.xOutputChannel, data.yOutputChannel, data.yAxis.length]);
   const realtimeData = useChannels(outputChannels);
 
   const [selection, setSelection] = useState<Selection | null>(null);
@@ -197,11 +220,12 @@ export function TableEditor({
   const calculatedLivePosition = useMemo((): CellPosition | null => {
     if (!followMode) return null;
     
-    const xChannel = data.xOutputChannel;
-    const yChannel = data.yOutputChannel;
-    
-    if (!xChannel) return null;
-    
+    // Parity with the dialog-embedded editor (TableEditor2D): an INI that
+    // declares no output channels still gets a cursor from the canonical
+    // rpm/map channels instead of silently showing nothing (issue #132).
+    const xChannel = data.xOutputChannel ?? 'rpm';
+    const yChannel = data.yOutputChannel ?? 'map';
+
     const xValue = realtimeData[xChannel];
     if (xValue === undefined) return null;
     
@@ -323,6 +347,147 @@ export function TableEditor({
     for (const e of historyTrail) m.set(`${e.row},${e.col}`, e);
     return m;
   }, [historyTrail]);
+
+  // ── Trail line overlay (issue #132) ──
+  // The tab view showed only per-cell fills — a 2 px live outline and a
+  // ≤0.4-opacity tint — so there was "no indication of the current
+  // position": no line at all on the spark table, nothing to follow on
+  // the fuel one. The dialog-embedded editor (TableGrid) has always drawn
+  // one; this gives the tab view the same SVG trail, sized to stay readable
+  // (3 px stroke, 4 px dots, halo + solid dot on the current cell).
+  const tableElRef = useRef<HTMLTableElement | null>(null);
+  const scrollHostRef = useRef<HTMLDivElement | null>(null);
+  const [gridGeometry, setGridGeometry] = useState<GridGeometry | null>(null);
+
+  useLayoutEffect(() => {
+    const table = tableElRef.current;
+    const host = scrollHostRef.current;
+    if (!table || !host) return;
+
+    const measure = () => {
+      const tRect = table.getBoundingClientRect();
+      const hRect = host.getBoundingClientRect();
+      // Content-space origin: rects are viewport-based, so undo the current
+      // scroll to get coordinates that stay correct as the user scrolls.
+      const left = tRect.left - hRect.left + host.scrollLeft;
+      const top = tRect.top - hRect.top + host.scrollTop;
+      const cols = Array.from(table.querySelectorAll<HTMLTableCellElement>('thead th'))
+        .slice(1) // the corner cell is not a column
+        .map((th) => {
+          const r = th.getBoundingClientRect();
+          return { left: r.left - tRect.left, width: r.width };
+        });
+      const rows = Array.from(
+        table.querySelectorAll<HTMLTableCellElement>('tbody tr > th:first-child')
+      ).map((th) => {
+        const r = th.getBoundingClientRect();
+        return { top: r.top - tRect.top, height: r.height };
+      });
+      setGridGeometry((prev) => {
+        const close = (a: number, b: number) => Math.abs(a - b) < 0.5;
+        const same =
+          prev !== null &&
+          close(prev.left, left) &&
+          close(prev.top, top) &&
+          close(prev.width, tRect.width) &&
+          close(prev.height, tRect.height) &&
+          prev.cols.length === cols.length &&
+          prev.rows.length === rows.length &&
+          prev.cols.every((c, i) => close(c.left, cols[i].left) && close(c.width, cols[i].width)) &&
+          prev.rows.every((r, i) => close(r.top, rows[i].top) && close(r.height, rows[i].height));
+        return same
+          ? prev
+          : { left, top, width: tRect.width, height: tRect.height, cols, rows };
+      });
+    };
+
+    measure();
+    if (typeof ResizeObserver === 'undefined') return; // jsdom
+    const ro = new ResizeObserver(() => measure());
+    ro.observe(table);
+    ro.observe(host);
+    return () => ro.disconnect();
+    // Bin-count changes, the orientation flip, and 2D/3D remounts all
+    // require a fresh measurement.
+  }, [data.xAxis.length, data.yAxis.length, yAxisBottom, show3D]);
+
+  const cellCenter = useCallback(
+    (row: number, col: number): { cx: number; cy: number } | null => {
+      if (!gridGeometry) return null;
+      const c = gridGeometry.cols[col];
+      const r = gridGeometry.rows[trailDisplayRow(row, data.yAxis.length, yAxisBottom)];
+      if (!c || !r) return null;
+      return { cx: c.left + c.width / 2, cy: r.top + r.height / 2 };
+    },
+    [gridGeometry, data.yAxis.length, yAxisBottom]
+  );
+
+  const renderTrailOverlay = () => {
+    if (!followMode || !gridGeometry) return null;
+    const now = Date.now();
+    const fade = (t: number) =>
+      TRAIL_DURATION_MS === Infinity ? 1 : Math.max(0, 1 - (now - t) / TRAIL_DURATION_MS);
+
+    const points = historyTrail
+      .map((e) => {
+        const c = cellCenter(e.row, e.col);
+        return c ? { cx: c.cx, cy: c.cy, fade: fade(e.time) } : null;
+      })
+      .filter((p): p is { cx: number; cy: number; fade: number } => p !== null);
+
+    const current = effectiveLivePosition
+      ? cellCenter(effectiveLivePosition.row, effectiveLivePosition.col)
+      : null;
+    if (points.length === 0 && !current) return null;
+
+    const segments = points.slice(1).map((p, i) => {
+      const a = points[i];
+      return { x1: a.cx, y1: a.cy, x2: p.cx, y2: p.cy, opacity: 0.75 * p.fade };
+    });
+    const head = current ?? points[points.length - 1];
+
+    return (
+      <svg
+        className="table-trail-overlay"
+        style={{
+          left: gridGeometry.left,
+          top: gridGeometry.top,
+          width: gridGeometry.width,
+          height: gridGeometry.height,
+        }}
+      >
+        {segments.map((s, i) => (
+          <line
+            key={i}
+            x1={s.x1}
+            y1={s.y1}
+            x2={s.x2}
+            y2={s.y2}
+            style={{ stroke: 'var(--cursor-trail, #4A90E2)' }}
+            strokeWidth="3"
+            strokeOpacity={s.opacity}
+            strokeLinecap="round"
+          />
+        ))}
+        {points.map((p, i) => (
+          <circle
+            key={i}
+            cx={p.cx}
+            cy={p.cy}
+            r="4"
+            style={{ fill: 'var(--cursor-trail, #4A90E2)' }}
+            fillOpacity={0.85 * p.fade}
+          />
+        ))}
+        {head && (
+          <>
+            <circle cx={head.cx} cy={head.cy} r="9" style={{ fill: 'var(--cursor-trail, #4A90E2)' }} fillOpacity={0.3} />
+            <circle cx={head.cx} cy={head.cy} r="6" style={{ fill: 'var(--cursor-trail, #4A90E2)' }} fillOpacity={1} />
+          </>
+        )}
+      </svg>
+    );
+  };
 
   // Calculate color for value based on min/max
   const getValueColor = useCallback((value: number) => {
@@ -1017,7 +1182,9 @@ export function TableEditor({
         canRedo={historyIndex < history.length - 1}
         followMode={followMode}
         onToggleFollowMode={() => setFollowMode(!followMode)}
-        hasOutputChannels={!!data.xOutputChannel}
+        // The rpm/map fallback (see calculatedLivePosition) makes follow mode
+        // usable even when the INI declares no axis channels.
+        hasOutputChannels={true}
         show3D={show3D}
         onToggle3D={() => setShow3D(!show3D)}
         onGenerate={generatableKind ? () => setShowGenerateDialog(true) : undefined}
@@ -1049,8 +1216,8 @@ export function TableEditor({
 
       {/* Table */}
       {!show3D && (
-      <div className="table-grid-container">
-        <table className="table-grid">
+      <div className="table-grid-container" ref={scrollHostRef}>
+        <table className="table-grid" ref={tableElRef}>
           <thead>
             <tr>
               <th className="table-corner">
@@ -1120,6 +1287,7 @@ export function TableEditor({
             })()}
           </tbody>
         </table>
+        {renderTrailOverlay()}
       </div>
       )}
 

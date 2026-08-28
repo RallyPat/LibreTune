@@ -2214,6 +2214,43 @@ mod fuel_tunable_tests {
             assert!(fuel_tune_refusal(&def, &name).is_none());
         }
     }
+
+    /// The hand-stamped test above cannot catch an inference gap: it never
+    /// asks how the roles got there. This one parses a dual-table INI, so the
+    /// whole chain — parser, `[VeAnalyze]` config, `infer_table_roles`,
+    /// guard — runs as it does in the app. Before sibling inference, the
+    /// second VE table came out `Other` and vanished from the pickers
+    /// (issue #132: "the drop-down for selecting the second table isn't
+    /// opening" — an empty dropdown looks exactly like a broken one).
+    #[test]
+    fn a_parsed_dual_table_ini_offers_both_ve_tables() {
+        let ini = "[TableEditor]
+table = veTable1Tbl, veTable1, \"VE Table 1\", 2
+    xBins = rpmBins1, rpm
+    yBins = fuelLoadBins1, fuelLoad
+    zBins = veTable1
+table = veTable2Tbl, veTable2, \"VE Table 2\", 2
+    xBins = rpmBins2, rpm
+    yBins = fuelLoadBins2, fuelLoad
+    zBins = veTable2
+table = afrTable1Tbl, afrTable1, \"AFR Table 1\", 2
+    xBins = rpmBins1, rpm
+    yBins = fuelLoadBins1, fuelLoad
+    zBins = afrTable1
+table = sparkTbl, spark, \"Spark Table\", 2
+    xBins = rpmBins1, rpm
+    yBins = ignLoadBins, ignLoad
+    zBins = spark
+[VeAnalyze]
+veAnalyzeMap = veTable1Tbl, afrTable1Tbl, afr, egoCorrection
+";
+        let def = EcuDefinition::from_str(ini).expect("parses");
+        assert_eq!(
+            fuel_tunable_tables(&def),
+            vec!["veTable1Tbl", "veTable2Tbl"],
+            "both VE tables must be offered; spark and AFR tables must not"
+        );
+    }
 }
 
 #[cfg(test)]

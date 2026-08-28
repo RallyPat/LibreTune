@@ -123,6 +123,18 @@ Enable **Follow Mode** to automatically highlight the cell corresponding to curr
 2. Click the crosshair icon in the toolbar
 3. The current operating cell is highlighted
 
+On top of the highlight, a **trace line** is drawn through the cells visited
+recently, ending in a bright dot on the current cell — an at-a-glance answer
+to "where is the engine operating right now?". It is drawn in both the
+standalone table view and tables embedded in dialogs.
+
+- Older segments fade out over time; the fade duration follows the
+  *Trail fade* setting (`table_trail_fade_sec`, 0 = never fade)
+- The position comes from the table's own axis channels; if the INI declares
+  none, the standard `rpm` / `map` channels are used
+- Toggle with `F`; trail and cursor colors follow the *Cursor color* /
+  *Trail color* settings
+
 ## Editing Curves
 
 1D curves (for example, warmup enrichment or fan PWM vs. temperature) open in
