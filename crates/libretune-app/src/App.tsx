@@ -186,6 +186,8 @@ function AppContent() {
       .catch(() => {});
   }, [newProjectDialogOpen, connectEcuWizardOpen]);
   const [baseMapDialogOpen, setBaseMapDialogOpen] = useState(false);
+  const [afrCalibrationOpen, setAfrCalibrationOpen] = useState(false);
+  const [tempCalibrationOpen, setTempCalibrationOpen] = useState(false);
 
   // Connection state
   const [status, setStatus] = useState<ConnectionStatus>({
@@ -1464,6 +1466,14 @@ function AppContent() {
         case "std_separator":
           // Separator - no action needed
           break;
+        case "std_ms2geno2":
+          // "Calibrate AFR Sensor" — Speeduino O2 calibration space
+          setAfrCalibrationOpen(true);
+          break;
+        case "std_ms2gentherm":
+          // "Calibrate Temperature Sensors" — CLT/IAT thermistor curves
+          setTempCalibrationOpen(true);
+          break;
         default:
           console.log("Unknown std target:", target);
           // Try to open as a dialog as fallback
@@ -1868,6 +1878,10 @@ function AppContent() {
         baseMapDialogOpen={baseMapDialogOpen}
         setBaseMapDialogOpen={setBaseMapDialogOpen}
         handleBaseMapApply={handleBaseMapApply}
+        afrCalibrationOpen={afrCalibrationOpen}
+        setAfrCalibrationOpen={setAfrCalibrationOpen}
+        tempCalibrationOpen={tempCalibrationOpen}
+        setTempCalibrationOpen={setTempCalibrationOpen}
         tuneComparisonOpen={tuneComparisonOpen}
         setTuneComparisonOpen={setTuneComparisonOpen}
         checkStatus={checkStatus}

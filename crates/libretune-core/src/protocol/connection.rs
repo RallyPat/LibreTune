@@ -7,6 +7,7 @@ use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::time::{Duration, Instant};
 
+use super::calibration::{self, CalibrationTable};
 use super::stream::{CommunicationChannel, SerialChannel, TcpChannel};
 use super::{
     commands::{BurnParams, ReadMemoryParams, WriteMemoryParams},
@@ -2275,6 +2276,212 @@ impl Connection {
     /// waiting in RAM that a power cycle would discard.
     pub fn dirty_pages(&self) -> Vec<u8> {
         self.dirty_pages.iter().copied().collect()
+    }
+
+    /// Write one Speeduino temperature calibration curve (CLT or IAT).
+    ///
+    /// `temps_c` are the sensor temperatures (°C) at the 32 ADC bins the
+    /// firmware assigns — sample your sensor curve at
+    /// [`calibration::temperature_calibration_bins`]`(self.is_modern_protocol())`.
+    ///
+    /// See the [`calibration`] module docs for the verified wire format.
+    pub fn write_temperature_calibration(
+        &mut self,
+        table: CalibrationTable,
+        temps_c: &[f64; calibration::TEMP_CALIBRATION_POINTS],
+    ) -> Result<(), ProtocolError> {
+        if table == CalibrationTable::O2 {
+            return Err(ProtocolError::ProtocolError(
+                "O2 table takes AFR data; use write_o2_calibration".to_string(),
+            ));
+        }
+        let wire = calibration::encode_temperature_calibration(temps_c);
+        self.write_calibration_wire(table, &wire)
+    }
+
+    /// Write the Speeduino O2/AFR sensor calibration curve.
+    ///
+    /// `afr` holds the AFR reading for each of the 1024 10-bit ADC counts
+    /// (0 V .. 5 V). Values are stored as AFR × 10 in one byte, so the
+    /// usable range is 0.0–25.5 AFR.
+    pub fn write_o2_calibration(
+        &mut self,
+        afr: &[f64; calibration::O2_CALIBRATION_WIRE_BYTES],
+    ) -> Result<(), ProtocolError> {
+        let wire = calibration::encode_o2_calibration(afr);
+        self.write_calibration_wire(CalibrationTable::O2, &wire)
+    }
+
+    /// Read the CRC32 the ECU stored for a calibration page (`k` command).
+    ///
+    /// Modern protocol only — the legacy command set has no calibration CRC
+    /// (or any calibration read-back at all), so legacy writes are
+    /// necessarily unverified, exactly as they are in TunerStudio.
+    pub fn read_calibration_crc(&mut self, table: CalibrationTable) -> Result<u32, ProtocolError> {
+        if !self.use_modern_protocol {
+            return Err(ProtocolError::ProtocolError(
+                "calibration CRC ('k') requires the CRC protocol; the legacy \
+                 command set has no calibration read-back"
+                    .to_string(),
+            ));
+        }
+        let payload = vec![b'k', 0x00, table.id()];
+        let response = self.send_packet(Packet::new(payload))?;
+        let data = &response.payload;
+        if data.len() < 5 || data[0] != 0 {
+            return Err(ProtocolError::ProtocolError(format!(
+                "calibration CRC read failed, response: {:02x?}",
+                data
+            )));
+        }
+        // Firmware sends reverse_bytes(crc) → big-endian on the wire.
+        Ok(u32::from_be_bytes([data[1], data[2], data[3], data[4]]))
+    }
+
+    /// Send pre-encoded calibration bytes to the ECU over whichever protocol
+    /// path is active, and verify where the protocol allows it.
+    fn write_calibration_wire(
+        &mut self,
+        table: CalibrationTable,
+        wire: &[u8],
+    ) -> Result<(), ProtocolError> {
+        // The `t` calibration command is Speeduino-specific (verified against
+        // firmware tag 202501). Refuse on ECUs known to speak something else
+        // rather than corrupt their command stream.
+        match self.ecu_type {
+            EcuType::Speeduino | EcuType::Unknown => {}
+            other => {
+                return Err(ProtocolError::ProtocolError(format!(
+                    "sensor calibration write is only implemented for \
+                     Speeduino (connected ECU type: {:?})",
+                    other
+                )));
+            }
+        }
+
+        let expected_len = match table {
+            CalibrationTable::O2 => calibration::O2_CALIBRATION_WIRE_BYTES,
+            _ => calibration::TEMP_CALIBRATION_WIRE_BYTES,
+        };
+        if wire.len() != expected_len {
+            return Err(ProtocolError::ProtocolError(format!(
+                "calibration table {:?} takes {} bytes, got {}",
+                table,
+                expected_len,
+                wire.len()
+            )));
+        }
+
+        if self.use_modern_protocol {
+            self.write_calibration_modern(table, wire)?;
+            // The modern path can verify: compare the ECU's stored CRC with
+            // the CRC of exactly the bytes we sent.
+            let expected = calibration::calibration_crc32(wire);
+            let stored = self.read_calibration_crc(table)?;
+            if stored != expected {
+                return Err(ProtocolError::ProtocolError(format!(
+                    "calibration verify failed for {:?}: ECU stored CRC \
+                     {:08x}, expected {:08x}",
+                    table, stored, expected
+                )));
+            }
+            Ok(())
+        } else {
+            self.write_calibration_legacy(table, wire)
+        }
+    }
+
+    /// Legacy path: `'t'`, table id, raw data stream. No ACK exists, so the
+    /// only failure modes visible here are serial-layer errors.
+    fn write_calibration_legacy(
+        &mut self,
+        table: CalibrationTable,
+        wire: &[u8],
+    ) -> Result<(), ProtocolError> {
+        tracing::info!(
+            "write_calibration_legacy: table {:?} ({} bytes)",
+            table,
+            wire.len()
+        );
+        // The legacy path has no ACK and no read-back, so this is the one
+        // calibration write whose success we cannot confirm. On firmware
+        // newer than 202501 it is worse than unverified: legacy comms were
+        // made read-only, and the firmware consumes the command and the whole
+        // data stream while writing nothing at all, reporting no error. There
+        // is nothing on the wire to distinguish that from success, so say so
+        // rather than let the UI report a clean write.
+        tracing::warn!(
+            "calibration written over the legacy protocol: the ECU sends no \
+             acknowledgement and offers no read-back, so this write is \
+             unverified. Firmware newer than 202501 ignores legacy \
+             calibration writes entirely. Connect with the CRC protocol to \
+             get a verified write."
+        );
+        self.send_raw_command_no_response(&[b't', table.id()])?;
+
+        // Pace the data out in small chunks. The firmware blocks inside
+        // receiveCalibration() actively draining, but the temperature path
+        // performs an EEPROM write per value pair *while receiving*, and the
+        // Mega's RX ring is only 257 bytes — the same buffer whose overflow
+        // corrupted VE tables via oversized `M` frames. Chunking + the
+        // inter-write delay keeps the ring comfortably below capacity.
+        let inter_chunk_ms = self.get_effective_min_wait().max(5);
+        for chunk in wire.chunks(128) {
+            self.send_raw_command_no_response(chunk)?;
+            std::thread::sleep(Duration::from_millis(inter_chunk_ms));
+        }
+
+        // writeCalibration() burns the table to EEPROM with no completion
+        // signal; give it time before the caller sends anything else.
+        // (EEPROM update of a full table is a few hundred ms on a Mega2560.)
+        let settle_ms = self
+            .protocol_settings
+            .as_ref()
+            .map(|p| p.page_activation_delay as u64)
+            .unwrap_or(0)
+            .max(500);
+        std::thread::sleep(Duration::from_millis(settle_ms));
+        Ok(())
+    }
+
+    /// Modern path: one `'t'` envelope per chunk, each ACKed. Header fields
+    /// are big-endian (unlike `'M'` — see the [`calibration`] module docs).
+    fn write_calibration_modern(
+        &mut self,
+        table: CalibrationTable,
+        wire: &[u8],
+    ) -> Result<(), ProtocolError> {
+        let chunk_size = match table {
+            // EEPROM burn triggers when offset reaches 1023, so the O2 table
+            // must arrive as 4 × 256.
+            CalibrationTable::O2 => calibration::O2_CALIBRATION_CHUNK,
+            // Any length other than 64 is rejected with RANGE_ERR.
+            _ => calibration::TEMP_CALIBRATION_WIRE_BYTES,
+        };
+
+        for (i, chunk) in wire.chunks(chunk_size).enumerate() {
+            let offset = i * chunk_size;
+            let mut payload = Vec::with_capacity(7 + chunk.len());
+            payload.push(b't');
+            payload.push(0x00); // canId slot; ignored by the firmware
+            payload.push(table.id());
+            payload.extend_from_slice(&(offset as u16).to_be_bytes());
+            payload.extend_from_slice(&(chunk.len() as u16).to_be_bytes());
+            payload.extend_from_slice(chunk);
+
+            let response = self.send_packet(Packet::new(payload))?;
+            let status = response.payload.first().copied().unwrap_or(0xFF);
+            if status != 0 {
+                let code = super::ResponseCode::from_byte(status);
+                return Err(ProtocolError::ProtocolError(format!(
+                    "calibration chunk at offset {} rejected: 0x{:02x} ({})",
+                    offset,
+                    status,
+                    code.message()
+                )));
+            }
+        }
+        Ok(())
     }
 
     /// Send raw bytes to ECU (for controller commands)

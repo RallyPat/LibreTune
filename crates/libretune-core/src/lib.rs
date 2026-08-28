@@ -43,6 +43,7 @@ pub mod action_scripting;
 pub mod agent;
 pub mod autotune;
 pub mod basemap;
+pub mod calibration;
 pub mod dash;
 pub mod datalog;
 pub mod demo;

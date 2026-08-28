@@ -64,6 +64,7 @@ pub mod realtime_stop;
 pub mod realtime_stream;
 pub mod restore_points;
 pub mod save_tune;
+pub mod sensor_calibration;
 pub mod settings;
 pub mod signature_helpers;
 pub mod start_autotune;

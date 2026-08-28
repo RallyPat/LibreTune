@@ -27,6 +27,8 @@ import NewProjectDialog from "./dialogs/NewProjectDialog";
 import OnlineIniDialog from "./dialogs/OnlineIniDialog";
 import ConnectEcuWizard from "./dialogs/ConnectEcuWizard";
 import BaseMapDialog, { BaseMapResult } from "./dialogs/BaseMapDialog";
+import AfrCalibrationDialog from "./dialogs/AfrCalibrationDialog";
+import TemperatureCalibrationDialog from "./dialogs/TemperatureCalibrationDialog";
 import TuneHistoryPanel from "./TuneHistoryPanel";
 import ErrorDetailsDialog from "./dialogs/ErrorDetailsDialog";
 import OnboardingDialog from "./dialogs/OnboardingDialog";
@@ -141,6 +143,12 @@ export interface DialogOverlaysProps {
   setBaseMapDialogOpen: (v: boolean) => void;
   handleBaseMapApply: (baseMap: BaseMapResult) => Promise<void> | void;
 
+  // Sensor calibration (Speeduino calibration space)
+  afrCalibrationOpen: boolean;
+  setAfrCalibrationOpen: (v: boolean) => void;
+  tempCalibrationOpen: boolean;
+  setTempCalibrationOpen: (v: boolean) => void;
+
   // Comparison dialogs
   tuneComparisonOpen: boolean;
   setTuneComparisonOpen: (v: boolean) => void;
@@ -232,6 +240,8 @@ export function DialogOverlays(props: DialogOverlaysProps) {
     connectEcuWizardOpen, setConnectEcuWizardOpen, connectWizardEcu,
     repositoryInis, setRepositoryInis, createProject, handleImportTuneIntoProject,
     baseMapDialogOpen, setBaseMapDialogOpen, handleBaseMapApply,
+    afrCalibrationOpen, setAfrCalibrationOpen,
+    tempCalibrationOpen, setTempCalibrationOpen,
     tuneComparisonOpen, setTuneComparisonOpen, checkStatus,
     tableComparisonOpen, setTableComparisonOpen,
     tuneFileDiffOpen, setTuneFileDiffOpen,
@@ -354,6 +364,18 @@ export function DialogOverlays(props: DialogOverlaysProps) {
         onClose={() => setBaseMapDialogOpen(false)}
         onApply={handleBaseMapApply}
         hasProject={!!currentProject}
+      />
+      <AfrCalibrationDialog
+        isOpen={afrCalibrationOpen}
+        onClose={() => setAfrCalibrationOpen(false)}
+        connected={status.state === "Connected"}
+        showToast={showToast}
+      />
+      <TemperatureCalibrationDialog
+        isOpen={tempCalibrationOpen}
+        onClose={() => setTempCalibrationOpen(false)}
+        connected={status.state === "Connected"}
+        showToast={showToast}
       />
       <TuneComparisonDialog
         isOpen={tuneComparisonOpen}

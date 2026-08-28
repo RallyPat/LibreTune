@@ -12,12 +12,13 @@ use super::{
     output_channels::parse_output_channel_line,
     tables::{CurveDefinition, TableDefinition},
     types::{
-        AnalysisFilter, CommandButtonCloseAction, CommandPart, ControllerCommand, DatalogEntry,
-        DatalogView, DialogComponent, DialogDefinition, EcuType, FTPBrowserConfig, FilterOperator,
+        AnalysisFilter, CalibrationGenerator, CalibrationSolution, CalibrationTableIdentifier,
+        CommandButtonCloseAction, CommandPart, ControllerCommand, DatalogEntry, DatalogView,
+        DialogComponent, DialogDefinition, EcuType, FTPBrowserConfig, FilterOperator,
         FrontPageConfig, FrontPageIndicator, GammaEConfig, HelpTopic, IndicatorDefinition,
         IndicatorPanel, KeyAction, LoggerDefinition, MaintainConstantValue, Menu, MenuItem,
         PortEditorConfig, ReadoutDefinition, ReadoutPanel, ReferenceTable, SettingGroup,
-        SettingOption, Shape, VeAnalyzeConfig, WueAnalyzeConfig,
+        SettingOption, Shape, ThermistorOption, VeAnalyzeConfig, WueAnalyzeConfig,
     },
     EcuDefinition, IniError,
 };
@@ -34,6 +35,11 @@ struct ParserState {
     current_readout_panel: Option<String>,
     current_curve: Option<String>,
     current_help: Option<String>,
+    current_reference_table: Option<String>,
+    /// `tableLimits` rows seen in the current `referenceTable` block; applied
+    /// to its identifiers when the block closes (they may appear either side
+    /// of the `tableIdentifier` line they annotate).
+    pending_reference_limits: Vec<(u8, f64, f64, f64)>,
 }
 
 /// Context for include resolution
@@ -162,6 +168,8 @@ fn parse_ini_internal(content: &str, ctx: &mut IncludeContext) -> Result<EcuDefi
         current_readout_panel: None,
         current_curve: None,
         current_help: None,
+        current_reference_table: None,
+        pending_reference_limits: Vec::new(),
     };
 
     // Preprocessor state - now shared via ctx.defined_symbols
@@ -406,7 +414,13 @@ fn parse_ini_internal(content: &str, ctx: &mut IncludeContext) -> Result<EcuDefi
                     parse_logger_definition_entry(&mut definition, key, value)
                 }
                 "porteditor" => parse_port_editor_entry(&mut definition, key, value),
-                "referencetables" => parse_reference_table_entry(&mut definition, key, value),
+                "referencetables" => parse_reference_table_entry(
+                    &mut definition,
+                    key,
+                    value,
+                    &mut state.current_reference_table,
+                    &mut state.pending_reference_limits,
+                ),
                 "ftpbrowser" => parse_ftp_browser_entry(&mut definition, key, value),
                 "datalogviews" => parse_datalog_view_entry(&mut definition, key, value),
                 "keyactions" => parse_key_action_entry(&mut definition, key, value),
@@ -448,6 +462,13 @@ fn parse_ini_internal(content: &str, ctx: &mut IncludeContext) -> Result<EcuDefi
 
         i += 1;
     }
+
+    // The last `referenceTable` block has no successor to close it.
+    apply_pending_reference_limits(
+        &mut definition,
+        &state.current_reference_table,
+        &mut state.pending_reference_limits,
+    );
 
     // Post-process: Apply variable substitution to commands that may have been parsed
     // before [PcVariables] section was encountered (e.g., queryCommand in [MegaTune])
@@ -2960,35 +2981,236 @@ fn parse_port_editor_entry(def: &mut EcuDefinition, key: &str, value: &str) {
     }
 }
 
-/// Parse a [ReferenceTables] section entry
-/// Format: ref_name = "Label", table_name [, {enable_condition}]
-fn parse_reference_table_entry(def: &mut EcuDefinition, key: &str, value: &str) {
-    let parts = split_ini_line(value);
-    if parts.len() >= 2 {
-        let name = key.to_string();
-        let label = parts[0].trim_matches('"').to_string();
-        let table_name = parts[1].trim().to_string();
+/// Strip surrounding double quotes from an INI field, leaving inner content
+/// (including deliberate whitespace, as in the blank `solution = " "` row).
+fn unquote(s: &str) -> String {
+    let t = s.trim();
+    t.strip_prefix('"')
+        .and_then(|r| r.strip_suffix('"'))
+        .unwrap_or(t)
+        .to_string()
+}
 
-        // Optional enable condition (last part in braces)
-        let enable_condition = parts
-            .iter()
-            .skip(2)
-            .find(|p| {
-                let trimmed = p.trim();
-                trimmed.starts_with('{') && trimmed.ends_with('}')
-            })
-            .map(|p| p.trim().trim_matches(|c| c == '{' || c == '}').to_string());
+/// Parse a `[ReferenceTables]` section.
+///
+/// This is a *block* section, not a flat key/value one — the earlier
+/// implementation treated every line as its own `name = "Label", table`
+/// record, which turned each sub-property (`adcCount`, `thermOption`,
+/// `solution`, …) into a bogus reference table of its own and dropped the
+/// actual calibration metadata on the floor. The real grammar is:
+///
+/// ```ini
+/// referenceTable  = std_ms2geno2, "Calibrate AFR Table..."
+///   topicHelp     = "https://..."
+///   tableIdentifier = 002, "AFR Table"
+///   tableLimits   = 000, -40, 350, 180
+///   adcCount      = 1024
+///   bytesPerAdc   = 1
+///   scale         = 10
+///   tableGenerator = linearGenerator, "Custom Linear WB", "Volts", "AFR", 1, 4, 9.7, 18.7
+///   thermOption   = "GM", 2490, -40, 100700, 30, 2238, 99, 177
+///   solutionsLabel = "EGO Sensor"
+///   solution      = "14Point7", { 10.0001 + (adcValue * 0.0097752) }
+///   solution      = "Custom Linear WB", linearGenerator
+/// ```
+///
+/// `tableLimits` lines may precede or follow the `tableIdentifier` they
+/// annotate, so they are stashed and applied when the block closes.
+fn parse_reference_table_entry(
+    def: &mut EcuDefinition,
+    key: &str,
+    value: &str,
+    current: &mut Option<String>,
+    pending_limits: &mut Vec<(u8, f64, f64, f64)>,
+) {
+    if key.eq_ignore_ascii_case("referenceTable") {
+        // A new block starts: flush limits collected for the previous one.
+        apply_pending_reference_limits(def, current, pending_limits);
 
+        let parts = split_ini_line(value);
+        if parts.is_empty() || parts[0].is_empty() {
+            return;
+        }
+        let name = parts[0].trim().to_string();
+        let label = parts.get(1).map(|s| unquote(s)).unwrap_or_default();
+        *current = Some(name.clone());
         def.reference_tables.insert(
             name.clone(),
             ReferenceTable {
                 name,
                 label,
-                table_name,
-                enable_condition,
+                topic_help: None,
+                identifiers: Vec::new(),
+                // Speeduino always declares these; the defaults just keep a
+                // malformed block from producing a zero-length table.
+                adc_count: 0,
+                bytes_per_adc: 1,
+                scale: 1.0,
+                generators: Vec::new(),
+                therm_options: Vec::new(),
+                solutions_label: None,
+                solutions: Vec::new(),
             },
         );
+        return;
     }
+
+    // Section-level properties; these precede the first block.
+    if key.eq_ignore_ascii_case("tableWriteCommand") {
+        def.table_write_command = Some(unquote(value));
+        return;
+    }
+    if key.eq_ignore_ascii_case("tableBlockingFactor") {
+        if let Ok(n) = value.trim().parse::<usize>() {
+            def.table_blocking_factor = Some(n);
+        }
+        return;
+    }
+
+    // `tableLimits` is recorded even before its identifier exists.
+    if key.eq_ignore_ascii_case("tableLimits") {
+        let parts = split_ini_line(value);
+        if parts.len() >= 4 {
+            if let (Ok(id), Ok(min), Ok(max), Ok(default)) = (
+                parts[0].trim().parse::<u8>(),
+                parts[1].trim().parse::<f64>(),
+                parts[2].trim().parse::<f64>(),
+                parts[3].trim().parse::<f64>(),
+            ) {
+                pending_limits.push((id, min, max, default));
+            }
+        }
+        return;
+    }
+
+    let Some(name) = current.clone() else { return };
+    let Some(table) = def.reference_tables.get_mut(&name) else {
+        return;
+    };
+
+    match key.to_ascii_lowercase().as_str() {
+        "topichelp" => table.topic_help = Some(unquote(value)),
+        "tableidentifier" => {
+            // One line may declare several: `000, "CLT", 001, "IAT"`.
+            let parts = split_ini_line(value);
+            for pair in parts.chunks(2) {
+                let Ok(id) = pair[0].trim().parse::<u8>() else {
+                    continue;
+                };
+                table.identifiers.push(CalibrationTableIdentifier {
+                    id,
+                    label: pair.get(1).map(|s| unquote(s)).unwrap_or_default(),
+                    limits: None,
+                });
+            }
+        }
+        "adccount" => {
+            if let Ok(n) = value.trim().parse::<usize>() {
+                table.adc_count = n;
+            }
+        }
+        "bytesperadc" => {
+            if let Ok(n) = value.trim().parse::<u8>() {
+                table.bytes_per_adc = n;
+            }
+        }
+        "scale" => {
+            if let Ok(n) = value.trim().parse::<f64>() {
+                table.scale = n;
+            }
+        }
+        "solutionslabel" => table.solutions_label = Some(unquote(value)),
+        "tablegenerator" => {
+            let parts = split_ini_line(value);
+            if parts.len() >= 2 {
+                let nums: Vec<f64> = parts
+                    .iter()
+                    .skip(4)
+                    .filter_map(|p| p.trim().parse::<f64>().ok())
+                    .collect();
+                table.generators.push(CalibrationGenerator {
+                    kind: parts[0].trim().to_string(),
+                    label: unquote(&parts[1]),
+                    x_units: parts.get(2).map(|s| unquote(s)),
+                    y_units: parts.get(3).map(|s| unquote(s)),
+                    bounds: if nums.len() >= 4 {
+                        Some((nums[0], nums[1], nums[2], nums[3]))
+                    } else {
+                        None
+                    },
+                });
+            }
+        }
+        "thermoption" => {
+            // name, biasResistor, t1, r1, t2, r2, t3, r3
+            let parts = split_ini_line(value);
+            if parts.len() >= 8 {
+                let nums: Option<Vec<f64>> = parts[1..8]
+                    .iter()
+                    .map(|p| p.trim().parse::<f64>().ok())
+                    .collect();
+                if let Some(n) = nums {
+                    table.therm_options.push(ThermistorOption {
+                        name: unquote(&parts[0]),
+                        bias_resistor: n[0],
+                        points: [(n[1], n[2]), (n[3], n[4]), (n[5], n[6])],
+                    });
+                }
+            }
+        }
+        "solution" => {
+            let parts = split_ini_line(value);
+            if parts.len() >= 2 {
+                let label = unquote(&parts[0]);
+                let body = parts[1].trim();
+                let solution =
+                    if let Some(expr) = body.strip_prefix('{').and_then(|r| r.strip_suffix('}')) {
+                        CalibrationSolution::Expression {
+                            expression: expr.trim().to_string(),
+                        }
+                    } else {
+                        CalibrationSolution::Generator {
+                            generator: body.to_string(),
+                        }
+                    };
+                // The stock INI's leading `solution = " ", { }` is a spacer
+                // row for the dropdown; it would generate an all-zero table
+                // if a user ever picked it, so drop it here rather than
+                // making every consumer special-case it.
+                let is_blank_spacer = matches!(
+                    &solution,
+                    CalibrationSolution::Expression { expression } if expression.is_empty()
+                );
+                if !is_blank_spacer {
+                    table.solutions.push((label, solution));
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Attach stashed `tableLimits` rows to the identifiers of the block that is
+/// closing (or, at end of section, the last one seen).
+fn apply_pending_reference_limits(
+    def: &mut EcuDefinition,
+    current: &Option<String>,
+    pending: &mut Vec<(u8, f64, f64, f64)>,
+) {
+    if pending.is_empty() {
+        return;
+    }
+    if let Some(table) = current
+        .as_ref()
+        .and_then(|n| def.reference_tables.get_mut(n))
+    {
+        for (id, min, max, default) in pending.iter() {
+            for ident in table.identifiers.iter_mut().filter(|i| i.id == *id) {
+                ident.limits = Some((*min, *max, *default));
+            }
+        }
+    }
+    pending.clear();
 }
 
 /// Parse a [FTPBrowser] section entry

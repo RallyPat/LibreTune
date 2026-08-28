@@ -4,6 +4,7 @@
 //!
 //! Supports both legacy ASCII protocol and modern binary protocol with CRC32.
 
+pub mod calibration;
 pub mod command_builder;
 pub mod commands;
 mod connection;
@@ -19,6 +20,7 @@ pub use discovery::{
     DEFAULT_SEARCH_BAUD_RATES, DEFAULT_SEARCH_QUERIES,
 };
 
+pub use calibration::CalibrationTable;
 pub use command_builder::CommandBuilder;
 pub use commands::{Command, ConsoleCommand};
 pub use connection::{
