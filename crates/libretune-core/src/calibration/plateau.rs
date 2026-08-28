@@ -354,18 +354,21 @@ mod tests {
         // A disconnected wideband sits at the bottom of the scale forever.
         // Two such "plateaus" must not be mistaken for the startup sequence.
         let samples = trace(&[(0.0, 5.0, 10.0), (5.0, 10.0, 10.0)]);
-        let err = auto_calibrate_from_plateaus(&samples, &stock_14point7_curve(), &Default::default())
-            .unwrap_err();
+        let err =
+            auto_calibrate_from_plateaus(&samples, &stock_14point7_curve(), &Default::default())
+                .unwrap_err();
         assert!(matches!(err, CalibrationError::DegenerateInputs(_)));
     }
 
     #[test]
     fn a_steady_idle_alone_is_not_a_plateau_pair() {
         let samples = trace(&[(0.0, 20.0, 14.7)]);
-        assert!(
-            auto_calibrate_from_plateaus(&samples, &stock_14point7_curve(), &Default::default())
-                .is_err()
-        );
+        assert!(auto_calibrate_from_plateaus(
+            &samples,
+            &stock_14point7_curve(),
+            &Default::default()
+        )
+        .is_err());
     }
 
     #[test]
@@ -373,10 +376,12 @@ mod tests {
         // The sequence rises. A high-then-low pair is the tail of a sequence
         // plus a live reading, and fitting it would invert the curve.
         let samples = trace(&[(0.0, 4.0, 16.90), (4.0, 9.0, 13.60)]);
-        assert!(
-            auto_calibrate_from_plateaus(&samples, &stock_14point7_curve(), &Default::default())
-                .is_err()
-        );
+        assert!(auto_calibrate_from_plateaus(
+            &samples,
+            &stock_14point7_curve(),
+            &Default::default()
+        )
+        .is_err());
     }
 
     #[test]
@@ -387,8 +392,7 @@ mod tests {
         let afr1 = curve[(SPARTAN2_PLATEAU_1.0 / 5.0 * 1023.0).round() as usize];
         let afr2 = curve[(SPARTAN2_PLATEAU_2.0 / 5.0 * 1023.0).round() as usize];
         let samples = trace(&[(0.0, 4.0, afr1), (4.0, 9.0, afr2)]);
-        let result =
-            auto_calibrate_from_plateaus(&samples, &curve, &Default::default()).unwrap();
+        let result = auto_calibrate_from_plateaus(&samples, &curve, &Default::default()).unwrap();
         assert!(
             result.ground_offset_volts.abs() < 0.01,
             "offset {} V should be ~0 for a perfect install",

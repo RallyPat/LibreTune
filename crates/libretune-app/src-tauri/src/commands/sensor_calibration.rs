@@ -197,7 +197,8 @@ pub async fn list_calibration_presets(
                         // missing shows as unusable, rather than failing at
                         // the moment the user clicks Write.
                         let err =
-                            calibration::evaluate_solution_with_tables(expression, &mut cache).err();
+                            calibration::evaluate_solution_with_tables(expression, &mut cache)
+                                .err();
                         AfrPreset {
                             label: label.clone(),
                             expression: Some(expression.clone()),

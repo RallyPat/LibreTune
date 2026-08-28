@@ -454,5 +454,9 @@ fn temperature_payload_stays_little_endian_inside_a_big_endian_header() {
          tell the two orders apart"
     );
     // And the firmware's own math must recover the requested temperature.
-    assert_eq!(firmware_stored_temperature(little), 140, "100 °C + 40 offset");
+    assert_eq!(
+        firmware_stored_temperature(little),
+        140,
+        "100 °C + 40 offset"
+    );
 }

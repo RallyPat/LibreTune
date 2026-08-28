@@ -217,7 +217,10 @@ impl LinearWideband {
         let at_full = self.afr_at_volts(ADC_REFERENCE_VOLTS);
         format!(
             "{:.2}–{:.2} AFR over 0–{:.0} V ({:.4} AFR/V)",
-            at_zero, at_full, ADC_REFERENCE_VOLTS, self.slope()
+            at_zero,
+            at_full,
+            ADC_REFERENCE_VOLTS,
+            self.slope()
         )
     }
 }
@@ -332,7 +335,10 @@ mod tests {
         assert!((curve[0] - 10.0001).abs() < 1e-6);
         // Brief's acceptance check: AFR x 10 at ADC 512 is ~150.
         let at_512 = curve[512] * 10.0;
-        assert!((at_512 - 150.0).abs() < 1.0, "AFR x 10 at ADC 512 = {at_512}");
+        assert!(
+            (at_512 - 150.0).abs() < 1.0,
+            "AFR x 10 at ADC 512 = {at_512}"
+        );
         // ... and the byte table over that span is monotone in 100..200.
         let bytes: Vec<u8> = curve.iter().map(|a| (a * 10.0).round() as u8).collect();
         assert!(bytes.windows(2).all(|w| w[1] >= w[0]));
@@ -369,9 +375,11 @@ mod tests {
     #[test]
     fn thermistor_fit_reproduces_its_own_calibration_points() {
         // The INI's Mazda preset — the NA6's own sensor.
-        let fit =
-            ThermistorFit::from_points(50000.0, [(-40.0, 2022088.0), (21.0, 68273.0), (99.0, 3715.0)])
-                .unwrap();
+        let fit = ThermistorFit::from_points(
+            50000.0,
+            [(-40.0, 2022088.0), (21.0, 68273.0), (99.0, 3715.0)],
+        )
+        .unwrap();
         for (temp_c, res) in [(-40.0, 2022088.0), (21.0, 68273.0), (99.0, 3715.0)] {
             let got = fit.temperature_at_resistance(res);
             assert!(
