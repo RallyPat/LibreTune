@@ -2,7 +2,7 @@ import { render, act } from '@testing-library/react';
 import { Profiler } from 'react';
 import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { invoke } from '@tauri-apps/api/core';
-import { TableEditor } from '../TableEditor';
+import { TableEditor, trailDisplayRow } from '../TableEditor';
 import { useRealtimeStore } from '../../../stores/realtimeStore';
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }));
@@ -140,5 +140,87 @@ describe('TableEditor live trail', () => {
     });
 
     expect(commits - before).toBe(2);
+  });
+});
+
+describe('trail overlay', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    invokeMock.mockReset();
+    invokeMock.mockImplementation(() => Promise.resolve({}));
+    useRealtimeStore.getState().clearChannels();
+  });
+
+  afterEach(() => {
+    act(() => {
+      vi.runOnlyPendingTimers();
+    });
+    vi.useRealTimers();
+  });
+
+  it('draws a trail line and current-position dot over the grid', async () => {
+    const { container } = render(
+      <TableEditor data={{ ...DATA }} onChange={() => {}} />
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    // No live data yet: no trail to draw.
+    expect(container.querySelector('svg.table-trail-overlay')).toBeNull();
+
+    // Move between two cells: the overlay appears with a segment joining
+    // them and a solid current dot. (jsdom reports zero rects, so the
+    // geometry is degenerate — presence and structure are what's testable
+    // here; the mapping itself is covered by trailDisplayRow below.)
+    act(() => {
+      useRealtimeStore.getState().updateChannels({ RPM: 1200, MAP: 45 });
+    });
+    act(() => {
+      useRealtimeStore.getState().updateChannels({ RPM: 2200, MAP: 55 });
+    });
+
+    const svg = container.querySelector('svg.table-trail-overlay');
+    expect(svg).not.toBeNull();
+    const lines = svg ? Array.from(svg.querySelectorAll('line')) : [];
+    expect(lines.length).toBeGreaterThanOrEqual(1);
+    // Halo (r=9) + solid dot (r=6) mark the current position.
+    const radii = (svg ? Array.from(svg.querySelectorAll('circle')) : []).map((c) =>
+      c.getAttribute('r')
+    );
+    expect(radii).toContain('6');
+    expect(radii).toContain('9');
+  });
+
+  it('falls back to rpm/map channels when the INI declares none', async () => {
+    const { container } = render(
+      <TableEditor
+        data={{ ...DATA, xOutputChannel: undefined, yOutputChannel: undefined }}
+        onChange={() => {}}
+      />
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    // Canonical channel names drive the cursor even with no declared ones
+    // (issue #132: silently showing nothing read as a missing trace).
+    act(() => {
+      useRealtimeStore.getState().updateChannels({ rpm: 1200, map: 45 });
+    });
+    expect(cellAt(container, 1, 1).className).toContain('live');
+  });
+});
+
+describe('trailDisplayRow', () => {
+  it('maps data rows through the yAxisBottom display flip', () => {
+    // Normal orientation: display order equals data order.
+    expect(trailDisplayRow(0, 4, false)).toBe(0);
+    expect(trailDisplayRow(3, 4, false)).toBe(3);
+    // Y-axis at bottom renders rows reversed.
+    expect(trailDisplayRow(0, 4, true)).toBe(3);
+    expect(trailDisplayRow(2, 4, true)).toBe(1);
+    expect(trailDisplayRow(3, 4, true)).toBe(0);
   });
 });

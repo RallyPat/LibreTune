@@ -80,6 +80,9 @@
   flex: 1;
   overflow: auto;
   padding: var(--space-2);
+  /* Containing block for the trail overlay, which is sized and positioned
+     in the container's content space so it scrolls with the grid. */
+  position: relative;
 }
 
 /* Grid */
@@ -180,6 +183,17 @@
   opacity: calc(var(--trail-opacity, 0.3) * 0.4);
   pointer-events: none;
   border-radius: 2px;
+}
+
+/* Trail line overlay (issue #132): the tab view showed only per-cell fills,
+   with no line to follow the current position. Sits above plain cells and
+   z-1 fills (later in DOM wins ties) but below the live-cell tint and the
+   sticky axis headers (z-2/3), so the line scrolls under them. */
+.table-trail-overlay {
+  position: absolute;
+  pointer-events: none;
+  z-index: 1;
+  overflow: visible;
 }
 
 /* Follow mode button */

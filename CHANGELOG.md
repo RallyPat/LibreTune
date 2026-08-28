@@ -13,6 +13,55 @@ relevant.
 
 ## [Unreleased]
 
+### 2026-08-28 — AutoTune second-table picker & table trace line (issue #132 follow-ups)
+
+Two reports from the issue #132 thread after the Aug 20 fixes: a
+dual-table user could no longer select the second VE table in AutoTune,
+and the live trace line was missing (tab-view tables) or too faint
+(dialog-view tables) to locate the active cell.
+
+#### Fixed
+- **Second VE table back in the AutoTune pickers** — `infer_table_roles`
+  now extends a role to numbered siblings of the `[VeAnalyze]`-labelled
+  table (`veTable1Tbl` → `veTable2Tbl`, likewise for AFR targets).
+  `[VeAnalyze]` names exactly one table because the analyzer runs one at
+  a time, so `veTable2Tbl` fell through to `Other`, the fuel-tune guard
+  refused it, and both table pickers (which list only guard-approved
+  tables) stopped offering it — an empty dropdown reads exactly like a
+  broken one. The sibling rule is prefix + digits + suffix with the
+  digits differing, so `veTableMafTbl` (no number) and cross-family
+  names stay unlabelled. The guard itself is unchanged and remains
+  authoritative for both the picker list and `start_autotune`.
+- **Secondary table selector empty state** — with a single tunable
+  table the secondary select echoed the primary (`|| tables[0]`
+  fallback) and looked dead; it now shows a disabled "No other fuel
+  tables" placeholder.
+
+#### Added
+- **Trace line in the tab-view table editor** — `tuner-ui/TableEditor`
+  (spark tables, the 3D-map menu entries) previously had no line at
+  all, only per-cell fills: "no indication of the current position"
+  (issue #132). It now draws the same SVG trail the dialog-embedded
+  editor has — 3 px stroke, 4 px dots, age-faded per segment, halo +
+  solid dot on the current cell — positioned over measured grid
+  geometry (ResizeObserver), layered under the sticky axis headers, and
+  orientation-aware for `yAxisBottom`.
+- **Current-cell highlight in AutoTune** — the `current` cell pulse
+  existed in CSS but `currentCell` was dead state (setter never
+  called). It is now derived from the table's own axis channels via the
+  realtime store (`useChannels`, nearest-bin).
+- **rpm/map channel fallback in the tab view** — an INI that declares
+  no axis output channels previously showed no cursor at all (silent
+  bail-out); the tab view now falls back to the canonical `rpm`/`map`
+  channels exactly like the dialog editor, and Follow Mode is no
+  longer disabled in that case.
+
+#### Changed
+- **Trail visibility in the dialog-embedded editor** — `TableGrid`'s
+  trail bumped from 2 px stroke / 3 px dots to 3 px / 4 px with round
+  joins and caps, plus a halo + solid dot on the newest point ("the
+  line is too small to identify which cell is active", issue #132).
+
 ### 2026-08-26 — AI Assistant: the apply path made real, analyst tools, trust & traceability, UX
 
 Four-phase enhancement of the bring-your-own-LLM assistant. The headline

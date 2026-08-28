@@ -318,7 +318,9 @@ impl EcuDefinition {
     /// is fully parsed (both `[TableEditor]` and the analyze sections). Safe
     /// to call more than once. Tables not referenced by any analyze config
     /// are left as [`TableRole::Other`] (their default), with a name-based
-    /// heuristic for ignition tables as a fallback.
+    /// heuristic for ignition tables as a fallback. A numbered sibling of a
+    /// referenced table (`veTable2Tbl` of `veTable1Tbl`) inherits its role —
+    /// see [`is_digit_sibling`].
     pub fn infer_table_roles(&mut self) {
         let mut ve_names: Vec<String> = Vec::new();
         let mut afr_target_names: Vec<String> = Vec::new();
@@ -343,11 +345,16 @@ impl EcuDefinition {
             let map_name = table.map_name.as_deref();
 
             // A table matches a candidate name if either its canonical name
-            // or its map_name equals the candidate.
+            // or its map_name equals the candidate — or if it is a numbered
+            // sibling of the candidate, so `veTable2Tbl` rides along with a
+            // config that names only `veTable1Tbl`.
             let matches_any = |names: &[String]| {
-                names
-                    .iter()
-                    .any(|n| n == canonical_name || map_name == Some(n.as_str()))
+                names.iter().any(|n| {
+                    n == canonical_name
+                        || map_name == Some(n.as_str())
+                        || is_digit_sibling(n, canonical_name)
+                        || map_name.is_some_and(|m| is_digit_sibling(n, m))
+                })
             };
 
             if matches_any(&ve_names) {
@@ -809,6 +816,39 @@ impl Default for EcuDefinition {
             requires_power_cycle: Vec::new(),
         }
     }
+}
+
+/// Split a table name around its last digit run: `veTable1Tbl` becomes
+/// (`veTable`, `1`, `Tbl`). Returns `None` when the name contains no digits.
+fn split_digit_run(name: &str) -> Option<(String, String, String)> {
+    let digits_end = name.rfind(|c: char| c.is_ascii_digit())? + 1;
+    let digits_start = name[..digits_end]
+        .rfind(|c: char| !c.is_ascii_digit())
+        .map_or(0, |i| i + 1);
+    Some((
+        name[..digits_start].to_string(),
+        name[digits_start..digits_end].to_string(),
+        name[digits_end..].to_string(),
+    ))
+}
+
+/// True when two table names differ only in their digit run — `veTable1Tbl`
+/// and `veTable2Tbl` are siblings; `veTable1Tbl` and `afrTable1Tbl` are not
+/// (different prefixes), nor is `veTableMafTbl` (no number to vary).
+///
+/// `[VeAnalyze]` names exactly one VE table because the analyzer runs one
+/// at a time, but dual-table INIs (Speeduino's second fuel algorithm, MS3
+/// table sets) define a whole numbered family. Without this, every sibling
+/// fell through to [`TableRole::Other`], the fuel-tune guard refused it, and
+/// the AutoTune pickers — which offer only guard-approved tables — stopped
+/// listing the second VE table at all (issue #132).
+fn is_digit_sibling(labeled: &str, candidate: &str) -> bool {
+    let (Some((lp, ld, ls)), Some((cp, cd, cs))) =
+        (split_digit_run(labeled), split_digit_run(candidate))
+    else {
+        return false;
+    };
+    lp == cp && ls == cs && ld != cd
 }
 
 #[cfg(test)]
