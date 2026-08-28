@@ -6,7 +6,7 @@ Thank you for your interest in contributing to LibreTune! This document provides
 
 ### Prerequisites
 
-- **Rust 1.75+** - Install via [rustup](https://rustup.rs)
+- **Rust (latest stable)** - Install via [rustup](https://rustup.rs)
 - **Node.js 20+** - For the Tauri frontend
 - **npm** - Comes with Node.js
 
@@ -156,17 +156,17 @@ npm run tauri dev
 npm run build
 
 # Type checking
-npx tsc --noEmit
+npm run typecheck
 ```
 
 ### Testing (Frontend)
 
 We use Vitest + @testing-library/react for unit and integration tests in the frontend.
 
-- Run the full test suite:
+- Run the full test suite (one-shot, as CI does):
 ```bash
 cd crates/libretune-app
-npm test
+npm run test:run
 ```
 
 - Run a single test file (watch-mode):
@@ -175,7 +175,7 @@ npm test -- <path/to/test-file>
 ```
 
 - Test helpers:
-  - The project provides `src/test-utils/setupTauriMocks.ts` to stub Tauri `core.invoke` and `event.listen` during tests. See `src/test-utils/README.md` for details and examples.
+  - The project provides `src/test-utils/tauriMocks.ts` to stub Tauri `core.invoke` and `event.listen` during tests. See `src/test-utils/README.md` for details and examples.
   - Use `setupTauriMocks()` in tests to provide deterministic `invoke` responses and deterministic event emission via `emit()` / `listen()` helpers.
 
 - Test-writing tips:

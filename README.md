@@ -47,7 +47,7 @@ Project-based workflow with restore points, Git-based tune versioning, CSV expor
 - **Performance calculator**: Estimated HP/torque curves and acceleration times
 - **Action scripting**: Record and replay tuning actions across tunes, with INI-backed validation
 - **Extensible**: WASM plugin system with sandboxing and permission model
-- **Localization**: i18n scaffold with English and Brazilian Portuguese (`pt-BR`); add new locales under `crates/libretune-app/src/i18n/locales/`
+- **Localization**: i18n scaffold with English, Brazilian Portuguese (`pt-BR`), and Hungarian (`hu-HU`); add new locales under `crates/libretune-app/src/i18n/locales/`
 - **Demo mode**: Run the app without an ECU using the bundled simulator (Settings → Enable Demo Mode)
 
 For full documentation, see the [User Manual](https://rallypat.github.io/LibreTune/) or the [architecture overview](docs/architecture.md).
@@ -202,7 +202,7 @@ cd crates/libretune-app
 npm run typecheck
 ```
 
-The full pre-push pipeline (build + tests + clippy + fmt + frontend build/tests) is wrapped in [scripts/pre-push.sh](scripts/pre-push.sh) and runs automatically as a Git hook.
+The full pre-push pipeline (build + tests + clippy + fmt + frontend build/tests) is wrapped in [scripts/pre-push.sh](scripts/pre-push.sh). Both Git hooks are opt-in: `scripts/setup-git-hooks.ps1` (or `.sh`) enables the pre-commit format check, and `./scripts/pre-push.sh --install-hook` runs the full pipeline before every push.
 
 ## License
 
