@@ -7,3 +7,4 @@
 //! connects to hardware.
 
 mod och_codec;
+mod ve_model;
