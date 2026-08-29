@@ -227,7 +227,8 @@ fn read_fields(reader: &mut impl Read, header: &Header) -> io::Result<Vec<MlgFie
 /// record whose checksum disagrees with its payload. Those turn up in ordinary
 /// captures — five of the thirty-four used to develop this reader carry
 /// between one and five of them — so they are left out and counted in a
-/// warning instead of costing the user the whole log.
+/// warning instead of costing the user the whole log. A record whose own
+/// elapsed-seconds reading is not a finite number goes the same way.
 ///
 /// The whole log is held in memory, exactly like `read_csv`, and `.mlg`
 /// captures are large: a few hundred channels over half an hour decode to
@@ -254,7 +255,8 @@ pub fn read_mlg<P: AsRef<Path>>(path: P) -> io::Result<(Vec<String>, Vec<LogEntr
     let time = time_channel(&fields);
     let mut first_seconds = None;
     let mut index = 0usize;
-    let mut dropped = 0usize;
+    let mut failed_checksum = 0usize;
+    let mut unusable_timestamp = 0usize;
 
     loop {
         match fill(&mut reader, &mut prefix)? {
@@ -271,21 +273,31 @@ pub fn read_mlg<P: AsRef<Path>>(path: P) -> io::Result<(Vec<String>, Vec<LogEntr
                     return Err(cut_short(index));
                 }
                 let (payload, checksum) = data.split_at(header.record_len);
-                if payload.iter().fold(0u8, |sum, b| sum.wrapping_add(*b)) == checksum[0] {
-                    let timestamp = match time {
-                        Some(i) => {
-                            let seconds = fields[i].value(payload);
-                            elapsed(seconds - *first_seconds.get_or_insert(seconds))
-                        }
-                        None => Duration::from_micros(ticks * CLOCK_TICK_MICROS),
-                    };
-                    entries.push(LogEntry::new(
-                        timestamp,
-                        fields.iter().map(|f| f.value(payload)).collect(),
-                    ));
-                } else {
-                    dropped += 1;
+                if payload.iter().fold(0u8, |sum, b| sum.wrapping_add(*b)) != checksum[0] {
+                    failed_checksum += 1;
+                    index += 1;
+                    continue;
                 }
+                let timestamp = match time {
+                    Some(i) => {
+                        let seconds = fields[i].value(payload);
+                        // A record whose own clock reading is nonsense is left
+                        // out: keeping it would mean either an invented
+                        // timestamp, or a baseline that turns every later
+                        // subtraction into NaN.
+                        if !seconds.is_finite() {
+                            unusable_timestamp += 1;
+                            index += 1;
+                            continue;
+                        }
+                        elapsed(seconds - *first_seconds.get_or_insert(seconds))
+                    }
+                    None => Duration::from_micros(ticks * CLOCK_TICK_MICROS),
+                };
+                entries.push(LogEntry::new(
+                    timestamp,
+                    fields.iter().map(|f| f.value(payload)).collect(),
+                ));
             }
             KIND_MARKER => {
                 if fill(&mut reader, &mut marker)? < marker.len() {
@@ -302,12 +314,13 @@ pub fn read_mlg<P: AsRef<Path>>(path: P) -> io::Result<(Vec<String>, Vec<LogEntr
         }
         index += 1;
     }
-    if dropped > 0 {
+    if failed_checksum > 0 || unusable_timestamp > 0 {
         tracing::warn!(
             log = %path.display(),
-            dropped,
+            failed_checksum,
+            unusable_timestamp,
             kept = entries.len(),
-            "MLG records failed their checksum and were left out of the log"
+            "MLG records were left out of the log"
         );
     }
     if entries.is_empty() {
@@ -706,6 +719,28 @@ mod tests {
         // The clock only moved 1000 ticks, but an hour passed.
         assert_eq!(entries[0].timestamp, Duration::ZERO);
         assert_eq!(entries[1].timestamp, Duration::from_secs(4_000));
+    }
+
+    #[test]
+    fn a_non_finite_time_value_does_not_flatten_the_whole_log() {
+        // The baseline is taken from the first record, so a NaN there would
+        // make every later subtraction NaN and report the entire log at zero.
+        let bytes = build_log(
+            2,
+            &[&TIME, &CLT, &STFT],
+            &[
+                record(0, 1_000, &payload(f32::NAN, 8741, 1.0)),
+                record(1, 2_000, &payload(10.0, 8741, 1.0)),
+                record(2, 3_000, &payload(12.0, 8741, 1.0)),
+            ],
+        );
+        let (_dir, path) = write_temp(&bytes);
+
+        let (_, entries) = read_mlg(&path).unwrap();
+
+        assert_eq!(entries.len(), 2, "the unusable record is left out");
+        assert_eq!(entries[0].timestamp, Duration::ZERO);
+        assert_eq!(entries[1].timestamp, Duration::from_secs(2));
     }
 
     #[test]
