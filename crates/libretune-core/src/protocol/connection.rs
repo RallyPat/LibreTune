@@ -3854,8 +3854,6 @@ mod tests {
 
 #[cfg(test)]
 mod burn_page_tests {
-    use super::*;
-
     /// Speeduino's INI declares one `burnCommand` per page, each taking the page
     /// number. A burn that only ever sends page 0 therefore commits the main
     /// config page and leaves every table in RAM - where it reads back correctly
