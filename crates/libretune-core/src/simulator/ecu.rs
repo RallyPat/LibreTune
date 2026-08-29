@@ -12,23 +12,26 @@ use super::engine::{EngineMode, SimEngine};
 use super::ve_model::{self, VeContext};
 use crate::ecu::EcuMemory;
 use crate::ini::{EcuDefinition, Endianness};
-use crate::protocol::{CommunicationChannel, EnvelopeOrder, Packet};
+use crate::protocol::{CommunicationChannel, EnvelopeOrder, Packet, ResponseCode};
 use std::collections::VecDeque;
 use std::io::{self, Read, Write};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-/// Speeduino's `SERIAL_RC_OK`.
-const RC_OK: u8 = 0x00;
-/// Speeduino's `SERIAL_RC_BURN_OK`.
-const RC_BURN_OK: u8 = 0x04;
-/// Speeduino's `SERIAL_RC_CRC_ERR` — frame arrived, checksum disagreed.
-const RC_CRC_ERR: u8 = 0x83;
-/// Speeduino's `SERIAL_RC_RANGE_ERR` — the addressed page/offset does not exist.
-const RC_RANGE_ERR: u8 = 0x84;
-/// Speeduino's `SERIAL_RC_UKWN_ERR`. Distinct from [`RC_OK`], which answering
-/// an unknown command with `0x00` would be indistinguishable from.
-const RC_UNKNOWN_ERR: u8 = 0x89;
+/// Return codes, taken from the decoder that reads them rather than
+/// redefined here.
+///
+/// Speeduino's own `SERIAL_RC_*` numbering and msEnvelope §15.2 disagree in
+/// places, and [`ResponseCode`] is what LibreTune actually decodes with. A
+/// simulator answering a different number would let a client's error
+/// handling look correct while being wrong.
+const RC_OK: u8 = ResponseCode::Ok.as_byte();
+const RC_BURN_OK: u8 = ResponseCode::OkBurn.as_byte();
+const RC_CRC_ERR: u8 = ResponseCode::CrcMismatch.as_byte();
+const RC_RANGE_ERR: u8 = ResponseCode::OutOfRange.as_byte();
+/// Distinct from [`RC_OK`], which answering an unknown command with `0x00`
+/// would be indistinguishable from.
+const RC_UNKNOWN_ERR: u8 = ResponseCode::UnrecognizedCommand.as_byte();
 /// How long an incomplete frame may sit *without progress* before it is
 /// discarded, mirroring Speeduino's `SERIAL_TIMEOUT`. Without it a client
 /// that abandons a frame mid-write desynchronises every later command,
@@ -314,32 +317,35 @@ fn page_identifiers(def: &EcuDefinition) -> Vec<u16> {
 /// prefix of `01 00` is a complete one-byte frame little-endian while still
 /// being the start of a 256-byte one big-endian. The INI already says which
 /// dialect it is, so ask it instead of guessing.
+///
+/// There is deliberately no "decide later" state. A single buffered `0x41`
+/// is both the complete command `A` and the length prefix of a 65-byte
+/// little-endian frame, and no rule over the bytes alone separates them —
+/// so an ECU whose dialect is unknown is a contradiction, not a mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Framing {
     /// `messageEnvelopeFormat` names msEnvelope: every request is a frame.
     Enveloped,
-    /// No envelope format declared: bare commands only.
+    /// No envelope format declared: bare commands only. Also the default for
+    /// a simulator built without a definition, which stands in for the
+    /// Speeduino its default signature names.
     Plain,
-    /// No definition to ask — the bare [`EcuSimulator::new`] used by tests.
-    /// Accept whichever framing first proves itself, then commit to it.
-    Undecided,
 }
 
 impl Framing {
     fn of(def: Option<&EcuDefinition>) -> Self {
         match def {
             Some(def) if def.protocol.uses_modern_protocol() => Framing::Enveloped,
-            Some(_) => Framing::Plain,
-            None => Framing::Undecided,
+            _ => Framing::Plain,
         }
     }
 
     fn allows_frames(self) -> bool {
-        self != Framing::Plain
+        self == Framing::Enveloped
     }
 
     fn allows_plain(self) -> bool {
-        self != Framing::Enveloped
+        self == Framing::Plain
     }
 }
 
@@ -490,10 +496,15 @@ fn respond(cmd: &[u8], pipe: &mut Pipe, enveloped: bool) -> Vec<u8> {
         b'M' | b'C' => {
             let wrote = parse_page_offset_count(cmd, pipe.cmd_le)
                 .and_then(|(id, offset, count)| Some((pipe.resolve_page(id)?, offset, count)))
-                .is_some_and(|(page, offset, count)| {
-                    let value = cmd.get(7..7 + count as usize).unwrap_or(&[]);
-                    pipe.memory.write(page, offset, value)
-                });
+                .and_then(|(page, offset, count)| {
+                    // The declared range has to actually be there. Falling
+                    // back to an empty slice acknowledged a truncated write
+                    // as success while storing nothing, which is exactly the
+                    // client bug a simulator exists to catch.
+                    let value = cmd.get(7..7 + count as usize)?;
+                    Some(pipe.memory.write(page, offset, value))
+                })
+                .unwrap_or(false);
             if enveloped {
                 vec![if wrote { RC_OK } else { RC_RANGE_ERR }]
             } else {
@@ -610,6 +621,9 @@ fn take_frame(pipe: &mut Pipe) -> Framed {
         let first = pipe.cmd_buf[0];
         if is_command_byte(first) {
             let cmd_le = pipe.cmd_le;
+            // The dialect is known to be plain, so there is nothing a
+            // command letter could be confused with and commands may be
+            // pipelined freely.
             match plain_command_len(&pipe.cmd_buf, cmd_le) {
                 Some(len) if len <= pipe.cmd_buf.len() => {
                     return Framed::Plain(pipe.cmd_buf.drain(..len).collect());
@@ -651,7 +665,6 @@ fn process(pipe: &Arc<Mutex<Pipe>>) {
             Framed::Enveloped { payload, order } => {
                 p.envelope = order;
                 p.order_latched = true;
-                p.framing = Framing::Enveloped;
                 let response = respond(&payload, &mut p, true);
                 let framed = Packet::new(response).to_bytes_ordered(order);
                 p.rsp_buf.extend(framed);
@@ -661,7 +674,6 @@ fn process(pipe: &Arc<Mutex<Pipe>>) {
                 p.rsp_buf.extend(framed);
             }
             Framed::Plain(cmd) => {
-                p.framing = Framing::Plain;
                 let out = respond(&cmd, &mut p, false);
                 p.rsp_buf.extend(out);
             }
@@ -942,27 +954,31 @@ mod tests {
     }
 
     #[test]
-    fn six_zero_bytes_do_not_latch_the_session_into_framed_mode() {
+    fn six_zero_bytes_do_not_latch_a_byte_order() {
         // A zero-length payload's CRC32 is zero, so `00 00 00 00 00 00`
-        // decodes as a "valid" frame. Latching on it disabled the plain
-        // protocol for the rest of the session, and a legacy client never
-        // got its signature back.
-        let sim = EcuSimulator::new();
+        // decodes as a "valid" frame in either order. Latching on it fixes
+        // the wrong byte order for the rest of the session.
+        let sim = EcuSimulator::from_definition(&enveloped_definition());
         let mut channel = sim.channel();
 
         channel
             .write_all(&[0, 0, 0, 0, 0, 0])
             .expect("noise is accepted");
         let _ = read_n(&mut channel, 64);
-        // Noise is not a frame and not a command, so it sits until the idle
-        // timeout drops it — exactly what the firmware does.
+        // Noise is neither a frame nor a command, so it waits for the idle
+        // timeout — exactly what the firmware does.
         sim.expire_frame_buffer_for_test();
 
-        channel.write_all(b"Q").expect("write succeeds");
+        // The definition is little-endian, so big-endian is the order the
+        // hint does *not* start on: it can only be reached by negotiation.
+        let request = Packet::new(b"Q".to_vec()).to_bytes_ordered(EnvelopeOrder::BigEndian);
+        channel.write_all(&request).expect("write succeeds");
+        let packet =
+            Packet::from_bytes_ordered(&read_n(&mut channel, 128), EnvelopeOrder::BigEndian, false)
+                .expect("line noise must not fix the wrong byte order");
         assert_eq!(
-            read_n(&mut channel, 64),
-            EcuSimulator::DEFAULT_SIGNATURE.as_bytes(),
-            "line noise must not disable the plain protocol"
+            &packet.payload[1..],
+            EcuSimulator::DEFAULT_SIGNATURE.as_bytes()
         );
     }
 
@@ -1096,6 +1112,109 @@ mod tests {
     }
 
     #[test]
+    fn the_return_codes_are_the_ones_the_decoder_reads() {
+        // Speeduino's own SERIAL_RC_* numbering and msEnvelope §15.2 disagree
+        // in places. Answering a number the client decodes as something else
+        // lets its error handling look correct while being wrong, and two
+        // matching hardcoded constants could never reveal it.
+        assert_eq!(ResponseCode::from_byte(RC_OK), ResponseCode::Ok);
+        assert_eq!(ResponseCode::from_byte(RC_BURN_OK), ResponseCode::OkBurn);
+        assert_eq!(
+            ResponseCode::from_byte(RC_CRC_ERR),
+            ResponseCode::CrcMismatch
+        );
+        assert_eq!(
+            ResponseCode::from_byte(RC_RANGE_ERR),
+            ResponseCode::OutOfRange
+        );
+        assert_eq!(
+            ResponseCode::from_byte(RC_UNKNOWN_ERR),
+            ResponseCode::UnrecognizedCommand
+        );
+        for success in [RC_OK, RC_BURN_OK] {
+            assert!(!ResponseCode::from_byte(success).is_error());
+        }
+        for failure in [RC_CRC_ERR, RC_RANGE_ERR, RC_UNKNOWN_ERR] {
+            assert!(ResponseCode::from_byte(failure).is_error());
+        }
+    }
+
+    #[test]
+    fn a_write_shorter_than_it_declares_is_refused() {
+        // `cmd.get(..)` falling back to an empty slice acknowledged a
+        // truncated write as success while storing nothing — the exact
+        // client bug a simulator is meant to catch.
+        let sim = EcuSimulator::from_definition(&enveloped_definition());
+        let mut channel = sim.channel();
+
+        let mut payload = vec![b'C'];
+        payload.extend(0u16.to_le_bytes()); // page 0
+        payload.extend(0u16.to_le_bytes()); // offset 0
+        payload.extend(3u16.to_le_bytes()); // declares three bytes
+                                            // ...and carries none.
+        channel
+            .write_all(&Packet::new(payload).to_bytes())
+            .expect("frame accepted");
+
+        let packet = Packet::from_bytes(&read_n(&mut channel, 64)).expect("a frame comes back");
+        assert_eq!(
+            packet.payload,
+            vec![RC_RANGE_ERR],
+            "a write that carries no data must not be acknowledged"
+        );
+    }
+
+    #[test]
+    fn a_framed_dialect_ignores_a_fragment_that_reads_as_a_whole_command() {
+        // `0x41` is the command `A` and also the length prefix of a 65-byte
+        // little-endian frame. There is no rule over the bytes that tells
+        // them apart, which is why the dialect comes from the INI and a
+        // "decide later" mode does not exist.
+        let sim = EcuSimulator::from_definition(&enveloped_definition());
+        let mut channel = sim.channel();
+
+        let frame = Packet::new(vec![0x5Au8; 65]).to_bytes_ordered(EnvelopeOrder::LittleEndian);
+        assert_eq!(frame[0], b'A', "the ambiguous first byte");
+
+        channel.write_all(&frame[..1]).expect("fragment accepted");
+        assert_eq!(
+            read_n(&mut channel, 64),
+            Vec::<u8>::new(),
+            "a length prefix is not a command"
+        );
+
+        channel.write_all(&frame[1..]).expect("rest accepted");
+        let response = read_n(&mut channel, 64);
+        assert!(
+            !response.is_empty(),
+            "the frame must still be understood once complete"
+        );
+        Packet::from_bytes_ordered(&response, EnvelopeOrder::LittleEndian, false)
+            .expect("answered in the framing it arrived in");
+    }
+
+    #[test]
+    fn a_definition_without_an_envelope_format_speaks_plain_only() {
+        let sim = EcuSimulator::from_definition(&definition());
+        let mut channel = sim.channel();
+
+        // A frame is not a request in this dialect; its first bytes are not
+        // even command letters, so nothing is dispatched.
+        channel
+            .write_all(&Packet::new(b"Q".to_vec()).to_bytes())
+            .expect("bytes accepted");
+        assert_eq!(read_n(&mut channel, 64), Vec::<u8>::new());
+
+        sim.expire_frame_buffer_for_test();
+        channel.write_all(b"Q").expect("write succeeds");
+        assert_eq!(
+            read_n(&mut channel, 64),
+            EcuSimulator::DEFAULT_SIGNATURE.as_bytes(),
+            "the plain protocol is what this INI declares"
+        );
+    }
+
+    #[test]
     fn an_empty_channel_reports_not_ready_rather_than_end_of_stream() {
         // `Ok(0)` into a non-empty buffer is EOF by contract, and
         // `read_exact_timeout` turns EOF into an immediate timeout instead of
@@ -1113,7 +1232,7 @@ mod tests {
     fn an_unknown_command_is_refused_with_a_code_that_is_not_success() {
         // Answering `vec![0]` made "I do not know this command" identical to
         // `RC_OK`, so a client saw every typo as a successful no-op.
-        let sim = EcuSimulator::new();
+        let sim = EcuSimulator::from_definition(&enveloped_definition());
         let mut channel = sim.channel();
 
         let request = Packet::new(b"\x01".to_vec()).to_bytes();
@@ -1283,7 +1402,7 @@ mod tests {
 
     #[test]
     fn crc_enveloped_commands_are_answered_in_the_same_framing() {
-        let sim = EcuSimulator::new();
+        let sim = EcuSimulator::from_definition(&enveloped_definition());
         let mut channel = sim.channel();
 
         let request = Packet::new(b"Q".to_vec()).to_bytes();

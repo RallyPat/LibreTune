@@ -209,6 +209,15 @@ pub struct AutoTuneConfig {
 
 pub struct AppState {
     pub connection: Mutex<Option<Connection>>,
+    /// Serialises everything that *replaces* [`AppState::connection`].
+    ///
+    /// Holding the connection lock is not enough: entering demo mode and
+    /// connecting to real hardware each take it several times, and between
+    /// those acquisitions the other can install its own connection. The
+    /// result is demo mode's definition and tune sitting over a physical
+    /// ECU, or a real connection torn down by a demo transition that had
+    /// already checked the flag. Take this for the whole transition.
+    pub connection_transition: Mutex<()>,
     pub definition: Mutex<Option<EcuDefinition>>,
     pub autotune_state: Mutex<AutoTuneState>,
     pub autotune_secondary_state: Mutex<AutoTuneState>,

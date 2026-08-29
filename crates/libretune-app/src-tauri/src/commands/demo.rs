@@ -16,6 +16,11 @@ pub async fn set_demo_mode(
     state: tauri::State<'_, AppState>,
     enabled: bool,
 ) -> Result<(), String> {
+    // Held for the whole transition, so a concurrent `connect_to_ecu`
+    // cannot install a physical connection between the guard below and the
+    // simulator landing in `state.connection` (or the reverse on disable).
+    let _transition = state.connection_transition.lock().await;
+
     // Idempotent in both directions. Setting the mode it is already in is a
     // no-op, not a licence to abort the realtime stream and rebuild the
     // connection, project, cache and tune underneath a running session.
@@ -221,13 +226,25 @@ pub(crate) async fn apply_demo_enable(
     }
 
     // The tune comes off the simulator itself, so the cache the editors read
-    // and the memory the physics answer from are the same bytes.
+    // and the memory the physics answer from are the same bytes. A session
+    // whose tune never loaded is not a working demo — realtime would run
+    // while every table editor refused to open — so the transition fails
+    // rather than reporting success.
     let mut cache = cache;
-    let tune = sync_tune_from_simulator(state, &def, &mut cache).await;
+    let tune = match sync_tune_from_simulator(state, &def, &mut cache).await {
+        Some(tune) => tune,
+        None => {
+            let mut conn_guard = state.connection.lock().await;
+            if let Some(mut connection) = conn_guard.take() {
+                connection.disconnect();
+            }
+            return Err("Demo mode could not read its tune out of the simulator".to_string());
+        }
+    };
 
     {
         let mut tune_guard = state.current_tune.lock().await;
-        *tune_guard = tune;
+        *tune_guard = Some(tune);
     }
 
     {
@@ -305,6 +322,7 @@ mod demo_mode_tests {
     fn test_state() -> AppState {
         AppState {
             connection: Mutex::new(None),
+            connection_transition: Mutex::new(()),
             definition: Mutex::new(None),
             autotune_state: Mutex::new(AutoTuneState::new()),
             autotune_secondary_state: Mutex::new(AutoTuneState::new()),
@@ -467,6 +485,34 @@ mod demo_mode_tests {
                 .get_page(page)
                 .is_none_or(|bytes| bytes.iter().all(|b| *b == 0))),
             "the cache must be left untouched when the sync aborts"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_demo_session_whose_tune_will_not_load_fails_instead_of_half_starting() {
+        // Installing the definition and flag while `current_tune` stays None
+        // reports a healthy demo session in which realtime runs but every
+        // table editor refuses to open.
+        let state = test_state();
+        let mut def = demo_def();
+        // Declare one identifier fewer than there are pages: the client
+        // addresses the last page by index, which the simulator then cannot
+        // resolve, and its read fails.
+        def.protocol.page_identifiers.truncate(1);
+
+        let result = apply_demo_enable(&state, def.clone(), TuneCache::from_definition(&def)).await;
+
+        assert!(
+            result.is_err(),
+            "a tune that will not load must fail loudly"
+        );
+        assert!(
+            state.current_tune.lock().await.is_none(),
+            "no half-loaded tune may be published"
+        );
+        assert!(
+            state.connection.lock().await.is_none(),
+            "the failed session must not leave a connection behind"
         );
     }
 

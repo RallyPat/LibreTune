@@ -2,7 +2,7 @@
 //! `Connection` path, driven by the real INI demo mode ships with.
 
 use libretune_core::ini::EcuDefinition;
-use libretune_core::protocol::{Connection, ConnectionConfig};
+use libretune_core::protocol::{Connection, ConnectionConfig, ResponseCode};
 use libretune_core::simulator::{EcuSimulator, EngineMode};
 use std::path::PathBuf;
 use std::time::Duration;
@@ -267,7 +267,11 @@ fn a_frame_whose_length_byte_looks_like_a_command_is_not_split() {
     response.truncate(read);
     let packet = Packet::from_bytes_ordered(&response, EnvelopeOrder::BigEndian, false)
         .expect("one well-formed reply, not a fragment");
-    assert_eq!(packet.payload, vec![0x00], "the write is acknowledged");
+    assert_eq!(
+        packet.payload,
+        vec![ResponseCode::Ok.as_byte()],
+        "the write is acknowledged"
+    );
 }
 
 #[test]
@@ -314,7 +318,14 @@ fn a_frame_with_a_broken_crc_is_refused_without_touching_memory() {
     buf.truncate(n);
     let packet = Packet::from_bytes_ordered(&buf, EnvelopeOrder::BigEndian, false)
         .expect("the refusal is itself well framed");
-    assert_eq!(packet.payload, vec![0x83], "a CRC error must be reported");
+    // Asserted through the decoder's own enum: a simulator answering a
+    // number the client reads as something else is the defect, and two
+    // matching hardcoded constants could never show it.
+    assert_eq!(
+        packet.payload,
+        vec![ResponseCode::CrcMismatch.as_byte()],
+        "a CRC error must be reported"
+    );
 
     assert_eq!(
         read_first_byte(&mut channel),
@@ -343,9 +354,15 @@ fn the_simulated_lambda_lands_in_a_range_autotune_will_accept() {
         .parse(&read_realtime_block(&mut channel, &def), def.endianness)
         .expect("lambda decodes");
 
+    // A band this wide would also admit 1.0, which is exactly what the
+    // engine reports when the VE context never reaches it — the test would
+    // then pass while the AutoTune loop supplied no error signal at all.
+    // The seed sits 15 % below the hidden truth, so lambda must be lean by
+    // about that ratio.
+    let expected = 1.0 / 0.85;
     assert!(
-        (0.5..1.6).contains(&value),
-        "lambda must be a plausible mixture, got {value}"
+        (value - expected).abs() < 0.05,
+        "the seeded tune must read lean by its own error, expected ~{expected:.3}, got {value}"
     );
 }
 

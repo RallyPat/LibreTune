@@ -212,6 +212,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .manage(AppState {
             connection: Mutex::new(None),
+            connection_transition: Mutex::new(()),
             definition: Mutex::new(None),
             autotune_state: Mutex::new(AutoTuneState::new()),
             autotune_secondary_state: Mutex::new(AutoTuneState::new()),
