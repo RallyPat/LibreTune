@@ -198,15 +198,20 @@ fn read_fields(reader: &mut impl Read, header: &Header) -> io::Result<Vec<MlgFie
 /// back online — advance the clock but carry no channel values, so they are
 /// skipped.
 ///
-/// Tolerates the damage real logs carry: a record cut short by a disconnect
-/// ends the read, and a record whose checksum disagrees with its payload is
-/// dropped rather than failing the whole file.
+/// Damage is reported rather than absorbed: a log that ends mid-record, or
+/// carries a record kind with no known length, is an error, because reading on
+/// would mean guessing where the next record starts. The one exception is a
+/// record whose checksum disagrees with its payload. Those turn up in ordinary
+/// captures — five of the thirty-four used to develop this reader carry
+/// between one and five of them — so they are left out and counted in a
+/// warning instead of costing the user the whole log.
 ///
 /// The whole log is held in memory, exactly like `read_csv`, and `.mlg`
 /// captures are large: a few hundred channels over half an hour decode to
 /// gigabytes of `f64`. Reading only the channels a caller asked for is the way
 /// past that ceiling when it starts to bite.
 pub fn read_mlg<P: AsRef<Path>>(path: P) -> io::Result<(Vec<String>, Vec<LogEntry>)> {
+    let path = path.as_ref();
     let mut reader = BufReader::new(File::open(path)?);
     let header = read_header(&mut reader)?;
     let fields = read_fields(&mut reader, &header)?;
@@ -223,36 +228,55 @@ pub fn read_mlg<P: AsRef<Path>>(path: P) -> io::Result<(Vec<String>, Vec<LogEntr
     let mut data = vec![0u8; header.record_len + 1]; // payload then checksum
     let mut marker = [0u8; MARKER_TEXT_LEN];
     let mut clock = Clock::default();
+    let mut index = 0usize;
+    let mut dropped = 0usize;
 
     loop {
-        if ends_log(reader.read_exact(&mut prefix))? {
-            break;
+        match fill(&mut reader, &mut prefix)? {
+            0 => break,
+            filled if filled < prefix.len() => return Err(cut_short(index)),
+            _ => {}
         }
-        // Advanced for every record, including ones dropped below, so that
-        // damage does not shift the timestamps of what follows.
+        // Advanced for every record, including ones dropped below, so that a
+        // rollover on the far side of one is still recognised.
         let ticks = clock.advance(u16::from_be_bytes([prefix[2], prefix[3]]));
         match prefix[0] {
             KIND_DATA => {
-                if ends_log(reader.read_exact(&mut data))? {
-                    break;
+                if fill(&mut reader, &mut data)? < data.len() {
+                    return Err(cut_short(index));
                 }
                 let (payload, checksum) = data.split_at(header.record_len);
-                if payload.iter().fold(0u8, |sum, b| sum.wrapping_add(*b)) != checksum[0] {
-                    continue;
+                if payload.iter().fold(0u8, |sum, b| sum.wrapping_add(*b)) == checksum[0] {
+                    entries.push(LogEntry::new(
+                        Duration::from_micros(ticks * CLOCK_TICK_MICROS),
+                        fields.iter().map(|f| f.value(payload)).collect(),
+                    ));
+                } else {
+                    dropped += 1;
                 }
-                entries.push(LogEntry::new(
-                    Duration::from_micros(ticks * CLOCK_TICK_MICROS),
-                    fields.iter().map(|f| f.value(payload)).collect(),
-                ));
             }
             KIND_MARKER => {
-                if ends_log(reader.read_exact(&mut marker))? {
-                    break;
+                if fill(&mut reader, &mut marker)? < marker.len() {
+                    return Err(cut_short(index));
                 }
             }
-            // Nothing else has a known length, so there is no way to resync.
-            _ => break,
+            // Nothing else has a known length, so there is no way to resync,
+            // and reading on would drop the rest of the log in silence.
+            kind => {
+                return Err(invalid(format!(
+                    "record kind {kind} at record {index} is not one this reader knows"
+                )))
+            }
         }
+        index += 1;
+    }
+    if dropped > 0 {
+        tracing::warn!(
+            log = %path.display(),
+            dropped,
+            kept = entries.len(),
+            "MLG records failed their checksum and were left out of the log"
+        );
     }
     if entries.is_empty() {
         return Err(invalid("MLG log contains no readable records"));
@@ -260,14 +284,21 @@ pub fn read_mlg<P: AsRef<Path>>(path: P) -> io::Result<(Vec<String>, Vec<LogEntr
     Ok((channels, entries))
 }
 
-/// Whether a read ran off the end of the log — the shape a capture cut short
-/// by a disconnect or a full card takes. Any other failure is a real error.
-fn ends_log(result: io::Result<()>) -> io::Result<bool> {
-    match result {
-        Ok(()) => Ok(false),
-        Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => Ok(true),
-        Err(e) => Err(e),
+/// Reads until `buf` is full or the file runs out, returning how many bytes
+/// were there. Anything short of a full buffer means the log stops mid-record.
+fn fill(reader: &mut impl Read, buf: &mut [u8]) -> io::Result<usize> {
+    let mut filled = 0;
+    while filled < buf.len() {
+        match reader.read(&mut buf[filled..])? {
+            0 => break,
+            n => filled += n,
+        }
     }
+    Ok(filled)
+}
+
+fn cut_short(index: usize) -> io::Error {
+    invalid(format!("log ends part-way through record {index}"))
 }
 
 /// Turns the 16-bit record clock back into a tick count from the first record.
@@ -477,8 +508,7 @@ mod tests {
     }
 
     #[test]
-    fn keeps_the_records_before_a_truncated_tail() {
-        // Logs cut short by a disconnect or a full SD card end mid-record.
+    fn rejects_a_log_that_ends_mid_record() {
         let mut bytes = build_log(
             2,
             &[&TIME, &CLT, &STFT],
@@ -490,9 +520,31 @@ mod tests {
         bytes.truncate(bytes.len() - 5);
 
         let (_dir, path) = write_temp(&bytes);
-        let (_, entries) = read_mlg(&path).unwrap();
 
-        assert_eq!(entries.len(), 1);
+        assert!(read_mlg(&path).is_err());
+    }
+
+    #[test]
+    fn rejects_a_record_kind_it_cannot_decode() {
+        // Only kinds 0 and 1 have a known length, so an unknown one leaves no
+        // way to find the next record — reading on would drop the rest of the
+        // log without saying so.
+        let mut unknown = vec![2u8, 0, 0x0b, 0xb8];
+        unknown.extend(std::iter::repeat_n(0u8, 32));
+
+        let bytes = build_log(
+            2,
+            &[&TIME, &CLT, &STFT],
+            &[record(0, 1_000, &payload(0.0, 8741, 1.0)), unknown],
+        );
+        let (_dir, path) = write_temp(&bytes);
+
+        let error = read_mlg(&path).unwrap_err();
+
+        assert!(
+            error.to_string().contains("record kind 2"),
+            "expected the unknown kind to be named, got: {error}"
+        );
     }
 
     #[test]
