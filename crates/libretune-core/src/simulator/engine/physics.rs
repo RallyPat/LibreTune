@@ -116,17 +116,16 @@ impl SimEngine {
     /// to range, idle fluctuation noise. (The reference's unsigned math can
     /// wrap below 0 at idle; `i32` + clamp keeps the same behavior safely.)
     pub(super) fn simulate_rpm(&mut self) {
-        let delta = self.rpm_accel * UPDATE_INTERVAL_MS as i32 / 1_000;
+        // The slew is a magnitude; the direction comes from which side of
+        // the target we are on. Adding a signed `rpm_accel` on both branches
+        // only works while the sign happens to match, and every mode but
+        // deceleration slews positive: from above its target, Idle would
+        // climb away from it and never arrive.
+        let step = (self.rpm_accel * UPDATE_INTERVAL_MS as i32 / 1_000).abs();
         if self.rpm < self.target_rpm {
-            self.rpm += delta;
-            if self.rpm > self.target_rpm {
-                self.rpm = self.target_rpm;
-            }
+            self.rpm = (self.rpm + step).min(self.target_rpm);
         } else if self.rpm > self.target_rpm {
-            self.rpm += delta;
-            if self.rpm < self.target_rpm {
-                self.rpm = self.target_rpm;
-            }
+            self.rpm = (self.rpm - step).max(self.target_rpm);
         }
         self.rpm = self.rpm.clamp(RPM_MIN, RPM_MAX);
         if matches!(self.mode, EngineMode::Idle | EngineMode::WarmupIdle) {

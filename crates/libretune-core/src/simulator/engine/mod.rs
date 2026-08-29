@@ -418,6 +418,36 @@ mod deceleration_tests {
     }
 
     #[test]
+    fn a_positive_slew_mode_converges_on_its_target_from_above() {
+        // Both branches used to add a signed `rpm_accel`, which only steers
+        // correctly while the sign happens to match. Every mode but
+        // deceleration slews positive, so from above its target Idle climbed
+        // away from it and the mode could never complete.
+        let mut def = EcuDefinition::default();
+        def.protocol.och_block_size = 8;
+        let mut engine = SimEngine::new(&def);
+
+        engine.set_mode(EngineMode::Idle);
+        let target = engine.target_rpm;
+        engine.rpm = target + 400;
+
+        // The slew is exercised directly: letting the mode machine run would
+        // hand Idle off to another mode long before the question is answered.
+        for _ in 0..400 {
+            engine.simulate_rpm();
+            // Idle jitters by a few rpm once it arrives, so "converged" is a
+            // neighbourhood, not equality.
+            if engine.rpm <= target + 20 {
+                return;
+            }
+        }
+        panic!(
+            "idle never came down to its {target} rpm target, stuck at {}",
+            engine.rpm
+        );
+    }
+
+    #[test]
     fn deceleration_hands_over_instead_of_running_forever() {
         let mut def = EcuDefinition::default();
         def.protocol.och_block_size = 8;

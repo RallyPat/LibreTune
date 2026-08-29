@@ -159,13 +159,16 @@ struct Pipe {
     /// `%2i` parameter, so the simulator has to reverse the same mapping
     /// rather than assume the identifier equals the page index.
     page_ids: Vec<u16>,
-    /// Set once a CRC-framed request has been decoded successfully.
+    /// Which framing this ECU answers, taken from the definition.
+    framing: Framing,
+    /// Set once a frame has validated, which is what fixes [`Pipe::envelope`]
+    /// to the order actually in use.
     ///
-    /// From then on every request is a frame. Without this latch a partially
-    /// arrived frame whose first payload byte happens to be a command letter
-    /// (`0x41` = `'A'` is also the high byte of length 0x4100) is consumed as
-    /// a bare command, and the rest of the frame corrupts the next one.
-    enveloped_session: bool,
+    /// Until then the order is a guess, so a frame that fails to validate is
+    /// left alone rather than consumed: "complete" is only meaningful once
+    /// the length field's byte order is known, and a wrong guess turns the
+    /// first seven bytes of a 256-byte frame into a whole one.
+    order_latched: bool,
     /// When the current incomplete frame last made progress. Reset by every
     /// write that adds bytes, so [`FRAME_TIMEOUT`] measures silence.
     partial_since: Option<Instant>,
@@ -215,7 +218,8 @@ impl Pipe {
             auto_tick: true,
             last_auto_tick: None,
             page_ids: def.map(page_identifiers).unwrap_or_default(),
-            enveloped_session: false,
+            framing: Framing::of(def),
+            order_latched: false,
             partial_since: None,
         }
     }
@@ -302,12 +306,44 @@ fn page_identifiers(def: &EcuDefinition) -> Vec<u16> {
         .collect()
 }
 
-/// Whether `b` starts a plain-protocol command this ECU understands.
+/// Which framing this ECU speaks.
 ///
-/// Only ever consulted for a buffer that failed to decode as a CRC frame,
-/// and only before the session has latched into framed mode — on its own it
-/// cannot tell a command letter from a length byte that happens to share its
-/// value.
+/// Sniffing the wire cannot answer this. A fragment of a frame is
+/// indistinguishable from a bare command — `0x41` is both the burst command
+/// `A` and the high byte of a big-endian length of `0x4100` — and a length
+/// prefix of `01 00` is a complete one-byte frame little-endian while still
+/// being the start of a 256-byte one big-endian. The INI already says which
+/// dialect it is, so ask it instead of guessing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Framing {
+    /// `messageEnvelopeFormat` names msEnvelope: every request is a frame.
+    Enveloped,
+    /// No envelope format declared: bare commands only.
+    Plain,
+    /// No definition to ask — the bare [`EcuSimulator::new`] used by tests.
+    /// Accept whichever framing first proves itself, then commit to it.
+    Undecided,
+}
+
+impl Framing {
+    fn of(def: Option<&EcuDefinition>) -> Self {
+        match def {
+            Some(def) if def.protocol.uses_modern_protocol() => Framing::Enveloped,
+            Some(_) => Framing::Plain,
+            None => Framing::Undecided,
+        }
+    }
+
+    fn allows_frames(self) -> bool {
+        self != Framing::Plain
+    }
+
+    fn allows_plain(self) -> bool {
+        self != Framing::Enveloped
+    }
+}
+
+/// Whether `b` starts a plain-protocol command this ECU understands.
 fn is_command_byte(b: u8) -> bool {
     matches!(
         b,
@@ -534,67 +570,71 @@ enum Framed {
 /// for good — a partially arrived frame is then never mistaken for a bare
 /// command.
 fn take_frame(pipe: &mut Pipe) -> Framed {
-    let hint = pipe.envelope;
-    let other = match hint {
-        EnvelopeOrder::BigEndian => EnvelopeOrder::LittleEndian,
-        EnvelopeOrder::LittleEndian => EnvelopeOrder::BigEndian,
-    };
-    let bytes = pipe.cmd_buf.make_contiguous();
-    if bytes.is_empty() {
+    if pipe.cmd_buf.is_empty() {
         return Framed::NeedMore;
     }
 
-    for order in [hint, other] {
-        let Ok(packet) = Packet::from_bytes_ordered(bytes, order, false) else {
-            continue;
+    if pipe.framing.allows_frames() {
+        // Once a frame has validated the order is known and only it is
+        // tried; before that both are candidates, and only a full CRC match
+        // decides between them.
+        let orders: &[EnvelopeOrder] = if pipe.order_latched {
+            &[pipe.envelope]
+        } else if pipe.envelope == EnvelopeOrder::BigEndian {
+            &[EnvelopeOrder::BigEndian, EnvelopeOrder::LittleEndian]
+        } else {
+            &[EnvelopeOrder::LittleEndian, EnvelopeOrder::BigEndian]
         };
-        // A zero-length payload carries no command, and its CRC32 is zero —
-        // so six zero bytes of line noise decode as a "valid" frame. Latching
-        // the session on that would disable the plain protocol for good.
-        if packet.payload.is_empty() {
-            continue;
-        }
-        let total = packet.encoded_size();
-        let _ = pipe.cmd_buf.drain(..total);
-        return Framed::Enveloped {
-            payload: packet.payload,
-            order,
-        };
-    }
-
-    let first = pipe.cmd_buf[0];
-    if !pipe.enveloped_session && is_command_byte(first) {
-        let cmd_le = pipe.cmd_le;
-        match plain_command_len(&pipe.cmd_buf, cmd_le) {
-            // Before the session has latched, a command letter is only
-            // trusted when it accounts for every buffered byte. A frame
-            // whose length field starts with one — big-endian 0x4100 leads
-            // with ASCII 'A' — always leaves a tail behind, and consuming
-            // just the letter would poison the rest of that frame.
-            Some(len) if len == pipe.cmd_buf.len() => {
-                return Framed::Plain(pipe.cmd_buf.drain(..len).collect());
+        let bytes = pipe.cmd_buf.make_contiguous();
+        for order in orders {
+            let Ok(packet) = Packet::from_bytes_ordered(bytes, *order, false) else {
+                continue;
+            };
+            // A zero-length payload carries no command, and its CRC32 is
+            // zero — so six zero bytes of line noise decode as a "valid"
+            // frame. Committing the session on that would be wrong twice
+            // over: wrong framing, and wrong byte order.
+            if packet.payload.is_empty() {
+                continue;
             }
-            _ => return Framed::NeedMore,
+            let total = packet.encoded_size();
+            let _ = pipe.cmd_buf.drain(..total);
+            return Framed::Enveloped {
+                payload: packet.payload,
+                order: *order,
+            };
         }
     }
 
-    // Not a plain command, so it can only be a frame. A frame that is
-    // complete in *either* order must have failed its CRC above, and has to
-    // be consumed and refused — leaving it buffered would stall the link
-    // until the timeout silently dropped it.
-    let bytes = pipe.cmd_buf.make_contiguous();
-    if bytes.len() >= 2 {
-        let complete = [hint, other].into_iter().filter_map(|order| {
-            let total = 2 + order.read_u16(&bytes[..2]) as usize + 4;
-            (bytes.len() >= total).then_some((total, order))
-        });
-        // The shortest complete reading is the frame that actually ended
-        // here; a longer one would still be mid-flight.
-        if let Some((total, order)) = complete.min_by_key(|(total, _)| *total) {
-            let _ = pipe.cmd_buf.drain(..total);
-            return Framed::BadCrc(order);
+    if pipe.framing.allows_plain() {
+        let first = pipe.cmd_buf[0];
+        if is_command_byte(first) {
+            let cmd_le = pipe.cmd_le;
+            match plain_command_len(&pipe.cmd_buf, cmd_le) {
+                Some(len) if len <= pipe.cmd_buf.len() => {
+                    return Framed::Plain(pipe.cmd_buf.drain(..len).collect());
+                }
+                _ => return Framed::NeedMore,
+            }
         }
     }
+
+    // A frame that is complete and corrupt has to be consumed and refused,
+    // or it stalls the link until the idle timeout drops it silently. Only
+    // once the order is latched, though: before that, "complete" is a guess,
+    // and guessing wrong eats the head of a valid frame still arriving.
+    if pipe.framing.allows_frames() && pipe.order_latched {
+        let order = pipe.envelope;
+        let bytes = pipe.cmd_buf.make_contiguous();
+        if bytes.len() >= 2 {
+            let total = 2 + order.read_u16(&bytes[..2]) as usize + 4;
+            if bytes.len() >= total {
+                let _ = pipe.cmd_buf.drain(..total);
+                return Framed::BadCrc(order);
+            }
+        }
+    }
+
     Framed::NeedMore
 }
 
@@ -610,7 +650,8 @@ fn process(pipe: &Arc<Mutex<Pipe>>) {
         match take_frame(&mut p) {
             Framed::Enveloped { payload, order } => {
                 p.envelope = order;
-                p.enveloped_session = true;
+                p.order_latched = true;
+                p.framing = Framing::Enveloped;
                 let response = respond(&payload, &mut p, true);
                 let framed = Packet::new(response).to_bytes_ordered(order);
                 p.rsp_buf.extend(framed);
@@ -620,6 +661,7 @@ fn process(pipe: &Arc<Mutex<Pipe>>) {
                 p.rsp_buf.extend(framed);
             }
             Framed::Plain(cmd) => {
+                p.framing = Framing::Plain;
                 let out = respond(&cmd, &mut p, false);
                 p.rsp_buf.extend(out);
             }
@@ -777,6 +819,17 @@ impl EcuSimulator {
         pipe.partial_since = Instant::now().checked_sub(FRAME_TIMEOUT);
     }
 
+    /// Age the incomplete-frame timer by `by`, simulating that much silence.
+    ///
+    /// Subtracting rather than assigning is what makes the idle timer
+    /// testable: a timer that is refreshed on every write never accumulates
+    /// these gaps, while one armed once and left alone does.
+    #[cfg(test)]
+    pub(crate) fn age_frame_timer_for_test(&self, by: Duration) {
+        let mut pipe = self.pipe.lock().unwrap_or_else(|e| e.into_inner());
+        pipe.partial_since = pipe.partial_since.and_then(|at| at.checked_sub(by));
+    }
+
     /// Advance the engine by `dt` and refresh the realtime frame.
     ///
     /// The engine has no wall clock, so this call is what moves its
@@ -863,6 +916,19 @@ mod tests {
     /// The channel reports an empty response buffer as `WouldBlock`, not
     /// `Ok(0)` — `Ok(0)` is end of stream, and the connection's read loop
     /// turns that into an immediate timeout.
+    /// The same fixture, but declaring the CRC envelope the way a modern
+    /// INI does. Framing is a property of the dialect, so a test that speaks
+    /// frames has to say so.
+    fn enveloped_definition() -> EcuDefinition {
+        let mut def = definition();
+        def.protocol.message_envelope_format = Some("msEnvelope_1.0".to_string());
+        // Page 0 has to hold the largest frame these tests send, or a write
+        // is refused for being out of range and the framing assertion never
+        // gets to run.
+        def.page_sizes = vec![0x4100, 16];
+        def
+    }
+
     fn read_n(channel: &mut SimulatorChannel, n: usize) -> Vec<u8> {
         let mut buf = vec![0u8; n];
         match channel.read(&mut buf) {
@@ -888,6 +954,9 @@ mod tests {
             .write_all(&[0, 0, 0, 0, 0, 0])
             .expect("noise is accepted");
         let _ = read_n(&mut channel, 64);
+        // Noise is not a frame and not a command, so it sits until the idle
+        // timeout drops it — exactly what the firmware does.
+        sim.expire_frame_buffer_for_test();
 
         channel.write_all(b"Q").expect("write succeeds");
         assert_eq!(
@@ -898,41 +967,112 @@ mod tests {
     }
 
     #[test]
-    fn a_bad_crc_frame_in_the_other_byte_order_is_still_consumed_and_refused() {
-        // Frames are validated in both orders, but completeness used to be
-        // measured only in the hinted one: a complete-but-corrupt frame in
-        // the other order was neither answered nor consumed, so it stalled
-        // the link until the idle timeout silently dropped it.
-        let mut def = definition();
-        def.endianness = Endianness::Little; // hint = little-endian
-        let sim = EcuSimulator::from_definition(&def);
+    fn a_corrupt_frame_is_refused_once_the_byte_order_is_known() {
+        // After a frame has validated, "complete" is a fact and a bad CRC
+        // must be answered rather than left to rot in the buffer.
+        let sim = EcuSimulator::from_definition(&enveloped_definition());
         let mut channel = sim.channel();
 
-        // A complete big-endian frame (length 1, payload `Q`) with a
-        // deliberately wrong CRC. Little-endian reads its length as 256.
         channel
-            .write_all(&[0x00, 0x01, b'Q', 0xFF, 0xFF, 0xFF, 0xFF])
-            .expect("frame accepted");
+            .write_all(&Packet::new(b"Q".to_vec()).to_bytes())
+            .expect("handshake accepted");
+        let _ = read_n(&mut channel, 128);
 
-        let response = read_n(&mut channel, 64);
-        assert!(
-            !response.is_empty(),
-            "a complete corrupt frame must be answered, not left to rot"
-        );
-        let packet = Packet::from_bytes_ordered(&response, EnvelopeOrder::BigEndian, false)
-            .expect("the refusal is framed");
+        let mut frame = Packet::new(b"Q".to_vec()).to_bytes();
+        let last = frame.len() - 1;
+        frame[last] ^= 0xFF;
+        channel.write_all(&frame).expect("frame accepted");
+
+        let packet = Packet::from_bytes(&read_n(&mut channel, 64)).expect("the refusal is framed");
         assert_eq!(packet.payload, vec![RC_CRC_ERR]);
     }
 
     #[test]
-    fn a_frame_arriving_in_steady_chunks_is_not_timed_out() {
-        // The idle timer must measure silence, not total assembly time. Real
-        // gaps are used deliberately: back-dating the timer would trip the
-        // fixed code too, and prove nothing about which quantity is measured.
-        let sim = EcuSimulator::from_definition(&definition());
+    fn an_unvalidated_byte_order_never_decides_that_a_frame_is_complete() {
+        // `01 00` is a complete one-byte frame little-endian and the start of
+        // a 256-byte one big-endian. Before any frame has validated there is
+        // no way to tell, so the head of a valid frame must not be eaten as a
+        // corrupt short one.
+        let sim = EcuSimulator::from_definition(&enveloped_definition());
         let mut channel = sim.channel();
 
-        // Each gap is comfortably under FRAME_TIMEOUT, but they sum past it.
+        let mut payload = vec![b'R'];
+        payload.extend(0u16.to_le_bytes());
+        payload.extend(0u16.to_le_bytes());
+        payload.extend(1u16.to_le_bytes());
+        payload.resize(256, 0);
+        let frame = Packet::new(payload).to_bytes_ordered(EnvelopeOrder::BigEndian);
+        assert_eq!(&frame[..2], &[0x01, 0x00], "the ambiguous length prefix");
+
+        // Deliver the ambiguous head on its own; nothing may be consumed.
+        channel.write_all(&frame[..7]).expect("head accepted");
+        assert_eq!(
+            read_n(&mut channel, 64),
+            Vec::<u8>::new(),
+            "a guessed byte order must not consume a frame still arriving"
+        );
+
+        channel.write_all(&frame[7..]).expect("tail accepted");
+        let packet =
+            Packet::from_bytes_ordered(&read_n(&mut channel, 128), EnvelopeOrder::BigEndian, false)
+                .expect("the reassembled frame is answered");
+        assert_eq!(packet.payload[0], RC_OK);
+    }
+
+    #[test]
+    fn a_declared_envelope_dialect_never_dispatches_a_bare_command() {
+        // The whole point of taking framing from the INI: a fragment whose
+        // first byte is `A` is a length prefix here, not the burst command,
+        // and no amount of sniffing could tell them apart.
+        let sim = EcuSimulator::from_definition(&enveloped_definition());
+        let mut channel = sim.channel();
+
+        channel.write_all(&[b'A']).expect("fragment accepted");
+
+        assert_eq!(
+            read_n(&mut channel, 64),
+            Vec::<u8>::new(),
+            "a command letter is not a command in a framed dialect"
+        );
+    }
+
+    #[test]
+    fn a_frame_whose_length_prefix_is_a_command_letter_reassembles_across_writes() {
+        // Regression for the fragmentation case: 0x4100 big-endian leads with
+        // ASCII 'A'. Split so the first write contains nothing but that byte,
+        // which is exactly when a sniffing simulator dispatches the wrong
+        // protocol unit.
+        let sim = EcuSimulator::from_definition(&enveloped_definition());
+        let mut channel = sim.channel();
+
+        let count: u16 = 0x4100 - 7;
+        let mut payload = vec![b'C'];
+        payload.extend(0u16.to_le_bytes());
+        payload.extend(0u16.to_le_bytes());
+        payload.extend(count.to_le_bytes());
+        payload.extend(std::iter::repeat_n(0x5Au8, count as usize));
+        let frame = Packet::new(payload).to_bytes_ordered(EnvelopeOrder::BigEndian);
+        assert_eq!(frame[0], b'A', "the length high byte must be the collision");
+
+        for chunk in [&frame[..1], &frame[1..9], &frame[9..]] {
+            channel.write_all(chunk).expect("chunk accepted");
+        }
+
+        let packet =
+            Packet::from_bytes_ordered(&read_n(&mut channel, 64), EnvelopeOrder::BigEndian, false)
+                .expect("one well-formed reply, not a fragment");
+        assert_eq!(packet.payload, vec![RC_OK], "the write is acknowledged");
+    }
+
+    #[test]
+    fn a_frame_arriving_in_steady_chunks_is_not_timed_out() {
+        // The timer must measure silence, not total assembly time. Ageing it
+        // between writes — rather than sleeping — is what makes the two
+        // readings distinguishable: a timer refreshed on every write never
+        // accumulates these gaps, one armed once and left alone does.
+        let sim = EcuSimulator::from_definition(&enveloped_definition());
+        let mut channel = sim.channel();
+
         let gap = FRAME_TIMEOUT * 3 / 4;
         let frame = Packet::new(b"Q".to_vec()).to_bytes();
         let chunks: Vec<&[u8]> = frame.chunks(3).collect();
@@ -942,7 +1082,7 @@ mod tests {
         );
         for (index, chunk) in chunks.iter().enumerate() {
             if index > 0 {
-                std::thread::sleep(gap);
+                sim.age_frame_timer_for_test(gap);
             }
             channel.write_all(chunk).expect("chunk accepted");
         }
@@ -952,25 +1092,6 @@ mod tests {
         assert_eq!(
             &packet.payload[1..],
             EcuSimulator::DEFAULT_SIGNATURE.as_bytes()
-        );
-    }
-
-    #[test]
-    fn a_command_letter_with_a_tail_behind_it_waits_instead_of_being_split() {
-        // Before the session latches, `0x41` is both the command `A` and the
-        // high byte of a big-endian length of 0x4100. Consuming just the
-        // letter poisons the rest of the frame; the tail is the tell.
-        let sim = EcuSimulator::from_definition(&definition());
-        let mut channel = sim.channel();
-
-        channel
-            .write_all(&[b'A', 0x00, 0x11, 0x22, 0x33])
-            .expect("chunk accepted");
-
-        assert_eq!(
-            read_n(&mut channel, 64),
-            Vec::<u8>::new(),
-            "a command letter followed by unexplained bytes must not dispatch"
         );
     }
 
@@ -1006,7 +1127,7 @@ mod tests {
 
     #[test]
     fn a_write_outside_the_page_is_refused_instead_of_acknowledged() {
-        let sim = EcuSimulator::from_definition(&definition());
+        let sim = EcuSimulator::from_definition(&enveloped_definition());
         let mut channel = sim.channel();
 
         // Page 1 is 16 bytes; ask to write 32 at offset 0.
@@ -1031,7 +1152,7 @@ mod tests {
 
     #[test]
     fn an_abandoned_partial_frame_does_not_poison_the_next_command() {
-        let sim = EcuSimulator::from_definition(&definition());
+        let sim = EcuSimulator::from_definition(&enveloped_definition());
         let mut channel = sim.channel();
 
         // Latch into framed mode, then start a frame and walk away.
@@ -1186,7 +1307,7 @@ mod tests {
         // The length field's high byte is only zero while payloads stay
         // small. A page-write chunk is thousands of bytes, so telling frames
         // apart by that byte misreads every real write as a command.
-        let sim = EcuSimulator::from_definition(&definition());
+        let sim = EcuSimulator::from_definition(&enveloped_definition());
         let mut channel = sim.channel();
         let count: u16 = 300;
         let mut payload = vec![b'M', 0, 0];

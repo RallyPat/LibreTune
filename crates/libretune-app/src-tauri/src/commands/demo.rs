@@ -16,11 +16,15 @@ pub async fn set_demo_mode(
     state: tauri::State<'_, AppState>,
     enabled: bool,
 ) -> Result<(), String> {
-    // Stop any existing streaming first — but only for a transition that
-    // actually changes something. Disabling demo mode that is already off
-    // must be a no-op, not a way to kill a real ECU's realtime stream.
-    let is_transition = enabled || *state.demo_mode.lock().await;
-    if is_transition {
+    // Idempotent in both directions. Setting the mode it is already in is a
+    // no-op, not a licence to abort the realtime stream and rebuild the
+    // connection, project, cache and tune underneath a running session.
+    if !demo_mode_transition_needed(&state, enabled).await {
+        return Ok(());
+    }
+
+    // Stop any existing streaming first
+    {
         let mut task_guard = state.streaming_task.lock().await;
         if let Some(handle) = task_guard.take() {
             handle.abort();
@@ -103,6 +107,15 @@ pub async fn set_demo_mode(
     Ok(())
 }
 
+/// Whether `set_demo_mode(enabled)` has any work to do.
+///
+/// `enabled || demo_mode` looked like the same test and is not: it calls a
+/// duplicate *enable* a transition, and rebuilding an already-running demo
+/// session throws away whatever the user had done in it.
+pub(crate) async fn demo_mode_transition_needed(state: &AppState, enabled: bool) -> bool {
+    enabled != *state.demo_mode.lock().await
+}
+
 /// Internal helper: apply demo enable with a provided definition and cache
 /// Build a connection onto a simulator backed by `def`, or `None` if the
 /// handshake doesn't come up.
@@ -134,34 +147,45 @@ fn connect_simulator(def: &EcuDefinition) -> Option<Connection> {
 /// brain: the physics answer from the seeded veTable while AutoTune reads
 /// zeroes out of the cache, and the table editors refuse to open at all
 /// for want of a `current_tune`.
+/// All or nothing: a page that fails to read leaves both the cache and the
+/// tune untouched. A half-synced pair is worse than an unsynced one — the
+/// tune would silently lack the page while the cache still reported it as
+/// zeroes that were never loaded.
 async fn sync_tune_from_simulator(
     state: &AppState,
     def: &EcuDefinition,
     cache: &mut TuneCache,
 ) -> Option<TuneFile> {
-    let mut conn_guard = state.connection.lock().await;
-    let connection = conn_guard.as_mut()?;
+    let pages = {
+        let mut conn_guard = state.connection.lock().await;
+        let connection = conn_guard.as_mut()?;
+        let mut pages = Vec::with_capacity(def.n_pages as usize);
+        for page in 0..def.n_pages {
+            // A zero-length page is declared but has nothing to read; the
+            // real sync path records it as empty rather than failing.
+            if def.page_sizes.get(page as usize).copied().unwrap_or(0) == 0 {
+                pages.push((page, Vec::new()));
+                continue;
+            }
+            match connection.read_page(page) {
+                Ok(data) => pages.push((page, data)),
+                Err(error) => {
+                    tracing::warn!(
+                        "demo: page {page} did not sync from the simulator ({error}); \
+                         leaving the tune unloaded rather than half-loaded"
+                    );
+                    return None;
+                }
+            }
+        }
+        pages
+    };
+
     let mut tune = TuneFile::new(&def.signature);
-
-    for page in 0..def.n_pages {
-        // A zero-length page is declared but has nothing to read; the real
-        // sync path records it as empty rather than failing.
-        if def.page_sizes.get(page as usize).copied().unwrap_or(0) == 0 {
-            tune.pages.insert(page, Vec::new());
-            cache.load_page(page, Vec::new());
-            continue;
-        }
-        match connection.read_page(page) {
-            Ok(data) => {
-                cache.load_page(page, data.clone());
-                tune.pages.insert(page, data);
-            }
-            Err(error) => {
-                tracing::warn!("demo: page {page} did not sync from the simulator: {error}");
-            }
-        }
+    for (page, data) in pages {
+        cache.load_page(page, data.clone());
+        tune.pages.insert(page, data);
     }
-
     Some(tune)
 }
 
@@ -384,6 +408,65 @@ mod demo_mode_tests {
             state.connection.lock().await.is_none(),
             "leaving the simulator connected reports a phantom ECU once demo \
              mode is off"
+        );
+    }
+
+    #[tokio::test]
+    async fn setting_demo_mode_to_the_value_it_already_has_is_not_a_transition() {
+        // `enabled || demo_mode` treated (true, true) as a transition, so a
+        // duplicate enable aborted the realtime stream and rebuilt the
+        // connection, cache and tune underneath a running session.
+        let state = test_state();
+
+        assert!(
+            demo_mode_transition_needed(&state, true).await,
+            "off -> on is a transition"
+        );
+        assert!(
+            !demo_mode_transition_needed(&state, false).await,
+            "off -> off is not"
+        );
+
+        let def = demo_def();
+        apply_demo_enable(&state, def.clone(), TuneCache::from_definition(&def))
+            .await
+            .expect("enable");
+
+        assert!(
+            !demo_mode_transition_needed(&state, true).await,
+            "on -> on must not rebuild a running demo session"
+        );
+        assert!(
+            demo_mode_transition_needed(&state, false).await,
+            "on -> off is a transition"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_page_that_fails_to_read_leaves_the_tune_unloaded_rather_than_half_loaded() {
+        // Publishing a partial sync gives the app a TuneFile missing pages
+        // beside a cache still reporting them as never loaded.
+        let state = test_state();
+        let def = demo_def();
+        apply_demo_enable(&state, def.clone(), TuneCache::from_definition(&def))
+            .await
+            .expect("enable");
+
+        // Ask for one more page than the simulator was built with; the extra
+        // one cannot resolve and the read fails.
+        let mut beyond = def.clone();
+        beyond.n_pages = def.n_pages + 1;
+        beyond.page_sizes.push(64);
+
+        let mut cache = TuneCache::from_definition(&def);
+        let tune = sync_tune_from_simulator(&state, &beyond, &mut cache).await;
+
+        assert!(tune.is_none(), "a failed page must abort the whole sync");
+        assert!(
+            (0..def.n_pages).all(|page| cache
+                .get_page(page)
+                .is_none_or(|bytes| bytes.iter().all(|b| *b == 0))),
+            "the cache must be left untouched when the sync aborts"
         );
     }
 

@@ -124,17 +124,34 @@ fn a_wide_open_throttle_pull_raises_rpm() {
     );
 }
 
-/// Read the whole output-channel block off the simulator with one `r`
+/// Read the leading `len` bytes of the output-channel block with one `r`
 /// request, the way the realtime stream does.
-fn read_realtime(channel: &mut libretune_core::simulator::SimulatorChannel) -> Vec<u8> {
+///
+/// The demo INI declares `msEnvelope_1.0`, so the simulator speaks frames
+/// and only frames — a bare `r` is not a request in that dialect.
+fn request_realtime(
+    channel: &mut libretune_core::simulator::SimulatorChannel,
+    len: u16,
+) -> Vec<u8> {
+    use libretune_core::protocol::Packet;
     use std::io::{Read, Write};
-    let len: u16 = 64;
+
     let mut request = vec![b'r', 0, 0x30, 0, 0];
     request.extend(len.to_le_bytes());
-    channel.write_all(&request).expect("request is accepted");
-    let mut block = vec![0u8; len as usize];
-    channel.read_exact(&mut block).expect("the block arrives");
-    block
+    channel
+        .write_all(&Packet::new(request).to_bytes())
+        .expect("request is accepted");
+
+    let mut buf = vec![0u8; usize::from(len) + 64];
+    let read = channel.read(&mut buf).expect("the block arrives");
+    buf.truncate(read);
+    let packet = Packet::from_bytes(&buf).expect("the reply is a well-formed frame");
+    // Under msEnvelope every payload is `rc || data`.
+    packet.payload[1..].to_vec()
+}
+
+fn read_realtime(channel: &mut libretune_core::simulator::SimulatorChannel) -> Vec<u8> {
+    request_realtime(channel, 64)
 }
 
 #[test]
@@ -337,14 +354,8 @@ fn read_realtime_block(
     channel: &mut libretune_core::simulator::SimulatorChannel,
     def: &EcuDefinition,
 ) -> Vec<u8> {
-    use std::io::{Read, Write};
     // `%2c` is two bytes on the wire; `och_block_size` is a u32, and sending
     // it whole appends two stray bytes the ECU never asked for.
     let len = u16::try_from(def.protocol.och_block_size).expect("the demo block fits a u16");
-    let mut request = vec![b'r', 0, 0x30, 0, 0];
-    request.extend(len.to_le_bytes());
-    channel.write_all(&request).expect("request is accepted");
-    let mut block = vec![0u8; len as usize];
-    channel.read_exact(&mut block).expect("the block arrives");
-    block
+    request_realtime(channel, len)
 }
