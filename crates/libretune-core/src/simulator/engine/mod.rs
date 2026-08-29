@@ -389,3 +389,48 @@ mod tests {
         assert_eq!(engine.och_block().len(), 16);
     }
 }
+
+#[cfg(test)]
+mod deceleration_tests {
+    use super::*;
+
+    /// The RPM below which [`EngineMode::Deceleration`] hands over to
+    /// [`EngineMode::Idle`], as `physics::update_mode` spells it.
+    const DECEL_EXIT_RPM: i32 = RPM_IDLE_MAX + 200;
+
+    #[test]
+    fn every_deceleration_target_sits_below_the_mode_exit_threshold() {
+        // A target at or above the exit RPM makes deceleration terminal: the
+        // slew settles exactly on the target and the exit test never fires.
+        // One sampled run cannot show this — the draw has to be exhausted.
+        let mut def = EcuDefinition::default();
+        def.protocol.och_block_size = 8;
+        let mut engine = SimEngine::new(&def);
+
+        for draw in 0..2_000 {
+            engine.transition(EngineMode::Deceleration);
+            assert!(
+                engine.target_rpm < DECEL_EXIT_RPM,
+                "draw {draw} targeted {} rpm, at or above the {DECEL_EXIT_RPM} exit",
+                engine.target_rpm
+            );
+        }
+    }
+
+    #[test]
+    fn deceleration_hands_over_instead_of_running_forever() {
+        let mut def = EcuDefinition::default();
+        def.protocol.och_block_size = 8;
+        let mut engine = SimEngine::new(&def);
+        engine.set_mode(EngineMode::Deceleration);
+
+        // Thirty simulated seconds is far more than the mode's own dwell.
+        for _ in 0..600 {
+            engine.tick(Duration::from_millis(50));
+            if engine.mode != EngineMode::Deceleration {
+                return;
+            }
+        }
+        panic!("the engine never left deceleration");
+    }
+}

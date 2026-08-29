@@ -100,7 +100,11 @@ impl SimEngine {
                 TPS_WOT - self.rng.range(0, 20),
                 500,
             ),
-            EngineMode::Deceleration => (RPM_IDLE_MAX + self.rng.range(0, 500), TPS_IDLE, -800),
+            // The target has to sit strictly below the exit threshold above
+            // (`RPM_IDLE_MAX + 200`). A higher one is a terminal state: RPM
+            // settles exactly on it, the exit test never fires, and the
+            // model decelerates forever.
+            EngineMode::Deceleration => (RPM_IDLE_MAX + self.rng.range(0, 150), TPS_IDLE, -800),
             EngineMode::Wot => (RPM_REDLINE, TPS_WOT, 1_500),
         };
         self.target_rpm = target_rpm;

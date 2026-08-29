@@ -5,6 +5,10 @@
 use super::types::DataType;
 use serde::{Deserialize, Serialize};
 
+fn default_bit_storage() -> DataType {
+    DataType::U08
+}
+
 /// An output channel (real-time data) definition
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OutputChannel {
@@ -29,6 +33,15 @@ pub struct OutputChannel {
     /// returns 0, and the INI's `pulseLimit = { cycleTime / nSquirts }` then
     /// divides by zero and takes injector duty cycle with it.
     pub bit_count: Option<u8>,
+
+    /// For bits type: the declared backing storage type (`bits, U32, ...`).
+    ///
+    /// `data_type` collapses to [`DataType::Bits`] for bit channels, which
+    /// loses the word width the bit position is measured against. Bit 11 of
+    /// a `U32` sits in a different byte under each endianness, so the width
+    /// has to survive parsing or every position above 7 decodes as zero.
+    #[serde(default = "default_bit_storage")]
+    pub bit_storage: DataType,
 
     /// Unit of measurement
     pub units: String,
@@ -57,6 +70,7 @@ impl OutputChannel {
             offset,
             bit_position: None,
             bit_count: None,
+            bit_storage: DataType::U08,
             units: String::new(),
             scale: 1.0,
             translate: 0.0,
@@ -86,10 +100,16 @@ impl OutputChannel {
         self.expression.is_some()
     }
 
-    /// Size in bytes for this channel (0 for computed)
+    /// Size in bytes this channel reads out of the block (0 for computed).
+    ///
+    /// A bits channel reads its whole backing word, not a byte: `bits, U32,
+    /// 1, [8:8]` needs bytes 1..5 present. Reporting 0 let a bounds check
+    /// wave through a channel whose decode then returns `None`.
     pub fn size_bytes(&self) -> usize {
-        if self.is_computed() || self.data_type == DataType::Bits {
+        if self.is_computed() {
             0
+        } else if self.data_type == DataType::Bits {
+            self.bit_storage.size_bytes()
         } else {
             self.data_type.size_bytes()
         }
@@ -102,30 +122,30 @@ impl OutputChannel {
             return None;
         }
 
-        let raw = self
-            .data_type
-            .read_from_bytes(data, self.offset as usize, endian)?;
-
         if self.data_type == DataType::Bits {
             if let Some(pos) = self.bit_position {
-                // Prevent shift overflow - if bit position >= 8, treat as invalid
+                // Read the *backing word*, not one byte: a `bits, U32` field
+                // can name any of 32 positions, and which byte holds bit 11
+                // depends on the block's endianness.
+                let raw = self
+                    .bit_storage
+                    .read_from_bytes(data, self.offset as usize, endian)?;
                 let count = self.bit_count.unwrap_or(1).clamp(1, 64);
                 let mask: u64 = if count >= 64 {
                     u64::MAX
                 } else {
                     (1u64 << count) - 1
                 };
-                if pos < 8 {
-                    let bit_val = ((raw as u64) >> pos) & mask;
-                    return Some(self.raw_to_display(bit_val as f64));
-                } else {
-                    // For larger bit positions, use u64 shift
-                    let bit_val = ((raw as u64) >> (pos as u64)) & mask;
-                    return Some(self.raw_to_display(bit_val as f64));
-                }
+                // A position past the backing word reads 0 rather than
+                // panicking on an overflowing shift.
+                let bit_val = (raw as u64).checked_shr(u32::from(pos)).unwrap_or(0) & mask;
+                return Some(self.raw_to_display(bit_val as f64));
             }
         }
 
+        let raw = self
+            .data_type
+            .read_from_bytes(data, self.offset as usize, endian)?;
         Some(self.raw_to_display(raw))
     }
 
@@ -188,6 +208,7 @@ impl Default for OutputChannel {
             offset: 0,
             bit_position: None,
             bit_count: None,
+            bit_storage: DataType::U08,
             units: String::new(),
             scale: 1.0,
             translate: 0.0,
@@ -226,6 +247,7 @@ pub fn parse_output_channel_line(name: &str, value: &str) -> Option<OutputChanne
                 offset: 0,
                 bit_position: None,
                 bit_count: None,
+                bit_storage: DataType::U08,
                 units: units.to_string(),
                 scale: 1.0,
                 translate: 0.0,
@@ -263,6 +285,7 @@ pub fn parse_output_channel_line(name: &str, value: &str) -> Option<OutputChanne
     let mut channel = OutputChannel::new(name, data_type, offset);
 
     if is_bits_prefix {
+        channel.bit_storage = data_type;
         channel.data_type = DataType::Bits;
         if parts.len() > 2 {
             let p2 = parts[2];
@@ -320,6 +343,51 @@ mod tests {
         assert_eq!(ch.data_type, DataType::U16);
         assert_eq!(ch.offset, 0);
         assert_eq!(ch.units, "RPM");
+    }
+
+    #[test]
+    fn a_bits_channel_keeps_the_width_its_bit_position_is_measured_against() {
+        // `data_type` collapses to `Bits`, which used to throw away the `U32`.
+        // Bit 11 then decoded off byte 0 alone and always read as zero — the
+        // demo INI puts `crank` exactly there.
+        let ch =
+            parse_output_channel_line("crank", "bits, U32, 852, [11:11]").expect("the line parses");
+        assert_eq!(ch.data_type, DataType::Bits);
+        assert_eq!(ch.bit_storage, DataType::U32);
+        assert_eq!(ch.bit_position, Some(11));
+        assert_eq!(ch.bit_count, Some(1));
+
+        let mut block = vec![0u8; 4];
+        block[1] = 0b0000_1000; // bit 11 of a little-endian U32
+        let mut positioned = ch.clone();
+        positioned.offset = 0;
+        assert_eq!(
+            positioned.parse(&block, super::super::Endianness::Little),
+            Some(1.0),
+            "bit 11 must be read out of the second byte"
+        );
+    }
+
+    #[test]
+    fn a_bits_channel_reports_the_width_it_actually_reads() {
+        // Reporting 0 let a bounds check wave through a channel whose decode
+        // then returns None: `bits, U32, 1, [8:8]` in a 2-byte block needs
+        // bytes 1..5, not byte 1.
+        let ch = parse_output_channel_line("flag", "bits, U32, 1, [8:8]").expect("parses");
+        assert_eq!(ch.size_bytes(), 4);
+        assert_eq!(
+            ch.parse(&[0u8; 2], super::super::Endianness::Little),
+            None,
+            "a block that short cannot hold the backing word"
+        );
+
+        // Single-byte bit channels are unchanged.
+        let byte_ch = parse_output_channel_line("run", "bits, U08, 0, [1:1]").expect("parses");
+        assert_eq!(byte_ch.size_bytes(), 1);
+        assert_eq!(
+            byte_ch.parse(&[0b0000_0010], super::super::Endianness::Little),
+            Some(1.0)
+        );
     }
 
     #[test]

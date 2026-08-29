@@ -2,10 +2,10 @@
 //!
 //! The physics produce a [`ChannelValues`] snapshot; this module writes it
 //! into the output-channel block at whatever offsets and types the loaded
-//! INI's `[OutputChannels]` declares. Raw encoding is the inverse of
-//! TunerStudio's `physical = (raw + translate) * scale`, but out-of-range
-//! values clamp instead of erroring — the simulator must stay graceful and
-//! never panic its thread.
+//! INI's `[OutputChannels]` declares. Raw encoding is the exact inverse of
+//! [`OutputChannel::raw_to_display`], i.e. of `physical = raw * scale +
+//! translate`, but out-of-range values clamp instead of erroring — the
+//! simulator must stay graceful and never panic its thread.
 
 use crate::ini::{DataType, EcuDefinition, Endianness, OutputChannel};
 use std::collections::HashMap;
@@ -113,7 +113,7 @@ pub(crate) fn encode_channels(
                 continue;
             }
             if let Some(value) = values.bits(&channel.name) {
-                write_bits(block, offset, lo, lo + count - 1, value);
+                write_bits(block, offset, channel.bit_storage, endian, lo, count, value);
             }
             continue;
         }
@@ -121,7 +121,7 @@ pub(crate) fn encode_channels(
             // Exact inverse of OutputChannel::raw_to_display
             // (`physical = raw * scale + translate`).
             let raw = if channel.scale != 0.0 {
-                ((physical - channel.translate) / channel.scale).round()
+                (physical - channel.translate) / channel.scale
             } else {
                 0.0
             };
@@ -140,7 +140,14 @@ pub(crate) fn block_size(def: &EcuDefinition) -> usize {
     def.output_channels
         .values()
         .filter(|channel| channel.expression.is_none())
-        .filter_map(|channel| (channel.offset as usize).checked_add(width(channel.data_type)))
+        .filter_map(|channel| {
+            let kind = if channel.data_type == DataType::Bits {
+                channel.bit_storage
+            } else {
+                channel.data_type
+            };
+            (channel.offset as usize).checked_add(width(kind))
+        })
         .max()
         .unwrap_or(0)
 }
@@ -161,6 +168,12 @@ pub(crate) fn width(kind: DataType) -> usize {
 /// offset past the block end is skipped, never a panic.
 fn write_scalar(block: &mut [u8], offset: usize, kind: DataType, endian: Endianness, raw: f64) {
     let raw = if raw.is_finite() { raw } else { 0.0 };
+    // Integer storage rounds to nearest; float storage must keep its
+    // fraction, or an `F32` channel scaled 1.0 would quantise to whole units.
+    let raw = match kind {
+        DataType::F32 | DataType::F64 => raw,
+        _ => raw.round(),
+    };
     let bytes: Vec<u8> = match kind {
         DataType::U08 | DataType::Bits => vec![raw.clamp(0.0, f64::from(u8::MAX)) as u8],
         DataType::S08 => vec![(raw.clamp(f64::from(i8::MIN), f64::from(i8::MAX)) as i8) as u8],
@@ -180,7 +193,12 @@ fn write_scalar(block: &mut [u8], offset: usize, kind: DataType, endian: Endiann
             &(raw.clamp(f64::from(i32::MIN), f64::from(i32::MAX)) as i32).to_be_bytes(),
             endian,
         ),
-        DataType::F32 => endian_bytes(&(raw as f32).to_be_bytes(), endian),
+        // A finite f64 beyond f32's range casts to infinity, which is not
+        // "clamped into its storage range" by any reading.
+        DataType::F32 => endian_bytes(
+            &(raw.clamp(f64::from(f32::MIN), f64::from(f32::MAX)) as f32).to_be_bytes(),
+            endian,
+        ),
         DataType::F64 => endian_bytes(&raw.to_be_bytes(), endian),
         DataType::String => return,
     };
@@ -200,20 +218,58 @@ fn endian_bytes(be: &[u8], endian: Endianness) -> Vec<u8> {
     }
 }
 
-/// Read-modify-write a bit range, preserving the neighboring bits.
+/// Read-modify-write a bit range inside its declared backing word,
+/// preserving the neighboring bits.
 ///
-/// `DataType::Bits` decodes from a single byte and ignores endianness (see
-/// `DataType::read_from_bytes`), so this writes one byte to match exactly.
-/// Malformed ranges and out-of-block offsets are skipped.
-fn write_bits(block: &mut [u8], offset: usize, bit_lo: u8, bit_hi: u8, value: u64) {
-    if bit_lo > bit_hi || bit_hi >= 8 {
+/// The word is `storage` wide and laid out in `endian` order, so bit 11 of a
+/// little-endian `U32` lands in byte `offset + 1` and in byte `offset + 2`
+/// big-endian. Malformed ranges and out-of-block offsets are skipped.
+fn write_bits(
+    block: &mut [u8],
+    offset: usize,
+    storage: DataType,
+    endian: Endianness,
+    bit_lo: u8,
+    bit_count: u8,
+    value: u64,
+) {
+    let bytes = width(storage).max(1);
+    let bits = bytes * 8;
+    if bit_count == 0 || usize::from(bit_lo) + usize::from(bit_count) > bits {
         return;
     }
-    let Some(byte) = block.get_mut(offset) else {
+    let Some(end) = offset.checked_add(bytes) else {
         return;
     };
-    let mask = (1u8 << (bit_hi - bit_lo + 1)) - 1;
-    *byte = (*byte & !(mask << bit_lo)) | (((value as u8) & mask) << bit_lo);
+    let Some(slot) = block.get_mut(offset..end) else {
+        return;
+    };
+    let mut word = [0u8; 8];
+    match endian {
+        Endianness::Big => word[8 - bytes..].copy_from_slice(slot),
+        Endianness::Little => {
+            for (i, b) in slot.iter().enumerate() {
+                word[8 - 1 - i] = *b;
+            }
+        }
+    }
+    let current = u64::from_be_bytes(word);
+    let mask = if bit_count >= 64 {
+        u64::MAX
+    } else {
+        (1u64 << bit_count) - 1
+    };
+    let shift = u32::from(bit_lo);
+    let updated = (current & !(mask << shift)) | ((value & mask) << shift);
+    let out = updated.to_be_bytes();
+    match endian {
+        Endianness::Big => slot.copy_from_slice(&out[8 - bytes..]),
+        Endianness::Little => {
+            for (i, b) in slot.iter_mut().enumerate() {
+                *b = out[8 - 1 - i];
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -273,6 +329,83 @@ mod tests {
 
         assert_eq!(block[0], 0b1010_1101, "only bit 3 may change");
         assert_eq!(channel.parse(&block, Endianness::Little), Some(1.0));
+    }
+
+    #[test]
+    fn a_bits_channel_past_byte_zero_uses_its_declared_backing_word() {
+        // The demo INI declares `crank = bits, U32, 852, [11:11]`. Treating
+        // every bits channel as one byte wrote nothing at all above bit 7,
+        // so `crank` stayed false through the whole cranking phase.
+        for (endian, expected_byte) in [(Endianness::Little, 1usize), (Endianness::Big, 2usize)] {
+            let mut channel = scalar_channel("crank", DataType::Bits, 0);
+            channel.bit_storage = DataType::U32;
+            channel.bit_position = Some(11);
+            channel.bit_count = Some(1);
+            let mut channels = HashMap::new();
+            channels.insert(channel.name.clone(), channel.clone());
+            let values = ChannelValues {
+                cranking: true,
+                ..Default::default()
+            };
+            let mut block = vec![0u8; 4];
+
+            encode_channels(&channels, endian, &values, &mut block);
+
+            assert_eq!(
+                block[expected_byte], 0b0000_1000,
+                "bit 11 belongs in byte {expected_byte} under {endian:?}"
+            );
+            assert_eq!(
+                channel.parse(&block, endian),
+                Some(1.0),
+                "the decoder must read back what the codec wrote ({endian:?})"
+            );
+        }
+    }
+
+    #[test]
+    fn a_float_channel_keeps_its_fraction_instead_of_rounding_to_whole_units() {
+        // Rounding before dispatching on the storage type quantised every
+        // F32 channel to integers, so a 0.85 lambda encoded as 1.0.
+        let mut channel = scalar_channel("afr", DataType::F32, 0);
+        channel.scale = 1.0;
+        let mut channels = HashMap::new();
+        channels.insert(channel.name.clone(), channel.clone());
+        let values = ChannelValues {
+            afr: 14.35,
+            ..Default::default()
+        };
+        let mut block = vec![0u8; 4];
+
+        encode_channels(&channels, Endianness::Little, &values, &mut block);
+
+        let decoded = channel
+            .parse(&block, Endianness::Little)
+            .expect("channel decodes");
+        assert!(
+            (decoded - 14.35).abs() < 1e-4,
+            "the fraction must survive, got {decoded}"
+        );
+    }
+
+    #[test]
+    fn a_value_beyond_f32_range_clamps_instead_of_becoming_infinity() {
+        let mut channel = scalar_channel("afr", DataType::F32, 0);
+        channel.scale = 1e-30;
+        let mut channels = HashMap::new();
+        channels.insert(channel.name.clone(), channel.clone());
+        let values = ChannelValues {
+            afr: 1.0,
+            ..Default::default()
+        };
+        let mut block = vec![0u8; 4];
+
+        encode_channels(&channels, Endianness::Little, &values, &mut block);
+
+        let decoded = channel
+            .parse(&block, Endianness::Little)
+            .expect("channel decodes");
+        assert!(decoded.is_finite(), "clamped, not infinite: {decoded}");
     }
 
     #[test]

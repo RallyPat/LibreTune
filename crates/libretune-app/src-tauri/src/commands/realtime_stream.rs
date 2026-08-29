@@ -637,8 +637,21 @@ pub async fn start_realtime_stream(
             };
             let current_time_ms = start_time.elapsed().as_millis() as u64;
 
-            if is_demo {
-                // Demo mode: generate simulated data
+            // Demo mode normally runs against the in-process ECU simulator,
+            // which is installed as an ordinary `Connection` — so it takes
+            // the real-ECU branch below and exercises the actual protocol,
+            // output-channel decode and VE model. The generator underneath
+            // is only the fallback for when the simulator handshake failed
+            // and demo mode is running without any connection at all.
+            let has_connection = match app_state.connection.try_lock() {
+                Ok(guard) => guard.is_some(),
+                // Busy means someone holds it, so a connection exists; the
+                // real branch will skip this tick on its own try_lock.
+                Err(_) => true,
+            };
+
+            if is_demo && !has_connection {
+                // Demo mode without a simulator: generate simulated data
                 if demo_simulator.is_none() {
                     demo_simulator = Some(DemoSimulator::new());
                 }
@@ -714,7 +727,8 @@ pub async fn start_realtime_stream(
                     local_ticks_success += 1;
                 }
             } else {
-                // Real ECU mode: read from connection
+                // Real ECU, or demo mode over the in-process simulator —
+                // both read through the same connection.
                 demo_simulator = None; // Clear simulator if we switch modes
 
                 // Phase 1: Get raw data from ECU (hold connection lock only during I/O)

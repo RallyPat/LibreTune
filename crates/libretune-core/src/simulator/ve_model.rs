@@ -32,6 +32,20 @@ pub(crate) struct VeContext {
 }
 
 impl VeContext {
+    /// Whether this context describes a real tune rather than blank memory.
+    ///
+    /// An all-zero page decodes into a structurally valid but meaningless
+    /// context: flat axes and 0 % cells. Interpolating it yields a VE the
+    /// engine model would divide by, producing an AFR no consumer can use,
+    /// so it is rejected at the source instead.
+    pub(crate) fn is_usable(&self) -> bool {
+        let ascending = |bins: &[f64]| bins.len() >= 2 && bins.windows(2).all(|w| w[1] > w[0]);
+        ascending(&self.rpm_bins)
+            && ascending(&self.load_bins)
+            && self.ve.len() == self.rpm_bins.len() * self.load_bins.len()
+            && self.ve.iter().any(|v| *v > 0.0)
+    }
+
     /// Bilinear current-VE lookup, clamped to the bin range.
     ///
     /// `None` when the bins are empty or `ve`'s length doesn't match
@@ -107,11 +121,111 @@ pub(crate) fn ve_context(def: &EcuDefinition, memory: &EcuMemory) -> Option<VeCo
     let rpm_bins = decode_constant(def, memory, &table.x_bins)?;
     let load_bins = decode_constant(def, memory, table.y_bins.as_ref()?)?;
     let ve = decode_constant(def, memory, &table.map)?;
-    Some(VeContext {
+    let ctx = VeContext {
         rpm_bins,
         load_bins,
         ve,
-    })
+    };
+    ctx.is_usable().then_some(ctx)
+}
+
+/// Overwrite the `[VeAnalyze]` veTable in `memory` with a plausible starting
+/// tune: ascending axes and a VE surface deliberately below the engine's
+/// hidden truth.
+///
+/// A freshly built [`EcuMemory`] is all zeroes, and a zeroed veTable is not
+/// a tune — its axes are degenerate, its cells are 0 %, and the AFR the
+/// model would report from it is meaningless. Seeding gives the AutoTune
+/// demo a real error surface to flatten instead of a division by nothing.
+///
+/// Returns whether a table was found and written.
+pub(crate) fn seed_ve_table(def: &EcuDefinition, memory: &mut EcuMemory) -> bool {
+    let Some(analyze) = def.ve_analyze.as_ref() else {
+        return false;
+    };
+    let table = match def.tables.get(&analyze.ve_table_name).or_else(|| {
+        def.table_map_to_name
+            .get(&analyze.ve_table_name)
+            .and_then(|resolved| def.tables.get(resolved))
+    }) {
+        Some(table) => table,
+        None => return false,
+    };
+    let Some(y_bins) = table.y_bins.as_ref() else {
+        return false;
+    };
+
+    let rpm = spread(count_of(def, &table.x_bins), SEED_RPM_MIN, SEED_RPM_MAX);
+    let load = spread(count_of(def, y_bins), SEED_LOAD_MIN, SEED_LOAD_MAX);
+    if rpm.len() < 2 || load.len() < 2 {
+        return false;
+    }
+    // Deliberately short of the truth, so the first AutoTune pass has
+    // something visible to correct.
+    let cells: Vec<f64> = load
+        .iter()
+        .flat_map(|l| rpm.iter().map(move |r| true_ve(*r, *l) * SEED_VE_ERROR))
+        .collect();
+
+    encode_constant(def, memory, &table.x_bins, &rpm)
+        && encode_constant(def, memory, y_bins, &load)
+        && encode_constant(def, memory, &table.map, &cells)
+}
+
+/// Seeded axis range and the deliberate VE error baked into the seed.
+const SEED_RPM_MIN: f64 = 500.0;
+const SEED_RPM_MAX: f64 = 7000.0;
+const SEED_LOAD_MIN: f64 = 20.0;
+const SEED_LOAD_MAX: f64 = 100.0;
+const SEED_VE_ERROR: f64 = 0.85;
+
+/// `n` values evenly spanning `[lo, hi]`.
+fn spread(n: usize, lo: f64, hi: f64) -> Vec<f64> {
+    if n < 2 {
+        return Vec::new();
+    }
+    let step = (hi - lo) / (n - 1) as f64;
+    (0..n).map(|i| lo + step * i as f64).collect()
+}
+
+fn count_of(def: &EcuDefinition, name: &str) -> usize {
+    def.constants
+        .get(name)
+        .map(|c| element_count(&c.shape))
+        .unwrap_or(0)
+}
+
+/// Inverse of [`decode_constant`]: write physical values back as raw bytes.
+fn encode_constant(
+    def: &EcuDefinition,
+    memory: &mut EcuMemory,
+    name: &str,
+    values: &[f64],
+) -> bool {
+    let Some(constant) = def.constants.get(name) else {
+        return false;
+    };
+    let width = constant.data_type.size_bytes();
+    if width == 0 || element_count(&constant.shape) != values.len() {
+        return false;
+    }
+    let endian = constant.endianness_override.unwrap_or(def.endianness);
+    let mut bytes = vec![0u8; values.len() * width];
+    for (i, physical) in values.iter().enumerate() {
+        let raw = if constant.scale != 0.0 {
+            (physical - constant.translate) / constant.scale
+        } else {
+            0.0
+        };
+        let raw = match constant.data_type.raw_range_bounds() {
+            Some((lo, hi)) => raw.clamp(lo, hi),
+            None => raw,
+        };
+        constant
+            .data_type
+            .write_to_bytes(&mut bytes, i * width, raw, endian);
+    }
+    memory.write_bytes(constant.page, constant.offset, &bytes)
 }
 
 /// Decode a named constant's current raw bytes into physical values,
@@ -263,6 +377,100 @@ mod tests {
         assert_eq!(ctx.load_bins, vec![40.0, 80.0]);
         assert_eq!(ctx.ve, vec![50.0, 60.0, 70.0, 80.0]);
         assert_eq!(ctx.current_ve(1500.0, 60.0), Some(65.0));
+    }
+
+    #[test]
+    fn a_blank_page_is_refused_rather_than_read_as_a_flat_zero_tune() {
+        // Zeroed memory decodes into a structurally valid context whose axes
+        // are degenerate and whose cells are 0 %. Accepting it made the
+        // engine report an AFR no consumer can use.
+        let ctx = VeContext {
+            rpm_bins: vec![0.0, 0.0],
+            load_bins: vec![0.0, 0.0],
+            ve: vec![0.0; 4],
+        };
+        assert!(!ctx.is_usable(), "flat axes and empty cells are not a tune");
+
+        let ascending_but_empty = VeContext {
+            rpm_bins: vec![1000.0, 2000.0],
+            load_bins: vec![40.0, 80.0],
+            ve: vec![0.0; 4],
+        };
+        assert!(
+            !ascending_but_empty.is_usable(),
+            "an all-zero surface is still not a tune"
+        );
+
+        assert!(context().is_usable(), "a real table must be accepted");
+    }
+
+    #[test]
+    fn seeding_turns_blank_memory_into_a_context_the_model_can_use() {
+        let def = seedable_definition();
+        let mut memory = EcuMemory::from_definition(&def);
+        assert_eq!(
+            ve_context(&def, &memory),
+            None,
+            "blank memory must not pass as a tune"
+        );
+
+        assert!(seed_ve_table(&def, &mut memory), "the table is seeded");
+
+        let ctx = ve_context(&def, &memory).expect("the seeded table is usable");
+        assert!(
+            ctx.rpm_bins.windows(2).all(|w| w[1] > w[0]),
+            "seeded rpm axis must ascend: {:?}",
+            ctx.rpm_bins
+        );
+        let ve = ctx
+            .current_ve(3000.0, 60.0)
+            .expect("the seeded grid interpolates");
+        assert!(
+            (10.0..110.0).contains(&ve),
+            "seeded VE must be a plausible percentage, got {ve}"
+        );
+        assert!(
+            ve < true_ve(3000.0, 60.0),
+            "the seed must sit below the truth, or AutoTune has nothing to correct"
+        );
+    }
+
+    /// A definition whose veTable is large enough to seed and read back.
+    fn seedable_definition() -> EcuDefinition {
+        let mut def = EcuDefinition::default();
+        def.endianness = Endianness::Little;
+        def.page_sizes = vec![256];
+        def.n_pages = 1;
+        def.ve_analyze = Some(VeAnalyzeConfig {
+            ve_table_name: "veTable".to_string(),
+            ..Default::default()
+        });
+
+        let mut table = TableDefinition::default();
+        table.name = "veTable".to_string();
+        table.x_bins = "rpmBins".to_string();
+        table.y_bins = Some("loadBins".to_string());
+        table.map = "veTableCells".to_string();
+        def.tables.insert("veTable".to_string(), table);
+
+        let constant = |offset: u16, shape: Shape, scale: f64| Constant {
+            page: 0,
+            offset,
+            data_type: DataType::U08,
+            shape,
+            scale,
+            translate: 0.0,
+            ..Default::default()
+        };
+        def.constants
+            .insert("rpmBins".to_string(), constant(0, Shape::Array1D(4), 100.0));
+        def.constants
+            .insert("loadBins".to_string(), constant(4, Shape::Array1D(4), 1.0));
+        def.constants.insert(
+            "veTableCells".to_string(),
+            constant(8, Shape::Array2D { rows: 4, cols: 4 }, 1.0),
+        );
+        def
     }
 
     #[test]

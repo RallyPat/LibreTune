@@ -22,6 +22,22 @@ use std::time::{Duration, Instant};
 const RC_OK: u8 = 0x00;
 /// Speeduino's `SERIAL_RC_BURN_OK`.
 const RC_BURN_OK: u8 = 0x04;
+/// Speeduino's `SERIAL_RC_CRC_ERR` — frame arrived, checksum disagreed.
+const RC_CRC_ERR: u8 = 0x83;
+/// Speeduino's `SERIAL_RC_RANGE_ERR` — the addressed page/offset does not exist.
+const RC_RANGE_ERR: u8 = 0x84;
+/// Speeduino's `SERIAL_RC_UKWN_ERR`. Distinct from [`RC_OK`], which answering
+/// an unknown command with `0x00` would be indistinguishable from.
+const RC_UNKNOWN_ERR: u8 = 0x89;
+/// How long an incomplete frame may sit *without progress* before it is
+/// discarded, mirroring Speeduino's `SERIAL_TIMEOUT`. Without it a client
+/// that abandons a frame mid-write desynchronises every later command,
+/// because the leftover bytes stay glued to the front of the next one.
+///
+/// Every write that adds bytes restarts the clock, so this is an idle
+/// timeout rather than a budget for the whole frame: a large frame arriving
+/// in steady chunks is not a stalled one, however long it takes in total.
+const FRAME_TIMEOUT: Duration = Duration::from_millis(400);
 /// The only `r` sub-command understood: "send output channels".
 const SUBCMD_OUTPUT_CHANNELS: u8 = 0x30;
 
@@ -43,6 +59,26 @@ impl PageMemory {
         }
     }
 
+    /// A [`PageMemory::new`] carrying a plausible starting tune.
+    ///
+    /// Blank flash is not a tune: its veTable has degenerate axes and 0 %
+    /// cells, which makes the AFR the model reports meaningless and gives
+    /// AutoTune nothing it will accept. Seeding both RAM and flash means a
+    /// reboot lands back on the same starting tune, exactly as real
+    /// hardware would.
+    fn seeded(def: &EcuDefinition) -> Self {
+        let mut memory = Self::new(def);
+        if ve_model::seed_ve_table(def, &mut memory.ram) {
+            for page in 0..memory.ram.page_count() {
+                if let Some(data) = memory.ram.get_page(page) {
+                    let copy = data.to_vec();
+                    memory.flash.load_page(page, copy);
+                }
+            }
+        }
+        memory
+    }
+
     fn read(&self, page: u8, offset: u16, count: u16) -> Vec<u8> {
         let mut out = self
             .ram
@@ -55,8 +91,10 @@ impl PageMemory {
         out
     }
 
-    fn write(&mut self, page: u8, offset: u16, value: &[u8]) {
-        self.ram.write_bytes(page, offset, value);
+    /// Whether the write landed. A refused write must not be acknowledged as
+    /// success, or a client silently believes memory it never changed.
+    fn write(&mut self, page: u8, offset: u16, value: &[u8]) -> bool {
+        self.ram.write_bytes(page, offset, value)
     }
 
     fn burn(&mut self, page: u8) {
@@ -113,6 +151,24 @@ struct Pipe {
     /// never race the clock.
     auto_tick: bool,
     last_auto_tick: Option<Instant>,
+    /// Wire page identifiers, indexed by logical page.
+    ///
+    /// An INI's `pageIdentifier` entries are literal byte strings, not
+    /// numbers — the bundled demo declares `\x00\x00`, `\x00\x01`,
+    /// `\x00\x02`. The client turns each into a `u16` and sends it as a
+    /// `%2i` parameter, so the simulator has to reverse the same mapping
+    /// rather than assume the identifier equals the page index.
+    page_ids: Vec<u16>,
+    /// Set once a CRC-framed request has been decoded successfully.
+    ///
+    /// From then on every request is a frame. Without this latch a partially
+    /// arrived frame whose first payload byte happens to be a command letter
+    /// (`0x41` = `'A'` is also the high byte of length 0x4100) is consumed as
+    /// a bare command, and the rest of the frame corrupts the next one.
+    enveloped_session: bool,
+    /// When the current incomplete frame last made progress. Reset by every
+    /// write that adds bytes, so [`FRAME_TIMEOUT`] measures silence.
+    partial_since: Option<Instant>,
 }
 
 impl Pipe {
@@ -124,7 +180,7 @@ impl Pipe {
             dropped: false,
             secl: 0,
             memory: def
-                .map(PageMemory::new)
+                .map(PageMemory::seeded)
                 .unwrap_or_else(|| PageMemory::new(&EcuDefinition::default())),
             och_block: engine
                 .as_ref()
@@ -133,7 +189,15 @@ impl Pipe {
             first_och_done: false,
             engine,
             definition: def.cloned(),
-            envelope: EnvelopeOrder::BigEndian,
+            // Only a starting hint: [`take_frame`] re-latches this from
+            // whichever order actually validates on the wire, because the
+            // client itself probes both during the handshake.
+            envelope: def
+                .map(|d| match d.endianness {
+                    Endianness::Little => EnvelopeOrder::LittleEndian,
+                    Endianness::Big => EnvelopeOrder::BigEndian,
+                })
+                .unwrap_or(EnvelopeOrder::BigEndian),
             signature: def
                 .map(|d| d.signature.clone())
                 .filter(|s| !s.is_empty())
@@ -150,6 +214,34 @@ impl Pipe {
                 .unwrap_or_else(|| EcuSimulator::DEFAULT_VERSION.to_string()),
             auto_tick: true,
             last_auto_tick: None,
+            page_ids: def.map(page_identifiers).unwrap_or_default(),
+            enveloped_session: false,
+            partial_since: None,
+        }
+    }
+
+    /// Logical page for a wire identifier, or `None` when the dialect
+    /// declares identifiers and this is not one of them.
+    fn resolve_page(&self, id: u16) -> Option<u8> {
+        if let Some(index) = self.page_ids.iter().position(|known| *known == id) {
+            return u8::try_from(index).ok();
+        }
+        // An INI that declares no identifiers addresses pages by index.
+        if self.page_ids.is_empty() {
+            return u8::try_from(id).ok();
+        }
+        None
+    }
+
+    /// Drop an incomplete frame that stopped arriving, so the next command
+    /// starts from a clean buffer.
+    fn expire_partial_frame(&mut self) {
+        let stale = self
+            .partial_since
+            .is_some_and(|since| since.elapsed() >= FRAME_TIMEOUT);
+        if stale {
+            self.cmd_buf.clear();
+            self.partial_since = None;
         }
     }
 
@@ -194,12 +286,28 @@ impl Pipe {
     }
 }
 
+/// The wire identifier of each page, decoded exactly the way the client
+/// encodes it in [`crate::protocol::Connection::get_page_identifier`]: the
+/// INI's raw identifier bytes read as a little-endian `u16`.
+fn page_identifiers(def: &EcuDefinition) -> Vec<u16> {
+    def.protocol
+        .page_identifiers
+        .iter()
+        .enumerate()
+        .map(|(index, bytes)| match bytes.len() {
+            0 => index as u16,
+            1 => u16::from(bytes[0]),
+            _ => u16::from_le_bytes([bytes[0], bytes[1]]),
+        })
+        .collect()
+}
+
 /// Whether `b` starts a plain-protocol command this ECU understands.
 ///
-/// This is how a frame is told apart from a bare command. Sniffing for a
-/// leading `0x00` — the high byte of the envelope's length field — only works
-/// while payloads stay under 256 bytes, and a page write chunk is thousands,
-/// so that test silently misreads every large write as a command byte.
+/// Only ever consulted for a buffer that failed to decode as a CRC frame,
+/// and only before the session has latched into framed mode — on its own it
+/// cannot tell a command letter from a length byte that happens to share its
+/// value.
 fn is_command_byte(b: u8) -> bool {
     matches!(
         b,
@@ -245,20 +353,23 @@ fn param_u16(bytes: &[u8], at: usize, cmd_le: bool) -> Option<u16> {
     })
 }
 
-/// `(page, offset, count)` from a `p`/`M` command, or their rusEFI-family
-/// spellings `R`/`C`. The page identifier's
-/// high byte is always zero on this protocol, so only the low byte is read.
-fn parse_page_offset_count(bytes: &[u8], cmd_le: bool) -> Option<(u8, u16, u16)> {
-    let page = u8::try_from(param_u16(bytes, 1, cmd_le)?).ok()?;
+/// `(page identifier, offset, count)` from a `p`/`M` command, or their
+/// rusEFI-family spellings `R`/`C`.
+///
+/// The identifier is returned as it arrived; only [`Pipe::resolve_page`]
+/// knows which logical page it names. Truncating it to a `u8` here is what
+/// made every page but the first unreachable — the demo INI's page 1 is
+/// identifier `0x0100`, not `1`.
+fn parse_page_offset_count(bytes: &[u8], cmd_le: bool) -> Option<(u16, u16, u16)> {
     Some((
-        page,
+        param_u16(bytes, 1, cmd_le)?,
         param_u16(bytes, 3, cmd_le)?,
         param_u16(bytes, 5, cmd_le)?,
     ))
 }
 
-fn parse_page(bytes: &[u8], cmd_le: bool) -> Option<u8> {
-    u8::try_from(param_u16(bytes, 1, cmd_le)?).ok()
+fn parse_page(bytes: &[u8], cmd_le: bool) -> Option<u16> {
+    param_u16(bytes, 1, cmd_le)
 }
 
 /// `(offset, len)` from an `r` command: `['r', canId, 0x30, offset, len]`.
@@ -304,6 +415,15 @@ fn respond(cmd: &[u8], pipe: &mut Pipe, enveloped: bool) -> Vec<u8> {
             body
         }
     };
+    // The plain framing has no status byte at all, so a refusal there is
+    // simply silence — the same thing the firmware does.
+    let status = |code: u8| -> Vec<u8> {
+        if enveloped {
+            vec![code]
+        } else {
+            Vec::new()
+        }
+    };
     let cmd_byte = cmd.first().copied().unwrap_or(0);
     // The INI's own query command wins: answering `S` with a version string
     // would fail every rusEFI-family handshake, which asks with `S`.
@@ -325,38 +445,47 @@ fn respond(cmd: &[u8], pipe: &mut Pipe, enveloped: bool) -> Vec<u8> {
                 ok(pipe.och_block.clone())
             }
         }
-        b'p' | b'R' => match parse_page_offset_count(cmd, pipe.cmd_le) {
+        b'p' | b'R' => match parse_page_offset_count(cmd, pipe.cmd_le)
+            .and_then(|(id, offset, count)| Some((pipe.resolve_page(id)?, offset, count)))
+        {
             Some((page, offset, count)) => ok(pipe.memory.read(page, offset, count)),
-            None => ok(Vec::new()),
+            None => status(RC_RANGE_ERR),
         },
         b'M' | b'C' => {
-            if let Some((page, offset, count)) = parse_page_offset_count(cmd, pipe.cmd_le) {
-                let value = cmd.get(7..7 + count as usize).unwrap_or(&[]);
-                pipe.memory.write(page, offset, value);
-            }
+            let wrote = parse_page_offset_count(cmd, pipe.cmd_le)
+                .and_then(|(id, offset, count)| Some((pipe.resolve_page(id)?, offset, count)))
+                .is_some_and(|(page, offset, count)| {
+                    let value = cmd.get(7..7 + count as usize).unwrap_or(&[]);
+                    pipe.memory.write(page, offset, value)
+                });
             if enveloped {
-                vec![RC_OK]
+                vec![if wrote { RC_OK } else { RC_RANGE_ERR }]
             } else {
                 Vec::new()
             }
         }
         b'b' | b'B' => {
-            if let Some(page) = parse_page(cmd, pipe.cmd_le) {
-                pipe.memory.burn(page);
-            }
+            let burned = parse_page(cmd, pipe.cmd_le)
+                .and_then(|id| pipe.resolve_page(id))
+                .map(|page| {
+                    pipe.memory.burn(page);
+                })
+                .is_some();
             if enveloped {
-                vec![RC_BURN_OK]
+                vec![if burned { RC_BURN_OK } else { RC_RANGE_ERR }]
             } else {
                 Vec::new()
             }
         }
-        b'k' => match parse_page_offset_count(cmd, pipe.cmd_le) {
+        b'k' => match parse_page_offset_count(cmd, pipe.cmd_le)
+            .and_then(|(id, offset, count)| Some((pipe.resolve_page(id)?, offset, count)))
+        {
             Some((page, offset, count)) => {
                 let mut hasher = crc32fast::Hasher::new();
                 hasher.update(&pipe.memory.read(page, offset, count));
                 ok(hasher.finalize().to_be_bytes().to_vec())
             }
-            None => ok(Vec::new()),
+            None => status(RC_RANGE_ERR),
         },
         b'O' => match parse_och_get(cmd, pipe.cmd_le) {
             Some((offset, len)) => {
@@ -374,8 +503,99 @@ fn respond(cmd: &[u8], pipe: &mut Pipe, enveloped: bool) -> Vec<u8> {
             }
             None => ok(Vec::new()),
         },
-        _ => vec![0],
+        _ => status(RC_UNKNOWN_ERR),
     }
+}
+
+/// What the front of the input buffer turned out to be.
+enum Framed {
+    /// A complete frame whose CRC checked out, in the order that validated.
+    Enveloped {
+        payload: Vec<u8>,
+        order: EnvelopeOrder,
+    },
+    /// A complete frame whose CRC did not check out. Consumed and refused —
+    /// never dispatched, or a corrupted write would mutate RAM and be
+    /// acknowledged as success.
+    BadCrc(EnvelopeOrder),
+    /// A bare command in the plain framing.
+    Plain(Vec<u8>),
+    /// Not enough bytes yet to decide.
+    NeedMore,
+}
+
+/// Take whatever is at the front of the input buffer.
+///
+/// A complete, CRC-valid envelope wins outright in either byte order, which
+/// is the only discriminator that cannot be fooled: guessing from the first
+/// byte cannot distinguish the command letter `A` from the high byte of
+/// length `0x4100`, and guessing the order wrongly parses a length of 1 as
+/// 256 and waits forever. Once a frame has validated, the session is framed
+/// for good — a partially arrived frame is then never mistaken for a bare
+/// command.
+fn take_frame(pipe: &mut Pipe) -> Framed {
+    let hint = pipe.envelope;
+    let other = match hint {
+        EnvelopeOrder::BigEndian => EnvelopeOrder::LittleEndian,
+        EnvelopeOrder::LittleEndian => EnvelopeOrder::BigEndian,
+    };
+    let bytes = pipe.cmd_buf.make_contiguous();
+    if bytes.is_empty() {
+        return Framed::NeedMore;
+    }
+
+    for order in [hint, other] {
+        let Ok(packet) = Packet::from_bytes_ordered(bytes, order, false) else {
+            continue;
+        };
+        // A zero-length payload carries no command, and its CRC32 is zero —
+        // so six zero bytes of line noise decode as a "valid" frame. Latching
+        // the session on that would disable the plain protocol for good.
+        if packet.payload.is_empty() {
+            continue;
+        }
+        let total = packet.encoded_size();
+        let _ = pipe.cmd_buf.drain(..total);
+        return Framed::Enveloped {
+            payload: packet.payload,
+            order,
+        };
+    }
+
+    let first = pipe.cmd_buf[0];
+    if !pipe.enveloped_session && is_command_byte(first) {
+        let cmd_le = pipe.cmd_le;
+        match plain_command_len(&pipe.cmd_buf, cmd_le) {
+            // Before the session has latched, a command letter is only
+            // trusted when it accounts for every buffered byte. A frame
+            // whose length field starts with one — big-endian 0x4100 leads
+            // with ASCII 'A' — always leaves a tail behind, and consuming
+            // just the letter would poison the rest of that frame.
+            Some(len) if len == pipe.cmd_buf.len() => {
+                return Framed::Plain(pipe.cmd_buf.drain(..len).collect());
+            }
+            _ => return Framed::NeedMore,
+        }
+    }
+
+    // Not a plain command, so it can only be a frame. A frame that is
+    // complete in *either* order must have failed its CRC above, and has to
+    // be consumed and refused — leaving it buffered would stall the link
+    // until the timeout silently dropped it.
+    let bytes = pipe.cmd_buf.make_contiguous();
+    if bytes.len() >= 2 {
+        let complete = [hint, other].into_iter().filter_map(|order| {
+            let total = 2 + order.read_u16(&bytes[..2]) as usize + 4;
+            (bytes.len() >= total).then_some((total, order))
+        });
+        // The shortest complete reading is the frame that actually ended
+        // here; a longer one would still be mid-flight.
+        if let Some((total, order)) = complete.min_by_key(|(total, _)| *total) {
+            let _ = pipe.cmd_buf.drain(..total);
+            return Framed::BadCrc(order);
+        }
+    }
+    Framed::NeedMore
 }
 
 /// Drain buffered commands, dispatch them, and queue their responses.
@@ -384,40 +604,33 @@ fn process(pipe: &Arc<Mutex<Pipe>>) {
     if p.dropped {
         return;
     }
+    // Keep draining: a client that pipelines several frames before reading
+    // must get an answer to every one of them, not just the first.
     while !p.cmd_buf.is_empty() {
-        if !is_command_byte(*p.cmd_buf.front().unwrap()) {
-            // CRC envelope: [len(2), payload.., crc(4)]
-            if p.cmd_buf.len() < 2 {
-                break;
+        match take_frame(&mut p) {
+            Framed::Enveloped { payload, order } => {
+                p.envelope = order;
+                p.enveloped_session = true;
+                let response = respond(&payload, &mut p, true);
+                let framed = Packet::new(response).to_bytes_ordered(order);
+                p.rsp_buf.extend(framed);
             }
-            let mut len_bytes = [0u8; 2];
-            len_bytes.copy_from_slice(&[p.cmd_buf[0], p.cmd_buf[1]]);
-            let plen = p.envelope.read_u16(&len_bytes) as usize;
-            if p.cmd_buf.len() < 2 + plen + 4 {
-                break;
+            Framed::BadCrc(order) => {
+                let framed = Packet::new(vec![RC_CRC_ERR]).to_bytes_ordered(order);
+                p.rsp_buf.extend(framed);
             }
-            let _ = p.cmd_buf.drain(..2);
-            let payload: Vec<u8> = p.cmd_buf.drain(..plen).collect();
-            let _ = p.cmd_buf.drain(..4);
-            let response = respond(&payload, &mut p, true);
-            let order = p.envelope;
-            let framed = Packet::new(response).to_bytes_ordered(order);
-            p.rsp_buf.extend(framed);
-            // Keep draining: a client that pipelines several frames before
-            // reading must get an answer to every one of them, not just the
-            // first.
-            continue;
+            Framed::Plain(cmd) => {
+                let out = respond(&cmd, &mut p, false);
+                p.rsp_buf.extend(out);
+            }
+            Framed::NeedMore => {
+                if p.partial_since.is_none() {
+                    p.partial_since = Some(Instant::now());
+                }
+                return;
+            }
         }
-        let cmd_le = p.cmd_le;
-        let Some(len) = plain_command_len(&p.cmd_buf, cmd_le) else {
-            break;
-        };
-        if p.cmd_buf.len() < len {
-            break;
-        }
-        let cmd: Vec<u8> = p.cmd_buf.drain(..len).collect();
-        let out = respond(&cmd, &mut p, false);
-        p.rsp_buf.extend(out);
+        p.partial_since = None;
     }
 }
 
@@ -434,6 +647,15 @@ impl Read for SimulatorChannel {
             return Err(io::Error::new(
                 io::ErrorKind::NotConnected,
                 "simulated link is down",
+            ));
+        }
+        if p.rsp_buf.is_empty() && !buf.is_empty() {
+            // `Ok(0)` into a non-empty buffer means end of stream, and
+            // `read_exact_timeout` turns that into an immediate timeout. The
+            // link is fine — there is just nothing queued yet.
+            return Err(io::Error::new(
+                io::ErrorKind::WouldBlock,
+                "no simulated response queued",
             ));
         }
         let n = buf.len().min(p.rsp_buf.len());
@@ -453,6 +675,13 @@ impl Write for SimulatorChannel {
                     io::ErrorKind::NotConnected,
                     "simulated link is down",
                 ));
+            }
+            // Before the new bytes land: an abandoned frame still sitting in
+            // the buffer would otherwise stay glued to the front of this one.
+            p.expire_partial_frame();
+            if !buf.is_empty() {
+                // This write is progress, so the idle clock restarts.
+                p.partial_since = None;
             }
             p.cmd_buf.extend(buf);
         }
@@ -540,6 +769,14 @@ impl EcuSimulator {
         }
     }
 
+    /// Back-date the incomplete-frame timer so the next request sees it as
+    /// expired, instead of a test sleeping out the real timeout.
+    #[cfg(test)]
+    pub(crate) fn expire_frame_buffer_for_test(&self) {
+        let mut pipe = self.pipe.lock().unwrap_or_else(|e| e.into_inner());
+        pipe.partial_since = Instant::now().checked_sub(FRAME_TIMEOUT);
+    }
+
     /// Advance the engine by `dt` and refresh the realtime frame.
     ///
     /// The engine has no wall clock, so this call is what moves its
@@ -605,7 +842,7 @@ mod tests {
     fn definition() -> EcuDefinition {
         let mut def = EcuDefinition::default();
         def.endianness = Endianness::Little;
-        def.page_sizes = vec![32, 16];
+        def.page_sizes = vec![512, 16];
         def.n_pages = 2;
         def.protocol.och_block_size = 16;
         def.output_channels.insert(
@@ -621,11 +858,204 @@ mod tests {
         def
     }
 
+    /// Read up to `n` bytes, treating "nothing queued" as an empty read.
+    ///
+    /// The channel reports an empty response buffer as `WouldBlock`, not
+    /// `Ok(0)` — `Ok(0)` is end of stream, and the connection's read loop
+    /// turns that into an immediate timeout.
     fn read_n(channel: &mut SimulatorChannel, n: usize) -> Vec<u8> {
         let mut buf = vec![0u8; n];
-        let got = channel.read(&mut buf).expect("read succeeds");
-        buf.truncate(got);
-        buf
+        match channel.read(&mut buf) {
+            Ok(got) => {
+                buf.truncate(got);
+                buf
+            }
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => Vec::new(),
+            Err(error) => panic!("read failed: {error}"),
+        }
+    }
+
+    #[test]
+    fn six_zero_bytes_do_not_latch_the_session_into_framed_mode() {
+        // A zero-length payload's CRC32 is zero, so `00 00 00 00 00 00`
+        // decodes as a "valid" frame. Latching on it disabled the plain
+        // protocol for the rest of the session, and a legacy client never
+        // got its signature back.
+        let sim = EcuSimulator::new();
+        let mut channel = sim.channel();
+
+        channel
+            .write_all(&[0, 0, 0, 0, 0, 0])
+            .expect("noise is accepted");
+        let _ = read_n(&mut channel, 64);
+
+        channel.write_all(b"Q").expect("write succeeds");
+        assert_eq!(
+            read_n(&mut channel, 64),
+            EcuSimulator::DEFAULT_SIGNATURE.as_bytes(),
+            "line noise must not disable the plain protocol"
+        );
+    }
+
+    #[test]
+    fn a_bad_crc_frame_in_the_other_byte_order_is_still_consumed_and_refused() {
+        // Frames are validated in both orders, but completeness used to be
+        // measured only in the hinted one: a complete-but-corrupt frame in
+        // the other order was neither answered nor consumed, so it stalled
+        // the link until the idle timeout silently dropped it.
+        let mut def = definition();
+        def.endianness = Endianness::Little; // hint = little-endian
+        let sim = EcuSimulator::from_definition(&def);
+        let mut channel = sim.channel();
+
+        // A complete big-endian frame (length 1, payload `Q`) with a
+        // deliberately wrong CRC. Little-endian reads its length as 256.
+        channel
+            .write_all(&[0x00, 0x01, b'Q', 0xFF, 0xFF, 0xFF, 0xFF])
+            .expect("frame accepted");
+
+        let response = read_n(&mut channel, 64);
+        assert!(
+            !response.is_empty(),
+            "a complete corrupt frame must be answered, not left to rot"
+        );
+        let packet = Packet::from_bytes_ordered(&response, EnvelopeOrder::BigEndian, false)
+            .expect("the refusal is framed");
+        assert_eq!(packet.payload, vec![RC_CRC_ERR]);
+    }
+
+    #[test]
+    fn a_frame_arriving_in_steady_chunks_is_not_timed_out() {
+        // The idle timer must measure silence, not total assembly time. Real
+        // gaps are used deliberately: back-dating the timer would trip the
+        // fixed code too, and prove nothing about which quantity is measured.
+        let sim = EcuSimulator::from_definition(&definition());
+        let mut channel = sim.channel();
+
+        // Each gap is comfortably under FRAME_TIMEOUT, but they sum past it.
+        let gap = FRAME_TIMEOUT * 3 / 4;
+        let frame = Packet::new(b"Q".to_vec()).to_bytes();
+        let chunks: Vec<&[u8]> = frame.chunks(3).collect();
+        assert!(
+            gap * (chunks.len() as u32 - 1) > FRAME_TIMEOUT,
+            "the gaps must add up past the timeout for this to prove anything"
+        );
+        for (index, chunk) in chunks.iter().enumerate() {
+            if index > 0 {
+                std::thread::sleep(gap);
+            }
+            channel.write_all(chunk).expect("chunk accepted");
+        }
+
+        let packet = Packet::from_bytes(&read_n(&mut channel, 128))
+            .expect("the reassembled frame is answered");
+        assert_eq!(
+            &packet.payload[1..],
+            EcuSimulator::DEFAULT_SIGNATURE.as_bytes()
+        );
+    }
+
+    #[test]
+    fn a_command_letter_with_a_tail_behind_it_waits_instead_of_being_split() {
+        // Before the session latches, `0x41` is both the command `A` and the
+        // high byte of a big-endian length of 0x4100. Consuming just the
+        // letter poisons the rest of the frame; the tail is the tell.
+        let sim = EcuSimulator::from_definition(&definition());
+        let mut channel = sim.channel();
+
+        channel
+            .write_all(&[b'A', 0x00, 0x11, 0x22, 0x33])
+            .expect("chunk accepted");
+
+        assert_eq!(
+            read_n(&mut channel, 64),
+            Vec::<u8>::new(),
+            "a command letter followed by unexplained bytes must not dispatch"
+        );
+    }
+
+    #[test]
+    fn an_empty_channel_reports_not_ready_rather_than_end_of_stream() {
+        // `Ok(0)` into a non-empty buffer is EOF by contract, and
+        // `read_exact_timeout` turns EOF into an immediate timeout instead of
+        // polling again.
+        let sim = EcuSimulator::new();
+        let mut channel = sim.channel();
+
+        let mut buf = [0u8; 8];
+        let error = channel.read(&mut buf).expect_err("nothing is queued yet");
+
+        assert_eq!(error.kind(), io::ErrorKind::WouldBlock);
+    }
+
+    #[test]
+    fn an_unknown_command_is_refused_with_a_code_that_is_not_success() {
+        // Answering `vec![0]` made "I do not know this command" identical to
+        // `RC_OK`, so a client saw every typo as a successful no-op.
+        let sim = EcuSimulator::new();
+        let mut channel = sim.channel();
+
+        let request = Packet::new(b"\x01".to_vec()).to_bytes();
+        channel.write_all(&request).expect("write succeeds");
+
+        let response = read_n(&mut channel, 64);
+        let packet = Packet::from_bytes(&response).expect("a frame comes back");
+        assert_eq!(packet.payload, vec![RC_UNKNOWN_ERR]);
+        assert_ne!(packet.payload[0], RC_OK);
+    }
+
+    #[test]
+    fn a_write_outside_the_page_is_refused_instead_of_acknowledged() {
+        let sim = EcuSimulator::from_definition(&definition());
+        let mut channel = sim.channel();
+
+        // Page 1 is 16 bytes; ask to write 32 at offset 0.
+        let count: u16 = 32;
+        let mut payload = vec![b'C'];
+        payload.extend(1u16.to_le_bytes());
+        payload.extend(0u16.to_le_bytes());
+        payload.extend(count.to_le_bytes());
+        payload.extend(std::iter::repeat_n(0x11u8, count as usize));
+        channel
+            .write_all(&Packet::new(payload).to_bytes())
+            .expect("write succeeds");
+
+        let response = read_n(&mut channel, 64);
+        let packet = Packet::from_bytes(&response).expect("a frame comes back");
+        assert_eq!(
+            packet.payload,
+            vec![RC_RANGE_ERR],
+            "a refused write must not report success"
+        );
+    }
+
+    #[test]
+    fn an_abandoned_partial_frame_does_not_poison_the_next_command() {
+        let sim = EcuSimulator::from_definition(&definition());
+        let mut channel = sim.channel();
+
+        // Latch into framed mode, then start a frame and walk away.
+        channel
+            .write_all(&Packet::new(b"Q".to_vec()).to_bytes())
+            .expect("handshake accepted");
+        let _ = read_n(&mut channel, 128);
+        channel
+            .write_all(&[0x00, 0x20, 0x51])
+            .expect("stub accepted");
+        assert_eq!(read_n(&mut channel, 16), Vec::<u8>::new());
+
+        sim.expire_frame_buffer_for_test();
+
+        channel
+            .write_all(&Packet::new(b"Q".to_vec()).to_bytes())
+            .expect("second handshake accepted");
+        let packet =
+            Packet::from_bytes(&read_n(&mut channel, 128)).expect("the next frame is answered");
+        assert_eq!(
+            &packet.payload[1..],
+            EcuSimulator::DEFAULT_SIGNATURE.as_bytes(),
+            "leftover bytes must not be glued onto the next frame"
+        );
     }
 
     #[test]
