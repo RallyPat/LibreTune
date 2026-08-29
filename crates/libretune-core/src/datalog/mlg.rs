@@ -101,6 +101,7 @@ impl FieldType {
 
 struct MlgField {
     name: String,
+    units: String,
     field_type: FieldType,
     offset: usize,
     scale: f32,
@@ -114,6 +115,22 @@ impl MlgField {
             .read(&payload[self.offset..self.offset + self.field_type.width()]);
         (raw + self.transform as f64) * self.scale as f64
     }
+}
+
+/// The elapsed-seconds channel TunerStudio writes as field 0. Where a log has
+/// it, it is the only timeline that survives a pause in logging: the 16-bit
+/// record clock wraps every 655 ms, so a longer gap cannot be recovered from
+/// it at all.
+fn time_channel(fields: &[MlgField]) -> Option<usize> {
+    fields
+        .iter()
+        .position(|f| f.name.eq_ignore_ascii_case("time") && f.units == "s")
+}
+
+/// Seconds since the first record, as a `Duration`. Guards the conversion:
+/// the values come from the file, so they can be negative, NaN, or absurd.
+fn elapsed(seconds: f64) -> Duration {
+    Duration::try_from_secs_f64(seconds).unwrap_or(Duration::ZERO)
 }
 
 fn invalid(message: impl Into<String>) -> io::Error {
@@ -175,6 +192,7 @@ fn read_fields(reader: &mut impl Read, header: &Header) -> io::Result<Vec<MlgFie
         }
         fields.push(MlgField {
             name: read_name(&descriptor[1..35]),
+            units: read_name(&descriptor[35..45]),
             field_type,
             offset,
             scale,
@@ -193,6 +211,11 @@ fn read_fields(reader: &mut impl Read, header: &Header) -> io::Result<Vec<MlgFie
 
 /// Read an `.mlg` log into the same `(channels, entries)` shape as
 /// [`super::format::read_csv`].
+///
+/// Timestamps come from the log's own elapsed-seconds channel where it has
+/// one, and from the 16-bit record clock otherwise. The record clock wraps
+/// every 655 ms, which is shorter than a pause in logging, so it cannot stand
+/// in for a real timeline across one.
 ///
 /// Marker records — the notes TunerStudio writes when logging goes offline and
 /// back online — advance the clock but carry no channel values, so they are
@@ -228,6 +251,8 @@ pub fn read_mlg<P: AsRef<Path>>(path: P) -> io::Result<(Vec<String>, Vec<LogEntr
     let mut data = vec![0u8; header.record_len + 1]; // payload then checksum
     let mut marker = [0u8; MARKER_TEXT_LEN];
     let mut clock = Clock::default();
+    let time = time_channel(&fields);
+    let mut first_seconds = None;
     let mut index = 0usize;
     let mut dropped = 0usize;
 
@@ -247,8 +272,15 @@ pub fn read_mlg<P: AsRef<Path>>(path: P) -> io::Result<(Vec<String>, Vec<LogEntr
                 }
                 let (payload, checksum) = data.split_at(header.record_len);
                 if payload.iter().fold(0u8, |sum, b| sum.wrapping_add(*b)) == checksum[0] {
+                    let timestamp = match time {
+                        Some(i) => {
+                            let seconds = fields[i].value(payload);
+                            elapsed(seconds - *first_seconds.get_or_insert(seconds))
+                        }
+                        None => Duration::from_micros(ticks * CLOCK_TICK_MICROS),
+                    };
                     entries.push(LogEntry::new(
-                        Duration::from_micros(ticks * CLOCK_TICK_MICROS),
+                        timestamp,
                         fields.iter().map(|f| f.value(payload)).collect(),
                     ));
                 } else {
@@ -289,9 +321,12 @@ pub fn read_mlg<P: AsRef<Path>>(path: P) -> io::Result<(Vec<String>, Vec<LogEntr
 fn fill(reader: &mut impl Read, buf: &mut [u8]) -> io::Result<usize> {
     let mut filled = 0;
     while filled < buf.len() {
-        match reader.read(&mut buf[filled..])? {
-            0 => break,
-            n => filled += n,
+        match reader.read(&mut buf[filled..]) {
+            Ok(0) => break,
+            Ok(n) => filled += n,
+            // A signal, not a damaged log.
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+            Err(e) => return Err(e),
         }
     }
     Ok(filled)
@@ -439,6 +474,14 @@ mod tests {
         (dir, path)
     }
 
+    /// The channel set of a log with no Time channel, where the record clock
+    /// is the only timeline available.
+    fn untimed(clt: u16, stft: f32) -> Vec<u8> {
+        let mut p = clt.to_be_bytes().to_vec();
+        p.extend_from_slice(&stft.to_be_bytes());
+        p
+    }
+
     fn payload(time: f32, clt: u16, stft: f32) -> Vec<u8> {
         let mut p = time.to_be_bytes().to_vec();
         p.extend_from_slice(&clt.to_be_bytes());
@@ -476,10 +519,10 @@ mod tests {
     fn timestamps_start_at_zero_and_step_by_the_record_clock() {
         let bytes = build_log(
             2,
-            &[&TIME, &CLT, &STFT],
+            &[&CLT, &STFT],
             &[
-                record(0, 1_000, &payload(0.0, 8741, 1.0)),
-                record(1, 2_000, &payload(0.01, 8741, 1.0)),
+                record(0, 1_000, &untimed(8741, 1.0)),
+                record(1, 2_000, &untimed(8741, 1.0)),
             ],
         );
         let (_dir, path) = write_temp(&bytes);
@@ -505,6 +548,55 @@ mod tests {
         let bytes = build_log(1, &[&TIME], &[record(0, 0, &0.0f32.to_be_bytes())]);
         let (_dir, path) = write_temp(&bytes);
         assert!(read_mlg(&path).is_err());
+    }
+
+    #[test]
+    fn the_fallback_clock_starts_at_the_first_record_of_any_kind() {
+        // A log that opens with a marker: taking the start from the first
+        // *kept* record instead would swallow the interval before it.
+        let bytes = build_log(
+            2,
+            &[&CLT, &STFT],
+            &[
+                marker(0, 1_000, "MARK 000 - Going Online"),
+                record(1, 3_000, &untimed(8741, 1.0)),
+            ],
+        );
+        let (_dir, path) = write_temp(&bytes);
+
+        let (_, entries) = read_mlg(&path).unwrap();
+
+        assert_eq!(entries[0].timestamp, Duration::from_micros(20_000));
+    }
+
+    /// A reader that hands back `Interrupted` once before every real read,
+    /// the way a signal arriving mid-read looks.
+    struct Interrupting<R> {
+        inner: R,
+        armed: bool,
+    }
+
+    impl<R: Read> Read for Interrupting<R> {
+        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+            if self.armed {
+                self.armed = false;
+                return Err(io::Error::from(io::ErrorKind::Interrupted));
+            }
+            self.armed = true;
+            self.inner.read(buf)
+        }
+    }
+
+    #[test]
+    fn an_interrupted_read_is_retried_rather_than_failing_the_log() {
+        let mut reader = Interrupting {
+            inner: &b"abcd"[..],
+            armed: true,
+        };
+        let mut buf = [0u8; 4];
+
+        assert_eq!(fill(&mut reader, &mut buf).unwrap(), 4);
+        assert_eq!(&buf, b"abcd");
     }
 
     #[test]
@@ -595,14 +687,36 @@ mod tests {
     }
 
     #[test]
-    fn a_wrapped_clock_keeps_time_moving_forward() {
-        // The 16-bit clock rolls over every 65536 ticks, roughly twice a second.
+    fn takes_the_timeline_from_the_time_channel_when_the_log_has_one() {
+        // Logging pauses: 8 of 34 real captures contain a gap longer than the
+        // 655 ms the record clock can represent, one of them 25 hours long.
+        // Only the Time channel survives that.
         let bytes = build_log(
             2,
             &[&TIME, &CLT, &STFT],
             &[
-                record(0, 65_000, &payload(0.0, 8741, 1.0)),
-                record(1, 200, &payload(0.01, 8741, 1.0)),
+                record(0, 1_000, &payload(10.0, 8741, 1.0)),
+                record(1, 2_000, &payload(4_010.0, 8741, 1.0)),
+            ],
+        );
+        let (_dir, path) = write_temp(&bytes);
+
+        let (_, entries) = read_mlg(&path).unwrap();
+
+        // The clock only moved 1000 ticks, but an hour passed.
+        assert_eq!(entries[0].timestamp, Duration::ZERO);
+        assert_eq!(entries[1].timestamp, Duration::from_secs(4_000));
+    }
+
+    #[test]
+    fn a_wrapped_clock_keeps_time_moving_forward() {
+        // The 16-bit clock rolls over every 65536 ticks, roughly twice a second.
+        let bytes = build_log(
+            2,
+            &[&CLT, &STFT],
+            &[
+                record(0, 65_000, &untimed(8741, 1.0)),
+                record(1, 200, &untimed(8741, 1.0)),
             ],
         );
         let (_dir, path) = write_temp(&bytes);
@@ -620,11 +734,11 @@ mod tests {
         // 655 ms to every record after it.
         let bytes = build_log(
             2,
-            &[&TIME, &CLT, &STFT],
+            &[&CLT, &STFT],
             &[
-                record(0, 1_000, &payload(0.0, 8741, 1.0)),
-                record(1, 900, &payload(0.01, 8741, 1.0)),
-                record(2, 1_100, &payload(0.02, 8741, 1.0)),
+                record(0, 1_000, &untimed(8741, 1.0)),
+                record(1, 900, &untimed(8741, 1.0)),
+                record(2, 1_100, &untimed(8741, 1.0)),
             ],
         );
         let (_dir, path) = write_temp(&bytes);
@@ -640,17 +754,17 @@ mod tests {
     /// step backwards instead of the far side of a wrap.
     #[test]
     fn a_dropped_record_still_advances_the_clock() {
-        let mut corrupt = record(1, 60_000, &payload(0.01, 8741, 1.0));
+        let mut corrupt = record(1, 60_000, &untimed(8741, 1.0));
         let last = corrupt.len() - 1;
         corrupt[last] ^= 0xff;
 
         let bytes = build_log(
             2,
-            &[&TIME, &CLT, &STFT],
+            &[&CLT, &STFT],
             &[
-                record(0, 1_000, &payload(0.0, 8741, 1.0)),
+                record(0, 1_000, &untimed(8741, 1.0)),
                 corrupt,
-                record(2, 200, &payload(0.02, 8741, 1.0)),
+                record(2, 200, &untimed(8741, 1.0)),
             ],
         );
         let (_dir, path) = write_temp(&bytes);
@@ -666,11 +780,11 @@ mod tests {
     fn a_marker_still_advances_the_clock() {
         let bytes = build_log(
             2,
-            &[&TIME, &CLT, &STFT],
+            &[&CLT, &STFT],
             &[
-                record(0, 1_000, &payload(0.0, 8741, 1.0)),
+                record(0, 1_000, &untimed(8741, 1.0)),
                 marker(1, 60_000, "MARK 000 - Going Offline"),
-                record(2, 200, &payload(0.02, 8741, 1.0)),
+                record(2, 200, &untimed(8741, 1.0)),
             ],
         );
         let (_dir, path) = write_temp(&bytes);
