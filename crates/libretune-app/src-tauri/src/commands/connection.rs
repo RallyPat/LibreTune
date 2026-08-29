@@ -10,13 +10,54 @@ use std::time::{Duration, Instant};
 ///
 /// Closes the serial connection and clears the connection state.
 ///
+/// How long [`disconnect_ecu`] will wait for another connection transition
+/// before going ahead without the lock. Deliberately shorter than the
+/// connection-lock deadline: a user asking to disconnect wants the link
+/// gone, not a spinner.
+const TRANSITION_LOCK_BUDGET: Duration = Duration::from_secs(1);
+
+/// Take `lock`, giving up after `budget` rather than waiting for however
+/// long its current holder needs.
+async fn acquire_within(
+    lock: &tokio::sync::Mutex<()>,
+    budget: Duration,
+) -> Option<tokio::sync::MutexGuard<'_, ()>> {
+    let deadline = Instant::now() + budget;
+    loop {
+        // `try_lock` in a loop rather than `timeout(lock())`: the guard has to
+        // outlive this function, and a timed-out `lock()` future can still be
+        // holding a place in the queue when it is dropped.
+        if let Ok(guard) = lock.try_lock() {
+            return Some(guard);
+        }
+        if Instant::now() >= deadline {
+            return None;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
 /// Returns: Nothing on success
 #[tauri::command]
 pub async fn disconnect_ecu(state: tauri::State<'_, AppState>) -> Result<(), String> {
     // Every path that replaces `state.connection` takes this first, so a
     // teardown cannot race a demo transition or a connect that is midway
     // through installing its own connection.
-    let _transition = state.connection_transition.lock().await;
+    //
+    // Bounded, though: `connect_to_ecu` holds it while its worker thread
+    // blocks on a channel for up to 15 s, and waiting unconditionally here
+    // would put Issue #71's "disconnect does nothing" hang straight back —
+    // five times longer than the deadline below was chosen to allow.
+    // Disconnect must always work, so past the budget it proceeds without
+    // the lock and accepts the race it guards.
+    let _transition = acquire_within(&state.connection_transition, TRANSITION_LOCK_BUDGET).await;
+    if _transition.is_none() {
+        eprintln!(
+            "[WARN] disconnect_ecu: another connection transition is still running \
+             after {}s, disconnecting anyway (Issue #71)",
+            TRANSITION_LOCK_BUDGET.as_secs()
+        );
+    }
 
     // Stop metrics and realtime streaming before dropping the connection
     stop_metrics_task(state.clone()).await;
@@ -140,4 +181,50 @@ pub async fn auto_load_last_ini(app: tauri::AppHandle) -> Result<Option<String>,
         }
     }
     Ok(None)
+}
+
+#[cfg(test)]
+mod disconnect_tests {
+    use super::{acquire_within, TRANSITION_LOCK_BUDGET};
+    use std::time::{Duration, Instant};
+    use tokio::sync::Mutex;
+
+    #[tokio::test]
+    async fn a_free_lock_is_taken_immediately() {
+        let lock = Mutex::new(());
+        let started = Instant::now();
+
+        let guard = acquire_within(&lock, TRANSITION_LOCK_BUDGET).await;
+
+        assert!(guard.is_some());
+        assert!(
+            started.elapsed() < Duration::from_millis(200),
+            "an uncontended lock must not wait"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_held_lock_is_given_up_on_instead_of_waited_out() {
+        // `connect_to_ecu` holds the transition lock while its worker thread
+        // blocks on a channel for up to 15 s. Waiting that out would put
+        // Issue #71's "disconnect does nothing" hang back, only longer.
+        let lock = Mutex::new(());
+        let held = lock.lock().await;
+        let budget = Duration::from_millis(150);
+        let started = Instant::now();
+
+        let guard = acquire_within(&lock, budget).await;
+
+        assert!(guard.is_none(), "the budget must expire, not the caller");
+        let waited = started.elapsed();
+        assert!(
+            waited >= budget,
+            "it must actually try for the whole budget"
+        );
+        assert!(
+            waited < budget * 4,
+            "it must not wait for the holder: gave up after {waited:?}"
+        );
+        drop(held);
+    }
 }
