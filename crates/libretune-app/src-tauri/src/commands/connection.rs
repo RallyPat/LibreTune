@@ -13,6 +13,11 @@ use std::time::{Duration, Instant};
 /// Returns: Nothing on success
 #[tauri::command]
 pub async fn disconnect_ecu(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    // Every path that replaces `state.connection` takes this first, so a
+    // teardown cannot race a demo transition or a connect that is midway
+    // through installing its own connection.
+    let _transition = state.connection_transition.lock().await;
+
     // Stop metrics and realtime streaming before dropping the connection
     stop_metrics_task(state.clone()).await;
 

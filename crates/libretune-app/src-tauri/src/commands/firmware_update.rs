@@ -625,6 +625,8 @@ fn kill_stale_bootcommander_processes() {
 /// Free a blocked COM port after a failed firmware flash (e.g. stuck BootCommander).
 #[tauri::command]
 pub async fn release_serial_port_blockers(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    // Replacing `state.connection` is a transition like any other.
+    let _transition = state.connection_transition.lock().await;
     kill_stale_bootcommander_processes();
     stop_metrics_task(state.clone()).await;
     {
@@ -887,6 +889,7 @@ pub async fn update_ecu_firmware(
 
     stop_metrics_task(state.clone()).await;
     {
+        let _transition = state.connection_transition.lock().await;
         let mut conn_guard = state.connection.lock().await;
         *conn_guard = None;
     }

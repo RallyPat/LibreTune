@@ -263,7 +263,10 @@ pub async fn open_project(
     };
 
     // Disconnect any existing connection when opening a new project
-    // to avoid stale connection state from previous ECU
+    // to avoid stale connection state from previous ECU. Taken under the
+    // transition lock so this cannot land between another path's checks and
+    // its own install.
+    let _transition = state.connection_transition.lock().await;
     let mut conn_guard = state.connection.lock().await;
     *conn_guard = None;
     drop(conn_guard);
