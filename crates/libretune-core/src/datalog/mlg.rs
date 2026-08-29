@@ -38,6 +38,11 @@ const MARKER_TEXT_LEN: usize = 50;
 /// The record clock counts 10 µs ticks and wraps every 65536 of them.
 const CLOCK_TICK_MICROS: u64 = 10;
 const CLOCK_WRAP: u64 = 1 << 16;
+/// A rollover lands the clock near zero, so a backward step is only read as
+/// one when it crosses most of the range. Smaller backward steps are records
+/// out of order, or a corrupt prefix — it carries no checksum of its own —
+/// and must not be paid for with 655 ms of invented elapsed time.
+const CLOCK_WRAP_MARGIN: u16 = 1 << 15;
 
 /// A scalar as stored in a record payload.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -275,12 +280,13 @@ struct Clock {
 
 impl Clock {
     fn advance(&mut self, raw: u16) -> u64 {
-        if self.start.is_some() && raw < self.previous {
+        if self.start.is_some() && self.previous.saturating_sub(raw) > CLOCK_WRAP_MARGIN {
             self.wraps += 1;
         }
         self.previous = raw;
         let absolute = self.wraps * CLOCK_WRAP + raw as u64;
-        absolute - *self.start.get_or_insert(absolute)
+        // A record that arrived out of order can sit before the first one.
+        absolute.saturating_sub(*self.start.get_or_insert(absolute))
     }
 }
 #[cfg(test)]
@@ -345,15 +351,27 @@ mod tests {
     }
 
     fn build_log(version: u16, fields: &[&TestField], records: &[Vec<u8>]) -> Vec<u8> {
+        build_log_with_info(version, fields, "", records)
+    }
+
+    /// `info` stands in for the MSQ tune text TunerStudio parks between the
+    /// field descriptors and the first record.
+    fn build_log_with_info(
+        version: u16,
+        fields: &[&TestField],
+        info: &str,
+        records: &[Vec<u8>],
+    ) -> Vec<u8> {
         let record_len: usize = fields.iter().map(|f| f.width).sum();
         let info_start = HEADER_LEN + fields.len() * DESCRIPTOR_LEN;
+        let data_start = info_start + info.len();
 
         let mut out = Vec::new();
         out.extend_from_slice(MAGIC);
         out.extend_from_slice(&version.to_be_bytes());
         out.extend_from_slice(&1_784_378_352u32.to_be_bytes()); // capture time
         out.extend_from_slice(&(info_start as u32).to_be_bytes());
-        out.extend_from_slice(&(info_start as u32).to_be_bytes()); // no info block
+        out.extend_from_slice(&(data_start as u32).to_be_bytes());
         out.extend_from_slice(&(record_len as u16).to_be_bytes());
         out.extend_from_slice(&(fields.len() as u16).to_be_bytes());
         assert_eq!(out.len(), HEADER_LEN);
@@ -376,6 +394,7 @@ mod tests {
             assert_eq!(out.len() - start, DESCRIPTOR_LEN);
         }
 
+        out.extend_from_slice(info.as_bytes());
         for r in records {
             out.extend_from_slice(r);
         }
@@ -521,6 +540,204 @@ mod tests {
         let (_dir, path) = write_temp(&bytes);
 
         assert!(read_mlg(&path).is_err());
+    }
+
+    #[test]
+    fn a_wrapped_clock_keeps_time_moving_forward() {
+        // The 16-bit clock rolls over every 65536 ticks, roughly twice a second.
+        let bytes = build_log(
+            2,
+            &[&TIME, &CLT, &STFT],
+            &[
+                record(0, 65_000, &payload(0.0, 8741, 1.0)),
+                record(1, 200, &payload(0.01, 8741, 1.0)),
+            ],
+        );
+        let (_dir, path) = write_temp(&bytes);
+
+        let (_, entries) = read_mlg(&path).unwrap();
+
+        // 65536 + 200 - 65000 = 736 ticks.
+        assert_eq!(entries[1].timestamp, Duration::from_micros(7_360));
+    }
+
+    #[test]
+    fn a_small_backward_clock_step_is_not_a_wrap() {
+        // The record prefix carries no checksum, so a single corrupt byte can
+        // send the clock backwards. Reading that as a rollover would add
+        // 655 ms to every record after it.
+        let bytes = build_log(
+            2,
+            &[&TIME, &CLT, &STFT],
+            &[
+                record(0, 1_000, &payload(0.0, 8741, 1.0)),
+                record(1, 900, &payload(0.01, 8741, 1.0)),
+                record(2, 1_100, &payload(0.02, 8741, 1.0)),
+            ],
+        );
+        let (_dir, path) = write_temp(&bytes);
+
+        let (_, entries) = read_mlg(&path).unwrap();
+
+        assert_eq!(entries.len(), 3);
+        assert_eq!(entries[2].timestamp, Duration::from_micros(1_000));
+    }
+
+    /// Records the reader drops still carry a clock reading, and losing it
+    /// loses the rollover it was about to prove: the next record looks like a
+    /// step backwards instead of the far side of a wrap.
+    #[test]
+    fn a_dropped_record_still_advances_the_clock() {
+        let mut corrupt = record(1, 60_000, &payload(0.01, 8741, 1.0));
+        let last = corrupt.len() - 1;
+        corrupt[last] ^= 0xff;
+
+        let bytes = build_log(
+            2,
+            &[&TIME, &CLT, &STFT],
+            &[
+                record(0, 1_000, &payload(0.0, 8741, 1.0)),
+                corrupt,
+                record(2, 200, &payload(0.02, 8741, 1.0)),
+            ],
+        );
+        let (_dir, path) = write_temp(&bytes);
+
+        let (_, entries) = read_mlg(&path).unwrap();
+
+        assert_eq!(entries.len(), 2);
+        // 65536 + 200 - 1000 = 64736 ticks.
+        assert_eq!(entries[1].timestamp, Duration::from_micros(647_360));
+    }
+
+    #[test]
+    fn a_marker_still_advances_the_clock() {
+        let bytes = build_log(
+            2,
+            &[&TIME, &CLT, &STFT],
+            &[
+                record(0, 1_000, &payload(0.0, 8741, 1.0)),
+                marker(1, 60_000, "MARK 000 - Going Offline"),
+                record(2, 200, &payload(0.02, 8741, 1.0)),
+            ],
+        );
+        let (_dir, path) = write_temp(&bytes);
+
+        let (_, entries) = read_mlg(&path).unwrap();
+
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[1].timestamp, Duration::from_micros(647_360));
+    }
+
+    #[test]
+    fn skips_the_tune_text_between_the_descriptors_and_the_data() {
+        // Real captures carry the whole MSQ tune here — 400 kB is typical.
+        let bytes = build_log_with_info(
+            2,
+            &[&TIME, &CLT, &STFT],
+            "<msq><constant name=\"veTable\">80 82 84</constant></msq>",
+            &[record(0, 1_000, &payload(0.0, 8741, 1.0))],
+        );
+        let (_dir, path) = write_temp(&bytes);
+
+        let (_, entries) = read_mlg(&path).unwrap();
+
+        assert_eq!(entries.len(), 1);
+        assert!((entries[0].values[1] - 87.41).abs() < 1e-4);
+    }
+
+    #[test]
+    fn decodes_every_scalar_type_the_format_defines() {
+        const TYPES: [TestField; 7] = [
+            TestField {
+                code: 0,
+                width: 1,
+                name: "u8",
+                units: "",
+                scale: 1.0,
+                transform: 0.0,
+            },
+            TestField {
+                code: 1,
+                width: 1,
+                name: "i8",
+                units: "",
+                scale: 1.0,
+                transform: 0.0,
+            },
+            TestField {
+                code: 2,
+                width: 2,
+                name: "u16",
+                units: "",
+                scale: 1.0,
+                transform: 0.0,
+            },
+            TestField {
+                code: 3,
+                width: 2,
+                name: "i16",
+                units: "",
+                scale: 1.0,
+                transform: 0.0,
+            },
+            TestField {
+                code: 4,
+                width: 4,
+                name: "u32",
+                units: "",
+                scale: 1.0,
+                transform: 0.0,
+            },
+            TestField {
+                code: 5,
+                width: 4,
+                name: "i32",
+                units: "",
+                scale: 1.0,
+                transform: 0.0,
+            },
+            TestField {
+                code: 6,
+                width: 8,
+                name: "i64",
+                units: "",
+                scale: 1.0,
+                transform: 0.0,
+            },
+        ];
+
+        let mut wide = Vec::new();
+        wide.push(200u8);
+        wide.extend_from_slice(&(-5i8).to_be_bytes());
+        wide.extend_from_slice(&8741u16.to_be_bytes());
+        wide.extend_from_slice(&(-1234i16).to_be_bytes());
+        wide.extend_from_slice(&70_000u32.to_be_bytes());
+        wide.extend_from_slice(&(-70_000i32).to_be_bytes());
+        wide.extend_from_slice(&(-5_000_000_000i64).to_be_bytes());
+
+        let fields: Vec<&TestField> = TYPES.iter().collect();
+        let bytes = build_log(2, &fields, &[record(0, 0, &wide)]);
+        let (_dir, path) = write_temp(&bytes);
+
+        let (channels, entries) = read_mlg(&path).unwrap();
+
+        assert_eq!(
+            channels,
+            vec!["u8", "i8", "u16", "i16", "u32", "i32", "i64"]
+        );
+        assert_eq!(
+            entries[0].values,
+            vec![
+                200.0,
+                -5.0,
+                8741.0,
+                -1234.0,
+                70_000.0,
+                -70_000.0,
+                -5_000_000_000.0
+            ]
+        );
     }
 
     /// Checks the reader against a log TunerStudio actually wrote. Repo

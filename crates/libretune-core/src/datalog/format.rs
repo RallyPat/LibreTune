@@ -251,10 +251,18 @@ mod tests {
     #[test]
     fn read_log_rejects_an_extension_it_has_no_reader_for() {
         let dir = tempfile::tempdir().unwrap();
+        // Readable CSV under a .msl name: read_csv would happily parse it, so
+        // the rejection can only come from the extension, not the content.
         let path = dir.path().join("log.msl");
-        std::fs::write(&path, "Time\n0.0\n").unwrap();
+        std::fs::write(&path, "Time,rpm\n0.0,900\n").unwrap();
 
-        assert!(read_log(&path).is_err());
+        let error = read_log(&path).unwrap_err();
+
+        assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+        assert!(
+            error.to_string().contains("not a log format"),
+            "expected the extension to be named as the reason, got: {error}"
+        );
     }
     #[test]
     fn read_log_sends_mlg_files_to_the_mlg_reader() {
