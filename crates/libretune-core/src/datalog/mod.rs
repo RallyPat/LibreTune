@@ -4,6 +4,7 @@
 
 pub mod dyno;
 pub mod format;
+pub mod mlg;
 mod playback;
 mod recorder;
 
