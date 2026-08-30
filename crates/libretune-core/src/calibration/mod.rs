@@ -166,6 +166,88 @@ pub fn solution_curve(
 /// can show exactly what was entered, and so [`describe`](Self::describe)
 /// can report the transfer function in the same terms the sensor's datasheet
 /// uses.
+/// A reference correction applied over an existing AFR curve.
+///
+/// The workflow this models: the ECU is displaying an AFR through its current
+/// calibration, and a trusted reference - the wideband controller's own gauge,
+/// a second meter, span gas - says what the mixture actually is. Each point is
+/// `(measured, expected)`: what the ECU showed, and what it should have shown.
+///
+/// One point corrects offset only (`afr' = afr + (expected - measured)`),
+/// which is the right tool when the whole scale reads uniformly rich or lean -
+/// a ground-offset error does exactly that. Two points solve gain and offset,
+/// for a sensor whose error grows across the range - this NA6's Spartan reads
+/// about 0.3 AFR low near stoich and nearly 6% low at the lean end, which an
+/// offset alone cannot express.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AfrCorrection {
+    /// Multiplier applied to the curve's AFR.
+    pub gain: f64,
+    /// Offset added after the gain.
+    pub offset: f64,
+    points: Vec<(f64, f64)>,
+}
+
+impl AfrCorrection {
+    /// Build from one or two `(measured, expected)` pairs.
+    pub fn from_points(points: &[(f64, f64)]) -> Result<Self, CalibrationError> {
+        match points {
+            [(m, e)] => Ok(Self {
+                gain: 1.0,
+                offset: e - m,
+                points: points.to_vec(),
+            }),
+            [(m1, e1), (m2, e2)] => {
+                if (m1 - m2).abs() < 1e-6 {
+                    return Err(CalibrationError::DegenerateInputs(format!(
+                        "the two measured readings must differ (both were                          {m1:.2} AFR) - a gain cannot be solved from one point",
+                    )));
+                }
+                let gain = (e2 - e1) / (m2 - m1);
+                // A non-positive gain flattens or reverses the curve: richer
+                // mixtures would read leaner. No physical sensor error does
+                // that; it means the two points were swapped or mistyped.
+                if gain <= 0.0 {
+                    return Err(CalibrationError::DegenerateInputs(format!(
+                        "these points give a gain of {gain:.3}, which would                          reverse the curve - check the expected values are                          paired with the right measured readings",
+                    )));
+                }
+                Ok(Self {
+                    gain,
+                    offset: e1 - gain * m1,
+                    points: points.to_vec(),
+                })
+            }
+            _ => Err(CalibrationError::DegenerateInputs(format!(
+                "a correction takes one or two points, got {}",
+                points.len()
+            ))),
+        }
+    }
+
+    /// Apply to a curve in place.
+    pub fn apply(&self, afr: &mut [f64]) {
+        for v in afr.iter_mut() {
+            *v = self.gain * *v + self.offset;
+        }
+    }
+
+    /// Human-readable suffix for the stored transfer function, so a log reads
+    /// as corrected rather than silently differing from its preset.
+    pub fn describe(&self) -> String {
+        match self.points.as_slice() {
+            [(m, e)] => format!(
+                "corrected {:+.2} AFR against a reference ({m:.2} read as {e:.2})",
+                self.offset
+            ),
+            _ => format!(
+                "corrected against a reference (gain {:.4}, offset {:+.2})",
+                self.gain, self.offset
+            ),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct LinearWideband {
     /// First calibration point, `(volts, afr)`.
@@ -404,5 +486,66 @@ mod tests {
     fn adc_endpoints_span_the_reference_rail() {
         assert!((adc_to_volts(0) - 0.0).abs() < 1e-12);
         assert!((adc_to_volts(1023) - 5.0).abs() < 1e-12);
+    }
+}
+
+#[cfg(test)]
+mod afr_correction_tests {
+    use super::*;
+
+    #[test]
+    fn a_single_point_shifts_the_whole_curve_by_the_error() {
+        // ECU showed 14.2 where the reference gauge read 14.7: half an AFR lean.
+        let c = AfrCorrection::from_points(&[(14.2, 14.7)]).unwrap();
+        assert_eq!(c.gain, 1.0);
+        assert!((c.offset - 0.5).abs() < 1e-9);
+
+        let mut curve = vec![10.0, 14.2, 19.5];
+        c.apply(&mut curve);
+        assert!((curve[0] - 10.5).abs() < 1e-9);
+        assert!(
+            (curve[1] - 14.7).abs() < 1e-9,
+            "the entered point maps exactly"
+        );
+        assert!((curve[2] - 20.0).abs() < 1e-9);
+    }
+
+    /// The NA6's Spartan case: reads low, and by more at the lean end - an
+    /// error that grows across the range, which one offset cannot express.
+    #[test]
+    fn two_points_solve_gain_and_offset_and_both_map_exactly() {
+        // ECU showed 12.5 where the reference said 12.08, and 19.0 where it
+        // said 18.25 (the measured-twice bench figures for this sensor).
+        let c = AfrCorrection::from_points(&[(12.5, 12.08), (19.0, 18.25)]).unwrap();
+
+        let mut probe = vec![12.5, 19.0, 14.7];
+        c.apply(&mut probe);
+        assert!((probe[0] - 12.08).abs() < 1e-9, "first point maps exactly");
+        assert!((probe[1] - 18.25).abs() < 1e-9, "second point maps exactly");
+        // Between the points the correction interpolates: stoich lands between
+        // the two entered errors, not at either one.
+        assert!(probe[2] < 14.7 && probe[2] > 14.0, "got {}", probe[2]);
+    }
+
+    #[test]
+    fn identical_measured_readings_cannot_solve_a_gain() {
+        let e = AfrCorrection::from_points(&[(14.7, 14.5), (14.7, 15.0)]).unwrap_err();
+        assert!(e.to_string().contains("must differ"), "{e}");
+    }
+
+    /// Swapped or mistyped pairs produce a negative gain - richer reading as
+    /// leaner. Refused with an error that says what to check, because writing
+    /// a reversed AFR curve to a car is how a lean condition gets fueled
+    /// leaner.
+    #[test]
+    fn a_reversing_correction_is_refused() {
+        let e = AfrCorrection::from_points(&[(12.0, 18.0), (18.0, 12.0)]).unwrap_err();
+        assert!(e.to_string().contains("reverse"), "{e}");
+    }
+
+    #[test]
+    fn zero_and_three_points_are_refused() {
+        assert!(AfrCorrection::from_points(&[]).is_err());
+        assert!(AfrCorrection::from_points(&[(1.0, 1.0), (2.0, 2.0), (3.0, 3.0)]).is_err());
     }
 }
