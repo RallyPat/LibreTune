@@ -66,6 +66,20 @@ jobs:
       - name: Test
         run: cargo test --workspace
 
+  rust-macos:
+    name: Rust (macOS)
+    runs-on: macos-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: ./.github/actions/setup-rust
+        with:
+          cache_key: rust-macos
+
+      - name: Test
+        run: cargo test --workspace
+
   frontend:
     name: Frontend
     runs-on: ubuntu-latest
@@ -116,7 +130,7 @@ jobs:
   ci:
     name: CI
     if: always()
-    needs: [format, rust-linux, rust-windows, frontend, security-audit]
+    needs: [format, rust-linux, rust-windows, rust-macos, frontend, security-audit]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -127,6 +141,7 @@ jobs:
             "${{ needs.format.result }}"
             "${{ needs.rust-linux.result }}"
             "${{ needs.rust-windows.result }}"
+            "${{ needs.rust-macos.result }}"
             "${{ needs.frontend.result }}"
             "${{ needs.security-audit.result }}"
           )
