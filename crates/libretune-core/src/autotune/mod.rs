@@ -2440,7 +2440,6 @@ mod hit_weighting_tests {
     fn the_weighted_mean_reduces_to_the_plain_mean_under_uniform() {
         let samples: [f64; 4] = [90.0, 100.0, 110.0, 95.0];
         let (mut cma, mut wtot) = (samples[0], 0.0);
-        cma = samples[0];
         for (i, x) in samples.iter().enumerate() {
             let w = 1.0;
             wtot += w;
