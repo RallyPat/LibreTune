@@ -178,7 +178,7 @@ fn read_fields(reader: &mut impl Read, header: &Header) -> io::Result<Vec<MlgFie
 
     let mut fields = Vec::with_capacity(header.field_count);
     let mut offset = 0usize;
-    for (index, descriptor) in bytes.chunks_exact(DESCRIPTOR_LEN).enumerate() {
+    for (index, descriptor) in bytes.as_chunks::<DESCRIPTOR_LEN>().0.iter().enumerate() {
         let field_type = FieldType::from_code(descriptor[0]).ok_or_else(|| {
             invalid(format!(
                 "field {index} has unknown storage type {}",
