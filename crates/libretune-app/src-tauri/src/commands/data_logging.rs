@@ -318,6 +318,13 @@ pub async fn read_text_file(path: String) -> Result<String, String> {
 
 #[tauri::command]
 pub async fn write_text_file(path: String, contents: String) -> Result<(), String> {
+    // Callers writing into a not-yet-created folder (e.g. tooth/composite
+    // capture auto-save into a project's datalogs/ before anything else has
+    // logged there) would otherwise fail with "path not found". Same
+    // create-parent-then-write pattern DataLogger::start_streaming uses.
+    if let Some(dir) = std::path::Path::new(&path).parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
     std::fs::write(&path, contents).map_err(|e| format!("Failed to write file: {}", e))
 }
 
