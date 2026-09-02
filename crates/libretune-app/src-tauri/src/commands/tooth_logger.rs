@@ -186,6 +186,7 @@ async fn run_capture(
     let (mut records, mut reads, mut empty) = (0u64, 0u64, 0u64);
     let mut batch: Vec<LoggerRecord> = Vec::new();
     let mut note = None;
+    let mut last_payload: Option<Vec<u8>> = None;
 
     loop {
         if !RUNNING.load(Ordering::SeqCst) {
@@ -225,6 +226,20 @@ async fn run_capture(
             }
             continue;
         }
+        // The ECU serves whatever its buffer holds; if we poll again before it
+        // refills (or after it stops filling), the same bytes come back and
+        // decoding them again duplicates every record. Same-bytes is "not
+        // ready", exactly like an empty read.
+        if last_payload.as_deref() == Some(payload.as_slice()) {
+            empty += 1;
+            if empty > 200 {
+                note = Some("buffer stopped refilling - same data on every read".into());
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+            continue;
+        }
+        last_payload = Some(payload.clone());
         empty = 0;
 
         let mut real = 0usize;
