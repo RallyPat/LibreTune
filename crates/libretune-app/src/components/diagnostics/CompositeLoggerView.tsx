@@ -10,6 +10,8 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import { Square, Play, Download, X, Check, XCircle } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { useToast } from "../../contexts/ToastContext";
+import type { CurrentProject } from "../../types/app";
 import "./CompositeLoggerView.css";
 
 interface CompositeLogEntry {
@@ -76,6 +78,17 @@ interface CompositeLoggerViewProps {
   onClose?: () => void;
 }
 
+/** Same format the manual Export button and the auto-save write to disk. */
+function buildCsv(rows: CompositeLogEntry[]): string {
+  const lines = ["Time (µs),Primary,Secondary,Sync,Voltage"];
+  rows.forEach((entry) => {
+    lines.push(
+      `${entry.time_us},${entry.primary ? 1 : 0},${entry.secondary ? 1 : 0},${entry.sync ? 1 : 0},${entry.voltage ?? ""}`
+    );
+  });
+  return lines.join("\n");
+}
+
 export const CompositeLoggerView: React.FC<CompositeLoggerViewProps> = ({ onClose }) => {
   const [logData, setLogData] = useState<CompositeLogEntry[]>([]);
   const [isCapturing, setIsCapturing] = useState(false);
@@ -83,6 +96,14 @@ export const CompositeLoggerView: React.FC<CompositeLoggerViewProps> = ({ onClos
   const [zoomLevel, setZoomLevel] = useState(1);
   const [scrollOffset, setScrollOffset] = useState(0);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const { showToast } = useToast();
+
+  // Mirrors logData, updated synchronously in the same setState updater that
+  // appends each batch. handleCapture reads THIS (not logData) right after
+  // the capture promise resolves, so it sees the final batch even though the
+  // resolved promise carries only counts, not records, and React hasn't
+  // necessarily re-rendered with the last setLogData yet.
+  const logDataRef = useRef<CompositeLogEntry[]>([]);
 
   // Listen for real-time composite data
   useEffect(() => {
@@ -96,7 +117,9 @@ export const CompositeLoggerView: React.FC<CompositeLoggerViewProps> = ({ onClos
         const mapped = toEntries(event.payload);
         setLogData((prev) => {
           const next = prev.concat(mapped);
-          return next.length > MAX_POINTS ? next.slice(-MAX_POINTS) : next;
+          const capped = next.length > MAX_POINTS ? next.slice(-MAX_POINTS) : next;
+          logDataRef.current = capped;
+          return capped;
         });
       });
     };
@@ -298,6 +321,7 @@ export const CompositeLoggerView: React.FC<CompositeLoggerViewProps> = ({ onClos
     setIsCapturing(true);
     setError(null);
     setLogData([]);
+    logDataRef.current = [];
 
     try {
       // Ask the definition which logger draws trigger patterns rather than
@@ -312,6 +336,9 @@ export const CompositeLoggerView: React.FC<CompositeLoggerViewProps> = ({ onClos
         return;
       }
 
+      // This resolves BOTH on natural completion and after a manual Stop
+      // (handleStop just flips the running flag; this promise then resolves
+      // on its own) - so the auto-save below covers both paths for free.
       const status = await invoke<CaptureStatus>("start_tooth_capture", {
         loggerName: composite.name,
       });
@@ -321,12 +348,34 @@ export const CompositeLoggerView: React.FC<CompositeLoggerViewProps> = ({ onClos
           status.note ?? "No records captured. The logger needs the engine turning."
         );
       }
+
+      // Auto-save to disk immediately so a tab switch (which unmounts this
+      // view and its in-memory logData) can never lose a finished capture
+      // again. Ceiling: this saves logDataRef.current, which MAX_POINTS caps
+      // at 20000 - an extremely long capture only saves its most recent
+      // points. Known, acceptable, not solved here.
+      const rows = logDataRef.current;
+      if (rows.length > 0) {
+        try {
+          const project = await invoke<CurrentProject | null>("get_current_project");
+          if (project) {
+            const n = new Date();
+            const p2 = (x: number) => String(x).padStart(2, "0");
+            const stamp = `${n.getFullYear()}-${p2(n.getMonth() + 1)}-${p2(n.getDate())}_${p2(n.getHours())}.${p2(n.getMinutes())}.${p2(n.getSeconds())}`;
+            const path = `${project.path}/datalogs/composite_${stamp}.csv`;
+            await invoke("write_text_file", { path, contents: buildCsv(rows) });
+            showToast(`Saved ${rows.length} records to ${path}`, "success");
+          }
+        } catch (saveErr) {
+          showToast(`Auto-save failed: ${saveErr}`, "error");
+        }
+      }
     } catch (err) {
       setError(String(err));
     } finally {
       setIsCapturing(false);
     }
-  }, []);
+  }, [showToast]);
 
   const handleStop = useCallback(async () => {
     try {
@@ -340,14 +389,7 @@ export const CompositeLoggerView: React.FC<CompositeLoggerViewProps> = ({ onClos
   const handleExport = useCallback(() => {
     if (logData.length === 0) return;
 
-    const lines = ["Time (µs),Primary,Secondary,Sync,Voltage"];
-    logData.forEach((entry) => {
-      lines.push(
-        `${entry.time_us},${entry.primary ? 1 : 0},${entry.secondary ? 1 : 0},${entry.sync ? 1 : 0},${entry.voltage ?? ""}`
-      );
-    });
-
-    const blob = new Blob([lines.join("\n")], { type: "text/csv" });
+    const blob = new Blob([buildCsv(logData)], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;

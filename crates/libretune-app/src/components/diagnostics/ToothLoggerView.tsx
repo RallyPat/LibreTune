@@ -10,6 +10,8 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import { Square, Play, Download, X } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { useToast } from "../../contexts/ToastContext";
+import type { CurrentProject } from "../../types/app";
 import "./ToothLoggerView.css";
 
 interface ToothLogEntry {
@@ -69,6 +71,15 @@ interface ToothLoggerViewProps {
   onClose?: () => void;
 }
 
+/** Same format the manual Export button and the auto-save write to disk. */
+function buildCsv(rows: ToothLogEntry[]): string {
+  const lines = ["Tooth Number,Time (µs),Crank Angle (deg)"];
+  rows.forEach((tooth) => {
+    lines.push(`${tooth.tooth_number},${tooth.tooth_time_us},${tooth.crank_angle || ""}`);
+  });
+  return lines.join("\n");
+}
+
 export const ToothLoggerView: React.FC<ToothLoggerViewProps> = ({ onClose }) => {
   const [logData, setLogData] = useState<ToothLogEntry[]>([]);
   const [isCapturing, setIsCapturing] = useState(false);
@@ -78,6 +89,14 @@ export const ToothLoggerView: React.FC<ToothLoggerViewProps> = ({ onClose }) => 
   // Long enough to hold a gear and reach the rpm band under investigation.
   const [captureSeconds, setCaptureSeconds] = useState<number>(20);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const { showToast } = useToast();
+
+  // Mirrors logData, updated synchronously in the same setState updater that
+  // appends each batch. handleCapture reads THIS (not logData) right after
+  // the capture promise resolves, so it sees the final batch even though the
+  // resolved promise carries only counts, not records, and React hasn't
+  // necessarily re-rendered with the last setLogData yet.
+  const logDataRef = useRef<ToothLogEntry[]>([]);
 
   // Listen for real-time tooth data
   useEffect(() => {
@@ -95,7 +114,9 @@ export const ToothLoggerView: React.FC<ToothLoggerViewProps> = ({ onClose }) => 
           const next = prev.concat(mapped);
           // Cap the view. A minute at 4500 rpm is on the order of a hundred
           // thousand teeth, which no canvas needs and no browser enjoys.
-          return next.length > MAX_POINTS ? next.slice(-MAX_POINTS) : next;
+          const capped = next.length > MAX_POINTS ? next.slice(-MAX_POINTS) : next;
+          logDataRef.current = capped;
+          return capped;
         });
       });
     };
@@ -251,11 +272,15 @@ export const ToothLoggerView: React.FC<ToothLoggerViewProps> = ({ onClose }) => 
     setIsCapturing(true);
     setError(null);
     setLogData([]);
+    logDataRef.current = [];
 
     try {
       // Runs until stopped, or the limit. The ECU's buffer holds 127 records;
       // it refills between reads, so a capture is as long as you let it be -
       // the old single-read call mistook one bufferful for the hardware limit.
+      // This resolves BOTH on natural completion and after a manual Stop
+      // (handleStop just flips the running flag; this promise then resolves
+      // on its own) - so the auto-save below covers both paths for free.
       const status = await invoke<CaptureStatus>("start_tooth_capture", {
         maxSeconds: captureSeconds,
       });
@@ -266,12 +291,34 @@ export const ToothLoggerView: React.FC<ToothLoggerViewProps> = ({ onClose }) => 
             "No records captured. The logger needs the engine turning."
         );
       }
+
+      // Auto-save to disk immediately so a tab switch (which unmounts this
+      // view and its in-memory logData) can never lose a finished capture
+      // again. Ceiling: this saves logDataRef.current, which MAX_POINTS caps
+      // at 20000 - an extremely long capture only saves its most recent
+      // points. Known, acceptable, not solved here.
+      const rows = logDataRef.current;
+      if (rows.length > 0) {
+        try {
+          const project = await invoke<CurrentProject | null>("get_current_project");
+          if (project) {
+            const n = new Date();
+            const p2 = (x: number) => String(x).padStart(2, "0");
+            const stamp = `${n.getFullYear()}-${p2(n.getMonth() + 1)}-${p2(n.getDate())}_${p2(n.getHours())}.${p2(n.getMinutes())}.${p2(n.getSeconds())}`;
+            const path = `${project.path}/datalogs/tooth_${stamp}.csv`;
+            await invoke("write_text_file", { path, contents: buildCsv(rows) });
+            showToast(`Saved ${rows.length} records to ${path}`, "success");
+          }
+        } catch (saveErr) {
+          showToast(`Auto-save failed: ${saveErr}`, "error");
+        }
+      }
     } catch (err) {
       setError(String(err));
     } finally {
       setIsCapturing(false);
     }
-  }, [captureSeconds]);
+  }, [captureSeconds, showToast]);
 
   const handleStop = useCallback(async () => {
     try {
@@ -285,14 +332,8 @@ export const ToothLoggerView: React.FC<ToothLoggerViewProps> = ({ onClose }) => 
   const handleExport = useCallback(() => {
     if (logData.length === 0) return;
 
-    // Create CSV content
-    const lines = ["Tooth Number,Time (µs),Crank Angle (deg)"];
-    logData.forEach((tooth) => {
-      lines.push(`${tooth.tooth_number},${tooth.tooth_time_us},${tooth.crank_angle || ""}`);
-    });
-
     // Download as file
-    const blob = new Blob([lines.join("\n")], { type: "text/csv" });
+    const blob = new Blob([buildCsv(logData)], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
