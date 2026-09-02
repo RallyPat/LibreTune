@@ -9,16 +9,11 @@
 //!
 //! * list the calibration presets the loaded INI declares, and preview any of
 //!   them as a curve ([`list_calibration_presets`], [`preview_afr_calibration`]);
-//! * solve a corrected calibration from a wideband's power-on self-test
-//!   ([`auto_calibrate_afr`]);
 //! * write a calibration and get the CRC read-back result
 //!   ([`write_afr_calibration`], [`write_temperature_calibration`]).
 
 use crate::state::AppState;
-use libretune_core::calibration::{
-    self, adc_to_volts, auto_calibrate_from_plateaus, AfrSample, LinearWideband,
-    PlateauDetectorConfig, ThermistorFit,
-};
+use libretune_core::calibration::{self, adc_to_volts, LinearWideband, ThermistorFit};
 use libretune_core::ini::{CalibrationSolution, IncTableCache};
 use libretune_core::protocol::calibration::{
     temperature_calibration_bins, O2_CALIBRATION_WIRE_BYTES, TEMP_CALIBRATION_POINTS,
@@ -45,10 +40,6 @@ fn parse_temperature_sensor(sensor: &str) -> Result<CalibrationTable, String> {
 /// issues a full EEPROM write *inside* its 32-iteration loop. On a running
 /// engine that stalls the main loop long enough to matter, which is why the
 /// firmware assumes the engine is stopped.
-///
-/// Note this gate is on the *write* only. Plateau detection deliberately
-/// tolerates a running engine, because the sensor's self-test overlaps
-/// cranking and early idle — see the `calibration::plateau` module docs.
 async fn require_engine_stopped(state: &tauri::State<'_, AppState>) -> Result<(), String> {
     // No live stream means there is nothing running to protect; a quiet ECU
     // is the normal case for a calibration write.
@@ -326,68 +317,6 @@ pub async fn preview_afr_calibration(
         curve.transfer_function = t;
     }
     Ok(curve)
-}
-
-/// The corrected calibration solved from a captured key-on trace.
-#[derive(serde::Serialize)]
-pub struct AutoCalResult {
-    pub point1: (f64, f64),
-    pub point2: (f64, f64),
-    pub observed_afr: (f64, f64),
-    pub observed_volts: (f64, f64),
-    pub ground_offset_volts: f64,
-    pub offset_consistency_volts: f64,
-    pub windows: ((f64, f64), (f64, f64)),
-    pub description: String,
-    pub curve: AfrCurve,
-}
-
-/// Solve a corrected wideband calibration from a captured key-on trace.
-///
-/// This is the thing TunerStudio cannot do. A 14Point7 Spartan 2 drives two
-/// known voltages at power-on; whatever the ECU read during those windows,
-/// versus what the sensor actually sent, is the error in the wiring — mostly
-/// ground offset. Feed in the AFR channel across a key-on and the corrected
-/// two-point calibration comes back, ready to preview and write.
-///
-/// `current_curve` is the calibration that was loaded when the trace was
-/// captured; without it the observed AFR readings cannot be turned back into
-/// voltages. Pass the curve of the preset currently selected in the ECU.
-#[tauri::command]
-pub async fn auto_calibrate_afr(
-    samples: Vec<(f64, f64)>,
-    current_curve: Vec<f64>,
-) -> Result<AutoCalResult, String> {
-    if current_curve.len() != O2_CALIBRATION_WIRE_BYTES {
-        return Err(format!(
-            "the currently loaded calibration curve must have \
-             {O2_CALIBRATION_WIRE_BYTES} points, got {}",
-            current_curve.len()
-        ));
-    }
-    let samples: Vec<AfrSample> = samples
-        .into_iter()
-        .map(|(time_s, afr)| AfrSample { time_s, afr })
-        .collect();
-
-    let solved =
-        auto_calibrate_from_plateaus(&samples, &current_curve, &PlateauDetectorConfig::default())
-            .map_err(|e| e.to_string())?;
-
-    let mut curve = describe_curve(&solved.calibration.curve());
-    curve.transfer_function = solved.calibration.describe();
-
-    Ok(AutoCalResult {
-        point1: solved.calibration.point1,
-        point2: solved.calibration.point2,
-        observed_afr: solved.observed_afr,
-        observed_volts: solved.observed_volts,
-        ground_offset_volts: solved.ground_offset_volts,
-        offset_consistency_volts: solved.offset_consistency_volts,
-        windows: solved.windows,
-        description: solved.describe(),
-        curve,
-    })
 }
 
 /// Write the 1024-entry O2/AFR transfer curve (AFR per 10-bit ADC count).

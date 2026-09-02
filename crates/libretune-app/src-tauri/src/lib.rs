@@ -148,9 +148,8 @@ use commands::restore_points::{
 };
 use commands::save_tune::{save_tune, save_tune_as};
 use commands::sensor_calibration::{
-    auto_calibrate_afr, build_thermistor_curve, get_temperature_calibration_bins,
-    list_calibration_presets, preview_afr_calibration, write_afr_calibration,
-    write_temperature_calibration,
+    build_thermistor_curve, get_temperature_calibration_bins, list_calibration_presets,
+    preview_afr_calibration, write_afr_calibration, write_temperature_calibration,
 };
 use commands::settings::{
     get_settings, update_heatmap_custom_stops, update_setting, update_settings,
@@ -388,7 +387,6 @@ pub fn run() {
             get_temperature_calibration_bins,
             list_calibration_presets,
             preview_afr_calibration,
-            auto_calibrate_afr,
             build_thermistor_curve,
             write_temperature_calibration,
             write_afr_calibration,

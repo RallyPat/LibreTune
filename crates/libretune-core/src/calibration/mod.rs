@@ -9,8 +9,7 @@
 //!
 //! * **`solution` expression** — a closed-form formula over `adcValue`
 //!   ([`evaluate_solution`]), e.g. the `14Point7` preset.
-//! * **`linearGenerator`** — two (volts, AFR) points ([`LinearWideband`]),
-//!   which is also what [`auto_calibrate_from_plateaus`] solves for.
+//! * **`linearGenerator`** — two (volts, AFR) points ([`LinearWideband`]).
 //! * **`thermGenerator`** — a three-point Steinhart–Hart thermistor fit
 //!   ([`ThermistorFit`]).
 
@@ -18,12 +17,6 @@ use std::collections::HashMap;
 
 use crate::ini::expression::{evaluate, Parser, StringContext};
 use crate::ini::{CalibrationSolution, IncTableCache, ReferenceTable, ThermistorOption};
-
-pub mod plateau;
-
-pub use plateau::{
-    auto_calibrate_from_plateaus, AfrSample, PlateauCalibration, PlateauDetectorConfig,
-};
 
 /// ADC counts spanned by the Speeduino's 10-bit sensor inputs.
 pub const ADC_COUNTS: usize = 1024;
@@ -160,7 +153,7 @@ pub fn solution_curve(
 }
 
 /// A two-point linear wideband transfer function — the `linearGenerator`
-/// case, and the form the plateau auto-cal solves for.
+/// case.
 ///
 /// Stored as the two measured points rather than slope/intercept so the UI
 /// can show exactly what was entered, and so [`describe`](Self::describe)
