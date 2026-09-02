@@ -254,7 +254,29 @@ The build ID is displayed in the **About** dialog for bug reporting and is verif
 
 ### Release Builds
 
-For release builds, increment `version` in `tauri.conf.json` (e.g., `0.2.0`) and create a git tag matching the version.
+Push a tag `vX.Y.Z`. The release workflow stamps `X.Y.Z` into `tauri.conf.json`
+via `tauri build --config`, so the version in the repo can stay at the nightly
+placeholder; you only need to bump it when you want local builds to report it.
+
+Tagged releases also produce **signed updater artifacts** that the in-app
+updater (`Help → About LibreTune`) installs. The workflow refuses to run
+without the signing key, so a maintainer sets it up once:
+
+```bash
+# 1. Generate a key pair. Keep the private key OUT of the repo and backed up:
+#    losing it means existing installs can never be updated again.
+cd crates/libretune-app && npx tauri signer generate -w ~/.tauri/libretune.key
+```
+
+2. Paste the printed **public** key into `plugins.updater.pubkey` in
+   `crates/libretune-app/src-tauri/tauri.conf.json` and commit it.
+3. Add two repository secrets: `TAURI_SIGNING_PRIVATE_KEY` (contents of
+   `~/.tauri/libretune.key`) and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` (the
+   password you chose, empty if none).
+
+The upload job rebuilds `latest.json` from the emitted `.sig` files and
+verifies every signature against the committed public key before publishing,
+so a key mismatch fails the release instead of surfacing on users' machines.
 
 ## Reporting Issues
 
