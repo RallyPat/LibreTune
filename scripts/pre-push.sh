@@ -137,6 +137,14 @@ else
 fi
 
 echo ""
+echo "→ ESLint..."
+if npm run lint 2>&1; then
+    print_success "ESLint passed"
+else
+    print_error "ESLint failed"
+fi
+
+echo ""
 echo "→ Building frontend..."
 if npm run build 2>&1 | tail -10; then
     print_success "Frontend build passed"

@@ -25,7 +25,8 @@ This file tracks app-crate specifics.
 - `npm run tauri dev` — full Tauri app
 - `npm run build` — production bundle (docs sync runs first)
 - `npm run test:run` — Vitest
-- `npm run typecheck` — `tsc --noEmit` (there is no ESLint script)
+- `npm run typecheck` — `tsc --noEmit`
+- `npm run lint` — ESLint (typescript-eslint recommended + react-hooks); CI fails on errors, warnings are advisory
 
 ## Docs sync
 

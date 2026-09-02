@@ -219,7 +219,6 @@ function TsGaugeInner({ config, value, embeddedImages, legacyMode = false, overr
     // `displayValueRef`; we only need to refresh `paint` when the
     // dispatch key or config-derived inputs change. The hook stores
     // the callback in a ref, so we don't pay an effect-restart cost.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [config, legacyMode, getEmbeddedImage, getValueColor, getFontSpec, getFontFamily],
   );
 
