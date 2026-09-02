@@ -23,6 +23,14 @@ pub async fn connect_to_ecu(
 ) -> Result<ConnectResult, String> {
     use libretune_core::protocol::ConnectionType;
 
+    // Held until the new connection is installed, so a demo-mode transition
+    // cannot slip its simulator in between the handshake and the store — or
+    // tear this connection down having already decided demo mode was off.
+    let _transition = state.connection_transition.lock().await;
+    let generation = state
+        .connection_generation
+        .load(std::sync::atomic::Ordering::SeqCst);
+
     let conn_type = match connection_type.as_deref() {
         Some(t) if t.eq_ignore_ascii_case("tcp") => ConnectionType::Tcp,
         _ => ConnectionType::Serial,
@@ -208,6 +216,18 @@ pub async fn connect_to_ecu(
             };
 
             let mut guard = state.connection.lock().await;
+            // A disconnect that ran past the transition budget while we were
+            // handshaking wins: installing now would leave the ECU connected
+            // after the user's disconnect reported success.
+            if state
+                .connection_generation
+                .load(std::sync::atomic::Ordering::SeqCst)
+                != generation
+            {
+                let mut conn = conn;
+                conn.disconnect();
+                return Err("Connection was cancelled by a disconnect".to_string());
+            }
             *guard = Some(conn);
 
             // Start periodic metrics emission task

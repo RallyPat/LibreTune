@@ -21,6 +21,7 @@ use libretune_core::tune::{MigrationReport, TuneCache, TuneFile};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -209,6 +210,20 @@ pub struct AutoTuneConfig {
 
 pub struct AppState {
     pub connection: Mutex<Option<Connection>>,
+    /// Serialises everything that *replaces* [`AppState::connection`].
+    ///
+    /// Holding the connection lock is not enough: entering demo mode and
+    /// connecting to real hardware each take it several times, and between
+    /// those acquisitions the other can install its own connection. The
+    /// result is demo mode's definition and tune sitting over a physical
+    /// ECU, or a real connection torn down by a demo transition that had
+    /// already checked the flag. Take this for the whole transition.
+    pub connection_transition: Mutex<()>,
+    /// Bumped by every disconnect. `connect_to_ecu` reads it before its
+    /// handshake and refuses to install the connection if it changed, so a
+    /// disconnect that gave up waiting on `connection_transition` (Issue #71)
+    /// cannot be undone by the connect it raced.
+    pub connection_generation: AtomicU64,
     pub definition: Mutex<Option<EcuDefinition>>,
     pub autotune_state: Mutex<AutoTuneState>,
     pub autotune_secondary_state: Mutex<AutoTuneState>,

@@ -110,7 +110,7 @@ impl ResponseCode {
     }
 
     /// Raw byte value for this response code.
-    pub fn as_byte(&self) -> u8 {
+    pub const fn as_byte(&self) -> u8 {
         match self {
             Self::Ok => 0x00,
             Self::OkTable => 0x01,

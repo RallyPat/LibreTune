@@ -677,9 +677,34 @@ impl Connection {
         // Small additional delay after clearing
         std::thread::sleep(Duration::from_millis(20));
 
+        self.finish_connect(channel)
+    }
+
+    /// Connect over a channel that is already open.
+    ///
+    /// Demo mode uses this to reach the in-process simulator through the very
+    /// same handshake, page and realtime paths as real hardware, so the demo
+    /// exercises the protocol rather than side-stepping it. Skips the
+    /// port-open settling delay, which exists only for physical bootloaders.
+    pub fn connect_with_channel(
+        &mut self,
+        channel: Box<dyn CommunicationChannel>,
+    ) -> Result<(), ProtocolError> {
+        if self.state == ConnectionState::Connected {
+            return Err(ProtocolError::AlreadyConnected);
+        }
+        self.state = ConnectionState::Connecting;
+        self.finish_connect(channel)
+    }
+
+    /// Adopt `channel` and handshake over it. Shared tail of [`Self::connect`]
+    /// and [`Self::connect_with_channel`].
+    fn finish_connect(
+        &mut self,
+        channel: Box<dyn CommunicationChannel>,
+    ) -> Result<(), ProtocolError> {
         self.channel = Some(channel);
 
-        // Perform handshake
         match self.handshake() {
             Ok(signature) => {
                 self.signature = Some(signature);

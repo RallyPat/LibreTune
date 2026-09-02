@@ -2,7 +2,9 @@
 
 use crate::AppState;
 use libretune_core::ini::EcuDefinition;
-use libretune_core::tune::TuneCache;
+use libretune_core::protocol::{Connection, ConnectionConfig};
+use libretune_core::simulator::EcuSimulator;
+use libretune_core::tune::{TuneCache, TuneFile};
 use std::path::PathBuf;
 use tauri::{Emitter, Manager};
 
@@ -14,6 +16,18 @@ pub async fn set_demo_mode(
     state: tauri::State<'_, AppState>,
     enabled: bool,
 ) -> Result<(), String> {
+    // Held for the whole transition, so a concurrent `connect_to_ecu`
+    // cannot install a physical connection between the guard below and the
+    // simulator landing in `state.connection` (or the reverse on disable).
+    let _transition = state.connection_transition.lock().await;
+
+    // Idempotent in both directions. Setting the mode it is already in is a
+    // no-op, not a licence to abort the realtime stream and rebuild the
+    // connection, project, cache and tune underneath a running session.
+    if !demo_mode_transition_needed(&state, enabled).await {
+        return Ok(());
+    }
+
     // Stop any existing streaming first
     {
         let mut task_guard = state.streaming_task.lock().await;
@@ -87,11 +101,7 @@ pub async fn set_demo_mode(
 
         eprintln!("[DEMO] Demo mode enabled - loaded demo INI and cleared open project/connection");
     } else {
-        // Disable demo mode
-        {
-            let mut demo_guard = state.demo_mode.lock().await;
-            *demo_guard = false;
-        }
+        apply_demo_disable(&state).await?;
 
         // Notify frontend demo disabled
         let _ = app.emit("demo:changed", false);
@@ -102,12 +112,98 @@ pub async fn set_demo_mode(
     Ok(())
 }
 
+/// Whether `set_demo_mode(enabled)` has any work to do.
+///
+/// `enabled || demo_mode` looked like the same test and is not: it calls a
+/// duplicate *enable* a transition, and rebuilding an already-running demo
+/// session throws away whatever the user had done in it.
+pub(crate) async fn demo_mode_transition_needed(state: &AppState, enabled: bool) -> bool {
+    enabled != *state.demo_mode.lock().await
+}
+
 /// Internal helper: apply demo enable with a provided definition and cache
+/// Build a connection onto a simulator backed by `def`, or `None` if the
+/// handshake doesn't come up.
+fn connect_simulator(def: &EcuDefinition) -> Option<Connection> {
+    let simulator = EcuSimulator::from_definition(def);
+    // The handshake has to use the INI's own query command and endianness,
+    // or it falls back to a generic probe and misreads the reply.
+    let mut connection = Connection::with_protocol(
+        ConnectionConfig::default(),
+        def.protocol.clone(),
+        def.endianness,
+    );
+    match connection.connect_with_channel(Box::new(simulator.channel())) {
+        Ok(()) => Some(connection),
+        Err(error) => {
+            tracing::warn!("demo: simulator handshake failed ({error})");
+            None
+        }
+    }
+}
+
+/// Fill `cache` from the pages the simulator already holds, and build the
+/// matching [`TuneFile`].
+///
+/// The simulator boots on a seeded tune, but `TuneCache::from_definition`
+/// is all zeroes. Leaving the two unreconciled gives demo mode a split
+/// brain: the physics answer from the seeded veTable while AutoTune reads
+/// zeroes out of the cache, and the table editors refuse to open at all
+/// for want of a `current_tune`.
+/// All or nothing: a page that fails to read leaves both the cache and the
+/// tune untouched. A half-synced pair is worse than an unsynced one — the
+/// tune would silently lack the page while the cache still reported it as
+/// zeroes that were never loaded.
+async fn sync_tune_from_simulator(
+    state: &AppState,
+    def: &EcuDefinition,
+    cache: &mut TuneCache,
+) -> Option<TuneFile> {
+    let pages = {
+        let mut conn_guard = state.connection.lock().await;
+        let connection = conn_guard.as_mut()?;
+        let mut pages = Vec::with_capacity(def.n_pages as usize);
+        for page in 0..def.n_pages {
+            // A zero-length page is declared but has nothing to read; the
+            // real sync path records it as empty rather than failing.
+            if def.page_sizes.get(page as usize).copied().unwrap_or(0) == 0 {
+                pages.push((page, Vec::new()));
+                continue;
+            }
+            match connection.read_page(page) {
+                Ok(data) => pages.push((page, data)),
+                Err(error) => {
+                    tracing::warn!(
+                        "demo: page {page} did not sync from the simulator ({error}); \
+                         leaving the tune unloaded rather than half-loaded"
+                    );
+                    return None;
+                }
+            }
+        }
+        pages
+    };
+
+    let mut tune = TuneFile::new(&def.signature);
+    for (page, data) in pages {
+        cache.load_page(page, data.clone());
+        tune.pages.insert(page, data);
+    }
+    Some(tune)
+}
+
 pub(crate) async fn apply_demo_enable(
     state: &AppState,
     def: EcuDefinition,
     cache: TuneCache,
 ) -> Result<(), String> {
+    // Handshake with the in-process simulator before touching any session
+    // state: a failure here must not leave the previous connection torn
+    // down with nothing installed in its place.
+    let Some(simulator_connection) = connect_simulator(&def) else {
+        return Err("Demo mode could not connect to its simulator".to_string());
+    };
+
     // Stop any existing streaming task first
     {
         let mut task_guard = state.streaming_task.lock().await;
@@ -116,13 +212,17 @@ pub(crate) async fn apply_demo_enable(
         }
     }
 
-    // Disconnect any existing connection
+    // Replace any existing connection with the simulator one, so demo mode
+    // reads pages, writes and burns through the same protocol path as real
+    // hardware instead of side-stepping it.
     {
         let mut conn_guard = state.connection.lock().await;
-        *conn_guard = None;
+        if let Some(mut previous) = conn_guard.replace(simulator_connection) {
+            previous.disconnect();
+        }
     }
 
-    // Close and clear any open project/tune to ensure a clean demo state
+    // Close and clear any open project to ensure a clean demo state
     {
         let mut proj_guard = state.current_project.lock().await;
         if let Some(project) = proj_guard.take() {
@@ -130,9 +230,26 @@ pub(crate) async fn apply_demo_enable(
         }
     }
 
+    // The tune comes off the simulator itself, so the cache the editors read
+    // and the memory the physics answer from are the same bytes. A session
+    // whose tune never loaded is not a working demo — realtime would run
+    // while every table editor refused to open — so the transition fails
+    // rather than reporting success.
+    let mut cache = cache;
+    let tune = match sync_tune_from_simulator(state, &def, &mut cache).await {
+        Some(tune) => tune,
+        None => {
+            let mut conn_guard = state.connection.lock().await;
+            if let Some(mut connection) = conn_guard.take() {
+                connection.disconnect();
+            }
+            return Err("Demo mode could not read its tune out of the simulator".to_string());
+        }
+    };
+
     {
         let mut tune_guard = state.current_tune.lock().await;
-        *tune_guard = None;
+        *tune_guard = Some(tune);
     }
 
     {
@@ -162,11 +279,25 @@ pub(crate) async fn apply_demo_enable(
     Ok(())
 }
 
-#[allow(dead_code)]
 pub(crate) async fn apply_demo_disable(state: &AppState) -> Result<(), String> {
+    // Idempotent: a duplicate or stale "disable demo" must not touch a
+    // connection it never owned. Only the simulator installed by
+    // `apply_demo_enable` is torn down here, and only while demo mode is
+    // actually on — otherwise this would disconnect real hardware.
     {
         let mut demo_guard = state.demo_mode.lock().await;
+        if !*demo_guard {
+            return Ok(());
+        }
         *demo_guard = false;
+    }
+
+    // The simulator connection belongs to demo mode. Leaving it installed
+    // makes connection status report a connected ECU that is not there, and
+    // every later command keeps targeting the simulator.
+    let mut conn_guard = state.connection.lock().await;
+    if let Some(mut connection) = conn_guard.take() {
+        connection.disconnect();
     }
     Ok(())
 }
@@ -192,10 +323,12 @@ mod demo_mode_tests {
     use std::path::PathBuf;
     use tokio::sync::Mutex;
 
-    #[tokio::test]
-    async fn test_apply_demo_enable_and_disable() {
-        let state = AppState {
+    /// A bare [`AppState`] with every field at its empty default.
+    fn test_state() -> AppState {
+        AppState {
             connection: Mutex::new(None),
+            connection_transition: Mutex::new(()),
+            connection_generation: std::sync::atomic::AtomicU64::new(0),
             definition: Mutex::new(None),
             autotune_state: Mutex::new(AutoTuneState::new()),
             autotune_secondary_state: Mutex::new(AutoTuneState::new()),
@@ -227,14 +360,23 @@ mod demo_mode_tests {
             agent_task: Mutex::new(None),
             app_start_epoch: AppState::process_start_epoch(),
             inc_table_cache: AppState::new_inc_table_cache(),
-        };
+        }
+    }
 
+    /// The bundled demo INI, the one demo mode actually loads.
+    fn demo_def() -> EcuDefinition {
         let dev_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("resources")
             .join("demo.ini");
         assert!(dev_path.exists(), "Demo INI not found at {:?}", dev_path);
-        let def =
-            EcuDefinition::from_file(dev_path.to_string_lossy().as_ref()).expect("Load demo INI");
+        EcuDefinition::from_file(dev_path.to_string_lossy().as_ref()).expect("Load demo INI")
+    }
+
+    #[tokio::test]
+    async fn test_apply_demo_enable_and_disable() {
+        let state = test_state();
+
+        let def = demo_def();
         let cache = TuneCache::from_definition(&def);
 
         // initial state
@@ -248,8 +390,161 @@ mod demo_mode_tests {
         assert!(*state.demo_mode.lock().await);
         assert!(state.definition.lock().await.is_some());
         assert!(state.tune_cache.lock().await.is_some());
+        assert!(
+            state.connection.lock().await.is_some(),
+            "demo mode must install the simulator connection, or the realtime \
+             stream silently falls back to the generator"
+        );
+
+        // The cache the editors read and the memory the physics answer from
+        // have to be the same bytes. A zero-filled cache beside a seeded
+        // simulator is a split brain: AutoTune samples nothing usable and the
+        // table editors report "No tune is loaded".
+        {
+            let tune_guard = state.current_tune.lock().await;
+            let tune = tune_guard
+                .as_ref()
+                .expect("demo mode must load a tune off the simulator");
+            assert_eq!(
+                tune.pages.len(),
+                def.n_pages as usize,
+                "every declared page must be synced"
+            );
+            assert!(
+                tune.pages.values().any(|page| page.iter().any(|b| *b != 0)),
+                "a tune of nothing but zeroes means the sync did not happen"
+            );
+        }
+        {
+            let cache_guard = state.tune_cache.lock().await;
+            let cache = cache_guard.as_ref().expect("the cache is installed");
+            assert!(
+                (0..def.n_pages).any(|page| cache
+                    .get_page(page)
+                    .is_some_and(|bytes| bytes.iter().any(|b| *b != 0))),
+                "the tune cache must hold the simulator's pages, not zeroes"
+            );
+        }
 
         apply_demo_disable(&state).await.expect("apply disable");
         assert!(!*state.demo_mode.lock().await);
+        assert!(
+            state.connection.lock().await.is_none(),
+            "leaving the simulator connected reports a phantom ECU once demo \
+             mode is off"
+        );
+    }
+
+    #[tokio::test]
+    async fn setting_demo_mode_to_the_value_it_already_has_is_not_a_transition() {
+        // `enabled || demo_mode` treated (true, true) as a transition, so a
+        // duplicate enable aborted the realtime stream and rebuilt the
+        // connection, cache and tune underneath a running session.
+        let state = test_state();
+
+        assert!(
+            demo_mode_transition_needed(&state, true).await,
+            "off -> on is a transition"
+        );
+        assert!(
+            !demo_mode_transition_needed(&state, false).await,
+            "off -> off is not"
+        );
+
+        let def = demo_def();
+        apply_demo_enable(&state, def.clone(), TuneCache::from_definition(&def))
+            .await
+            .expect("enable");
+
+        assert!(
+            !demo_mode_transition_needed(&state, true).await,
+            "on -> on must not rebuild a running demo session"
+        );
+        assert!(
+            demo_mode_transition_needed(&state, false).await,
+            "on -> off is a transition"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_page_that_fails_to_read_leaves_the_tune_unloaded_rather_than_half_loaded() {
+        // Publishing a partial sync gives the app a TuneFile missing pages
+        // beside a cache still reporting them as never loaded.
+        let state = test_state();
+        let def = demo_def();
+        apply_demo_enable(&state, def.clone(), TuneCache::from_definition(&def))
+            .await
+            .expect("enable");
+
+        // Ask for one more page than the simulator was built with; the extra
+        // one cannot resolve and the read fails.
+        let mut beyond = def.clone();
+        beyond.n_pages = def.n_pages + 1;
+        beyond.page_sizes.push(64);
+
+        let mut cache = TuneCache::from_definition(&def);
+        let tune = sync_tune_from_simulator(&state, &beyond, &mut cache).await;
+
+        assert!(tune.is_none(), "a failed page must abort the whole sync");
+        assert!(
+            (0..def.n_pages).all(|page| cache
+                .get_page(page)
+                .is_none_or(|bytes| bytes.iter().all(|b| *b == 0))),
+            "the cache must be left untouched when the sync aborts"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_demo_session_whose_tune_will_not_load_fails_instead_of_half_starting() {
+        // Installing the definition and flag while `current_tune` stays None
+        // reports a healthy demo session in which realtime runs but every
+        // table editor refuses to open.
+        let state = test_state();
+        let mut def = demo_def();
+        // Declare one identifier fewer than there are pages: the client
+        // addresses the last page by index, which the simulator then cannot
+        // resolve, and its read fails.
+        def.protocol.page_identifiers.truncate(1);
+
+        let result = apply_demo_enable(&state, def.clone(), TuneCache::from_definition(&def)).await;
+
+        assert!(
+            result.is_err(),
+            "a tune that will not load must fail loudly"
+        );
+        assert!(
+            state.current_tune.lock().await.is_none(),
+            "no half-loaded tune may be published"
+        );
+        assert!(
+            state.connection.lock().await.is_none(),
+            "the failed session must not leave a connection behind"
+        );
+    }
+
+    #[tokio::test]
+    async fn disabling_demo_mode_that_is_already_off_leaves_the_connection_alone() {
+        // `set_demo_mode(false)` fired twice, or from a stale UI action, used
+        // to disconnect whatever was plugged in — including real hardware.
+        let state = test_state();
+        let def = demo_def();
+        let cache = TuneCache::from_definition(&def);
+        apply_demo_enable(&state, def, cache)
+            .await
+            .expect("apply enable");
+        apply_demo_disable(&state).await.expect("first disable");
+
+        // Stand in for a real ECU connected after demo mode was turned off.
+        {
+            let mut conn_guard = state.connection.lock().await;
+            *conn_guard = Some(Connection::new(ConnectionConfig::default()));
+        }
+
+        apply_demo_disable(&state).await.expect("second disable");
+
+        assert!(
+            state.connection.lock().await.is_some(),
+            "disabling demo mode it never enabled must not disconnect anything"
+        );
     }
 }

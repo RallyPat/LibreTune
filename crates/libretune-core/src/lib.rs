@@ -59,6 +59,7 @@ pub mod port_editor;
 pub mod project;
 pub mod protocol;
 pub mod realtime;
+pub mod simulator;
 pub mod table_file;
 pub mod table_ops;
 pub mod tune;
