@@ -108,6 +108,7 @@ mod concurrency_tests {
         let state = Arc::new(AppState {
             connection: Mutex::new(Some(Connection::new(ConnectionConfig::default()))),
             connection_transition: Mutex::new(()),
+            connection_generation: std::sync::atomic::AtomicU64::new(0),
             definition: Mutex::new(Some(def)),
             autotune_state: Mutex::new(AutoTuneState::new()),
             autotune_secondary_state: Mutex::new(AutoTuneState::new()),
@@ -191,6 +192,7 @@ mod concurrency_tests {
         Arc::new(AppState {
             connection: Mutex::new(Some(Connection::new(ConnectionConfig::default()))),
             connection_transition: Mutex::new(()),
+            connection_generation: std::sync::atomic::AtomicU64::new(0),
             definition: Mutex::new(Some(def)),
             autotune_state: Mutex::new(AutoTuneState::new()),
             autotune_secondary_state: Mutex::new(AutoTuneState::new()),
@@ -460,6 +462,7 @@ signature = "Speeduino 2023-04"
         let state = AppState {
             connection: Mutex::new(None),
             connection_transition: Mutex::new(()),
+            connection_generation: std::sync::atomic::AtomicU64::new(0),
             definition: Mutex::new(None),
             autotune_state: Mutex::new(AutoTuneState::default()),
             autotune_secondary_state: Mutex::new(AutoTuneState::default()),
@@ -532,6 +535,7 @@ signature = "Speeduino 2023-04"
         let state = AppState {
             connection: Mutex::new(None),
             connection_transition: Mutex::new(()),
+            connection_generation: std::sync::atomic::AtomicU64::new(0),
             definition: Mutex::new(None),
             autotune_state: Mutex::new(AutoTuneState::default()),
             autotune_secondary_state: Mutex::new(AutoTuneState::default()),
@@ -607,6 +611,7 @@ signature = "Speeduino 2023-04"
         let state = AppState {
             connection: Mutex::new(None),
             connection_transition: Mutex::new(()),
+            connection_generation: std::sync::atomic::AtomicU64::new(0),
             definition: Mutex::new(Some(def)),
             autotune_state: Mutex::new(AutoTuneState::default()),
             autotune_secondary_state: Mutex::new(AutoTuneState::default()),
@@ -687,6 +692,7 @@ signature = "Speeduino 2023-04"
         let state = AppState {
             connection: Mutex::new(None),
             connection_transition: Mutex::new(()),
+            connection_generation: std::sync::atomic::AtomicU64::new(0),
             definition: Mutex::new(Some(
                 EcuDefinition::from_str(
                     r#"[MegaTune]

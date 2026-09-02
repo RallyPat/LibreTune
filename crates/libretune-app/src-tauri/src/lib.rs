@@ -213,6 +213,7 @@ pub fn run() {
         .manage(AppState {
             connection: Mutex::new(None),
             connection_transition: Mutex::new(()),
+            connection_generation: std::sync::atomic::AtomicU64::new(0),
             definition: Mutex::new(None),
             autotune_state: Mutex::new(AutoTuneState::new()),
             autotune_secondary_state: Mutex::new(AutoTuneState::new()),

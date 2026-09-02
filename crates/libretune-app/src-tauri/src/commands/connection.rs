@@ -51,6 +51,11 @@ pub async fn disconnect_ecu(state: tauri::State<'_, AppState>) -> Result<(), Str
     // Disconnect must always work, so past the budget it proceeds without
     // the lock and accepts the race it guards.
     let _transition = acquire_within(&state.connection_transition, TRANSITION_LOCK_BUDGET).await;
+    // Even without the lock, a connect still handshaking will see this
+    // bump and drop its connection instead of installing it over ours.
+    state
+        .connection_generation
+        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     if _transition.is_none() {
         eprintln!(
             "[WARN] disconnect_ecu: another connection transition is still running \

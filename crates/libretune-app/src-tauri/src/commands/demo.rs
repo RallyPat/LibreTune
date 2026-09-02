@@ -136,9 +136,7 @@ fn connect_simulator(def: &EcuDefinition) -> Option<Connection> {
     match connection.connect_with_channel(Box::new(simulator.channel())) {
         Ok(()) => Some(connection),
         Err(error) => {
-            tracing::warn!(
-                "demo: simulator handshake failed ({error}); falling back to generated values"
-            );
+            tracing::warn!("demo: simulator handshake failed ({error})");
             None
         }
     }
@@ -199,6 +197,13 @@ pub(crate) async fn apply_demo_enable(
     def: EcuDefinition,
     cache: TuneCache,
 ) -> Result<(), String> {
+    // Handshake with the in-process simulator before touching any session
+    // state: a failure here must not leave the previous connection torn
+    // down with nothing installed in its place.
+    let Some(simulator_connection) = connect_simulator(&def) else {
+        return Err("Demo mode could not connect to its simulator".to_string());
+    };
+
     // Stop any existing streaming task first
     {
         let mut task_guard = state.streaming_task.lock().await;
@@ -207,14 +212,14 @@ pub(crate) async fn apply_demo_enable(
         }
     }
 
-    // Replace any existing connection with one onto the in-process
-    // simulator, so demo mode reads pages, writes and burns through the same
-    // protocol path as real hardware instead of side-stepping it. If the
-    // simulator can't be reached for any reason, demo mode still runs — the
-    // realtime stream falls back to generating values directly.
+    // Replace any existing connection with the simulator one, so demo mode
+    // reads pages, writes and burns through the same protocol path as real
+    // hardware instead of side-stepping it.
     {
         let mut conn_guard = state.connection.lock().await;
-        *conn_guard = connect_simulator(&def);
+        if let Some(mut previous) = conn_guard.replace(simulator_connection) {
+            previous.disconnect();
+        }
     }
 
     // Close and clear any open project to ensure a clean demo state
@@ -323,6 +328,7 @@ mod demo_mode_tests {
         AppState {
             connection: Mutex::new(None),
             connection_transition: Mutex::new(()),
+            connection_generation: std::sync::atomic::AtomicU64::new(0),
             definition: Mutex::new(None),
             autotune_state: Mutex::new(AutoTuneState::new()),
             autotune_secondary_state: Mutex::new(AutoTuneState::new()),

@@ -876,10 +876,17 @@ impl EcuSimulator {
         self.pipe.lock().unwrap_or_else(|e| e.into_inner()).dropped = dropped;
     }
 
-    /// Advance the second counter, wrapping at 255.
+    /// Advance the second counter, wrapping at 255 — in the engine that
+    /// serves definition-backed realtime frames as well as the bare
+    /// fallback counter, so the next `r`/`A` response reflects it either way.
     pub fn advance_secl(&self, delta: u8) {
         let mut p = self.pipe.lock().unwrap_or_else(|e| e.into_inner());
         p.secl = p.secl.wrapping_add(delta);
+        if let Some(engine) = p.engine.as_mut() {
+            engine.advance_secl(delta);
+            let block = engine.och_block().to_vec();
+            p.och_block = block;
+        }
     }
 
     /// Simulate a reboot: un-burned RAM writes are lost, burned bytes

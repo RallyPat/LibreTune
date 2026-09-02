@@ -6,8 +6,9 @@
 //! The mode state machine and parameter correlations (here and in
 //! [`physics`]) are ported from
 //! [`askrejans/speeduino-serial-sim`](https://github.com/askrejans/speeduino-serial-sim)
-//! (MIT license, Copyright (c) 2026 Arvis Skrējāns — this notice is
-//! preserved as MIT requires): `include/EngineSimulator.h` and
+//! (MIT license, Copyright (c) 2026 Arvis Skrējāns; the full permission
+//! notice is reproduced in `THIRD_PARTY_NOTICES.md` at the repository
+//! root, as MIT requires): `include/EngineSimulator.h` and
 //! `src/EngineSimulator.cpp` give the STARTUP → WARMUP_IDLE → IDLE →
 //! LIGHT_LOAD → ACCELERATION → HIGH_RPM → DECELERATION → WOT machine, the
 //! RPM/thermal/throttle/MAP/ignition/voltage correlations, the sensor noise
@@ -198,6 +199,13 @@ impl SimEngine {
         self.encode();
     }
 
+    /// Advance the seconds counter by `delta` (wrapping at 255) and
+    /// re-encode, so the next frame already carries the new value.
+    pub fn advance_secl(&mut self, delta: u8) {
+        self.secl = self.secl.wrapping_add(delta);
+        self.encode();
+    }
+
     /// Force an operating mode (ported `setMode`): loads that mode's
     /// targets/slew rate, then the state machine continues from there. The
     /// reference only ever enters [`EngineMode::Wot`] this way.
@@ -380,6 +388,16 @@ mod tests {
             0.0,
             "reset must show up without waiting for the next tick"
         );
+    }
+
+    #[test]
+    fn advance_secl_shows_up_in_the_next_frame_and_wraps() {
+        let def = test_definition();
+        let mut engine = SimEngine::new(&def);
+        engine.advance_secl(250);
+        assert_eq!(channel(&def, &engine, "secl"), 250.0);
+        engine.advance_secl(10);
+        assert_eq!(channel(&def, &engine, "secl"), 4.0, "wraps at 255");
     }
 
     #[test]

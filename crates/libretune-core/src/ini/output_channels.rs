@@ -136,9 +136,14 @@ impl OutputChannel {
                 } else {
                     (1u64 << count) - 1
                 };
+                // A signed backing word (`bits, S08`) decodes negative when
+                // its top bit is set, and a negative float cast straight to
+                // `u64` saturates to 0 — every field would read as zero. Go
+                // through `i64` to keep the two's-complement bits instead.
                 // A position past the backing word reads 0 rather than
                 // panicking on an overflowing shift.
-                let bit_val = (raw as u64).checked_shr(u32::from(pos)).unwrap_or(0) & mask;
+                let word = raw as i64 as u64;
+                let bit_val = word.checked_shr(u32::from(pos)).unwrap_or(0) & mask;
                 return Some(self.raw_to_display(bit_val as f64));
             }
         }
@@ -443,6 +448,19 @@ mod multibit_channel_tests {
         block[75] = (42u8 << 2) | 3;
         assert_eq!(err_num.parse(&block, Endianness::Little), Some(3.0));
         assert_eq!(current.parse(&block, Endianness::Little), Some(42.0));
+    }
+
+    /// `bits, S08` with the sign bit set decodes negative; the fields
+    /// inside it must still read their bits (demo.ini declares several).
+    #[test]
+    fn a_signed_backing_word_with_its_sign_bit_set_still_reads_its_fields() {
+        let low = parse_line("afr_type = bits, S08, 753, [0:2]");
+        let high = parse_line("launchMode = bits, S08, 753, [6:7]");
+
+        let mut block = vec![0u8; 1024];
+        block[753] = 0b1100_0101; // -59 as i8: low bits = 5, high bits = 3
+        assert_eq!(low.parse(&block, Endianness::Little), Some(5.0));
+        assert_eq!(high.parse(&block, Endianness::Little), Some(3.0));
     }
 
     /// Single-bit flags keep working - most channels are these.
