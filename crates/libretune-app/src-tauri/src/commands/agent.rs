@@ -260,10 +260,19 @@ pub struct AgentStatus {
 ///
 /// Holds a [`tauri::AppHandle`] (cheap to clone) to reach managed `AppState`
 /// without borrowing the `tauri::State` lifetime into the executor.
-struct LiveReadExecutor {
+pub(crate) struct LiveReadExecutor {
     app: tauri::AppHandle,
     /// Display-unit preferences for read results (None = raw values).
     unit_prefs: Option<UnitPrefs>,
+}
+
+impl LiveReadExecutor {
+    /// Build an executor over the live app state. `unit_prefs: None` returns
+    /// raw ECU units — what the MCP server (`crate::mcp`) wants, since an
+    /// external agent has no display context to convert for.
+    pub(crate) fn new(app: tauri::AppHandle, unit_prefs: Option<UnitPrefs>) -> Self {
+        Self { app, unit_prefs }
+    }
 }
 
 #[async_trait::async_trait]
@@ -922,10 +931,7 @@ pub async fn agent_send_message(
     }
 
     let client = build_client(&s).map_err(|e| e.to_string())?;
-    let executor = LiveReadExecutor {
-        app: app.clone(),
-        unit_prefs: request.unit_prefs.clone(),
-    };
+    let executor = LiveReadExecutor::new(app.clone(), request.unit_prefs.clone());
 
     let history: Vec<Message> = request.history.into_iter().map(Into::into).collect();
     let inputs = OrchestratorInputs {

@@ -12,6 +12,7 @@ import { Dialog, Button, FormField, RiskAcknowledgement } from '../../common';
 import { ThemeName } from '../../../themes';
 import { SUPPORTED_LANGUAGES, LANGUAGE_STORAGE_KEY, type SupportedLanguageCode } from '../../../i18n/languages';
 import ConnectionMetrics from '../../layout/ConnectionMetrics';
+import { McpServerSection } from './McpServerSection';
 import '../Dialogs.css';
 
 interface DialogProps {
@@ -1173,6 +1174,8 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
               </select>
             )}
           </FormField>
+
+          <McpServerSection />
 
           <h3 style={{ marginTop: '1.5rem', marginBottom: '0.5rem' }}>Indicator Panel</h3>
           

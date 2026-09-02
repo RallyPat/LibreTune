@@ -42,6 +42,7 @@ Project-based workflow with restore points, Git-based tune versioning, CSV expor
 
 ### Additional
 - **AI Assistant**: Bring-your-own-LLM co-pilot (OpenAI / Anthropic / Google / local Ollama or LM Studio, with one-click presets) that reads your tables, realtime data, and datalogs, diagnoses problems, and *proposes* validated, authority-clamped changes for explicit review — applied only after your approval (restore point first) and never burned automatically. OS-keychain API-key storage, capability tiers, pin-conflict warnings, and an "Ask AI" button on every table editor.
+- **MCP Server** (local, read-only): expose the same tune-inspection tools to external agents (Claude Code, Claude Desktop, any MCP client) over a loopback HTTP server with bearer auth. Off by default; no tool can edit a tune or touch the ECU.
 - **Multi-monitor**: Pop out any tab to its own window with bidirectional sync
 - **Unit preferences**: Temperature (°C/°F/K), pressure (kPa/PSI/bar/inHg), AFR/Lambda
 - **Performance calculator**: Estimated HP/torque curves and acceleration times
