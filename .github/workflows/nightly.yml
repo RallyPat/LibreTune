@@ -79,6 +79,7 @@ jobs:
         run: |
           npm ci
           npx tsc --noEmit
+          npm run lint
 
   build-linux:
     name: Build Linux
