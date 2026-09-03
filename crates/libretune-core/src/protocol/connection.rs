@@ -1204,7 +1204,11 @@ impl Connection {
         // Trace the actual bytes (capped) so a lost capture can be reconstructed
         // from the session log — the framed path only counted bytes before, so
         // tooth/composite payloads left no trace. Legacy path already does this.
-        tracing::trace!("send_packet: tx {} bytes: {:02x?}", bytes.len(), &bytes[..bytes.len().min(64)]);
+        tracing::trace!(
+            "send_packet: tx {} bytes: {:02x?}",
+            bytes.len(),
+            &bytes[..bytes.len().min(64)]
+        );
         // Use write_and_wait which avoids the blocking tcdrain issue
         self.tx_bytes = self.tx_bytes.saturating_add(bytes.len() as u64);
         self.tx_packets = self.tx_packets.saturating_add(1);
@@ -1334,7 +1338,11 @@ impl Connection {
         self.rx_packets = self.rx_packets.saturating_add(1);
         // Trace the raw response (capped) before CRC parsing, so it survives in
         // the log even when CRC validation subsequently fails.
-        tracing::trace!("send_packet: rx {} bytes: {:02x?}", full_packet.len(), &full_packet[..full_packet.len().min(64)]);
+        tracing::trace!(
+            "send_packet: rx {} bytes: {:02x?}",
+            full_packet.len(),
+            &full_packet[..full_packet.len().min(64)]
+        );
 
         // If CRC parsing fails, the full packet was already consumed from the TCP
         // stream (exact bytes read = 2 + length + 4), so the stream IS aligned.

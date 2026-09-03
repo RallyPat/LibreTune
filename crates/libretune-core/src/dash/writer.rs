@@ -694,7 +694,9 @@ mod tests {
         // And a gauge that never set them still serializes without the tags
         // (backward-compatible: no spurious EnabledCondition/Hysteresis).
         let plain = DashFile::default();
-        assert!(!write_dash_file(&plain).unwrap().contains("EnabledCondition"));
+        assert!(!write_dash_file(&plain)
+            .unwrap()
+            .contains("EnabledCondition"));
     }
 
     #[test]
