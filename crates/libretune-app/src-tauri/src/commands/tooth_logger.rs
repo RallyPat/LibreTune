@@ -47,10 +47,17 @@ use serde::Serialize;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::Emitter;
 
-/// Above this the logger is refused: the firmware's per-tooth ISR work delays
-/// ignition scheduling, and the faster the engine turns the less slack there is.
-/// Idle and cranking are below it, which is where this diagnostic belongs.
-const MAX_SAFE_RPM: f64 = 1500.0;
+/// Above this the logger is refused ON A LEGACY CONNECTION ONLY.
+///
+/// The misfire this guarded against was never the per-tooth ISR work - a bench
+/// sweep held sync to 6,061 rpm with zero losses. It was the legacy transmit:
+/// an unframed `T` reaches `sendToothLog_legacy`, which the firmware itself
+/// marks `/* Blocking */` and which stalls the main loop for a measured 45 ms
+/// per read - and ignition is scheduled from that loop. The CRC protocol's
+/// framed path yields to the main loop every four bytes
+/// (`SERIAL_TRANSMIT_TOOTH_INPROGRESS`), so it has no such stall and gets no
+/// RPM limit, same as the reference tuning software.
+const MAX_SAFE_RPM_LEGACY: f64 = 1500.0;
 
 /// Set while a capture is running; cleared to ask it to stop.
 static RUNNING: AtomicBool = AtomicBool::new(false);
@@ -150,9 +157,13 @@ async fn run_capture(
             .await
             .unwrap_or_default();
         let rpm = rt.get("rpm").copied().unwrap_or(0.0);
-        if rpm > MAX_SAFE_RPM {
+        let modern = {
+            let conn_guard = state.connection.lock().await;
+            conn_guard.as_ref().is_some_and(|c| c.is_modern_protocol())
+        };
+        if !modern && rpm > MAX_SAFE_RPM_LEGACY {
             return Err(format!(
-                "Refusing to start the tooth logger at {rpm:.0} rpm. The firmware                  records each tooth inside the trigger interrupt, which delays                  ignition scheduling and makes a running engine misfire. Use it                  while cranking or at idle, below {MAX_SAFE_RPM:.0} rpm."
+                "Refusing to start the tooth logger at {rpm:.0} rpm on the legacy                  protocol: its blocking transmit stalls the ECU main loop ~45 ms                  per read, and ignition is scheduled from that loop - a measured                  misfire mechanism. Reconnect with the CRC protocol to log at any                  RPM, or stay below {MAX_SAFE_RPM_LEGACY:.0} rpm on legacy."
             ));
         }
     }
