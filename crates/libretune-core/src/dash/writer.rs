@@ -3,7 +3,7 @@
 //! Writes .dash and .gauge files in TS XML format (version 3.0).
 
 use super::types::*;
-use quick_xml::events::{BytesDecl, BytesEnd, BytesStart, BytesText, Event};
+use quick_xml::events::{BytesCData, BytesDecl, BytesEnd, BytesStart, BytesText, Event};
 use quick_xml::Writer;
 use std::io::Write;
 
@@ -345,6 +345,17 @@ fn write_gauge_component<W: Write>(
     write_string_property(writer, "GaugePainter", gauge.gauge_painter.to_ts_string())?;
     write_boolean_property(writer, "RunDemo", gauge.run_demo)?;
 
+    // Per-gauge visibility condition and warning-flicker hysteresis. These are
+    // editable in the designer and live on GaugeConfig, but were never written,
+    // so a saved dashboard lost them on the next load. Gated on Some(...), so a
+    // gauge that never set them serializes byte-identical to before.
+    if let Some(ref cond) = gauge.enabled_condition {
+        write_string_property(writer, "EnabledCondition", cond)?;
+    }
+    if let Some(h) = gauge.hysteresis {
+        write_double_property(writer, "Hysteresis", h)?;
+    }
+
     // Lossless extras: painter-specific properties (MultiChannelTrend's
     // lt_seriesN_* overlay series, TelemetryStat's lt_target_channel) and any
     // unrecognized properties captured at parse time. Without this, a
@@ -427,6 +438,16 @@ fn write_indicator_component<W: Write>(
     )?;
     write_boolean_property(writer, "RunDemo", indicator.run_demo)?;
 
+    // Visibility condition (same fix as gauges — was dropped on save).
+    if let Some(ref cond) = indicator.enabled_condition {
+        write_string_property(writer, "EnabledCondition", cond)?;
+    }
+    // Lossless extras, matching the gauge writer — this loop was missing, so
+    // any unrecognized indicator property was dropped on save.
+    for (k, v) in &indicator.extra_attrs {
+        write_string_property(writer, k, v)?;
+    }
+
     writer.write_event(Event::End(BytesEnd::new("dashComp")))?;
     Ok(())
 }
@@ -439,7 +460,16 @@ fn write_string_property<W: Write>(
     let mut elem = BytesStart::new(name);
     elem.push_attribute(("type", "String"));
     writer.write_event(Event::Start(elem))?;
-    writer.write_event(Event::Text(BytesText::new(value)))?;
+    // A value with markup characters (a visibility condition's `>`/`<`/`&`)
+    // goes in CDATA so it survives the round trip verbatim, spaces and all —
+    // the reader splits escaped entities into separate events and the trim
+    // config eats the surrounding spaces, so `rpm > 3000` came back mangled.
+    // Plain values (the overwhelming majority) keep the exact old encoding.
+    if value.contains(['<', '>', '&']) {
+        writer.write_event(Event::CData(BytesCData::new(value)))?;
+    } else {
+        writer.write_event(Event::Text(BytesText::new(value)))?;
+    }
     writer.write_event(Event::End(BytesEnd::new(name)))?;
     Ok(())
 }
@@ -616,6 +646,57 @@ mod tests {
         } else {
             panic!("Expected Gauge component");
         }
+    }
+
+    #[test]
+    fn gauge_and_indicator_condition_hysteresis_roundtrip() {
+        // Per-gauge visibility condition + hysteresis, and the indicator
+        // visibility condition, used to be dropped on save. They must survive
+        // write → parse now.
+        let mut dash = DashFile::default();
+        let gauge = GaugeConfig {
+            id: "boost".to_string(),
+            output_channel: "map".to_string(),
+            enabled_condition: Some("rpm > 3000".to_string()),
+            hysteresis: Some(2.5),
+            ..Default::default()
+        };
+        let indicator = IndicatorConfig {
+            id: "warn".to_string(),
+            output_channel: "clt".to_string(),
+            enabled_condition: Some("clt > 105".to_string()),
+            ..Default::default()
+        };
+        dash.gauge_cluster
+            .components
+            .push(DashComponent::Gauge(Box::new(gauge)));
+        dash.gauge_cluster
+            .components
+            .push(DashComponent::Indicator(Box::new(indicator)));
+
+        let xml = write_dash_file(&dash).unwrap();
+        let parsed = super::super::parser::parse_dash_file(&xml).unwrap();
+
+        match &parsed.gauge_cluster.components[0] {
+            DashComponent::Gauge(g) => {
+                assert_eq!(g.enabled_condition.as_deref(), Some("rpm > 3000"));
+                assert_eq!(g.hysteresis, Some(2.5));
+            }
+            _ => panic!("expected gauge"),
+        }
+        match &parsed.gauge_cluster.components[1] {
+            DashComponent::Indicator(i) => {
+                assert_eq!(i.enabled_condition.as_deref(), Some("clt > 105"));
+            }
+            _ => panic!("expected indicator"),
+        }
+
+        // And a gauge that never set them still serializes without the tags
+        // (backward-compatible: no spurious EnabledCondition/Hysteresis).
+        let plain = DashFile::default();
+        assert!(!write_dash_file(&plain)
+            .unwrap()
+            .contains("EnabledCondition"));
     }
 
     #[test]
