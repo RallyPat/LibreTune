@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { invoke } from '@tauri-apps/api/core';
 import { open, save } from '@tauri-apps/plugin-dialog';
 import { emit } from '@tauri-apps/api/event';
-import { ArrowLeft, Save, Zap, ExternalLink, AlertTriangle, Palette, MapPin, Crosshair, Box, Scaling } from 'lucide-react';
+import { ArrowLeft, Save, Zap, ExternalLink, AlertTriangle, Palette, MapPin, Crosshair, Box, Scaling, ArrowUpDown } from 'lucide-react';
 import TableToolbar from './TableToolbar';
 import TableGrid, { SelectionRange } from './TableGrid';
 import TableEditor3D from './TableEditor3D';
@@ -1314,6 +1314,14 @@ export default function TableEditor2D({
           >
             <Box size={14} />
           </button>
+          <button
+            className={`embedded-toggle ${yAxisBottom ? 'active' : ''}`}
+            onClick={() => setTableYAxisBottom(!yAxisBottom)}
+            title={`Y axis zero at ${yAxisBottom ? 'bottom' : 'top'} - click to flip`}
+            aria-label="Flip Y axis direction"
+          >
+            <ArrowUpDown size={14} />
+          </button>
           {sizeInfo?.resizable && (
             <button
               className="embedded-toggle"
@@ -1376,6 +1384,14 @@ export default function TableEditor2D({
               aria-label="Toggle 3D View"
             >
               <span className="action-icon"><Box size={16} /></span>
+            </button>
+            <button
+              className={`action-btn ${yAxisBottom ? 'active' : ''}`}
+              onClick={() => setTableYAxisBottom(!yAxisBottom)}
+              title={`Y axis zero at ${yAxisBottom ? 'bottom' : 'top'} - click to flip`}
+              aria-label="Flip Y axis direction"
+            >
+              <span className="action-icon"><ArrowUpDown size={16} /></span>
             </button>
             <button className="action-btn" onClick={handleSave} title="Save (S)">
               <Save size={18} />
