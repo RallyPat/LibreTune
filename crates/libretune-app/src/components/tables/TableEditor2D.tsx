@@ -654,7 +654,7 @@ export default function TableEditor2D({
 
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [selectionRange, followMode, activeCell, localZValues]);
+  }, [selectionRange, followMode, activeCell, localZValues, yAxisBottom]);
 
   // Arrow key navigation helper
   const handleArrowNavigation = (key: string, extendSelection: boolean) => {
@@ -1318,7 +1318,8 @@ export default function TableEditor2D({
             className={`embedded-toggle ${yAxisBottom ? 'active' : ''}`}
             onClick={() => setTableYAxisBottom(!yAxisBottom)}
             title={`Y axis zero at ${yAxisBottom ? 'bottom' : 'top'} - click to flip`}
-            aria-label="Flip Y axis direction"
+            aria-pressed={yAxisBottom}
+            aria-label="Y axis zero at bottom"
           >
             <ArrowUpDown size={14} />
           </button>
@@ -1389,7 +1390,8 @@ export default function TableEditor2D({
               className={`action-btn ${yAxisBottom ? 'active' : ''}`}
               onClick={() => setTableYAxisBottom(!yAxisBottom)}
               title={`Y axis zero at ${yAxisBottom ? 'bottom' : 'top'} - click to flip`}
-              aria-label="Flip Y axis direction"
+              aria-pressed={yAxisBottom}
+              aria-label="Y axis zero at bottom"
             >
               <span className="action-icon"><ArrowUpDown size={16} /></span>
             </button>

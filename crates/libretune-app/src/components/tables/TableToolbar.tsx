@@ -239,6 +239,8 @@ export default function TableToolbar({
             className={`ts-toolbar-btn ${yAxisBottom ? 'ts-toolbar-btn-active' : ''}`}
             title={yAxisBottom ? 'Y axis: zero at bottom (click for zero at top)' : 'Y axis: zero at top (click for zero at bottom)'}
             onClick={onYAxisBottomToggle}
+            aria-pressed={yAxisBottom}
+            aria-label="Y axis zero at bottom"
           >
             <ArrowUpDown size={14} />
           </button>

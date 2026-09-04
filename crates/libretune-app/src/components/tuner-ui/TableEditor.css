@@ -202,13 +202,13 @@
   border-color: var(--border-default);
 }
 
-.table-toolbar-btn-follow.active {
+.table-toolbar-btn.active {
   background: var(--primary);
   border-color: var(--primary);
   color: white;
 }
 
-.table-toolbar-btn-follow.active:hover {
+.table-toolbar-btn.active:hover {
   background: var(--primary-hover);
   border-color: var(--primary-hover);
 }

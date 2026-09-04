@@ -212,6 +212,8 @@ export default function TableToolbar({
       <button
         className={`table-toolbar-btn ${yAxisBottom ? 'active' : ''}`}
         onClick={onToggleYAxisBottom}
+        aria-pressed={yAxisBottom}
+        aria-label="Y axis zero at bottom"
         title={`Y axis zero at ${yAxisBottom ? 'bottom' : 'top'} - click to flip`}
       >
         <ArrowUpDown size={14} /> Y{yAxisBottom ? '↑' : '↓'}
