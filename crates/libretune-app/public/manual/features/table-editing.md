@@ -116,6 +116,14 @@ Notes:
 - `Ctrl+Z` - Undo last change
 - `Ctrl+Y` or `Ctrl+Shift+Z` - Redo
 
+## Y Axis Direction
+
+By default the Y axis (load) starts at the top of the table and increases downward.
+Click the **Y axis** toolbar button (arrows icon) to flip it so the lowest load row sits
+at the bottom, matching a classic graph layout. The same option is available in
+**Settings → Table Display → Table Y axis zero at bottom**. It applies to every table
+and is remembered between sessions.
+
 ## Follow Mode
 
 Enable **Follow Mode** to automatically highlight the cell corresponding to current engine operation:

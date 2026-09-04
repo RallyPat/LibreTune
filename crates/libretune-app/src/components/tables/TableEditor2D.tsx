@@ -16,7 +16,7 @@ import { Dialog, Button, FormField } from '../common';
 import type { BackendTableData, TableSizeInfo } from '../../types/app';
 import LambdaPreviewTable from './LambdaPreviewTable';
 import { useHeatmapSettings } from '../../utils/useHeatmapSettings';
-import { useTableYAxisBottom, useTrailFadeSec } from '../../utils/useTableOrientation';
+import { useTableYAxisBottom, setTableYAxisBottom, useTrailFadeSec } from '../../utils/useTableOrientation';
 import { useChannels } from '../../stores/realtimeStore';
 import { useToast } from '../../contexts/ToastContext';
 import { getHotkeyManager } from '../../services/hotkeyService';
@@ -1407,6 +1407,8 @@ export default function TableEditor2D({
           canPaste={true}
           followMode={followMode}
           onFollowModeToggle={() => setFollowMode(!followMode)}
+          yAxisBottom={yAxisBottom}
+          onYAxisBottomToggle={() => setTableYAxisBottom(!yAxisBottom)}
           showColorShade={showColorShade}
           onColorShadeToggle={() => setShowColorShade(!showColorShade)}
           show3D={show3D}

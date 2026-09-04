@@ -5,7 +5,7 @@ import { useChannels } from '../../stores/realtimeStore';
 import { useHeatmapSettings } from '../../utils/useHeatmapSettings';
 import { contrastTextColor } from '../../utils/heatmapColors';
 import { askNumber } from '../../utils/askNumber';
-import { useTableYAxisBottom, useTrailFadeSec } from '../../utils/useTableOrientation';
+import { useTableYAxisBottom, setTableYAxisBottom, useTrailFadeSec } from '../../utils/useTableOrientation';
 import './TableEditor.css';
 import TableEditor3D from '../tables/TableEditor3D';
 import TableToolbar from './table-editor/TableToolbar';
@@ -1185,6 +1185,8 @@ export function TableEditor({
         // The rpm/map fallback (see calculatedLivePosition) makes follow mode
         // usable even when the INI declares no axis channels.
         hasOutputChannels={true}
+        yAxisBottom={yAxisBottom}
+        onToggleYAxisBottom={() => setTableYAxisBottom(!yAxisBottom)}
         show3D={show3D}
         onToggle3D={() => setShow3D(!show3D)}
         onGenerate={generatableKind ? () => setShowGenerateDialog(true) : undefined}

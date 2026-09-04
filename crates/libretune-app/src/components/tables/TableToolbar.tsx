@@ -17,7 +17,8 @@ import {
   Wand2,
   Upload,
   Download,
-  Bot
+  Bot,
+  ArrowUpDown
 } from 'lucide-react';
 
 interface TableToolbarProps {
@@ -38,6 +39,9 @@ interface TableToolbarProps {
   canPaste: boolean;
   followMode?: boolean;
   onFollowModeToggle?: () => void;
+  /** Y axis zero at bottom (rows reversed). Toggles the global table_y_axis_bottom setting. */
+  yAxisBottom?: boolean;
+  onYAxisBottomToggle?: () => void;
   showColorShade?: boolean;
   onColorShadeToggle?: () => void;
   show3D?: boolean;
@@ -70,6 +74,8 @@ export default function TableToolbar({
   canPaste,
   followMode = false,
   onFollowModeToggle,
+  yAxisBottom = false,
+  onYAxisBottomToggle,
   showColorShade = false,
   onColorShadeToggle,
   show3D = false,
@@ -226,6 +232,15 @@ export default function TableToolbar({
             onClick={onColorShadeToggle}
           >
             <Palette size={14} />
+          </button>
+        )}
+        {onYAxisBottomToggle && (
+          <button
+            className={`ts-toolbar-btn ${yAxisBottom ? 'ts-toolbar-btn-active' : ''}`}
+            title={yAxisBottom ? 'Y axis: zero at bottom (click for zero at top)' : 'Y axis: zero at top (click for zero at bottom)'}
+            onClick={onYAxisBottomToggle}
+          >
+            <ArrowUpDown size={14} />
           </button>
         )}
         {onToggle3D && (

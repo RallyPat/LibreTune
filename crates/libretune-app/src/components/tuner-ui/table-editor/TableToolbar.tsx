@@ -1,4 +1,4 @@
-import { Copy, Clipboard, Undo2, Redo2, Flame, Crosshair, Box, Wand2, Upload, Download } from 'lucide-react';
+import { Copy, Clipboard, Undo2, Redo2, Flame, Crosshair, Box, Wand2, Upload, Download, ArrowUpDown } from 'lucide-react';
 import '../TableEditor.css';
 
 interface TableToolbarProps {
@@ -22,6 +22,9 @@ interface TableToolbarProps {
   followMode: boolean;
   onToggleFollowMode: () => void;
   hasOutputChannels: boolean;
+  /** Y axis zero at bottom (rows reversed). Toggles the global table_y_axis_bottom setting. */
+  yAxisBottom: boolean;
+  onToggleYAxisBottom: () => void;
   show3D: boolean;
   onToggle3D: () => void;
   /** Generate the whole table from engine specs (VE/ignition/AFR only). */
@@ -53,6 +56,8 @@ export default function TableToolbar({
   followMode,
   onToggleFollowMode,
   hasOutputChannels,
+  yAxisBottom,
+  onToggleYAxisBottom,
   show3D,
   onToggle3D,
   onGenerate,
@@ -204,6 +209,14 @@ export default function TableToolbar({
         <Crosshair size={14} /> Follow
       </button>
       
+      <button
+        className={`table-toolbar-btn ${yAxisBottom ? 'active' : ''}`}
+        onClick={onToggleYAxisBottom}
+        title={`Y axis zero at ${yAxisBottom ? 'bottom' : 'top'} - click to flip`}
+      >
+        <ArrowUpDown size={14} /> Y{yAxisBottom ? '↑' : '↓'}
+      </button>
+
       <button
         className={`table-toolbar-btn table-toolbar-btn-3d ${show3D ? 'active' : ''}`}
         onClick={onToggle3D}
