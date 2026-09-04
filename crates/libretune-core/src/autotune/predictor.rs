@@ -251,8 +251,20 @@ impl VePredictor {
         let dl = self.find_nearest_known(row, col, 1, -1, rows, cols, known);
         let dr = self.find_nearest_known(row, col, 1, 1, rows, cols, known);
 
-        // Need at least 3 corners for reasonable interpolation
-        let corners: Vec<_> = [ul, ur, dl, dr].iter().filter_map(|c| *c).collect();
+        // Need at least 3 *distinct* corners for reasonable interpolation.
+        //
+        // The quadrants below are a partition, so two searches can no longer
+        // return the same cell - but the fit's honesty rests on that, and a
+        // duplicate would silently inflate `corner_factor` to 1.0 without
+        // moving the predicted value (identical weights cancel in
+        // `weighted_sum / weight_sum`), which is undetectable from the output.
+        // De-duplicating here makes the count mean what it says regardless.
+        let mut corners: Vec<(usize, usize)> = Vec::with_capacity(4);
+        for corner in [ul, ur, dl, dr].into_iter().flatten() {
+            if !corners.contains(&corner) {
+                corners.push(corner);
+            }
+        }
         if corners.len() < 3 {
             return None;
         }
@@ -293,10 +305,27 @@ impl VePredictor {
 
         let predicted = weighted_sum / weight_sum;
 
-        // Confidence based on: number of corners and max distance
+        // Confidence based on: number of distinct corners and max distance.
+        //
+        // `max_dist` is a *normalised* axis fraction (each axis distance is
+        // divided by that axis' span, so it lives in 0..=1.41), while
+        // `max_search_radius` counts cells. Dividing one by the other compared
+        // apples to pears: with the default radius of 5 the denominator was
+        // 7.5, so `distance_factor` never fell below 0.81 and a fit five cells
+        // from the nearest data scored the same as one sitting next to it.
+        // Express the radius as the same fraction - `max_search_radius` bins
+        // out of the axis' bin count - so the two share units.
         let corner_factor = corners.len() as f64 / 4.0;
-        let distance_factor =
-            (1.0 - max_dist / (self.config.max_search_radius as f64 * 1.5)).max(0.0);
+        let radius_fraction = |bins: &[f64]| {
+            let steps = bins.len().saturating_sub(1).max(1) as f64;
+            (self.config.max_search_radius as f64 / steps).min(1.0)
+        };
+        let rx = radius_fraction(x_bins);
+        let ry = radius_fraction(y_bins);
+        // The 1.5 slack is kept: a fit exactly at the search limit should not
+        // score zero on distance alone.
+        let max_norm_dist = ((rx * rx + ry * ry).sqrt() * 1.5).max(1e-6);
+        let distance_factor = (1.0 - max_dist / max_norm_dist).max(0.0);
         let confidence = corner_factor * 0.7 + distance_factor * 0.3;
 
         // Apply axis-based sanity check: VE should be physically reasonable
@@ -314,14 +343,48 @@ impl VePredictor {
         })
     }
 
-    /// Find nearest known cell in a given direction (quadrant).
+    /// Whether the signed offset `(dr, dc)` belongs to the quadrant named by
+    /// `(row_dir, col_dir)`.
     ///
-    /// Bug #6: the previous implementation stepped strictly along the 45°
+    /// The four quadrants are half-open, so every offset except the origin
+    /// belongs to **exactly one** of them: each takes one of the two axis
+    /// half-lines that bound it, going round clockwise. That is what makes the
+    /// four searches in `try_bilinear` independent.
+    ///
+    /// The previous scheme let each quadrant see both of its bounding
+    /// half-lines, and the ring was scanned in ascending Euclidean order with a
+    /// *stable* sort - so the orthogonal offset (distance 1) always beat the
+    /// diagonal (distance 1.41) on the tie. Up-left and down-left therefore
+    /// both returned `(row, col - 1)`, up-right and down-right both returned
+    /// `(row, col + 1)`, and a "4 corner" bilinear fit was two cells counted
+    /// twice with the load axis never consulted at all.
+    fn in_quadrant(dr: i32, dc: i32, row_dir: i32, col_dir: i32) -> bool {
+        match (row_dir, col_dir) {
+            // Up-left owns straight up.
+            (-1, -1) => dr < 0 && dc <= 0,
+            // Up-right owns straight right.
+            (-1, 1) => dr <= 0 && dc > 0,
+            // Down-right owns straight down.
+            (1, 1) => dr > 0 && dc >= 0,
+            // Down-left owns straight left.
+            (1, -1) => dr >= 0 && dc < 0,
+            // A zero direction means "stay on this line".
+            (0, c) => dr == 0 && dc * c > 0,
+            (r, 0) => dc == 0 && dr * r > 0,
+            _ => false,
+        }
+    }
+
+    /// Find the nearest known cell in one quadrant.
+    ///
+    /// Bug #6: the original implementation stepped strictly along the 45°
     /// diagonal (row ± d, col ± d), so it could not find an orthogonal
     /// neighbor sitting directly above/below/left/right of the target. This
     /// version expands a 2D quadrant ring by ring (Chebyshev distance),
     /// scanning every cell in the quadrant at that radius in ascending
     /// Euclidean-distance order, returning the first known cell encountered.
+    /// Orthogonal neighbours are still reachable - each simply belongs to one
+    /// quadrant rather than two (see [`Self::in_quadrant`]).
     #[allow(clippy::too_many_arguments)]
     fn find_nearest_known(
         &self,
@@ -333,39 +396,31 @@ impl VePredictor {
         cols: usize,
         known: &HashMap<(usize, usize), (f64, u32)>,
     ) -> Option<(usize, usize)> {
-        let max_r = self.config.max_search_radius;
+        let max_r = self.config.max_search_radius as i32;
 
         for ring in 1..=max_r {
             // Collect candidate (dr, dc) offsets in this quadrant at Chebyshev
             // distance exactly `ring`, then sort by Euclidean distance so the
             // nearest known cell wins.
             let mut candidates: Vec<(i32, i32, f64)> = Vec::new();
-            for dr in 0..=ring {
-                for dc in 0..=ring {
-                    if dr == 0 && dc == 0 {
-                        continue;
-                    }
+            for dr in -ring..=ring {
+                for dc in -ring..=ring {
                     // Only the outer ring of the expanding square.
-                    if dr != ring && dc != ring {
+                    if dr.abs() != ring && dc.abs() != ring {
                         continue;
                     }
-                    // Respect zero directions: a 0 axis means "same line".
-                    if (row_dir == 0 && dr != 0) || (col_dir == 0 && dc != 0) {
+                    if !Self::in_quadrant(dr, dc, row_dir, col_dir) {
                         continue;
                     }
-                    let (dr_i, dc_i) = (dr as i32, dc as i32);
-                    let euclid = ((dr_i * dr_i + dc_i * dc_i) as f64).sqrt();
-                    candidates.push((dr_i, dc_i, euclid));
+                    let euclid = ((dr * dr + dc * dc) as f64).sqrt();
+                    candidates.push((dr, dc, euclid));
                 }
             }
             candidates.sort_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal));
 
             for (dr, dc, _) in candidates {
-                // dr, dc are non-negative magnitudes; row_dir/col_dir give the
-                // sign. (The 0-axis case was filtered above, so a non-zero
-                // magnitude always pairs with a ±1 direction.)
-                let r = row as i32 + dr * row_dir;
-                let c = col as i32 + dc * col_dir;
+                let r = row as i32 + dr;
+                let c = col as i32 + dc;
                 if r < 0 || r >= rows as i32 || c < 0 || c >= cols as i32 {
                     continue;
                 }
@@ -852,27 +907,48 @@ mod tests {
     #[test]
     fn test_quadrant_search_finds_orthogonal_neighbors() {
         // Bug #6: the old diagonal-only ray missed neighbors directly above,
-        // below, left, or right of the target cell.
+        // below, left, or right of the target cell. They are still reachable
+        // now that the quadrants are a half-open partition — each orthogonal
+        // offset simply belongs to exactly one quadrant instead of two, which
+        // is what stops a "4 corner" fit from being two cells counted twice.
+        //
+        // (The old version of this test supplied only two of the four
+        // orthogonal neighbours and passed *because* of that double-count:
+        // `[ul, ur, dl, dr]` came back as three entries covering two cells.)
         let config = PredictorConfig::default();
         let predictor = VePredictor::new(config);
 
         let mut table = make_table(5, 5, 50.0);
         let mut hits = make_hits(5, 5, 0);
 
-        // Known cells directly above (row 1) and left (col 1) of the target
-        // at (row 2, col 2), but no diagonal cells.
-        hits[1][2] = 10;
-        table[1][2] = 55.0;
-        hits[2][1] = 10;
-        table[2][1] = 53.0;
+        // Known cells directly above, below, left and right of the target at
+        // (row 2, col 2) — and no diagonal cells at all.
+        for (r, c, v) in [
+            (1usize, 2usize, 55.0),
+            (3, 2, 57.0),
+            (2, 1, 53.0),
+            (2, 3, 59.0),
+        ] {
+            hits[r][c] = 10;
+            table[r][c] = v;
+        }
 
         let x_bins = vec![1000.0, 2000.0, 3000.0, 4000.0, 5000.0];
         let y_bins = vec![20.0, 40.0, 60.0, 80.0, 100.0];
 
         let predictions = predictor.predict_cells(&table, &hits, &x_bins, &y_bins);
+        let target = predictions
+            .iter()
+            .find(|p| p.row == 2 && p.col == 2)
+            .expect("target (2,2) should be predicted from orthogonal neighbors");
         assert!(
-            predictions.iter().any(|p| p.row == 2 && p.col == 2),
-            "target (2,2) should be predicted from orthogonal neighbors"
+            matches!(target.method, PredictionMethod::BilinearInterpolation),
+            "four orthogonal neighbours are a full bilinear bracket, got {:?}",
+            target.method
+        );
+        assert_eq!(
+            target.neighbor_count, 4,
+            "each orthogonal neighbour must land in its own quadrant"
         );
     }
 
@@ -882,11 +958,15 @@ mod tests {
         // cells one index apart but spanning a huge physical RPM gap should
         // weight less than an equal-physical-gap pair.
         //
-        // Setup: target at (row 0, col 0). Two known cells in the first column
-        // but far apart in physical RPM. The top-left (row 0, col 1) is only
-        // 100 RPM away in x but same row; the bottom-left (row 1, col 0) is
-        // 1000 RPM away but same col. Physical-distance weighting should rank
-        // the 100 RPM neighbor higher.
+        // Setup: target at (row 0, col 0) with two known neighbours, one on
+        // each axis. Distances are normalised *per axis*, so the axes have to
+        // differ in how far along their own span the neighbour sits: the rpm
+        // neighbour is 5% of the rpm span away, the load neighbour 50% of the
+        // load span. Physical-distance weighting must rank the rpm one higher.
+        //
+        // (The original axes put both neighbours at exactly 50% of their own
+        // span — identical normalised distances — so the assertion below only
+        // held because the bilinear fit double-counted the rpm neighbour.)
         let config = PredictorConfig {
             min_confidence: 0.0, // accept everything for comparison
             max_search_radius: 3,
@@ -903,8 +983,9 @@ mod tests {
         hits[1][0] = 10;
         table[1][0] = 70.0; // same col, y_gap = 1000 "load" units
 
-        // Very compressed x axis: 0,100,200; very stretched y axis: 0,1000,2000
-        let x_bins = vec![0.0, 100.0, 200.0];
+        // x: the known neighbour sits 100 of a 2000-wide span away (5%).
+        // y: the known neighbour sits 1000 of a 2000-wide span away (50%).
+        let x_bins = vec![0.0, 100.0, 2000.0];
         let y_bins = vec![0.0, 1000.0, 2000.0];
 
         let predictions = predictor.predict_cells(&table, &hits, &x_bins, &y_bins);
@@ -1070,6 +1151,151 @@ mod tests {
             "off-peak RPM (got {}) should predict lower VE than peak RPM (got {})",
             low_rpm_pred.predicted_value,
             peak_pred.predicted_value
+        );
+    }
+}
+
+/// Regressions for the 2026-09-05 audit findings in the predictor: overlapping
+/// quadrant searches and the distance/radius unit mismatch in the bilinear
+/// confidence.
+#[cfg(test)]
+mod audit_regression_tests {
+    use super::*;
+
+    fn table(rows: usize, cols: usize) -> Vec<Vec<f64>> {
+        vec![vec![50.0; cols]; rows]
+    }
+
+    fn hits(rows: usize, cols: usize) -> Vec<Vec<u32>> {
+        vec![vec![0u32; cols]; rows]
+    }
+
+    /// Every quadrant ring put the two orthogonal offsets ahead of the diagonal
+    /// on an equal-Euclidean tie-break, and the sort is stable, so the two
+    /// left-hand quadrants both returned `(row, col - 1)` and the two
+    /// right-hand ones both returned `(row, col + 1)`. Four "corners", two
+    /// cells, and the load axis never consulted.
+    #[test]
+    fn bilinear_consults_the_load_axis_not_just_the_rpm_neighbours() {
+        let predictor = VePredictor::new(PredictorConfig {
+            min_hit_count: 1,
+            ..PredictorConfig::default()
+        });
+
+        let mut values = table(3, 3);
+        let mut counts = hits(3, 3);
+        // Horizontal neighbours straddle 50; the vertical ones are far richer.
+        for (r, c, v) in [
+            (1usize, 0usize, 40.0),
+            (1, 2, 60.0),
+            (0, 1, 100.0),
+            (2, 1, 100.0),
+        ] {
+            values[r][c] = v;
+            counts[r][c] = 10;
+        }
+        // Axes chosen so all four neighbours sit at the same normalised
+        // distance, making the expected answer the plain mean of the four.
+        let x_bins = vec![1000.0, 2000.0, 3000.0];
+        let y_bins = vec![20.0, 60.0, 100.0];
+
+        let predictions = predictor.predict_cells(&values, &counts, &x_bins, &y_bins);
+        let centre = predictions
+            .iter()
+            .find(|p| p.row == 1 && p.col == 1)
+            .expect("the centre cell should be predicted");
+
+        assert!(
+            matches!(centre.method, PredictionMethod::BilinearInterpolation),
+            "expected a bilinear fit, got {:?}",
+            centre.method
+        );
+        assert!(
+            centre.predicted_value > 60.0,
+            "the load-axis neighbours must contribute; got {} (50.0 means only \
+             the rpm neighbours were seen, each counted twice)",
+            centre.predicted_value
+        );
+    }
+
+    /// A duplicated corner also inflated `corner_factor` to 4/4. With only
+    /// three distinct cells around it the fit must report three.
+    #[test]
+    fn corner_count_reports_distinct_cells() {
+        let predictor = VePredictor::new(PredictorConfig {
+            min_hit_count: 1,
+            min_confidence: 0.0,
+            ..PredictorConfig::default()
+        });
+
+        let mut values = table(3, 3);
+        let mut counts = hits(3, 3);
+        for (r, c, v) in [(1usize, 0usize, 40.0), (1, 2, 60.0), (0, 1, 55.0)] {
+            values[r][c] = v;
+            counts[r][c] = 10;
+        }
+        let x_bins = vec![1000.0, 2000.0, 3000.0];
+        let y_bins = vec![20.0, 60.0, 100.0];
+
+        let predictions = predictor.predict_cells(&values, &counts, &x_bins, &y_bins);
+        let centre = predictions
+            .iter()
+            .find(|p| {
+                p.row == 1
+                    && p.col == 1
+                    && matches!(p.method, PredictionMethod::BilinearInterpolation)
+            })
+            .expect("the centre cell should get a bilinear fit from three cells");
+
+        assert_eq!(
+            centre.neighbor_count, 3,
+            "three known cells surround the target, not four"
+        );
+    }
+
+    /// `max_dist` is a normalised axis fraction (0..1.41) but the radius it was
+    /// divided by was a count of cells scaled by 1.5 (7.5 by default), so
+    /// `distance_factor` never fell below 0.81 and a fit five cells from any
+    /// data scored the same as one sitting right next to it.
+    #[test]
+    fn bilinear_confidence_falls_off_with_distance() {
+        let predictor = VePredictor::new(PredictorConfig {
+            min_hit_count: 1,
+            min_confidence: 0.0,
+            ..PredictorConfig::default()
+        });
+        let x_bins: Vec<f64> = (0..16).map(|i| 500.0 + i as f64 * 500.0).collect();
+        let y_bins: Vec<f64> = (0..16).map(|i| 20.0 + i as f64 * 10.0).collect();
+
+        let confidence_at = |offset: usize| {
+            let mut values = table(16, 16);
+            let mut counts = hits(16, 16);
+            for (r, c) in [
+                (8 - offset, 8 - offset),
+                (8 - offset, 8 + offset),
+                (8 + offset, 8 - offset),
+                (8 + offset, 8 + offset),
+            ] {
+                values[r][c] = 60.0;
+                counts[r][c] = 10;
+            }
+            predictor
+                .predict_cells(&values, &counts, &x_bins, &y_bins)
+                .into_iter()
+                .find(|p| {
+                    p.row == 8
+                        && p.col == 8
+                        && matches!(p.method, PredictionMethod::BilinearInterpolation)
+                })
+                .map(|p| p.confidence)
+                .expect("centre should get a bilinear fit")
+        };
+
+        let near = confidence_at(1);
+        let far = confidence_at(5);
+        assert!(
+            near - far > 0.10,
+            "distance must move confidence materially: near={near}, far={far}"
         );
     }
 }

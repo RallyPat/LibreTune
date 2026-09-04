@@ -189,8 +189,16 @@ impl AnomalyDetector {
                     }
                 }
 
-                // Need at least 3 non-collinear points for a plane fit.
-                if pts.len() < 3 {
+                // A plane has three parameters, so three points fit it
+                // *exactly*: every residual is zero, `residual_std` is zero,
+                // and the degenerate "clean plane" branch below fires - which
+                // is precisely the situation at all four grid corners, which
+                // have exactly three neighbours each. Every corner of every
+                // table therefore came out with the saturated severity 1.0 and
+                // headed the severity-sorted list. Require at least one point
+                // more than the fit consumes so there is a residual to speak of.
+                const PLANE_PARAMS: usize = 3;
+                if pts.len() <= PLANE_PARAMS {
                     continue;
                 }
 
@@ -224,9 +232,15 @@ impl AnomalyDetector {
                         .iter()
                         .map(|(x, y, z)| z - (a * x + b * y + cc))
                         .collect();
-                    let rstd = (resid.iter().map(|v| v.powi(2)).sum::<f64>()
-                        / resid.len().max(1) as f64)
-                        .sqrt();
+                    // Divide by the residual degrees of freedom, not the point
+                    // count: the plane was fitted to these same points, so
+                    // three of them are spent on it. Over the usual eight
+                    // neighbours the biased divisor understated sigma by
+                    // sqrt(5/8) and inflated every z-score by 1.27x - enough to
+                    // report a true 1.58 sigma deviation as a 2.0 sigma outlier
+                    // at the default threshold.
+                    let dof = resid.len().saturating_sub(PLANE_PARAMS).max(1) as f64;
+                    let rstd = (resid.iter().map(|v| v.powi(2)).sum::<f64>() / dof).sqrt();
                     (expected, rstd)
                 } else {
                     // Degenerate (collinear) neighborhood — fall back to mean.
@@ -240,10 +254,23 @@ impl AnomalyDetector {
                     // signal — flag it by an absolute residual threshold.
                     let residual = (val - expected).abs();
                     const CLEAN_PLANE_RESIDUAL_THRESHOLD: f64 = 5.0;
-                    if residual > CLEAN_PLANE_RESIDUAL_THRESHOLD {
-                        let z_score = residual / 0.01; // residual_std was ~0 → very high
+                    const DEFAULT_OUTLIER_SIGMA: f64 = 2.0;
+                    // `outlier_sigma` is the caller's strictness knob, but
+                    // there is no meaningful sigma on a clean plane, so it
+                    // scales the absolute VE gate instead - otherwise raising
+                    // the threshold would tighten every branch except this one.
+                    let gate = CLEAN_PLANE_RESIDUAL_THRESHOLD
+                        * (self.config.outlier_sigma / DEFAULT_OUTLIER_SIGMA).max(0.0);
+                    if residual > gate {
+                        // Grade by the residual itself. Dividing by a fixed
+                        // 0.01 made the "z-score" saturate the severity for
+                        // anything above 0.05 VE, while the branch is only
+                        // entered above the gate - so a 5.1 VE deviation and a
+                        // 50 VE one were reported as equally severe, and every
+                        // flagged cell headed the severity-sorted list.
+                        const CLEAN_PLANE_SEVERITY_SPAN: f64 = 45.0;
                         let severity =
-                            ((z_score - self.config.outlier_sigma) / 3.0).clamp(0.0, 1.0);
+                            ((residual - gate) / CLEAN_PLANE_SEVERITY_SPAN).clamp(0.0, 1.0);
                         anomalies.push(TuneAnomaly {
                             row: r,
                             col: c,
@@ -873,5 +900,168 @@ mod tests {
             "retained anomaly should be high severity, got {}",
             retained.severity
         );
+    }
+}
+
+/// Regressions for the 2026-09-05 audit findings in the outlier detector: the
+/// degenerate plane fit at grid corners and the residual-σ divisor.
+#[cfg(test)]
+mod audit_regression_tests {
+    use super::*;
+
+    /// A grid corner has exactly three neighbours, and three non-collinear
+    /// points fit a three-parameter plane *exactly* — every residual is zero,
+    /// so `residual_std < 0.01` fires for all four corners of every table.
+    /// Inside that branch the z-score is `residual / 0.01`, which saturates the
+    /// severity at 1.0 for any residual above 0.05 VE, so every flagged corner
+    /// heads the severity-sorted list regardless of how wrong it actually is.
+    #[test]
+    fn a_grid_corner_is_not_flagged_from_an_exact_three_point_plane() {
+        // Other detectors are suppressed so the per-cell dedup cannot mask a
+        // statistical outlier behind a gradient or monotonicity finding.
+        let detector = AnomalyDetector::new(AnomalyConfig {
+            gradient_threshold: 1e9,
+            monotonicity_load_floor_kpa: 1e9,
+            max_reasonable_ve: 1000.0,
+            ..AnomalyConfig::default()
+        });
+        // A planar table, so every interior neighbourhood fits exactly, with
+        // each corner nudged well past the 5.0 VE "clean plane" threshold.
+        let mut table: Vec<Vec<f64>> = (0..5)
+            .map(|r| {
+                (0..5)
+                    .map(|c| 50.0 + r as f64 * 4.0 + c as f64 * 2.0)
+                    .collect()
+            })
+            .collect();
+        for (r, c) in [(0usize, 0usize), (0, 4), (4, 0), (4, 4)] {
+            table[r][c] += 8.0;
+        }
+        let x_bins: Vec<f64> = (0..5).map(|i| 1000.0 + i as f64 * 1000.0).collect();
+        let y_bins: Vec<f64> = (0..5).map(|i| 20.0 + i as f64 * 20.0).collect();
+
+        let anomalies = detector.detect_anomalies(&table, &x_bins, &y_bins);
+        let flagged_corners: Vec<_> = anomalies
+            .iter()
+            .filter(|a| {
+                a.anomaly_type == AnomalyType::StatisticalOutlier
+                    && (a.row == 0 || a.row == 4)
+                    && (a.col == 0 || a.col == 4)
+            })
+            .collect();
+        assert!(
+            flagged_corners.is_empty(),
+            "a corner has too few neighbours for a plane fit to say anything, \
+             got {flagged_corners:?}"
+        );
+    }
+
+    /// The clean-plane branch divided by a fixed 0.01, so severity saturated at
+    /// 1.0 for every residual above 0.05 VE while the branch is only entered
+    /// above 5.0 VE. A 5.1 VE deviation and a 50 VE deviation were reported as
+    /// equally severe.
+    #[test]
+    fn clean_plane_severity_scales_with_the_residual() {
+        let detector = AnomalyDetector::new(AnomalyConfig {
+            // Keep the other detectors out of the way: the per-cell dedup keeps
+            // only the highest-severity finding, whatever its type.
+            max_reasonable_ve: 1000.0,
+            gradient_threshold: 1e9,
+            monotonicity_load_floor_kpa: 1e9,
+            ..AnomalyConfig::default()
+        });
+        let x_bins: Vec<f64> = (0..5).map(|i| 1000.0 + i as f64 * 1000.0).collect();
+        let y_bins: Vec<f64> = (0..5).map(|i| 20.0 + i as f64 * 20.0).collect();
+
+        let severity_for = |bump: f64| {
+            // Perfectly planar table so the interior neighbourhood fits exactly.
+            let mut table: Vec<Vec<f64>> = (0..5)
+                .map(|r| {
+                    (0..5)
+                        .map(|c| 50.0 + r as f64 * 4.0 + c as f64 * 2.0)
+                        .collect()
+                })
+                .collect();
+            table[2][2] += bump;
+            detector
+                .detect_anomalies(&table, &x_bins, &y_bins)
+                .into_iter()
+                .find(|a| {
+                    a.anomaly_type == AnomalyType::StatisticalOutlier && a.row == 2 && a.col == 2
+                })
+                .map(|a| a.severity)
+                .unwrap_or_else(|| panic!("a {bump} VE bump on a clean plane must be flagged"))
+        };
+
+        let small = severity_for(5.5);
+        let large = severity_for(50.0);
+        assert!(
+            large > small,
+            "a 50 VE deviation must outrank a 5.5 VE one: {large} vs {small}"
+        );
+        assert!(
+            small < 1.0,
+            "a marginal deviation must not saturate: {small}"
+        );
+    }
+
+    /// The residual σ divided by the number of points rather than the residual
+    /// degrees of freedom (`n - 3` for a three-parameter plane), understating σ
+    /// by `sqrt(5/8)` on a full 8-neighbour interior cell and inflating every
+    /// z-score by 1.27×. A true 1.58σ deviation was reported as a 2.0σ outlier.
+    #[test]
+    fn residual_sigma_uses_the_plane_fit_degrees_of_freedom() {
+        let detector = AnomalyDetector::new(AnomalyConfig {
+            gradient_threshold: 1e9,
+            monotonicity_load_floor_kpa: 1e9,
+            ..AnomalyConfig::default()
+        });
+        let x_bins: Vec<f64> = (0..5).map(|i| 1000.0 + i as f64 * 1000.0).collect();
+        let y_bins: Vec<f64> = (0..5).map(|i| 20.0 + i as f64 * 20.0).collect();
+
+        // A planar table with a repeatable ±1.0 VE ripple on the neighbours of
+        // (2,2), giving a real residual spread, plus a deviation sized to sit
+        // between the biased and the unbiased threshold.
+        let mut table: Vec<Vec<f64>> = (0..5)
+            .map(|r| {
+                (0..5)
+                    .map(|c| 50.0 + r as f64 * 4.0 + c as f64 * 2.0)
+                    .collect()
+            })
+            .collect();
+        let ripple = [
+            (1usize, 1usize, 1.0),
+            (1, 2, -1.0),
+            (1, 3, 1.0),
+            (2, 1, -1.0),
+            (2, 3, 1.0),
+            (3, 1, 1.0),
+            (3, 2, -1.0),
+            (3, 3, 1.0),
+        ];
+        for (r, c, d) in ripple {
+            table[r][c] += d;
+        }
+        // Biased σ over these 8 residuals ≈ 1.0; unbiased (n−3 = 5) ≈ 1.265.
+        // A 2.3 VE deviation is 2.3σ biased (flagged) but 1.82σ unbiased.
+        table[2][2] += 2.3;
+
+        let flagged = |t: &[Vec<f64>]| {
+            detector
+                .detect_anomalies(t, &x_bins, &y_bins)
+                .into_iter()
+                .any(|a| {
+                    a.anomaly_type == AnomalyType::StatisticalOutlier && a.row == 2 && a.col == 2
+                })
+        };
+        assert!(
+            !flagged(&table),
+            "a 1.75σ deviation must not be reported as a 2σ outlier"
+        );
+
+        // ...and the gate must still fire on a genuine one: 2.55 VE is 2.18σ
+        // against the unbiased estimate.
+        table[2][2] += 0.5;
+        assert!(flagged(&table), "a 2.18σ deviation is a real outlier");
     }
 }
