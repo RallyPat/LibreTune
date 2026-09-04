@@ -26,8 +26,6 @@ pub fn rebin_table(
     new_y_bins: Vec<f64>,
     interpolate_z: bool,
 ) -> TableOperationResult {
-    let _old_x_len = old_x_bins.len();
-    let _old_y_len = old_y_bins.len();
     let new_x_len = new_x_bins.len();
     let new_y_len = new_y_bins.len();
 
@@ -43,6 +41,8 @@ pub fn rebin_table(
                     interpolate_value(target_x, target_y, old_x_bins, old_y_bins, old_z_values);
             }
         }
+    } else {
+        copy_z_by_index(old_z_values, &mut new_z_values);
     }
 
     TableOperationResult {
@@ -50,6 +50,33 @@ pub fn rebin_table(
         x_bins: new_x_bins,
         y_bins: new_y_bins,
         z_values: new_z_values,
+    }
+}
+
+/// Copy old Z values into the new grid by cell index, with no interpolation.
+///
+/// Used for `rebin_table(..., interpolate_z: false)`: re-binning without
+/// interpolation should keep values in place while only the axes change, so
+/// `new_z[y][x] = old_z[y][x]` whenever both indices exist in the old grid.
+/// Cells beyond the old grid's bounds (e.g. when growing the table) fall back
+/// to the nearest existing old cell by clamping the index, so nothing is
+/// zeroed out. An empty old grid leaves `new_z_values` untouched (zeros).
+fn copy_z_by_index(old_z_values: &[Vec<f64>], new_z_values: &mut [Vec<f64>]) {
+    let old_y_len = old_z_values.len();
+    if old_y_len == 0 {
+        return;
+    }
+
+    for (y, new_row) in new_z_values.iter_mut().enumerate() {
+        let old_row = &old_z_values[y.min(old_y_len - 1)];
+        let old_x_len = old_row.len();
+        if old_x_len == 0 {
+            continue;
+        }
+
+        for (x, cell) in new_row.iter_mut().enumerate() {
+            *cell = old_row[x.min(old_x_len - 1)];
+        }
     }
 }
 
@@ -142,6 +169,17 @@ pub fn smooth_table(
 
     // No smoothing if factor <= 0
     if factor <= 0.0 {
+        return result;
+    }
+
+    // Reject (no-op) rather than panic if the selection references cells
+    // outside the table's current dimensions — the same guard
+    // `interpolate_linear` and `fill_region` carry. "Set Table Size" resizes
+    // the grid without clearing the frontend's `selectionRange`, so the next
+    // "Smooth" arrives with coordinates that no longer exist; a cell one row
+    // past the edge still has an in-bounds `(-1,-1)` neighbour, so
+    // `weight_sum > 0.0` and the unchecked `result[y][x]` write panicked.
+    if selected_cells.iter().any(|&(y, x)| y >= rows || x >= cols) {
         return result;
     }
 

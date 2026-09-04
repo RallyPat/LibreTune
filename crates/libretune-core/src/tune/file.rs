@@ -182,7 +182,10 @@ impl ConstantAttrs {
             }
         }
         attrs.sort_by_key(|(k, _)| *k);
-        attrs.iter().map(|(k, v)| format!(" {k}=\"{v}\"")).collect()
+        attrs
+            .iter()
+            .map(|(k, v)| format!(" {k}=\"{}\"", xml_escape(v)))
+            .collect()
     }
 }
 
@@ -192,7 +195,7 @@ fn parse_constant_attrs(tag: &str) -> ConstantAttrs {
         let needle = format!("{key}=\"");
         let start = tag.find(&needle)? + needle.len();
         let end = tag[start..].find('"')?;
-        Some(tag[start..start + end].to_string())
+        Some(xml_unescape(&tag[start..start + end]))
     };
     ConstantAttrs {
         digits: attr("digits"),
@@ -354,14 +357,14 @@ impl TuneFile {
             if let Some(sig_start) = content[version_start..].find("signature=\"") {
                 let sig_content = &content[version_start + sig_start + 11..];
                 if let Some(sig_end) = sig_content.find('"') {
-                    tune.signature = sig_content[..sig_end].to_string();
+                    tune.signature = xml_unescape(&sig_content[..sig_end]);
                 }
             }
         } else if let Some(sig_start) = content.find("signature=\"") {
             // Fallback to <msq signature="..."> format
             let sig_content = &content[sig_start + 11..];
             if let Some(sig_end) = sig_content.find('"') {
-                tune.signature = sig_content[..sig_end].to_string();
+                tune.signature = xml_unescape(&sig_content[..sig_end]);
             }
         }
 
@@ -371,21 +374,21 @@ impl TuneFile {
             if let Some(auth_start) = content[bib_start..].find("author=\"") {
                 let auth_content = &content[bib_start + auth_start + 8..];
                 if let Some(auth_end) = auth_content.find('"') {
-                    tune.author = Some(auth_content[..auth_end].to_string());
+                    tune.author = Some(xml_unescape(&auth_content[..auth_end]));
                 }
             }
             // Find writeDate (last modified)
             if let Some(write_start) = content[bib_start..].find("writeDate=\"") {
                 let write_content = &content[bib_start + write_start + 11..];
                 if let Some(write_end) = write_content.find('"') {
-                    tune.modified = Some(write_content[..write_end].to_string());
+                    tune.modified = Some(xml_unescape(&write_content[..write_end]));
                 }
             }
             // Find created date
             if let Some(created_start) = content[bib_start..].find("created=\"") {
                 let created_content = &content[bib_start + created_start + 9..];
                 if let Some(created_end) = created_content.find('"') {
-                    tune.created = Some(created_content[..created_end].to_string());
+                    tune.created = Some(xml_unescape(&created_content[..created_end]));
                 }
             }
         } else if let Some(ts_start) = content.find("timestamp=\"") {
@@ -405,31 +408,31 @@ impl TuneFile {
             if let Some(attr_start) = ini_remaining.find("signature=\"") {
                 let attr_content = &ini_remaining[attr_start + 11..];
                 if let Some(attr_end) = attr_content.find('"') {
-                    metadata.signature = attr_content[..attr_end].to_string();
+                    metadata.signature = xml_unescape(&attr_content[..attr_end]);
                 }
             }
             if let Some(attr_start) = ini_remaining.find("name=\"") {
                 let attr_content = &ini_remaining[attr_start + 6..];
                 if let Some(attr_end) = attr_content.find('"') {
-                    metadata.name = attr_content[..attr_end].to_string();
+                    metadata.name = xml_unescape(&attr_content[..attr_end]);
                 }
             }
             if let Some(attr_start) = ini_remaining.find("hash=\"") {
                 let attr_content = &ini_remaining[attr_start + 6..];
                 if let Some(attr_end) = attr_content.find('"') {
-                    metadata.hash = attr_content[..attr_end].to_string();
+                    metadata.hash = xml_unescape(&attr_content[..attr_end]);
                 }
             }
             if let Some(attr_start) = ini_remaining.find("specVersion=\"") {
                 let attr_content = &ini_remaining[attr_start + 13..];
                 if let Some(attr_end) = attr_content.find('"') {
-                    metadata.spec_version = attr_content[..attr_end].to_string();
+                    metadata.spec_version = xml_unescape(&attr_content[..attr_end]);
                 }
             }
             if let Some(attr_start) = ini_remaining.find("savedAt=\"") {
                 let attr_content = &ini_remaining[attr_start + 9..];
                 if let Some(attr_end) = attr_content.find('"') {
-                    metadata.saved_at = attr_content[..attr_end].to_string();
+                    metadata.saved_at = xml_unescape(&attr_content[..attr_end]);
                 }
             }
 
@@ -461,13 +464,13 @@ impl TuneFile {
                     if let Some(attr_start) = entry_remaining.find("name=\"") {
                         let attr_content = &entry_remaining[attr_start + 6..];
                         if let Some(attr_end) = attr_content.find('"') {
-                            entry.name = attr_content[..attr_end].to_string();
+                            entry.name = xml_unescape(&attr_content[..attr_end]);
                         }
                     }
                     if let Some(attr_start) = entry_remaining.find("type=\"") {
                         let attr_content = &entry_remaining[attr_start + 6..];
                         if let Some(attr_end) = attr_content.find('"') {
-                            entry.data_type = attr_content[..attr_end].to_string();
+                            entry.data_type = xml_unescape(&attr_content[..attr_end]);
                         }
                     }
                     if let Some(attr_start) = entry_remaining.find("page=\"") {
@@ -542,7 +545,8 @@ impl TuneFile {
                 if unquoted == "true" || unquoted == "false" {
                     return TuneValue::Bool(unquoted == "true");
                 }
-                return TuneValue::String(unquoted.to_string());
+                // The writer XML-escapes the payload; decode it symmetrically.
+                return TuneValue::String(xml_unescape(unquoted));
             }
 
             // Unquoted values: check if it's an array (brackets or multiple space-separated numbers)
@@ -671,7 +675,7 @@ impl TuneFile {
                     let Some(q) = block[abs..].find('"') else {
                         break;
                     };
-                    tune.ecu_settings.push(block[abs..abs + q].to_string());
+                    tune.ecu_settings.push(xml_unescape(&block[abs..abs + q]));
                     pos = abs + q;
                 }
             }
@@ -715,8 +719,9 @@ impl TuneFile {
                         if let Some(name_attr_start) = const_remaining.find("name=\"") {
                             let name_start = name_attr_start + 6;
                             if let Some(name_end) = const_remaining[name_start..].find('"') {
-                                let name =
-                                    const_remaining[name_start..name_start + name_end].to_string();
+                                let name = xml_unescape(
+                                    &const_remaining[name_start..name_start + name_end],
+                                );
 
                                 if let Some(tag_end) = const_remaining.find('>') {
                                     // Check for self-closing tag: <constant name="..."/> or <constant name="..." />
@@ -765,7 +770,7 @@ impl TuneFile {
                             let name_start = name_attr_start + 6;
                             if let Some(name_end) = pc_remaining[name_start..].find('"') {
                                 let name =
-                                    pc_remaining[name_start..name_start + name_end].to_string();
+                                    xml_unescape(&pc_remaining[name_start..name_start + name_end]);
 
                                 if let Some(tag_end) = pc_remaining.find('>') {
                                     // Check for self-closing tag: <pcVariable name="..."/> or <pcVariable name="..." />
@@ -822,7 +827,7 @@ impl TuneFile {
                     if let Some(name_attr_start) = remaining.find("name=\"") {
                         let name_start = name_attr_start + 6;
                         if let Some(name_end) = remaining[name_start..].find('"') {
-                            let name = remaining[name_start..name_start + name_end].to_string();
+                            let name = xml_unescape(&remaining[name_start..name_start + name_end]);
 
                             if let Some(tag_end) = remaining.find('>') {
                                 // Check for self-closing tag: <constant name="..."/> or <constant name="..." />
@@ -860,7 +865,7 @@ impl TuneFile {
                     if let Some(name_attr_start) = remaining.find("name=\"") {
                         let name_start = name_attr_start + 6;
                         if let Some(name_end) = remaining[name_start..].find('"') {
-                            let name = remaining[name_start..name_start + name_end].to_string();
+                            let name = xml_unescape(&remaining[name_start..name_start + name_end]);
 
                             if let Some(tag_end) = remaining.find('>') {
                                 // Check for self-closing tag: <pcVariable name="..."/> or <pcVariable name="..." />
@@ -945,7 +950,7 @@ impl TuneFile {
 
         // Add metadata comment
         if let Some(ref desc) = self.description {
-            xml.push_str(&format!("<!-- {} -->\n", desc));
+            xml.push_str(&format!("<!-- {} -->\n", xml_comment_escape(desc)));
         }
 
         // Start msq tag with signature
@@ -966,20 +971,22 @@ impl TuneFile {
         );
         xml.push_str(&format!(
             "  <versionInfo signature=\"{}\" firmwareInfo=\"{}\" nPages=\"{}\"/>\n",
-            self.signature, fw_info, n_pages
+            xml_escape(&self.signature),
+            xml_escape(fw_info),
+            n_pages
         ));
 
         // Add bibliography if we have metadata
         if self.author.is_some() || self.created.is_some() || self.modified.is_some() {
             xml.push_str("  <bibliography");
             if let Some(ref author) = self.author {
-                xml.push_str(&format!(" author=\"{}\"", author));
+                xml.push_str(&format!(" author=\"{}\"", xml_escape(author)));
             }
             if let Some(ref created) = self.created {
-                xml.push_str(&format!(" created=\"{}\"", created));
+                xml.push_str(&format!(" created=\"{}\"", xml_escape(created)));
             }
             if let Some(ref modified) = self.modified {
-                xml.push_str(&format!(" writeDate=\"{}\"", modified));
+                xml.push_str(&format!(" writeDate=\"{}\"", xml_escape(modified)));
             }
             xml.push_str("/>\n");
         }
@@ -988,11 +995,11 @@ impl TuneFile {
         if let Some(ref metadata) = self.ini_metadata {
             xml.push_str(&format!(
                 "  <iniMetadata signature=\"{}\" name=\"{}\" hash=\"{}\" specVersion=\"{}\" savedAt=\"{}\"/>\n",
-                metadata.signature,
-                metadata.name,
-                metadata.hash,
-                metadata.spec_version,
-                metadata.saved_at
+                xml_escape(&metadata.signature),
+                xml_escape(&metadata.name),
+                xml_escape(&metadata.hash),
+                xml_escape(&metadata.spec_version),
+                xml_escape(&metadata.saved_at)
             ));
         }
 
@@ -1002,8 +1009,8 @@ impl TuneFile {
             for entry in manifest {
                 xml.push_str(&format!(
                     "    <entry name=\"{}\" type=\"{}\" page=\"{}\" offset=\"{}\" scale=\"{}\" translate=\"{}\"/>\n",
-                    entry.name,
-                    entry.data_type,
+                    xml_escape(&entry.name),
+                    xml_escape(&entry.data_type),
                     entry.page,
                     entry.offset,
                     entry.scale,
@@ -1037,7 +1044,7 @@ impl TuneFile {
                 xml.push_str(&format!(
                     "    <setting name=\"{}\"/>
 ",
-                    name
+                    xml_escape(name)
                 ));
             }
             xml.push_str(
@@ -1069,38 +1076,7 @@ impl TuneFile {
 
             for name in const_names {
                 if let Some(value) = self.constants.get(&name) {
-                    let value_str = match value {
-                        TuneValue::Scalar(v) => {
-                            // Use high precision format to preserve F64 values accurately
-                            // Format with enough precision to round-trip any f64 exactly
-                            let formatted = format!("{:.17}", v);
-                            // Trim unnecessary trailing zeros for cleaner output
-                            let trimmed = formatted.trim_end_matches('0').trim_end_matches('.');
-                            if trimmed.is_empty() {
-                                "0".to_string()
-                            } else {
-                                trimmed.to_string()
-                            }
-                        }
-                        TuneValue::Array(arr) => {
-                            // Format as space-separated for arrays with high precision
-                            arr.iter()
-                                .map(|v| {
-                                    let formatted = format!("{:.17}", v);
-                                    let trimmed =
-                                        formatted.trim_end_matches('0').trim_end_matches('.');
-                                    if trimmed.is_empty() {
-                                        "0".to_string()
-                                    } else {
-                                        trimmed.to_string()
-                                    }
-                                })
-                                .collect::<Vec<_>>()
-                                .join(" ")
-                        }
-                        TuneValue::String(s) => format!("\"{}\"", s),
-                        TuneValue::Bool(b) => if *b { "true" } else { "false" }.to_string(),
-                    };
+                    let value_str = format_tune_value(value);
                     let attrs = self
                         .constant_attrs
                         .get(&name)
@@ -1149,32 +1125,7 @@ impl TuneFile {
 
             for name in pc_var_names {
                 if let Some(value) = self.pc_variables.get(name) {
-                    let value_str = match value {
-                        TuneValue::Scalar(v) => {
-                            let formatted = format!("{:.17}", v);
-                            let trimmed = formatted.trim_end_matches('0').trim_end_matches('.');
-                            if trimmed.is_empty() {
-                                "0".to_string()
-                            } else {
-                                trimmed.to_string()
-                            }
-                        }
-                        TuneValue::Array(arr) => arr
-                            .iter()
-                            .map(|v| {
-                                let formatted = format!("{:.17}", v);
-                                let trimmed = formatted.trim_end_matches('0').trim_end_matches('.');
-                                if trimmed.is_empty() {
-                                    "0".to_string()
-                                } else {
-                                    trimmed.to_string()
-                                }
-                            })
-                            .collect::<Vec<_>>()
-                            .join(" "),
-                        TuneValue::String(s) => format!("\"{}\"", s),
-                        TuneValue::Bool(b) => if *b { "true" } else { "false" }.to_string(),
-                    };
+                    let value_str = format_tune_value(value);
                     let attrs = self
                         .constant_attrs
                         .get(name)
@@ -1341,32 +1292,116 @@ impl TuneFile {
     }
 }
 
+/// Format an `f64` as the shortest decimal that round-trips back to the same
+/// value.
+///
+/// This used to be `format!("{:.17}", v)` followed by a trailing-zero trim, but
+/// `.17` is seventeen *decimal places*, not significant digits: `14.7` is
+/// exactly `14.699999999999999289…` as an `f64`, so the trim left
+/// `14.69999999999999929` in the file. `f64`'s `Display` already emits the
+/// shortest representation that parses back exactly, which is what both
+/// TunerStudio and a human reader expect.
+fn format_f64(v: f64) -> String {
+    if !v.is_finite() {
+        // Neither `NaN` nor `inf` is a legal MSQ number; write a benign 0.
+        return "0".to_string();
+    }
+    if v == 0.0 {
+        // Also normalises `-0.0`.
+        return "0".to_string();
+    }
+    v.to_string()
+}
+
+/// Escape the five XML predefined entities so a value containing `&`, `<`,
+/// `>`, `"` or `'` cannot break the document.
+///
+/// Without this an author of `R&D` or a string constant containing `<` made
+/// the saved `.msq` malformed: TunerStudio rejects it outright, and this
+/// file's own reader — which locates a tag's end with `find('>')` and an
+/// attribute's end with the next `"` — walks straight past the attribute list.
+/// [`xml_unescape`] is its inverse, applied on the read side.
+fn xml_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for ch in s.chars() {
+        match ch {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&apos;"),
+            _ => out.push(ch),
+        }
+    }
+    out
+}
+
+/// Decode the entities [`xml_escape`] writes, plus numeric character
+/// references, so a value survives a save/load round trip unchanged.
+fn xml_unescape(s: &str) -> String {
+    if !s.contains('&') {
+        return s.to_string();
+    }
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    while let Some(amp) = rest.find('&') {
+        out.push_str(&rest[..amp]);
+        let tail = &rest[amp..];
+        let Some(semi) = tail.find(';').filter(|&i| i <= 10) else {
+            // Not an entity — a bare `&` from a file some other writer produced.
+            out.push('&');
+            rest = &tail[1..];
+            continue;
+        };
+        let entity = &tail[1..semi];
+        match entity {
+            "amp" => out.push('&'),
+            "lt" => out.push('<'),
+            "gt" => out.push('>'),
+            "quot" => out.push('"'),
+            "apos" => out.push('\''),
+            _ => {
+                let code = entity
+                    .strip_prefix("#x")
+                    .or_else(|| entity.strip_prefix("#X"))
+                    .and_then(|h| u32::from_str_radix(h, 16).ok())
+                    .or_else(|| entity.strip_prefix('#').and_then(|d| d.parse().ok()))
+                    .and_then(char::from_u32);
+                match code {
+                    Some(c) => out.push(c),
+                    // Unknown entity: keep it verbatim rather than losing text.
+                    None => out.push_str(&tail[..=semi]),
+                }
+            }
+        }
+        rest = &tail[semi + 1..];
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Escape a string for use inside an XML comment.
+///
+/// Comments cannot contain `--` or end with `-`, and entities are not expanded
+/// inside them, so the only safe treatment is to break up the offending runs.
+fn xml_comment_escape(s: &str) -> String {
+    let mut out = s.replace("--", "- -");
+    if out.ends_with('-') {
+        out.push(' ');
+    }
+    out
+}
+
 /// Format a TuneValue for XML output with high precision
 fn format_tune_value(value: &TuneValue) -> String {
     match value {
-        TuneValue::Scalar(v) => {
-            let formatted = format!("{:.17}", v);
-            let trimmed = formatted.trim_end_matches('0').trim_end_matches('.');
-            if trimmed.is_empty() {
-                "0".to_string()
-            } else {
-                trimmed.to_string()
-            }
-        }
+        TuneValue::Scalar(v) => format_f64(*v),
         TuneValue::Array(arr) => arr
             .iter()
-            .map(|v| {
-                let formatted = format!("{:.17}", v);
-                let trimmed = formatted.trim_end_matches('0').trim_end_matches('.');
-                if trimmed.is_empty() {
-                    "0".to_string()
-                } else {
-                    trimmed.to_string()
-                }
-            })
+            .map(|v| format_f64(*v))
             .collect::<Vec<_>>()
             .join(" "),
-        TuneValue::String(s) => format!("\"{}\"", s),
+        TuneValue::String(s) => format!("\"{}\"", xml_escape(s)),
         TuneValue::Bool(b) => if *b { "true" } else { "false" }.to_string(),
     }
 }
@@ -1770,5 +1805,93 @@ mod msq_metadata_tests {
         assert!(tune.ecu_settings.is_empty());
         assert!(written.contains(r#"<constant name="reqFuel">"#));
         assert!(!written.contains("<settings"));
+    }
+
+    /// An `&`, `<`, `>` or `"` in any emitted value must be XML-escaped, and
+    /// the reader must decode it again, or the saved tune is not well-formed
+    /// XML - TunerStudio refuses it and LibreTune's own `find('>')` tag scan
+    /// walks off the end of the attribute list.
+    #[test]
+    fn msq_escapes_and_decodes_xml_special_characters() {
+        let raw_author = r#"R&D "quoted" <lab>"#;
+        let raw_note = r#"R&D "quoted" <x> 'y'"#;
+
+        let mut tune = TuneFile::new("speeduino 202501");
+        tune.author = Some(raw_author.to_string());
+        tune.set_constant("noteText", TuneValue::String(raw_note.to_string()));
+
+        let dir = std::env::temp_dir().join(format!("lt_xml_escape_{}", std::process::id()));
+        let _ = fs::create_dir_all(&dir);
+        let path = dir.join("escaped.msq");
+        tune.save(&path).expect("save");
+        let written = fs::read_to_string(&path).expect("read");
+
+        assert!(
+            written.contains("&amp;") && written.contains("&lt;") && written.contains("&quot;"),
+            "values were not escaped:\n{written}"
+        );
+        assert!(
+            !written.contains("R&D"),
+            "raw ampersand survived into the file:\n{written}"
+        );
+        assert!(
+            !written.contains("<lab>"),
+            "raw angle brackets survived into the file:\n{written}"
+        );
+
+        let reloaded = TuneFile::load(&path).expect("reload");
+        assert_eq!(reloaded.author.as_deref(), Some(raw_author));
+        match reloaded.constants.get("noteText") {
+            Some(TuneValue::String(s)) => assert_eq!(s, raw_note),
+            other => panic!("string constant did not survive the round trip: {other:?}"),
+        }
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// `{:.17}` is seventeen *decimal places*, not significant digits, so
+    /// `14.7` (exactly 14.699999999999999289... as an f64) was written as
+    /// `14.69999999999999929`. `f64`'s `Display` already emits the shortest
+    /// decimal that round-trips.
+    #[test]
+    fn msq_scalars_use_the_shortest_round_tripping_form() {
+        let mut tune = TuneFile::new("speeduino 202501");
+        tune.set_constant("stoich", TuneValue::Scalar(14.7));
+        tune.set_constant("reqFuel", TuneValue::Scalar(0.1));
+        tune.set_constant("zero", TuneValue::Scalar(0.0));
+        tune.set_constant("bins", TuneValue::Array(vec![14.7, 1.0, -0.3]));
+        tune.set_pc_variable("pcStoich", TuneValue::Scalar(14.7));
+
+        let dir = std::env::temp_dir().join(format!("lt_msq_fmt_{}", std::process::id()));
+        let _ = fs::create_dir_all(&dir);
+        let path = dir.join("fmt.msq");
+        tune.save(&path).expect("save");
+        let written = fs::read_to_string(&path).expect("read");
+
+        assert!(
+            written.contains(">14.7<"),
+            "stoich not shortest:\n{written}"
+        );
+        assert!(
+            written.contains(">0.1<"),
+            "reqFuel not shortest:\n{written}"
+        );
+        assert!(written.contains(">0<"), "zero not shortest:\n{written}");
+        assert!(
+            written.contains(">14.7 1 -0.3<"),
+            "array not shortest:\n{written}"
+        );
+        assert!(
+            written.matches(">14.7<").count() >= 2,
+            "pcVariable not shortest:\n{written}"
+        );
+
+        let reloaded = TuneFile::load(&path).expect("reload");
+        match reloaded.constants.get("stoich") {
+            Some(TuneValue::Scalar(v)) => assert!((v - 14.7).abs() < f64::EPSILON),
+            other => panic!("stoich did not round trip: {other:?}"),
+        }
+
+        let _ = fs::remove_dir_all(&dir);
     }
 }

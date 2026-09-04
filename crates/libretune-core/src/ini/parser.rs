@@ -36,6 +36,9 @@ struct ParserState {
     current_curve: Option<String>,
     current_help: Option<String>,
     current_reference_table: Option<String>,
+    /// Name of the `settingGroup` most recently opened in `[SettingGroups]`,
+    /// so its `settingOption` lines attach to it.
+    current_setting_group: Option<String>,
     /// `tableLimits` rows seen in the current `referenceTable` block; applied
     /// to its identifiers when the block closes (they may appear either side
     /// of the `tableIdentifier` line they annotate).
@@ -169,6 +172,7 @@ fn parse_ini_internal(content: &str, ctx: &mut IncludeContext) -> Result<EcuDefi
         current_curve: None,
         current_help: None,
         current_reference_table: None,
+        current_setting_group: None,
         pending_reference_limits: Vec::new(),
     };
 
@@ -199,19 +203,29 @@ fn parse_ini_internal(content: &str, ctx: &mut IncludeContext) -> Result<EcuDefi
             continue;
         }
 
-        // Handle preprocessor directives (always processed regardless of condition)
+        // Handle preprocessor directives.
+        //
+        // `#set`/`#unset` only take effect in a live branch, exactly like
+        // `#define` and `#include` below. Running them unconditionally let a
+        // symbol defined inside a dead `#if` arm leak into the live one, so an
+        // INI that guards a definition behind `#if SOME_BUILD` still picked up
+        // that build's symbols.
         if let Some(stripped) = line.strip_prefix("#set ") {
-            let symbol = stripped.trim().to_string();
-            tracing::debug!("preprocessor: #set {}", symbol);
-            ctx.defined_symbols.insert(symbol);
+            if condition_stack.iter().all(|&c| c) {
+                let symbol = stripped.trim().to_string();
+                tracing::debug!("preprocessor: #set {}", symbol);
+                ctx.defined_symbols.insert(symbol);
+            }
             i += 1;
             continue;
         }
 
         if let Some(stripped) = line.strip_prefix("#unset ") {
-            let symbol = stripped.trim();
-            tracing::debug!("preprocessor: #unset {}", symbol);
-            ctx.defined_symbols.remove(symbol);
+            if condition_stack.iter().all(|&c| c) {
+                let symbol = stripped.trim();
+                tracing::debug!("preprocessor: #unset {}", symbol);
+                ctx.defined_symbols.remove(symbol);
+            }
             i += 1;
             continue;
         }
@@ -389,7 +403,12 @@ fn parse_ini_internal(content: &str, ctx: &mut IncludeContext) -> Result<EcuDefi
                 "outputchannels" => parse_output_channel_entry(&mut definition, key, value),
                 "burstmode" => parse_burst_mode_entry(&mut definition, key, value),
                 "gaugeconfigurations" => parse_gauge_entry(&mut definition, key, value),
-                "settinggroups" => parse_setting_group_entry(&mut definition, key, value),
+                "settinggroups" => parse_setting_group_entry(
+                    &mut definition,
+                    key,
+                    value,
+                    &mut state.current_setting_group,
+                ),
                 "pcvariables" => parse_pc_variable_entry(&mut definition, key, value),
                 "datalog" => parse_datalog_entry(&mut definition, key, value),
                 "defaults" => parse_defaults_entry(&mut definition, key, value),
@@ -1072,6 +1091,10 @@ fn parse_constants_entry(
         "pageidentifier" => {
             // Parse page identifiers like "\x00\x00", "\x00\x01"
             // Also handles $tsCanId substitution
+            def.protocol.page_identifiers_raw = split_ini_line(value)
+                .into_iter()
+                .map(|s| s.trim().trim_matches('"').to_string())
+                .collect();
             def.protocol.page_identifiers = parse_page_identifiers(value, &def.pc_variables);
             return;
         }
@@ -1382,7 +1405,12 @@ fn parse_gauge_entry(def: &mut EcuDefinition, key: &str, value: &str) {
 }
 
 /// Parse [SettingGroups] section entries
-fn parse_setting_group_entry(def: &mut EcuDefinition, key: &str, value: &str) {
+fn parse_setting_group_entry(
+    def: &mut EcuDefinition,
+    key: &str,
+    value: &str,
+    current_group: &mut Option<String>,
+) {
     if key.eq_ignore_ascii_case("settinggroup") {
         // Format: settingGroup = refName, "Display Name"
         let parts: Vec<&str> = value.split(',').map(|s| s.trim()).collect();
@@ -1393,20 +1421,31 @@ fn parse_setting_group_entry(def: &mut EcuDefinition, key: &str, value: &str) {
                 options: Vec::new(),
             };
             def.setting_groups.insert(parts[0].to_string(), group);
+            *current_group = Some(parts[0].to_string());
         }
     } else if key.eq_ignore_ascii_case("settingoption") {
         // Format: settingOption = value, "Display Label"
-        // These apply to the last setting group
+        // These belong to the settingGroup line above them.
+        //
+        // This used to push onto `setting_groups.iter_mut().last()`, but
+        // `setting_groups` is a `HashMap` whose iteration order is seeded per
+        // instance, so every option landed in an arbitrary group.
         let parts: Vec<&str> = value.split(',').map(|s| s.trim()).collect();
         if parts.len() >= 2 {
             let option = SettingOption {
                 value: parts[0].to_string(),
                 label: parts[1].trim_matches('"').to_string(),
             };
-            // Add to last group - for simplicity, we'll store in a temp structure
-            // In a full implementation, we'd track the current group
-            if let Some((_name, group)) = def.setting_groups.iter_mut().last() {
+            if let Some(group) = current_group
+                .as_ref()
+                .and_then(|name| def.setting_groups.get_mut(name))
+            {
                 group.options.push(option);
+            } else {
+                tracing::warn!(
+                    "ini: settingOption '{}' before any settingGroup - dropped",
+                    option.value
+                );
             }
         }
     }
@@ -1439,9 +1478,30 @@ fn parse_pc_variable_entry(def: &mut EcuDefinition, key: &str, value: &str) {
         || type_str == "U16"
         || type_str == "S16"
     {
-        // Default to index 0
-        def.pc_variables.insert(key.to_string(), 0);
+        def.pc_variables.insert(
+            clean_key.to_string(),
+            resolve_pc_variable_byte(def, clean_key),
+        );
     }
+}
+
+/// Byte value a `$varName` reference resolves to.
+///
+/// This used to be a hard-coded `0`, so a board configured with a non-zero
+/// `tsCanId` had every `pageIdentifier` / `pageReadCommand` frame addressed to
+/// CAN id 0. The chain mirrors what the UI shows for the same variable
+/// (`commands/tune_io.rs`): the INI's declared default first, then the
+/// constant's declared minimum.
+fn resolve_pc_variable_byte(def: &EcuDefinition, name: &str) -> u8 {
+    def.default_values
+        .get(name)
+        .map(|v| v.clamp(0.0, u8::MAX as f64) as u8)
+        .or_else(|| {
+            def.constants
+                .get(name)
+                .map(|c| c.min.clamp(0.0, u8::MAX as f64) as u8)
+        })
+        .unwrap_or(0)
 }
 
 /// Parse [Defaults] section entries
@@ -1566,6 +1626,11 @@ fn parse_datalog_entry(def: &mut EcuDefinition, _key: &str, value: &str) {
     def.datalog_entries.push(entry);
 }
 
+/// Highest `gaugeN` index `[FrontPage]` may declare. The format documents
+/// `gauge1..gauge8`; the extra headroom covers INIs that go a little wider
+/// without letting a malformed suffix size the allocation.
+const MAX_FRONTPAGE_GAUGES: usize = 64;
+
 /// Parse [FrontPage] section entries
 /// Handles gauge1-gauge8 references and indicator definitions
 fn parse_frontpage_entry(def: &mut EcuDefinition, key: &str, value: &str) {
@@ -1583,13 +1648,22 @@ fn parse_frontpage_entry(def: &mut EcuDefinition, key: &str, value: &str) {
             .or_else(|| key.strip_prefix("Gauge"))
         {
             if let Ok(num) = num_str.parse::<usize>() {
+                // The suffix comes straight from arbitrary INI text, so cap it
+                // before growing the vector - `gauge4000000000` used to try to
+                // allocate four billion empty strings.
+                if num == 0 || num > MAX_FRONTPAGE_GAUGES {
+                    tracing::warn!(
+                        "ini: [FrontPage] {} out of range (1..={}) - ignored",
+                        key,
+                        MAX_FRONTPAGE_GAUGES
+                    );
+                    return;
+                }
                 // Ensure vector is large enough
                 while frontpage.gauges.len() < num {
                     frontpage.gauges.push(String::new());
                 }
-                if num > 0 && num <= frontpage.gauges.len() {
-                    frontpage.gauges[num - 1] = value.trim().to_string();
-                }
+                frontpage.gauges[num - 1] = value.trim().to_string();
             }
         }
     }
@@ -1875,6 +1949,16 @@ fn post_process_variable_substitution(def: &mut EcuDefinition) {
         return;
     }
 
+    // Re-resolve every PC variable now that the whole file has been read.
+    // `[PcVariables]` is parsed before `[Defaults]` in some INIs, so the value
+    // recorded at declaration time may predate the `defaultValue` line that
+    // sets it.
+    let names: Vec<String> = def.pc_variables.keys().cloned().collect();
+    for name in names {
+        let resolved = resolve_pc_variable_byte(def, &name);
+        def.pc_variables.insert(name, resolved);
+    }
+
     // Substitute in query_command
     def.query_command = substitute_variables(&def.query_command, &def.pc_variables);
     def.protocol.query_command =
@@ -1912,12 +1996,27 @@ fn post_process_variable_substitution(def: &mut EcuDefinition) {
         }
     }
 
-    // Re-process page identifiers
-    // This is trickier because page_identifiers are Vec<Vec<u8>>, not strings
-    // We need to check if any identifier bytes look like they might be unsubstituted
-    // For simplicity, if pc_variables exist and we have commands with '$', we should
-    // store the original command strings and re-parse. But since we've already parsed,
-    // we'll trust the initial parse worked for [Constants] section (which comes after [PcVariables])
+    // Re-process page identifiers from the source text.
+    //
+    // `page_identifiers` is `Vec<Vec<u8>>`, so the `$tsCanId` token is already
+    // gone by the time we get here - re-substituting the bytes is impossible.
+    // `page_identifiers_raw` keeps the INI's own strings precisely so this pass
+    // can redo the work with the resolved variables. Without it a board with a
+    // non-zero `tsCanId` addressed every page read/write frame to CAN id 0,
+    // since `[Constants]` is written before `[PcVariables]`.
+    if def
+        .protocol
+        .page_identifiers_raw
+        .iter()
+        .any(|s| s.contains('$'))
+    {
+        def.protocol.page_identifiers = def
+            .protocol
+            .page_identifiers_raw
+            .iter()
+            .map(|s| parse_escape_sequence(&substitute_variables(s, &pc_vars)))
+            .collect();
+    }
 
     // Handle och_get_command
     if let Some(ref cmd) = def.protocol.och_get_command {
@@ -4315,6 +4414,13 @@ table = veTable1, veTableMap, "VE Table"
         assert!(table.is_resizable());
     }
 
+    /// `[AxB]` is column-first, the order TunerStudio uses and the order the
+    /// `[{cols}x{rows}]` arm of `parse_shape_field` already used. rusEFI's
+    /// `demo.ini` is unambiguous: `cltIdleCorrTable = array, U08, 10378, [8x3]`
+    /// has an eight-entry `xBins` and a three-entry `yBins`, and
+    /// `scriptTable4 = [10x8]` a ten-entry `xBins` and an eight-entry `yBins`.
+    /// This test used to assert the opposite (row-first) reading, which only
+    /// went unnoticed because every checked-in fixture array is square.
     #[test]
     fn test_table_size_from_2d_map() {
         // Test that x_size/y_size can be inferred from the 2D map constant
@@ -4336,8 +4442,8 @@ table = veTable1, veTableMap, "VE Table"
         let table = def.tables.get("veTable1").unwrap();
 
         // When x_bins and y_bins are not specified, infer from the 2D map
-        assert_eq!(table.x_size, 12, "x_size should be 12 (cols from 8x12)");
-        assert_eq!(table.y_size, 8, "y_size should be 8 (rows from 8x12)");
+        assert_eq!(table.x_size, 8, "x_size should be 8 (cols from [8x12])");
+        assert_eq!(table.y_size, 12, "y_size should be 12 (rows from [8x12])");
     }
 
     #[test]
@@ -4468,6 +4574,156 @@ indicator = { (tps > tpsflood) && (rpm < crankRPM) }, "FLOOD OFF", "FLOOD CLEAR"
         assert_eq!(
             strip_comment("someField = 42 ; trailing note").trim(),
             "someField = 42"
+        );
+    }
+
+    /// `#set` and `#unset` used to run before the branch-suppression check, so
+    /// a symbol defined inside a dead `#if` arm leaked into the live one.
+    /// `#define` and `#include` already gate on `condition_stack`.
+    #[test]
+    #[serial(default_symbols)]
+    fn set_and_unset_are_ignored_inside_a_false_branch() {
+        set_default_symbols(Vec::<String>::new());
+
+        let ini = concat!(
+            "[Constants]\n",
+            "page = 1\n",
+            "#if NEVER_DEFINED\n",
+            "#set LEAKED\n",
+            "#endif\n",
+            "#if LEAKED\n",
+            "leaked = scalar, U08, 0, \"x\", 1, 0, 0, 255, 0\n",
+            "#else\n",
+            "clean = scalar, U08, 0, \"y\", 1, 0, 0, 255, 0\n",
+            "#endif\n",
+        );
+
+        let def = parse_ini(ini).expect("parses");
+        assert!(
+            !def.constants.contains_key("leaked"),
+            "#set inside a false #if leaked into the live branch"
+        );
+        assert!(def.constants.contains_key("clean"));
+    }
+
+    /// `#unset` in a dead branch must not clear a live symbol either.
+    #[test]
+    #[serial(default_symbols)]
+    fn unset_inside_a_false_branch_does_not_clear_a_live_symbol() {
+        set_default_symbols(Vec::<String>::new());
+
+        let ini = concat!(
+            "[Constants]\n",
+            "page = 1\n",
+            "#set KEEPME\n",
+            "#if NEVER_DEFINED\n",
+            "#unset KEEPME\n",
+            "#endif\n",
+            "#if KEEPME\n",
+            "kept = scalar, U08, 0, \"x\", 1, 0, 0, 255, 0\n",
+            "#endif\n",
+        );
+
+        let def = parse_ini(ini).expect("parses");
+        assert!(
+            def.constants.contains_key("kept"),
+            "#unset inside a false #if cleared a live symbol"
+        );
+    }
+
+    /// `settingOption` lines belong to the `settingGroup` above them.
+    /// `setting_groups` is a `HashMap`, so `.iter_mut().last()` picked an
+    /// arbitrary group - Rust seeds hash order per map instance.
+    #[test]
+    #[serial(default_symbols)]
+    fn setting_options_attach_to_the_group_that_precedes_them() {
+        set_default_symbols(Vec::<String>::new());
+
+        let mut ini = String::from("[SettingGroups]\n");
+        for i in 0..8 {
+            ini.push_str(&format!("settingGroup = grp{i}, \"Group {i}\"\n"));
+            ini.push_str(&format!("settingOption = opt{i}, \"Option {i}\"\n"));
+        }
+
+        let def = parse_ini(&ini).expect("parses");
+        assert_eq!(def.setting_groups.len(), 8);
+        for i in 0..8 {
+            let group = def
+                .setting_groups
+                .get(&format!("grp{i}"))
+                .unwrap_or_else(|| panic!("grp{i} missing"));
+            assert_eq!(
+                group
+                    .options
+                    .iter()
+                    .map(|o| o.value.as_str())
+                    .collect::<Vec<_>>(),
+                vec![format!("opt{i}").as_str()],
+                "grp{i} got the wrong options: {:?}",
+                group.options
+            );
+        }
+    }
+
+    /// `$tsCanId` used to resolve to byte 0 unconditionally, which misaddresses
+    /// every page-read/write frame on a board with a non-zero CAN id.
+    /// `[Constants]` is written before `[PcVariables]` in every real INI, so
+    /// the identifiers have to be re-resolved once the variable is known.
+    #[test]
+    #[serial(default_symbols)]
+    fn can_id_substitution_uses_the_declared_default_not_zero() {
+        set_default_symbols(Vec::<String>::new());
+
+        let ini = concat!(
+            "[Constants]\n",
+            "pageIdentifier = \"\\x00$tsCanId\"\n",
+            "pageReadCommand = \"r$tsCanId%2o%2c\"\n",
+            "[PcVariables]\n",
+            "tsCanId = scalar, U08, \"\", 1, 0, 0, 15, 0\n",
+            "[Defaults]\n",
+            "defaultValue = tsCanId, 3\n",
+        );
+
+        let def = parse_ini(ini).expect("parses");
+        assert_eq!(
+            def.pc_variables.get("tsCanId"),
+            Some(&3u8),
+            "pc_variables still hard-codes 0"
+        );
+        assert_eq!(
+            def.protocol.page_identifiers.first().map(Vec::as_slice),
+            Some([0u8, 3u8].as_slice()),
+            "page identifier not re-resolved after [PcVariables]"
+        );
+        assert_eq!(
+            def.protocol.page_read_commands.first().map(String::as_str),
+            Some("r\u{3}%2o%2c")
+        );
+    }
+
+    /// `gaugeN` grows a `Vec` to `N`. The documented range is `gauge1..gauge8`,
+    /// so a malformed `gauge4000000000` used to allocate four billion strings.
+    #[test]
+    #[serial(default_symbols)]
+    fn frontpage_gauge_indices_are_capped() {
+        set_default_symbols(Vec::<String>::new());
+
+        let ini = concat!(
+            "[FrontPage]\n",
+            "gauge1 = accelGauge\n",
+            "gauge4000000000 = bogusGauge\n",
+        );
+
+        let def = parse_ini(ini).expect("parses");
+        let frontpage = def.frontpage.expect("frontpage");
+        assert!(
+            frontpage.gauges.len() <= 64,
+            "gauge vector grew to {}",
+            frontpage.gauges.len()
+        );
+        assert_eq!(
+            frontpage.gauges.first().map(String::as_str),
+            Some("accelGauge")
         );
     }
 }
