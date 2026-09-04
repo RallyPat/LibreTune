@@ -159,9 +159,7 @@ async fn run_capture(
         let rpm = rt.get("rpm").copied().unwrap_or(0.0);
         let modern = {
             let conn_guard = state.connection.lock().await;
-            conn_guard
-                .as_ref()
-                .is_some_and(|c| c.is_modern_protocol())
+            conn_guard.as_ref().is_some_and(|c| c.is_modern_protocol())
         };
         if !modern && rpm > MAX_SAFE_RPM_LEGACY {
             return Err(format!(
