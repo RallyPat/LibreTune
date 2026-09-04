@@ -27,4 +27,14 @@ impl LlmClient {
     pub async fn chat(&self, req: &ChatRequest) -> Result<ChatResponse, LlmError> {
         self.provider.chat(req).await
     }
+
+    /// Test-only constructor that wraps an arbitrary [`Provider`] (typically
+    /// a mock/recording one) instead of building one from a
+    /// [`ProviderConfig`]. Lets tests elsewhere in the crate (e.g.
+    /// `agent::orchestrator`) observe exactly what gets sent to the model on
+    /// each round of a turn, without a live provider.
+    #[cfg(test)]
+    pub(crate) fn from_provider(provider: Box<dyn Provider>) -> Self {
+        Self { provider }
+    }
 }

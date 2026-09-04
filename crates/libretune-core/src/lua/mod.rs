@@ -1,7 +1,19 @@
 //! Lua scripting engine (sandboxed)
 
-use mlua::{Lua, LuaOptions, StdLib, Value, Variadic};
+use mlua::{HookTriggers, Lua, LuaOptions, StdLib, Value, Variadic, VmState};
 use std::sync::{Arc, Mutex};
+
+/// Memory ceiling (bytes) for a single [`execute_script`] call. Guards
+/// against a script that allocates without bound (e.g. growing a table
+/// forever) exhausting the host process's memory.
+const LUA_MEMORY_LIMIT_BYTES: usize = 64 * 1024 * 1024;
+
+/// Instruction budget for a single [`execute_script`] call, enforced via a
+/// `set_hook` triggered every `LUA_INSTRUCTION_BUDGET` VM instructions. A
+/// script like `while true do end` runs no host calls and allocates nothing,
+/// so neither a timeout nor the memory limit above would ever stop it —
+/// this hook is what actually bounds a runaway loop's CPU time.
+const LUA_INSTRUCTION_BUDGET: u32 = 10_000_000;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct LuaExecutionResult {
@@ -36,6 +48,21 @@ pub fn execute_script(script: &str) -> Result<LuaExecutionResult, String> {
 
     let lua = Lua::new_with(StdLib::TABLE | StdLib::STRING | StdLib::MATH, lua_options)
         .map_err(|e| format!("Failed to initialize Lua: {e}"))?;
+
+    lua.set_memory_limit(LUA_MEMORY_LIMIT_BYTES)
+        .map_err(|e| format!("Failed to set Lua memory limit: {e}"))?;
+
+    // Errors out of the executing script once it has run past the
+    // instruction budget, turning a runaway `while true do end` into a
+    // returned error instead of a permanently hung tokio worker.
+    lua.set_hook(
+        HookTriggers::new().every_nth_instruction(LUA_INSTRUCTION_BUDGET),
+        |_lua, _debug| -> mlua::Result<VmState> {
+            Err(mlua::Error::RuntimeError(format!(
+                "Script exceeded the instruction budget of {LUA_INSTRUCTION_BUDGET} VM instructions"
+            )))
+        },
+    );
 
     let print_fn = lua
         .create_function(move |_, args: Variadic<Value>| {
@@ -80,4 +107,32 @@ pub fn execute_script(script: &str) -> Result<LuaExecutionResult, String> {
         return_value: format_value(&result_value),
         error,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_infinite_loop_returns_error_instead_of_hanging() {
+        let result = execute_script("while true do end")
+            .expect("execute_script only errors on Lua-init failure, not script errors");
+
+        assert!(
+            result.error.is_some(),
+            "expected the instruction-budget hook to stop an infinite loop with an error"
+        );
+        let error = result.error.unwrap();
+        assert!(
+            error.contains("instruction budget"),
+            "expected the instruction-budget error message, got: {error}"
+        );
+    }
+
+    #[test]
+    fn test_normal_script_still_executes_successfully() {
+        let result = execute_script("return 1 + 1").expect("execute_script should succeed");
+        assert_eq!(result.error, None);
+        assert_eq!(result.return_value, Some("2".to_string()));
+    }
 }
