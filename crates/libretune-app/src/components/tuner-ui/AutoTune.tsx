@@ -1705,16 +1705,31 @@ export function AutoTune({ tableName: initialTableName = '', onClose, isConnecte
               <label>Max Change/Cell (VE):</label>
               <input
                 type="number"
+                min="0"
                 value={authority.max_change_per_cell}
-                onChange={(e) => setAuthority({ ...authority, max_change_per_cell: parseFloat(e.target.value) })}
+                onChange={(e) =>
+                  setAuthority({
+                    ...authority,
+                    // A negative authority limit is meaningless (and the
+                    // backend now rejects/clamps it too) - clamp here so the
+                    // field can't even be typed into an invalid state.
+                    max_change_per_cell: Math.max(0, parseFloat(e.target.value) || 0),
+                  })
+                }
               />
             </div>
             <div className="setting-row">
               <label>Max Change/Cell (%):</label>
               <input
                 type="number"
+                min="0"
                 value={authority.max_total_change}
-                onChange={(e) => setAuthority({ ...authority, max_total_change: parseFloat(e.target.value) })}
+                onChange={(e) =>
+                  setAuthority({
+                    ...authority,
+                    max_total_change: Math.max(0, parseFloat(e.target.value) || 0),
+                  })
+                }
               />
             </div>
             <div className="setting-row">

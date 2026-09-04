@@ -19,6 +19,7 @@ import {
   GraphPane,
   AxisSide,
 } from '../../stores/graphLogStore';
+import { nearestIndex as nearestIndexGeneric } from '../../utils/nearestIndex';
 import './GraphLog.css';
 
 export interface GraphSample {
@@ -100,15 +101,7 @@ function lastValue(channel: string | null, visible: GraphSample[]): number | und
 
 /** Binary search for the sample index nearest to time t */
 function nearestIndex(data: GraphSample[], t: number): number {
-  let lo = 0;
-  let hi = data.length - 1;
-  while (lo < hi) {
-    const mid = (lo + hi) >> 1;
-    if (data[mid].t < t) lo = mid + 1;
-    else hi = mid;
-  }
-  if (lo > 0 && Math.abs(data[lo - 1].t - t) < Math.abs(data[lo].t - t)) return lo - 1;
-  return lo;
+  return nearestIndexGeneric(data, t, (s) => s.t);
 }
 
 interface PaneCanvasProps {

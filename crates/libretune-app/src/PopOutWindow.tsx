@@ -63,13 +63,6 @@ export default function PopOutWindow() {
   const [error, setError] = useState<string | null>(null);
   const [isConnected, setIsConnected] = useState(false);
 
-  // Debug: log on mount
-  useEffect(() => {
-    console.log('[PopOutWindow] Component mounted');
-    console.log('[PopOutWindow] hash:', window.location.hash);
-    console.log('[PopOutWindow] href:', window.location.href);
-  }, []);
-
   // Dashboard render settings (refresh-rate cap, right-aligned values) apply
   // to gauges in pop-out windows too (issue #82).
   useEffect(() => {
@@ -102,14 +95,11 @@ export default function PopOutWindow() {
 
   // Parse URL params and load data
   useEffect(() => {
-    console.log('[PopOutWindow] Parsing URL params...');
     const hash = window.location.hash;
     const params = new URLSearchParams(hash.replace('#/popout?', ''));
     const tabId = params.get('tabId');
     const type = params.get('type') as PopOutData['type'];
     const title = params.get('title') || tabId || 'Pop-out';
-
-    console.log('[PopOutWindow] Parsed:', { tabId, type, title });
 
     if (!tabId || !type) {
       console.error('[PopOutWindow] Invalid params - tabId:', tabId, 'type:', type);
@@ -121,15 +111,10 @@ export default function PopOutWindow() {
     // Load data from localStorage
     const storageKey = `popout-${tabId}`;
     const storedData = localStorage.getItem(storageKey);
-    
-    console.log('[PopOutWindow] Storage key:', storageKey);
-    console.log('[PopOutWindow] Stored data exists:', !!storedData);
-    
+
     if (storedData) {
       try {
         const parsed = JSON.parse(storedData);
-        console.log('[PopOutWindow] Parsed data:', parsed);
-        console.log('[PopOutWindow] Data field:', parsed.data);
         setPopOutData({
           tabId,
           type,
@@ -145,7 +130,6 @@ export default function PopOutWindow() {
         return;
       }
     } else {
-      console.log('[PopOutWindow] No stored data, will need to fetch for type:', type);
       // No stored data - set up with just the ID for types that fetch their own data
       setPopOutData({ tabId, type, title });
     }
@@ -179,14 +163,11 @@ export default function PopOutWindow() {
   useEffect(() => {
     if (!popOutData || popOutData.type !== 'dialog' || popOutData.data) return;
 
-    console.log('[PopOutWindow] Fetching dialog definition for:', popOutData.tabId);
-
     (async () => {
       try {
-        const definition = await invoke<RendererDialogDef>('get_dialog_definition', { 
-          name: popOutData.tabId 
+        const definition = await invoke<RendererDialogDef>('get_dialog_definition', {
+          name: popOutData.tabId
         });
-        console.log('[PopOutWindow] Fetched dialog definition:', definition);
         setPopOutData(prev => prev ? { ...prev, data: definition } : null);
       } catch (e) {
         console.error('[PopOutWindow] Failed to fetch dialog definition:', e);
@@ -198,8 +179,6 @@ export default function PopOutWindow() {
   // Fetch table/curve data if type is table or curve and data is missing
   useEffect(() => {
     if (!popOutData || (popOutData.type !== 'table' && popOutData.type !== 'curve') || popOutData.data) return;
-
-    console.log('[PopOutWindow] Fetching table/curve data for:', popOutData.tabId);
 
     (async () => {
       try {
@@ -215,7 +194,6 @@ export default function PopOutWindow() {
             xOutputChannel: data.x_output_channel ?? undefined,
             yOutputChannel: data.y_output_channel ?? undefined,
           };
-          console.log('[PopOutWindow] Fetched table data:', tableData);
           setPopOutData(prev => prev ? { ...prev, data: tableData } : null);
         } else {
           const data = await invoke<BackendCurveData>('get_curve_data', { curveName: popOutData.tabId });
@@ -241,7 +219,6 @@ export default function PopOutWindow() {
             }
           }
 
-          console.log('[PopOutWindow] Fetched curve data:', curveData);
           setPopOutData(prev => prev ? { ...prev, data: curveData, gauge: gaugeInfo } : null);
         }
       } catch (e) {

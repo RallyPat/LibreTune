@@ -1,5 +1,6 @@
 import {
   Fragment,
+  memo,
   useState,
   useRef,
   useMemo,
@@ -73,7 +74,7 @@ function shouldShowAxisLabel(index: number, count: number, step: number): boolea
   return index === 0 || index === count - 1 || index % step === 0;
 }
 
-export default function TableGrid({
+function TableGrid({
   x_bins,
   y_bins,
   z_values,
@@ -656,3 +657,14 @@ export default function TableGrid({
     </div>
   );
 }
+
+/**
+ * Memoized: TableEditor2D re-renders on every realtime tick (its
+ * `useChannels` subscription updates on every backend value), and without
+ * memo this whole grid — every cell — re-rendered along with it even though
+ * only the live-cursor overlay actually needs to reflect the new tick.
+ * Requires the callback/array props passed in from TableEditor2D to stay
+ * referentially stable across those renders (see the useCallback/useMemo
+ * wrapping there) — otherwise this memo does nothing.
+ */
+export default memo(TableGrid);
