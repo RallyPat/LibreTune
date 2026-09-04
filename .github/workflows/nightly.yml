@@ -25,7 +25,7 @@ jobs:
       has_changes: ${{ steps.check.outputs.has_changes }}
       date_stamp: ${{ steps.date.outputs.date }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           fetch-depth: 0
 
@@ -52,7 +52,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
       - uses: ./.github/actions/setup-rust
         with:
@@ -68,7 +68,7 @@ jobs:
         run: cargo clippy --workspace -- -D warnings
 
       - name: Setup Node.js
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: "24"
           cache: npm
@@ -86,7 +86,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
       - uses: ./.github/actions/setup-rust
         with:
@@ -95,7 +95,7 @@ jobs:
       - uses: ./.github/actions/setup-linux-deps
 
       - name: Setup Node.js
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: "24"
           cache: npm
@@ -122,7 +122,7 @@ jobs:
           dest: crates/libretune-app/artifacts/linux
 
       - name: Upload Linux artifacts
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: linux-x86_64-${{ needs.check-changes.outputs.date_stamp }}
           path: crates/libretune-app/artifacts/linux/*
@@ -135,14 +135,14 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
       - uses: ./.github/actions/setup-rust
         with:
           cache_key: nightly-windows
 
       - name: Setup Node.js
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: "24"
           cache: npm
@@ -162,7 +162,7 @@ jobs:
           dest: crates/libretune-app/artifacts/windows
 
       - name: Upload Windows artifacts
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: windows-x86_64-${{ needs.check-changes.outputs.date_stamp }}
           path: crates/libretune-app/artifacts/windows/*
@@ -175,14 +175,14 @@ jobs:
     runs-on: macos-latest
     timeout-minutes: 90
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
       - uses: ./.github/actions/setup-rust
         with:
           cache_key: nightly-macos
 
       - name: Setup Node.js
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: "24"
           cache: npm
@@ -218,7 +218,7 @@ jobs:
           dest: crates/libretune-app/artifacts/macos
 
       - name: Upload macOS artifacts
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: macos-aarch64-x86_64-${{ needs.check-changes.outputs.date_stamp }}
           path: crates/libretune-app/artifacts/macos/*
@@ -232,7 +232,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Download all artifacts
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
         with:
           path: artifacts
           pattern: "*"
@@ -271,7 +271,7 @@ jobs:
           fi
 
       - name: Create/Update Nightly Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           tag_name: nightly
           name: Nightly Build

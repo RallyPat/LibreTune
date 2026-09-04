@@ -1,0 +1,16 @@
+# Keeps the SHA-pinned actions current; without this, pins rot.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    # `/` covers .github/workflows only; nested composite actions need their
+    # own entry (dependabot/dependabot-core#6345).
+    directories:
+      - /
+      - /.github/actions/setup-rust
+      - /.github/actions/setup-linux-deps
+      - /.github/actions/collect-tauri-artifacts
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
