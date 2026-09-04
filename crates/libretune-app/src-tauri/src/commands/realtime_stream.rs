@@ -443,6 +443,40 @@ pub(crate) async fn feed_autotune_data(
     }
 }
 
+/// The identifiers the realtime stream's expressions can actually reach.
+///
+/// The stream used to rebuild the *unfiltered* string context every 20 ticks.
+/// That clones every string constant, every array, and the option list of every
+/// bitfield: on a real Speeduino INI, 910 constants, 507 of them bitfields and
+/// 144 arrays, measured at ~100 ms per call. At the 50 ms default interval that
+/// is a ~100 ms stall roughly once a second on the one loop with a deadline —
+/// and it takes `definition`, `current_tune` and `current_project` to do it.
+///
+/// The stream only ever evaluates two kinds of expression: the INI's computed
+/// output channels and the user's math channels. Their identifiers are the only
+/// entries the context can be asked for, so build only those. The scan is
+/// deliberately over-inclusive (see `referenced_identifiers`) — a spurious entry
+/// costs one map insertion, a missing one would change the result.
+fn stream_context_filter(
+    output_channels: Option<&HashMap<String, libretune_core::ini::OutputChannel>>,
+    math_channels: &[libretune_core::project::UserMathChannel],
+) -> std::collections::HashSet<String> {
+    use crate::commands::string_context::referenced_identifiers;
+
+    let mut names = std::collections::HashSet::new();
+    if let Some(channels) = output_channels {
+        for channel in channels.values() {
+            if let Some(expression) = &channel.expression {
+                names.extend(referenced_identifiers(expression));
+            }
+        }
+    }
+    for channel in math_channels {
+        names.extend(referenced_identifiers(&channel.expression));
+    }
+    names
+}
+
 /// Aborts any in-progress realtime streaming task. Call this from every
 /// place that overwrites `state.definition` (reconnect to a different ECU,
 /// load a different INI, toggle demo mode, open a different project).
@@ -524,18 +558,6 @@ pub async fn start_realtime_stream(
         // For demo mode, create a simulator
         let mut demo_simulator: Option<DemoSimulator> = None;
         let start_time = std::time::Instant::now();
-        let mut string_ctx =
-            crate::commands::string_context::build_string_context(&app_state).await;
-        // Computed channels are written against the whole tune, not just the
-        // runtime block: the INI defines `lambda = { afr / stoich }`, and
-        // stoich is a [Constants] value. Without it the expression engine
-        // resolves the identifier to 0.0 by design, so lambda becomes afr/0.
-        // Refreshed on the same cadence as the string context, and for the same
-        // reason - the tune can change mid-session but not per tick.
-        let mut numeric_ctx = {
-            let tune = app_state.current_tune.lock().await;
-            crate::commands::string_context::numeric_context_from_tune(tune.as_ref())
-        };
 
         // Cache output channels + endianness once before the loop.
         // These don't change during a session so there's no need to re-lock every tick.
@@ -569,6 +591,28 @@ pub async fn start_realtime_stream(
             "task started, cached_def_data={}",
             cached_def_data.is_some()
         ));
+
+        // Only the identifiers this stream's expressions can actually reach.
+        // See `stream_context_filter`.
+        let mut context_filter = stream_context_filter(
+            cached_def_data.as_ref().map(|(ch, _)| ch.as_ref()),
+            &app_state.math_channels.lock().await,
+        );
+        let mut string_ctx = crate::commands::string_context::build_string_context_filtered(
+            &app_state,
+            Some(&context_filter),
+        )
+        .await;
+        // Computed channels are written against the whole tune, not just the
+        // runtime block: the INI defines `lambda = { afr / stoich }`, and
+        // stoich is a [Constants] value. Without it the expression engine
+        // resolves the identifier to 0.0 by design, so lambda becomes afr/0.
+        // Refreshed on the same cadence as the string context, and for the same
+        // reason - the tune can change mid-session but not per tick.
+        let mut numeric_ctx = {
+            let tune = app_state.current_tune.lock().await;
+            crate::commands::string_context::numeric_context_from_tune(tune.as_ref())
+        };
 
         // Cache app settings once — load_settings() reads from disk and must not run every tick.
         let rpm_settings = load_settings(&app_handle);
@@ -616,8 +660,18 @@ pub async fn start_realtime_stream(
             tick_count += 1;
             local_ticks_total += 1;
             if tick_count.is_multiple_of(20) {
-                string_ctx =
-                    crate::commands::string_context::build_string_context(&app_state).await;
+                // Math channels are user-editable mid-session, so the filter is
+                // recomputed here too - it is a few dozen short strings against
+                // the hundreds of clones the unfiltered build would do.
+                context_filter = stream_context_filter(
+                    cached_def_data.as_ref().map(|(ch, _)| ch.as_ref()),
+                    &app_state.math_channels.lock().await,
+                );
+                string_ctx = crate::commands::string_context::build_string_context_filtered(
+                    &app_state,
+                    Some(&context_filter),
+                )
+                .await;
                 numeric_ctx = {
                     let tune = app_state.current_tune.lock().await;
                     crate::commands::string_context::numeric_context_from_tune(tune.as_ref())
@@ -985,6 +1039,58 @@ pub async fn start_realtime_stream(
 
     *task_guard = Some(handle);
     Ok(())
+}
+
+#[cfg(test)]
+mod context_filter_tests {
+    use super::stream_context_filter;
+    use libretune_core::ini::OutputChannel;
+    use libretune_core::project::UserMathChannel;
+    use std::collections::HashMap;
+
+    fn computed(name: &str, expression: &str) -> OutputChannel {
+        OutputChannel {
+            name: name.to_string(),
+            expression: Some(expression.to_string()),
+            ..Default::default()
+        }
+    }
+
+    /// The filter decides which of the INI's ~910 constants the stream's
+    /// string context clones every 20 ticks. Missing a name an expression can
+    /// reach would silently change the evaluated value, so this pins that both
+    /// expression sources are scanned.
+    #[test]
+    fn covers_computed_output_channels_and_user_math_channels() {
+        let mut channels = HashMap::new();
+        channels.insert("lambda".to_string(), computed("lambda", "{ afr / stoich }"));
+        channels.insert(
+            "raw".to_string(),
+            OutputChannel {
+                name: "raw".to_string(),
+                ..Default::default()
+            },
+        );
+
+        let math = vec![UserMathChannel::new(
+            "boost".to_string(),
+            "psi".to_string(),
+            "MAPValue - baroCorr".to_string(),
+        )];
+
+        let filter = stream_context_filter(Some(&channels), &math);
+
+        for want in ["afr", "stoich", "MAPValue", "baroCorr"] {
+            assert!(filter.contains(want), "missed {want}");
+        }
+    }
+
+    #[test]
+    fn an_ini_with_no_computed_channels_needs_no_context_entries() {
+        let channels: HashMap<String, OutputChannel> = HashMap::new();
+        assert!(stream_context_filter(Some(&channels), &[]).is_empty());
+        assert!(stream_context_filter(None, &[]).is_empty());
+    }
 }
 
 #[cfg(test)]

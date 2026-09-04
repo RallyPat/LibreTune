@@ -402,7 +402,8 @@ pub(crate) fn read_axis_bins(
                         bins.clear();
                         break;
                     }
-                    match read_raw_value(&page_data[offset..], &constant.data_type) {
+                    match read_raw_value(&page_data[offset..], &constant.data_type, def.endianness)
+                    {
                         Ok(raw) => bins.push(constant.raw_to_display(raw)),
                         Err(e) => {
                             tracing::warn!(
@@ -789,18 +790,19 @@ pub(crate) fn read_table_z_values(
                 );
                 return None;
             }
-            let raw = match read_raw_value(&page_data[offset..], &constant.data_type) {
-                Ok(raw) => raw,
-                Err(e) => {
-                    tracing::warn!(
-                        map = map_name,
-                        offset,
-                        error = %e,
-                        "table value failed to decode; refusing a partial table"
-                    );
-                    return None;
-                }
-            };
+            let raw =
+                match read_raw_value(&page_data[offset..], &constant.data_type, def.endianness) {
+                    Ok(raw) => raw,
+                    Err(e) => {
+                        tracing::warn!(
+                            map = map_name,
+                            offset,
+                            error = %e,
+                            "table value failed to decode; refusing a partial table"
+                        );
+                        return None;
+                    }
+                };
             row.push(constant.raw_to_display(raw));
             offset += elem_size;
         }
