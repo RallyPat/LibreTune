@@ -120,6 +120,13 @@
   min-width: 50px;
 }
 
+/* Y axis zero at bottom: header row lives in <tfoot>, sticky to the bottom edge */
+.table-grid tfoot .table-corner,
+.table-grid tfoot .table-x-header {
+  top: auto;
+  bottom: 0;
+}
+
 .table-y-header {
   position: sticky;
   left: 0;

@@ -371,7 +371,7 @@ export function TableEditor({
       // scroll to get coordinates that stay correct as the user scrolls.
       const left = tRect.left - hRect.left + host.scrollLeft;
       const top = tRect.top - hRect.top + host.scrollTop;
-      const cols = Array.from(table.querySelectorAll<HTMLTableCellElement>('thead th'))
+      const cols = Array.from(table.querySelectorAll<HTMLTableCellElement>('thead th, tfoot th'))
         .slice(1) // the corner cell is not a column
         .map((th) => {
           const r = th.getBoundingClientRect();
@@ -1220,7 +1220,7 @@ export function TableEditor({
       {!show3D && (
       <div className="table-grid-container" ref={scrollHostRef}>
         <table className="table-grid" ref={tableElRef}>
-          <thead>
+          {!yAxisBottom && <thead>
             <tr>
               <th className="table-corner">
                 {data.yLabel || 'Y'} / {data.xLabel || 'X'}
@@ -1231,7 +1231,7 @@ export function TableEditor({
                 </th>
               ))}
             </tr>
-          </thead>
+          </thead>}
           <tbody>
             {/* Display order only — rowIndex stays in data space */}
             {/* One timestamp per render: the fade refreshes when the trail
@@ -1288,6 +1288,18 @@ export function TableEditor({
               ));
             })()}
           </tbody>
+          {yAxisBottom && <tfoot>
+            <tr>
+              <th className="table-corner">
+                {data.yLabel || 'Y'} / {data.xLabel || 'X'}
+              </th>
+              {data.xAxis.map((x, i) => (
+                <th key={i} className="table-x-header">
+                  {x}
+                </th>
+              ))}
+            </tr>
+          </tfoot>}
         </table>
         {renderTrailOverlay()}
       </div>
