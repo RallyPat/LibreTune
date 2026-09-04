@@ -347,7 +347,7 @@ export default function TableGrid({
     const observer = new ResizeObserver(measure);
     observer.observe(grid);
     return () => observer.disconnect();
-  }, [x_size, y_size, compact]);
+  }, [x_size, y_size, compact, yAxisBottom]);
 
   const cellCenter = (x: number, y: number) => {
     if (!cellMetrics) return null;
@@ -482,18 +482,14 @@ export default function TableGrid({
       }
     : { gridTemplateColumns };
 
-  const grid = (
-    <div
-      ref={gridRef}
-      className={`table-grid-container${compact ? ' table-grid-container--compact' : ''}${fitViewport ? ' table-grid-container--fit-ve' : ''}`}
-      onMouseUp={handleMouseUp}
-      onMouseMove={handleCellMouseMove}
-      style={gridStyle}
-    >
-      {/* Corner cell (row 0, col 0) */}
+  // Header row (corner + X bins). CSS grid auto-placement puts it wherever
+  // it lands in DOM order, so it is emitted before or after the data rows.
+  const xHeaderRow = (
+    <>
+      {/* Corner cell where the axes meet */}
       <div className="axis-corner" />
 
-      {/* X-axis headers (row 0, cols 1..N) */}
+      {/* X-axis headers; rendered above or below the rows depending on yAxisBottom */}
       {x_bins.map((val, i) => {
         const isEditingThis = editingAxis?.axis === 'x' && editingAxis.index === i;
         const isHeaderSelected = selectionRange && 
@@ -532,6 +528,18 @@ export default function TableGrid({
           </div>
         );
       })}
+    </>
+  );
+
+  const grid = (
+    <div
+      ref={gridRef}
+      className={`table-grid-container${compact ? ' table-grid-container--compact' : ''}${fitViewport ? ' table-grid-container--fit-ve' : ''}${yAxisBottom ? ' table-grid-container--x-axis-bottom' : ''}`}
+      onMouseUp={handleMouseUp}
+      onMouseMove={handleCellMouseMove}
+      style={gridStyle}
+    >
+      {!yAxisBottom && xHeaderRow}
 
       {/* Data rows: each row = y-axis label + data cells.
           Display order only — all coordinates stay in data space. */}
@@ -631,6 +639,8 @@ export default function TableGrid({
           </Fragment>
         );
       })}
+
+      {yAxisBottom && xHeaderRow}
 
       {renderHistoryTrail()}
       

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { invoke } from '@tauri-apps/api/core';
 import { open, save } from '@tauri-apps/plugin-dialog';
 import { emit } from '@tauri-apps/api/event';
-import { ArrowLeft, Save, Zap, ExternalLink, AlertTriangle, Palette, MapPin, Crosshair, Box, Scaling } from 'lucide-react';
+import { ArrowLeft, Save, Zap, ExternalLink, AlertTriangle, Palette, MapPin, Crosshair, Box, Scaling, ArrowUpDown } from 'lucide-react';
 import TableToolbar from './TableToolbar';
 import TableGrid, { SelectionRange } from './TableGrid';
 import TableEditor3D from './TableEditor3D';
@@ -16,7 +16,7 @@ import { Dialog, Button, FormField } from '../common';
 import type { BackendTableData, TableSizeInfo } from '../../types/app';
 import LambdaPreviewTable from './LambdaPreviewTable';
 import { useHeatmapSettings } from '../../utils/useHeatmapSettings';
-import { useTableYAxisBottom, useTrailFadeSec } from '../../utils/useTableOrientation';
+import { useTableYAxisBottom, setTableYAxisBottom, useTrailFadeSec } from '../../utils/useTableOrientation';
 import { useChannels } from '../../stores/realtimeStore';
 import { useToast } from '../../contexts/ToastContext';
 import { getHotkeyManager } from '../../services/hotkeyService';
@@ -654,7 +654,7 @@ export default function TableEditor2D({
 
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [selectionRange, followMode, activeCell, localZValues]);
+  }, [selectionRange, followMode, activeCell, localZValues, yAxisBottom]);
 
   // Arrow key navigation helper
   const handleArrowNavigation = (key: string, extendSelection: boolean) => {
@@ -1314,6 +1314,15 @@ export default function TableEditor2D({
           >
             <Box size={14} />
           </button>
+          <button
+            className={`embedded-toggle ${yAxisBottom ? 'active' : ''}`}
+            onClick={() => setTableYAxisBottom(!yAxisBottom)}
+            title={`Y axis zero at ${yAxisBottom ? 'bottom' : 'top'} - click to flip`}
+            aria-pressed={yAxisBottom}
+            aria-label="Y axis zero at bottom"
+          >
+            <ArrowUpDown size={14} />
+          </button>
           {sizeInfo?.resizable && (
             <button
               className="embedded-toggle"
@@ -1377,6 +1386,15 @@ export default function TableEditor2D({
             >
               <span className="action-icon"><Box size={16} /></span>
             </button>
+            <button
+              className={`action-btn ${yAxisBottom ? 'active' : ''}`}
+              onClick={() => setTableYAxisBottom(!yAxisBottom)}
+              title={`Y axis zero at ${yAxisBottom ? 'bottom' : 'top'} - click to flip`}
+              aria-pressed={yAxisBottom}
+              aria-label="Y axis zero at bottom"
+            >
+              <span className="action-icon"><ArrowUpDown size={16} /></span>
+            </button>
             <button className="action-btn" onClick={handleSave} title="Save (S)">
               <Save size={18} />
             </button>
@@ -1407,6 +1425,8 @@ export default function TableEditor2D({
           canPaste={true}
           followMode={followMode}
           onFollowModeToggle={() => setFollowMode(!followMode)}
+          yAxisBottom={yAxisBottom}
+          onYAxisBottomToggle={() => setTableYAxisBottom(!yAxisBottom)}
           showColorShade={showColorShade}
           onColorShadeToggle={() => setShowColorShade(!showColorShade)}
           show3D={show3D}

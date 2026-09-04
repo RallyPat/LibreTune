@@ -105,3 +105,11 @@ export function useTableYAxisBottom(): boolean {
 
   return bottom;
 }
+
+/**
+ * Persist the Y-axis orientation. The backend emits `settings:changed`, so
+ * every mounted `useTableYAxisBottom` (and the Settings dialog) picks it up.
+ */
+export function setTableYAxisBottom(bottom: boolean): Promise<void> {
+  return invoke<void>('update_setting', { key: 'table_y_axis_bottom', value: String(bottom) }).catch(() => {});
+}

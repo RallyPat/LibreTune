@@ -31,6 +31,7 @@ interface TableEditor3DProps {
 }
 
 import { Scene } from './3d/SceneComponents';
+import { useTableYAxisBottom } from '../../utils/useTableOrientation';
 
 export default function TableEditor3D({
   title,
@@ -54,6 +55,7 @@ export default function TableEditor3D({
   const [showCells, setShowCells] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const yAxisBottom = useTableYAxisBottom();
 
   const canRender3D = x_bins.length > 1 && y_bins.length > 1 && z_values.length > 0 && z_values[0]?.length > 0;
 
@@ -147,6 +149,7 @@ export default function TableEditor3D({
             historyTrail={historyTrail}
             wireframe={wireframe}
             showCells={showCells}
+            yAxisBottom={yAxisBottom}
           />
         </Canvas>
       </div>
