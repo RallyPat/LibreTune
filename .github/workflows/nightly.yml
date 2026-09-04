@@ -307,3 +307,26 @@ jobs:
           fail_on_unmatched_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # A red cron run notifies nobody by itself; file (at most) one open issue
+  # pointing at the failed run.
+  notify-failure:
+    name: Open issue on failure
+    needs: [check-changes, test, build-linux, build-windows, build-macos, upload-nightly]
+    if: failure()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    steps:
+      - name: Open a nightly-failure issue unless one is already open
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          open_count="$(gh issue list --repo "$GITHUB_REPOSITORY" --state open \
+            --search 'Nightly build failed in:title' --json number --jq length)"
+          if [ "$open_count" -eq 0 ]; then
+            gh issue create --repo "$GITHUB_REPOSITORY" \
+              --title 'Nightly build failed' \
+              --body "Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          fi
