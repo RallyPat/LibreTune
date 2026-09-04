@@ -97,20 +97,27 @@ fn parse_command_string(s: &str) -> Vec<u8> {
 /// Detection strategy (in priority order):
 ///   1. payload.len() == expected_data_len + 1 AND payload[0] == 0  → status byte present, strip it
 ///   2. payload.len() == expected_data_len                           → no status byte, use as-is
-///   3. payload[0] == 0                                              → assume status byte, strip it
-///   4. otherwise                                                    → use full payload (best-effort)
-fn strip_status_byte(payload: &[u8], expected_data_len: usize, label: &str) -> Vec<u8> {
-    if payload.is_empty() {
-        return Vec::new();
-    }
+///   3. neither, and a length was declared                           → error
+///   4. no declared length                                           → best-effort (strip a leading 0)
+///
+/// Case 3 used to guess: strip on a leading `0x00`, otherwise return the whole
+/// payload. Either guess shifts every channel offset by a byte, and the caller
+/// cannot tell — `parse` returns plausible numbers for the wrong bytes while
+/// the UI still reports Connected. A buffer of the wrong length is not
+/// recoverable here, so it is reported instead.
+fn strip_status_byte(
+    payload: &[u8],
+    expected_data_len: usize,
+    label: &str,
+) -> Result<Vec<u8>, ProtocolError> {
     if expected_data_len > 0 {
         if payload.len() == expected_data_len + 1 && payload[0] == 0 {
             // Status byte present and indicates success
-            return payload[1..].to_vec();
+            return Ok(payload[1..].to_vec());
         }
         if payload.len() == expected_data_len {
             // No status byte — firmware sent raw data directly
-            return payload.to_vec();
+            return Ok(payload.to_vec());
         }
         if payload.len() == expected_data_len + 1 && payload[0] != 0 {
             let code = super::ResponseCode::from_byte(payload[0]);
@@ -120,22 +127,74 @@ fn strip_status_byte(payload: &[u8], expected_data_len: usize, label: &str) -> V
                 payload[0],
                 code.message()
             );
-            return payload[1..].to_vec();
+            return Ok(payload[1..].to_vec());
         }
-    }
-    // Fallback: use old behaviour (strip if starts with 0x00, else keep all)
-    if payload[0] == 0 {
-        payload[1..].to_vec()
-    } else {
-        // Don't error — just return the full payload; channel offsets will be relative to byte 0
-        tracing::warn!(
-            "{} response: unexpected first byte 0x{:02x} (expected_len={}), using full payload",
+        return Err(ProtocolError::ProtocolError(format!(
+            "{} response: {} bytes, expected {} (or {} with a status byte) — \
+             channel offsets cannot be trusted",
             label,
-            payload[0],
-            expected_data_len
-        );
-        payload.to_vec()
+            payload.len(),
+            expected_data_len,
+            expected_data_len + 1
+        )));
     }
+
+    // No declared length (INI omits ochBlockSize): nothing to validate
+    // against, so keep the original best-effort behaviour.
+    if payload.is_empty() {
+        return Ok(Vec::new());
+    }
+    if payload[0] == 0 {
+        Ok(payload[1..].to_vec())
+    } else {
+        tracing::warn!(
+            "{} response: unexpected first byte 0x{:02x} (no declared length), using full payload",
+            label,
+            payload[0]
+        );
+        Ok(payload.to_vec())
+    }
+}
+
+/// Extract an ECU signature from a handshake reply payload.
+///
+/// Returns `None` when the frame cannot be a signature, so the caller falls
+/// through to the next envelope order or the legacy path instead of latching
+/// the modern protocol on. `send_packet` returns `Ok` for *any* frame whose
+/// CRC decodes and never inspects the response code, so without this an
+/// `Underrun` reply (`00 01 | 80 | crc32`) became the signature `"\u{80}"`
+/// and the whole fallback chain was skipped.
+fn signature_from_payload(payload: &[u8]) -> Option<String> {
+    let first = *payload.first()?;
+    if super::ResponseCode::from_byte(first).is_error() {
+        tracing::debug!(
+            "handshake: reply carries ECU error status 0x{:02x}, not a signature",
+            first
+        );
+        return None;
+    }
+    // Per msEnvelope_1.0 a success reply leads with 0x00; some firmware omits it.
+    let bytes = if first == 0 { &payload[1..] } else { payload };
+    let signature = String::from_utf8_lossy(bytes).trim().to_string();
+    if signature.is_empty() {
+        None
+    } else {
+        Some(signature)
+    }
+}
+
+/// Resolve a TCP target to a socket address so the connect can be given a
+/// deadline — `TcpStream::connect` takes a host string and has no timeout,
+/// `TcpStream::connect_timeout` needs a resolved [`std::net::SocketAddr`].
+fn resolve_tcp_addr(host: &str, port: u16) -> Result<std::net::SocketAddr, ProtocolError> {
+    use std::net::ToSocketAddrs;
+    (host, port)
+        .to_socket_addrs()
+        .map_err(|e| ProtocolError::ConnectionFailed(format!("cannot resolve {host}:{port}: {e}")))?
+        .next()
+        .ok_or_else(|| {
+            ProtocolError::ConnectionFailed(format!("no address found for {host}:{port}"))
+        })
 }
 
 /// Inspect a modern-protocol write response for an ECU-reported error status.
@@ -320,8 +379,11 @@ pub struct ConnectionConfig {
     /// Auto-burn the previous page before any write that targets a different page (spec §6.2).
     /// Prevents partial-flash corruption on power loss. Default `true`.
     pub auto_burn_on_page_change: bool,
-    /// Auto-burn when a settings dialog closes (spec §6.2).
-    /// Frontend signals dialog-close via `flush_pending_burn`. Default `true`.
+    /// Auto-burn when a settings dialog closes (spec §6.2). Default `true`.
+    ///
+    /// Nothing acts on this yet: the dialog-close flush it used to drive burned
+    /// only the last-written page, while `send_burn_command` walks every dirty
+    /// page and is already wired to the Burn button.
     pub auto_burn_on_close_dialog: bool,
 }
 
@@ -636,6 +698,12 @@ impl Connection {
             return Err(ProtocolError::AlreadyConnected);
         }
 
+        // Clear any cancellation left raised by a previous disconnect. It is
+        // cleared here rather than at the end of `disconnect()` so the read
+        // that disconnect is trying to interrupt — which runs after it
+        // returns — can still observe it (Issue #71).
+        self.cancel.store(false, Ordering::Relaxed);
+
         self.state = ConnectionState::Connecting;
 
         // Open communication channel
@@ -650,10 +718,17 @@ impl Connection {
             ConnectionType::Tcp => {
                 let host = self.config.tcp_host.as_deref().unwrap_or("localhost");
                 let port = self.config.tcp_port.unwrap_or(29001);
-                let addr = format!("{}:{}", host, port);
-                tracing::info!("Connecting to ECU via TCP: {}", addr);
-                let stream = TcpStream::connect(&addr)
-                    .map_err(|e| ProtocolError::ConnectionFailed(e.to_string()))?;
+                tracing::info!("Connecting to ECU via TCP: {}:{}", host, port);
+                // A bare `TcpStream::connect` has no deadline: an unreachable
+                // host parks this thread in the OS SYN timeout (~75 s) while
+                // the caller has long since given up, and the connection it
+                // eventually produces is dropped unregistered.
+                let addr = resolve_tcp_addr(host, port)?;
+                let stream = TcpStream::connect_timeout(
+                    &addr,
+                    Duration::from_millis(self.config.timeout_ms),
+                )
+                .map_err(|e| ProtocolError::ConnectionFailed(e.to_string()))?;
                 stream.set_nodelay(true).ok();
                 Box::new(TcpChannel::new(stream))
             }
@@ -725,13 +800,14 @@ impl Connection {
     /// in another thread (e.g. the realtime stream task) aborts its current
     /// read promptly instead of waiting for the full timeout (Issue #71).
     pub fn disconnect(&mut self) {
-        // Signal in-flight blocking reads to abort.
+        // Signal in-flight blocking reads to abort. The flag stays raised: the
+        // read this is meant to interrupt is running on another thread and
+        // polls the flag *after* this returns, so clearing it here made the
+        // whole mechanism inert. `connect()` clears it instead.
         self.cancel.store(true, Ordering::Relaxed);
         self.channel = None;
         self.signature = None;
         self.state = ConnectionState::Disconnected;
-        // Reset the flag so a reconnect starts clean.
-        self.cancel.store(false, Ordering::Relaxed);
     }
 
     /// Perform handshake and get ECU signature
@@ -802,23 +878,23 @@ impl Connection {
                 }
                 let packet = Packet::new(cmd_bytes.clone());
                 if let Ok(response_packet) = self.send_packet(packet) {
+                    // A decodable frame is not yet an answer: the ECU may have
+                    // replied with an error code, which must fall through to
+                    // the flipped order and then to legacy rather than latch
+                    // the modern protocol on.
+                    if let Some(signature) = signature_from_payload(&response_packet.payload) {
+                        tracing::debug!(
+                            "handshake: CRC protocol succeeded (envelope order {:?}), signature = {:?}",
+                            order,
+                            signature
+                        );
+                        self.use_modern_protocol = true;
+                        return Ok(signature);
+                    }
                     tracing::debug!(
-                        "handshake: CRC protocol succeeded (envelope order {:?})",
+                        "handshake: CRC reply (envelope order {:?}) was not a signature",
                         order
                     );
-                    self.use_modern_protocol = true;
-
-                    // Handle status byte: response may start with 0x00 (success)
-                    let payload = &response_packet.payload;
-                    let signature_bytes = if !payload.is_empty() && payload[0] == 0 {
-                        &payload[1..]
-                    } else {
-                        payload.as_slice()
-                    };
-
-                    let signature = String::from_utf8_lossy(signature_bytes).trim().to_string();
-                    tracing::debug!("handshake: CRC success, signature = {:?}", signature);
-                    return Ok(signature);
                 }
             }
             // Neither order worked — restore the declared order for any later
@@ -860,22 +936,15 @@ impl Connection {
 
                     let packet = Packet::new(cmd_bytes);
                     if let Ok(response_packet) = self.send_packet(packet) {
-                        tracing::debug!("handshake: CRC fallback succeeded");
-                        self.use_modern_protocol = true;
-
-                        let payload = &response_packet.payload;
-                        let signature_bytes = if !payload.is_empty() && payload[0] == 0 {
-                            &payload[1..]
-                        } else {
-                            payload.as_slice()
-                        };
-
-                        let signature = String::from_utf8_lossy(signature_bytes).trim().to_string();
-                        tracing::debug!(
-                            "handshake: CRC fallback success, signature = {:?}",
-                            signature
-                        );
-                        return Ok(signature);
+                        if let Some(signature) = signature_from_payload(&response_packet.payload) {
+                            tracing::debug!(
+                                "handshake: CRC fallback success, signature = {:?}",
+                                signature
+                            );
+                            self.use_modern_protocol = true;
+                            return Ok(signature);
+                        }
+                        tracing::debug!("handshake: CRC fallback reply was not a signature");
                     }
                 }
 
@@ -1215,22 +1284,26 @@ impl Connection {
         write_and_wait(channel, &bytes, baud_rate, min_wait)
             .map_err(|e| ProtocolError::SerialError(e.to_string()))?;
 
-        // Helper to read exact bytes with timeout
+        // Helper to read exact bytes by a deadline
         // Uses bytes_to_read() polling to avoid blocking read() calls on Linux
-        fn read_exact_timeout(
+        //
+        // Takes a deadline rather than a duration so the header read and the
+        // payload read of one response share a single budget. Each starting
+        // its own `Instant::now()` let a single command block for twice the
+        // configured timeout with the connection lock held.
+        fn read_exact_by_deadline(
             channel: &mut Box<dyn CommunicationChannel>,
             buf: &mut [u8],
-            timeout: Duration,
+            deadline: Instant,
             poll_ms: u64,
             cancel: &AtomicBool,
         ) -> Result<(), ProtocolError> {
-            let start = Instant::now();
             let mut offset = 0;
 
             while offset < buf.len() {
-                if start.elapsed() > timeout {
+                if Instant::now() >= deadline {
                     tracing::warn!(
-                        "read_exact_timeout: timed out after reading {} of {} bytes",
+                        "read_exact_by_deadline: timed out after reading {} of {} bytes",
                         offset,
                         buf.len()
                     );
@@ -1239,7 +1312,7 @@ impl Connection {
 
                 // Cancellation check (Issue #71): abort promptly if disconnect() was called.
                 if cancel.load(Ordering::Relaxed) {
-                    tracing::debug!("read_exact_timeout: cancelled by disconnect");
+                    tracing::debug!("read_exact_by_deadline: cancelled by disconnect");
                     return Err(ProtocolError::ConnectionClosed);
                 }
 
@@ -1259,7 +1332,7 @@ impl Connection {
                 let to_read = std::cmp::min(available, buf.len() - offset);
                 match channel.read(&mut buf[offset..offset + to_read]) {
                     Ok(0) => {
-                        tracing::warn!("read_exact_timeout: EOF after {} bytes", offset);
+                        tracing::warn!("read_exact_by_deadline: EOF after {} bytes", offset);
                         return Err(ProtocolError::Timeout);
                     }
                     Ok(n) => {
@@ -1272,7 +1345,7 @@ impl Connection {
                         continue;
                     }
                     Err(e) => {
-                        tracing::warn!("read_exact_timeout: error: {}", e);
+                        tracing::warn!("read_exact_by_deadline: error: {}", e);
                         return Err(ProtocolError::SerialError(e.to_string()));
                     }
                 }
@@ -1280,9 +1353,13 @@ impl Connection {
             Ok(())
         }
 
+        // One deadline for the whole response: header and payload share it.
+        let deadline = Instant::now() + timeout;
+
         // Read response header (2 bytes for length)
         let mut header = [0u8; 2];
-        if let Err(e) = read_exact_timeout(channel, &mut header, timeout, poll_interval_ms, &cancel)
+        if let Err(e) =
+            read_exact_by_deadline(channel, &mut header, deadline, poll_interval_ms, &cancel)
         {
             // Drain any buffered bytes first (uses channel borrow), then reset timing
             let _ = channel.clear_input_buffer();
@@ -1306,10 +1383,10 @@ impl Connection {
 
         // Read payload + CRC
         let mut payload_and_crc = vec![0u8; length + 4];
-        if let Err(e) = read_exact_timeout(
+        if let Err(e) = read_exact_by_deadline(
             channel,
             &mut payload_and_crc,
-            timeout,
+            deadline,
             poll_interval_ms,
             &cancel,
         ) {
@@ -1568,7 +1645,7 @@ impl Connection {
                     let packet = Packet::new(cmd_bytes);
                     let response = self.send_packet(packet)?;
                     let payload = &response.payload;
-                    Ok(strip_status_byte(payload, expected_len, "Burst"))
+                    strip_status_byte(payload, expected_len, "Burst")
                 } else {
                     let cmd_byte = cmd.as_bytes().first().copied().unwrap_or(b'A');
                     // This is the hot path — it repeats for every realtime
@@ -1640,7 +1717,7 @@ impl Connection {
                     let packet = Packet::new(cmd_bytes);
                     let response = self.send_packet(packet)?;
                     let payload = &response.payload;
-                    Ok(strip_status_byte(payload, expected_och_len, "OCH"))
+                    strip_status_byte(payload, expected_och_len, "OCH")
                 } else {
                     // For legacy protocol, usually single byte command
                     // If cmd_bytes > 1, send all bytes (rare case for legacy but possible)
@@ -1703,7 +1780,7 @@ impl Connection {
             params.length,
         )?;
 
-        if self.use_modern_protocol {
+        let data = if self.use_modern_protocol {
             // Modern protocol: wrap in CRC packet
             let packet = Packet::new(cmd);
             let response = self.send_packet(packet)?;
@@ -1722,15 +1799,34 @@ impl Connection {
                 )));
             }
 
-            Ok(payload[1..].to_vec())
+            payload[1..].to_vec()
         } else {
             // Legacy protocol: the reply length is exactly the requested
             // count, so let the read return as soon as it has arrived instead
             // of waiting out the inter-character timeout — the read-back
             // verify does one of these per written chunk, under the
             // connection lock, while the realtime poll waits.
-            self.send_raw_command_expecting(&cmd, Some(params.length as usize))
+            self.send_raw_command_expecting(&cmd, Some(params.length as usize))?
+        };
+
+        // A short reply must never reach the caller. `read_page` appends each
+        // chunk and advances its cursor by the *requested* size, so a truncated
+        // chunk silently shifts every byte after it — the page is stored and
+        // cached as if it were whole. The legacy read returns whatever arrived
+        // before the line fell quiet, and the modern read trusts the frame's
+        // own length field, so neither can spot this on its own. This is the
+        // same guard the write-side read-back already applies.
+        if data.len() < params.length as usize {
+            return Err(ProtocolError::ProtocolError(format!(
+                "short read on page {} offset {}: got {} of {} bytes",
+                params.page,
+                params.offset,
+                data.len(),
+                params.length
+            )));
         }
+
+        Ok(data)
     }
 
     /// Read a full page from ECU, respecting blocking factor
@@ -2264,20 +2360,6 @@ impl Connection {
         Ok(())
     }
 
-    /// Flush any pending auto-burn (called by the UI when a settings dialog closes,
-    /// per spec §6.2 `autoBurnOnCloseDialog`). Burns the most recently written page
-    /// if `auto_burn_on_close_dialog` is enabled and a write is pending.
-    pub fn flush_pending_burn(&mut self) -> Result<(), ProtocolError> {
-        if !self.config.auto_burn_on_close_dialog {
-            return Ok(());
-        }
-        if let Some(page) = self.last_written_page {
-            tracing::info!("auto-burn: dialog close, burning page {}", page);
-            self.burn(BurnParams { page, can_id: 0 })?;
-        }
-        Ok(())
-    }
-
     /// Convenience method to burn all pages to flash
     /// Burn every page that has been written since it was last burned.
     ///
@@ -2594,7 +2676,7 @@ impl Connection {
             // the same thing - otherwise every record is shifted one byte and
             // the whole log decodes as garbage. `expected_data_len` is unknown
             // for a raw command, so 0 selects the helper's leading-zero rule.
-            let payload = strip_status_byte(&reply.payload, 0, "raw command");
+            let payload = strip_status_byte(&reply.payload, 0, "raw command")?;
             tracing::debug!(
                 "send_raw_bytes_with_response: framed reply, {} payload bytes -> {} after status byte",
                 reply.payload.len(),
@@ -3889,6 +3971,289 @@ mod tests {
         let raw = "emu`RPM=1200`emu`shape update for ch0`";
         let result = Connection::parse_rusefi_text_output(raw);
         assert_eq!(result, "RPM=1200\nshape update for ch0");
+    }
+
+    // ------------------------------------------------------------------
+    // Audit 01-protocol regressions
+    // ------------------------------------------------------------------
+
+    /// A short reply is indistinguishable from a good one once it has been
+    /// appended to the page image: every byte after it is shifted, and the
+    /// tune the tuner reads is not the tune the ECU is running.
+    mod short_reads {
+        use super::*;
+
+        #[test]
+        fn read_memory_rejects_a_reply_shorter_than_requested() {
+            let core = Arc::new(Mutex::new(MegaCore::new()));
+            let mut conn = speeduino_conn(&core);
+
+            // The simulated ECU's page image is 1024 bytes, so a 100-byte read
+            // at offset 1000 can only ever produce 24 bytes.
+            let err = conn
+                .read_memory(ReadMemoryParams {
+                    page: 3,
+                    offset: 1000,
+                    length: 100,
+                    can_id: 0,
+                })
+                .expect_err("a short reply must be reported, never padded over");
+            let msg = err.to_string();
+            assert!(
+                msg.contains("24") && msg.contains("100"),
+                "error should say how much arrived and how much was asked for: {msg}"
+            );
+        }
+
+        #[test]
+        fn read_memory_accepts_a_full_reply() {
+            let core = Arc::new(Mutex::new(MegaCore::new()));
+            let mut conn = speeduino_conn(&core);
+            let data = conn
+                .read_memory(ReadMemoryParams {
+                    page: 3,
+                    offset: 0,
+                    length: 16,
+                    can_id: 0,
+                })
+                .expect("a full-length reply is fine");
+            assert_eq!(data.len(), 16);
+        }
+    }
+
+    /// The handshake decides the whole session: accept an ECU error frame as a
+    /// signature and the modern protocol is latched on, the legacy fallback is
+    /// skipped, and the app reports Connected to something that never answered.
+    mod handshake_signature {
+        use super::*;
+
+        #[test]
+        fn an_error_frame_is_not_a_signature() {
+            // 0x80 Underrun, the frame rusEFI answers a mis-framed command
+            // with. This used to become the signature "\u{80}".
+            assert_eq!(signature_from_payload(&[0x80]), None);
+            assert_eq!(signature_from_payload(&[0x84, b'x']), None);
+            // 0x03 SettingsError has the high bit clear but is still an error.
+            assert_eq!(signature_from_payload(&[0x03, b'n', b'o']), None);
+        }
+
+        #[test]
+        fn an_empty_or_blank_payload_is_not_a_signature() {
+            assert_eq!(signature_from_payload(&[]), None);
+            assert_eq!(signature_from_payload(&[0x00]), None);
+            assert_eq!(signature_from_payload(b"   "), None);
+        }
+
+        #[test]
+        fn a_real_signature_survives_with_or_without_a_status_byte() {
+            let mut with_status = vec![0x00];
+            with_status.extend_from_slice(b"speeduino 202501.4 ");
+            assert_eq!(
+                signature_from_payload(&with_status).as_deref(),
+                Some("speeduino 202501.4")
+            );
+            assert_eq!(
+                signature_from_payload(b"rusEFI master.2024 ").as_deref(),
+                Some("rusEFI master.2024")
+            );
+        }
+    }
+
+    /// A one-byte shift decodes every realtime channel into a plausible wrong
+    /// number, with the UI still showing Connected. Guessing is worse than
+    /// failing here.
+    mod realtime_status_byte {
+        use super::*;
+
+        #[test]
+        fn a_length_matching_neither_shape_is_an_error() {
+            // 130 declared, 128 arrived: the old fallback returned all 128 and
+            // every channel offset was wrong from byte 0.
+            assert!(strip_status_byte(&[0xAB; 128], 130, "OCH").is_err());
+            // The leading-zero case, which used to look like a safe strip.
+            let mut short = vec![0x00];
+            short.extend_from_slice(&[0xAB; 100]);
+            assert!(strip_status_byte(&short, 130, "OCH").is_err());
+            assert!(strip_status_byte(&[], 130, "OCH").is_err());
+        }
+
+        #[test]
+        fn both_declared_shapes_still_parse() {
+            let mut with_status = vec![0x00];
+            with_status.extend_from_slice(&[0x11; 130]);
+            assert_eq!(
+                strip_status_byte(&with_status, 130, "OCH").unwrap(),
+                vec![0x11; 130]
+            );
+            assert_eq!(
+                strip_status_byte(&[0x11; 130], 130, "OCH").unwrap(),
+                vec![0x11; 130]
+            );
+        }
+
+        #[test]
+        fn an_undeclared_length_keeps_the_best_effort_fallback() {
+            // expected_data_len == 0 means the INI never declared ochBlockSize,
+            // so there is nothing to validate against and the old behaviour
+            // must stand rather than failing every realtime read.
+            assert_eq!(
+                strip_status_byte(&[0x00, 1, 2], 0, "OCH").unwrap(),
+                vec![1, 2]
+            );
+            assert_eq!(
+                strip_status_byte(&[9, 1, 2], 0, "OCH").unwrap(),
+                vec![9, 1, 2]
+            );
+        }
+    }
+
+    /// Issue #71: the flag exists so another thread can interrupt a blocking
+    /// read. Clearing it at the end of `disconnect()` cleared it before any
+    /// in-flight read could observe it.
+    mod cancel_lifecycle {
+        use super::*;
+
+        #[test]
+        fn disconnect_leaves_the_flag_raised_for_the_in_flight_read() {
+            let mut conn = Connection::new(ConnectionConfig::default());
+            let handle = conn.cancel_handle();
+            conn.disconnect();
+            assert!(
+                handle.load(Ordering::Relaxed),
+                "the read that disconnect is trying to interrupt runs after it returns"
+            );
+        }
+
+        #[test]
+        fn connect_clears_a_stale_flag() {
+            let mut config = ConnectionConfig::default();
+            config.port_name = "/dev/libretune-no-such-port".to_string();
+            let mut conn = Connection::new(config);
+            let handle = conn.cancel_handle();
+            conn.disconnect();
+            assert!(handle.load(Ordering::Relaxed));
+
+            // Opening the port fails; clearing the flag must happen first so a
+            // reconnect never starts with reads already cancelled.
+            let _ = conn.connect();
+            assert!(
+                !handle.load(Ordering::Relaxed),
+                "a reconnect must start with a clean cancel flag"
+            );
+        }
+    }
+
+    /// Answers a write with the 2-byte length header only, and only after
+    /// `header_delay`. This is the shape that cost two full timeouts: the
+    /// header read spent most of its budget, then the payload read started a
+    /// fresh one of the same size.
+    struct SlowHeaderChannel {
+        sent_at: Option<Instant>,
+        header_delay: Duration,
+        header: VecDeque<u8>,
+    }
+
+    impl SlowHeaderChannel {
+        fn new(header_delay: Duration) -> Self {
+            Self {
+                sent_at: None,
+                header_delay,
+                header: VecDeque::new(),
+            }
+        }
+
+        fn header_is_due(&self) -> bool {
+            self.sent_at
+                .is_some_and(|t| t.elapsed() >= self.header_delay)
+        }
+    }
+
+    impl Write for SlowHeaderChannel {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.sent_at = Some(Instant::now());
+            // Big-endian length 64: a payload that never arrives.
+            self.header = VecDeque::from(vec![0x00, 0x40]);
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl Read for SlowHeaderChannel {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            if !self.header_is_due() {
+                return Ok(0);
+            }
+            let n = self.header.len().min(buf.len());
+            for slot in buf.iter_mut().take(n) {
+                *slot = self.header.pop_front().unwrap();
+            }
+            Ok(n)
+        }
+    }
+
+    impl CommunicationChannel for SlowHeaderChannel {
+        fn set_timeout(&mut self, _timeout: Duration) -> std::io::Result<()> {
+            Ok(())
+        }
+        fn clear_input_buffer(&mut self) -> std::io::Result<()> {
+            self.header.clear();
+            Ok(())
+        }
+        fn clear_output_buffer(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+        fn try_clone(&self) -> std::io::Result<Box<dyn CommunicationChannel>> {
+            Err(std::io::Error::other("mock"))
+        }
+        fn bytes_to_read(&mut self) -> std::io::Result<u32> {
+            if self.header_is_due() {
+                Ok(self.header.len() as u32)
+            } else {
+                Ok(0)
+            }
+        }
+    }
+
+    #[test]
+    fn a_stalled_payload_costs_one_timeout_not_two() {
+        const TIMEOUT_MS: u64 = 800;
+        let mut conn = Connection::new(ConnectionConfig::default());
+        let mut proto = ProtocolSettings::default();
+        proto.block_read_timeout = TIMEOUT_MS as u32;
+        proto.inter_write_delay = 0;
+        conn.set_protocol(proto, Endianness::Big);
+        conn.channel = Some(Box::new(SlowHeaderChannel::new(Duration::from_millis(
+            TIMEOUT_MS * 4 / 5,
+        ))));
+
+        let start = Instant::now();
+        let err = conn
+            .send_packet(Packet::new(vec![b'S']))
+            .expect_err("the payload never arrives");
+        let elapsed = start.elapsed();
+
+        assert!(matches!(err, ProtocolError::Timeout), "{err:?}");
+        // Header at 0.8x the budget plus a fresh full budget for the payload
+        // used to make this ~1.8x, before the 500 ms drain on the failure arm.
+        // One shared deadline caps the reads at 1x.
+        assert!(
+            elapsed < Duration::from_millis(TIMEOUT_MS * 2),
+            "header and payload must share one {TIMEOUT_MS}ms budget, took {elapsed:?}"
+        );
+    }
+
+    #[test]
+    fn a_tcp_target_is_resolved_before_connecting() {
+        // `connect_timeout` needs a resolved address, so resolution is now its
+        // own step and its failure has to be reported, not unwrapped.
+        let addr = resolve_tcp_addr("127.0.0.1", 29001).expect("loopback resolves");
+        assert_eq!(addr.port(), 29001);
+        assert!(addr.ip().is_loopback());
+
+        let err = resolve_tcp_addr("", 29001).expect_err("an empty host cannot resolve");
+        assert!(matches!(err, ProtocolError::ConnectionFailed(_)), "{err:?}");
     }
 }
 
