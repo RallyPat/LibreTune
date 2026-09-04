@@ -38,6 +38,7 @@
 - [Pop-out Windows](./features/popout-windows.md)
 - [ECU Console](./features/ecu-console.md)
 - [AI Assistant](./features/ai-assistant.md)
+  - [MCP Server](./features/mcp-server.md)
 - [Tune Migration](./features/tune-migration.md)
 - [Hardware Configuration](./technical/port-editor.md)
 - [Action Scripting](./reference/action-scripting.md)

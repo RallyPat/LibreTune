@@ -11,6 +11,7 @@ use libretune_core::project::OnlineIniRepository;
 use tokio::sync::Mutex;
 
 mod commands;
+mod mcp;
 mod paths;
 mod port_editor; // used by commands/ini_dialogs.rs
 mod state;
@@ -506,8 +507,28 @@ pub fn run() {
             list_wasm_plugins,
             execute_wasm_plugin,
             get_wasm_plugin_info,
-            log_webview_message
+            log_webview_message,
+            // Local MCP server (read-only tune tools for external agents)
+            mcp::commands::mcp_status,
+            mcp::commands::mcp_set_enabled,
+            mcp::commands::mcp_set_port,
+            mcp::commands::mcp_get_token,
+            mcp::commands::mcp_regenerate_token
         ])
+        .manage(mcp::server::McpServerState::default())
+        .setup(|app| {
+            // Restart the MCP server if the user left it enabled last run.
+            // Spawned rather than awaited: a busy port must not block the
+            // window from opening, and the failure surfaces in the Settings
+            // dialog's status line either way.
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                if let Err(e) = mcp::commands::start_on_boot(&handle).await {
+                    tracing::warn!("MCP server did not start on boot: {e}");
+                }
+            });
+            Ok(())
+        })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

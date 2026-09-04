@@ -34,6 +34,10 @@ What the assistant can do:
 - **Propose ECU configuration changes** (feature enablement, scalar constants).
 - **Propose tune edits** to individual cells or bulk regions.
 
+The assistant's read tools are also available to **external** agents (Claude
+Code, Claude Desktop, …) over a local, read-only
+[MCP server](./mcp-server.md) — off by default.
+
 The assistant is **not** a closed-loop controller. It does not run every
 realtime tick — that remains the job of the algorithmic [AutoTune](./autotune.md)
 engine. Think of it as a smart strategy and explanation layer on top of the

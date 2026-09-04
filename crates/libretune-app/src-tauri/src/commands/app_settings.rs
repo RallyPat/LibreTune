@@ -185,6 +185,22 @@ pub(crate) struct Settings {
     /// Capability the assistant is unlocked for: "read" | "tune" | "config".
     #[serde(default = "default_ai_capability")]
     pub(crate) ai_capability_tier: String,
+
+    // --- Local MCP server (see `crate::mcp`) ---
+    /// Expose the read-only tune tools to external MCP clients on loopback.
+    /// Off by default: turning it on opens a socket, so it stays an explicit
+    /// choice rather than something an update can switch on for the user.
+    #[serde(default = "default_false")]
+    pub(crate) mcp_enabled: bool,
+    /// Loopback port for the MCP server.
+    #[serde(default = "default_mcp_port")]
+    pub(crate) mcp_port: u16,
+}
+
+/// Default MCP port. Same 8765 OpenTune used, so a client config ported over
+/// only needs its URL changed.
+pub(crate) fn default_mcp_port() -> u16 {
+    8765
 }
 
 pub(crate) fn default_runtime_packet_mode() -> String {
@@ -397,6 +413,8 @@ fn default_settings() -> Settings {
         ai_api_key: String::new(),
         ai_model: String::new(),
         ai_capability_tier: default_ai_capability(),
+        mcp_enabled: false,
+        mcp_port: default_mcp_port(),
     }
 }
 

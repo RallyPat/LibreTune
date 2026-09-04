@@ -175,6 +175,17 @@ The project aims to provide professional ECU tuning workflow and functionality w
 - Safety: the model only ever PROPOSES; nothing burns automatically. Gated by an "at your own risk" enablement (RiskAcknowledgement shared primitive). Settings reset risk-ack on provider/key change. `SendCommand`/`ExecuteLuaScript` remain unreachable by the model.
 - Gap closures motivated by this feature: extended validate_action_set (min/max, cell bounds, DataType range, bits enum); TableRole enum + infer_table_roles(); summarize_tune_context(); constant safety tiering.
 
+### 13. MCP Server (local, read-only)
+- Backend: `crates/libretune-app/src-tauri/src/mcp/` — `handler.rs` (rmcp `ServerHandler`), `server.rs` (axum loopback + bearer auth + start/stop/reconcile), `token.rs` (per-install token file), `commands.rs` (Tauri surface), `tests.rs`
+- Frontend: `crates/libretune-app/src/components/tuner-ui/dialogs/McpServerSection.tsx` (Settings → AI Assistant → MCP server)
+- Ported from OpenTune's `ai_mcp.rs` / `ai_mcp_server.rs`, retargeted onto LibreTune's `agent::tools` catalogue
+- Exposes ONLY the 8 read tools, dispatched through the same `LiveReadExecutor` the in-app assistant uses (so the two surfaces cannot drift). `propose_*` are withheld from `tools/list` AND refused by name — a proposal is meaningless without the in-app review queue
+- Handler takes an `ExecutorFactory` (`Arc<dyn Fn() -> Arc<dyn ReadToolExecutor>>`), not an `AppHandle`, so the whole module is testable with a stub executor and no `tauri::App`
+- Security: binds 127.0.0.1 only; constant-time bearer compare (`tokens_match`); rmcp Host AND Origin allow-lists pinned to loopback (rmcp's Origin default is an empty list = validation OFF); token file is 0600 on unix and never in `settings.json`
+- Settings: `mcp_enabled` / `mcp_port` (default 8765), off by default. NOT routed through `update_setting` — the toggle reconciles a real socket, which the batch settings path cannot await; `mcp::commands` are called directly
+- Docs: `docs/src/features/mcp-server.md` (synced to `public/manual`)
+- Deferred: propose-over-MCP needs a backend proposal store + Tauri event, since `ProposalQueue` state is per-chat frontend state today
+
 ## Development Commands
 
 ### Backend (Rust)
