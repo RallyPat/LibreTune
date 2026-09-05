@@ -21,6 +21,10 @@ jobs:
     timeout-minutes: 5
     outputs:
       tag_name: ${{ steps.get_version.outputs.VERSION || 'manual' }}
+      # JSON merged into tauri.conf.json by `tauri build --config` (RFC 7396).
+      # Tag builds stamp the version from the tag and produce signed updater
+      # artifacts; manual runs build exactly what is in the repo, unsigned.
+      tauri_config: ${{ steps.get_version.outputs.TAURI_CONFIG || '{}' }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
@@ -30,6 +34,23 @@ jobs:
         run: |
           VERSION=${GITHUB_REF#refs/tags/}
           echo "VERSION=$VERSION" >> "$GITHUB_OUTPUT"
+          SEMVER=${VERSION#v}
+          echo "TAURI_CONFIG={\"version\":\"$SEMVER\",\"bundle\":{\"createUpdaterArtifacts\":true}}" >> "$GITHUB_OUTPUT"
+
+      - name: Require updater signing key for tagged releases
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          pubkey="$(jq -r '.plugins.updater.pubkey' crates/libretune-app/src-tauri/tauri.conf.json)"
+          if [ -z "$pubkey" ]; then
+            echo "::error::plugins.updater.pubkey in tauri.conf.json is empty; see CONTRIBUTING.md → Release Builds"
+            exit 1
+          fi
+          if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+            echo "::error::TAURI_SIGNING_PRIVATE_KEY secret is not set; see CONTRIBUTING.md → Release Builds"
+            exit 1
+          fi
 
   build-linux:
     name: Build Linux
@@ -58,7 +79,10 @@ jobs:
 
       - name: Build Tauri app (Linux)
         working-directory: crates/libretune-app
-        run: npx tauri build --target x86_64-unknown-linux-gnu
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ startsWith(github.ref, 'refs/tags/') && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ startsWith(github.ref, 'refs/tags/') && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || '' }}
+        run: npx tauri build --target x86_64-unknown-linux-gnu --config '${{ needs.create-release.outputs.tauri_config }}'
 
       - uses: ./.github/actions/collect-tauri-artifacts
         with:
@@ -98,7 +122,10 @@ jobs:
 
       - name: Build Tauri app (Windows)
         working-directory: crates/libretune-app
-        run: npx tauri build --target x86_64-pc-windows-msvc
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ startsWith(github.ref, 'refs/tags/') && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ startsWith(github.ref, 'refs/tags/') && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || '' }}
+        run: npx tauri build --target x86_64-pc-windows-msvc --config '${{ needs.create-release.outputs.tauri_config }}'
 
       - uses: ./.github/actions/collect-tauri-artifacts
         with:
@@ -143,11 +170,17 @@ jobs:
 
       - name: Build Tauri app (macOS ARM)
         working-directory: crates/libretune-app
-        run: npx tauri build --target aarch64-apple-darwin
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ startsWith(github.ref, 'refs/tags/') && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ startsWith(github.ref, 'refs/tags/') && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || '' }}
+        run: npx tauri build --target aarch64-apple-darwin --config '${{ needs.create-release.outputs.tauri_config }}'
 
       - name: Build Tauri app (macOS Intel)
         working-directory: crates/libretune-app
-        run: npx tauri build --target x86_64-apple-darwin
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ startsWith(github.ref, 'refs/tags/') && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ startsWith(github.ref, 'refs/tags/') && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || '' }}
+        run: npx tauri build --target x86_64-apple-darwin --config '${{ needs.create-release.outputs.tauri_config }}'
 
       - uses: ./.github/actions/collect-tauri-artifacts
         with:
@@ -168,12 +201,78 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      - uses: actions/checkout@v5
+
       - name: Download all artifacts
         uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
         with:
           path: artifacts
           pattern: "*"
           merge-multiple: false
+
+      # The in-app updater reads releases/latest/download/latest.json. Build it
+      # from the .sig files the bundler emitted, and refuse to publish unless
+      # every platform's signature verifies against the public key the app
+      # ships with — a wrong key would otherwise only surface on users' machines.
+      - name: Build and verify updater manifest
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          TAG: ${{ needs.create-release.outputs.tag_name }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          sudo apt-get update -q && sudo apt-get install -y -q minisign
+          jq -r '.plugins.updater.pubkey' crates/libretune-app/src-tauri/tauri.conf.json \
+            | base64 -d > updater.pub
+
+          one() { # one <glob> → exactly one match or fail
+            local m=( $1 )
+            [ "${#m[@]}" -eq 1 ] || { echo "::error::expected one file for $1, got ${#m[@]}: ${m[*]:-none}"; exit 1; }
+            echo "${m[0]}"
+          }
+          # Verify one artifact and append its manifest entry. Runs as a plain
+          # top-level command so `set -e` sees every failure (a process
+          # substitution would not propagate one).
+          entry() { # entry <platform-key> <artifact>
+            local sig="$2.sig"
+            [ -f "$sig" ] || { echo "::error::missing signature $sig"; exit 1; }
+            base64 -d "$sig" > /tmp/sig.minisig
+            minisign -Vq -p updater.pub -x /tmp/sig.minisig -m "$2" \
+              || { echo "::error::signature of $2 does not verify against plugins.updater.pubkey"; exit 1; }
+            jq -n --arg k "$1" --arg sig "$(cat "$sig")" \
+              --arg url "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/download/${TAG}/$(basename "$2")" \
+              '{($k): {signature: $sig, url: $url}}' >> /tmp/platforms.jsonl
+          }
+
+          appimage="$(one 'artifacts/linux-x86_64/*.AppImage')"
+          deb="$(one 'artifacts/linux-x86_64/*.deb')"
+          nsis="$(one 'artifacts/windows-x86_64/*-setup.exe')"
+          msi="$(one 'artifacts/windows-x86_64/*.msi')"
+          mac_arm="$(one 'artifacts/macos-aarch64-x86_64/*_aarch64-apple-darwin.app.tar.gz')"
+          mac_x64="$(one 'artifacts/macos-aarch64-x86_64/*_x86_64-apple-darwin.app.tar.gz')"
+
+          # The plugin looks up "<target>-<arch>-<installer>" first and falls
+          # back to "<target>-<arch>", so a .deb install must not be handed an
+          # AppImage. Generic keys point at the documented default installer.
+          : > /tmp/platforms.jsonl
+          entry linux-x86_64-appimage "$appimage"
+          entry linux-x86_64-deb      "$deb"
+          entry linux-x86_64          "$appimage"
+          entry windows-x86_64-nsis   "$nsis"
+          entry windows-x86_64-msi    "$msi"
+          entry windows-x86_64        "$nsis"
+          entry darwin-aarch64        "$mac_arm"
+          entry darwin-x86_64         "$mac_x64"
+          [ "$(wc -l < /tmp/platforms.jsonl)" -eq 8 ] || { echo "::error::expected 8 platform entries"; exit 1; }
+
+          mkdir -p artifacts/updater
+          jq -n --arg version "${TAG#v}" --arg date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --arg notes "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/tag/${TAG}" \
+            --slurpfile p /tmp/platforms.jsonl \
+            '{version: $version, pub_date: $date, notes: $notes, platforms: ($p | add)}' \
+            > artifacts/updater/latest.json
+          jq -e '.platforms | length == 8' artifacts/updater/latest.json > /dev/null
+          cat artifacts/updater/latest.json
 
       - name: Get tag name
         id: tag
@@ -194,6 +293,7 @@ jobs:
             artifacts/linux-x86_64/**/*
             artifacts/windows-x86_64/**/*
             artifacts/macos-aarch64-x86_64/**/*
+            artifacts/updater/latest.json
           draft: false
           prerelease: false
           generate_release_notes: true
