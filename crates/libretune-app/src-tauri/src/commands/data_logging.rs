@@ -342,7 +342,7 @@ pub(crate) struct DatalogListing {
     pub modified: String,
 }
 
-/// List the CSVs in the current project's `datalogs/` folder, newest first.
+/// List the readable logs in the project's `datalogs/` folder, newest first.
 /// Returns an empty list when no project is open or the folder doesn't
 /// exist yet.
 pub(crate) async fn list_datalog_files(state: &AppState) -> Vec<DatalogListing> {
@@ -360,9 +360,8 @@ pub(crate) async fn list_datalog_files(state: &AppState) -> Vec<DatalogListing> 
         .flatten()
         .filter_map(|e| {
             let path = e.path();
-            if path.extension().and_then(|x| x.to_str())? != "csv" {
-                return None;
-            }
+            // Only formats the loader can read back are worth listing.
+            libretune_core::datalog::LogFormat::from_extension(&path)?;
             let meta = e.metadata().ok()?;
             let modified = meta
                 .modified()
@@ -410,7 +409,7 @@ pub(crate) async fn load_datalog_file(state: &AppState, name: &str) -> Result<Da
             .ok_or_else(|| "No project loaded".to_string())?
     };
     let path = dir.join(name);
-    let (channels, entries) = libretune_core::datalog::format::read_csv(&path)
+    let (channels, entries) = libretune_core::datalog::format::read_log(&path)
         .map_err(|e| format!("could not read log '{name}': {e}"))?;
     Ok(DatalogData {
         channels,

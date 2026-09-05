@@ -36,6 +36,19 @@ impl LogFormat {
     }
 }
 
+/// Read a saved log, choosing the reader from the file extension.
+pub fn read_log<P: AsRef<Path>>(path: P) -> io::Result<(Vec<String>, Vec<LogEntry>)> {
+    let path = path.as_ref();
+    match LogFormat::from_extension(path) {
+        Some(LogFormat::Csv) => read_csv(path),
+        Some(LogFormat::Mlg) => super::mlg::read_mlg(path),
+        None => Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("{} is not a log format LibreTune reads", path.display()),
+        )),
+    }
+}
+
 /// Write log entries to a CSV file
 #[allow(dead_code)]
 pub fn write_csv<P: AsRef<Path>>(
@@ -222,5 +235,48 @@ mod tests {
         let header_only = dir.path().join("header.csv");
         std::fs::write(&header_only, "Time,rpm\n").unwrap();
         assert!(read_csv(&header_only).is_err());
+    }
+    #[test]
+    fn read_log_picks_the_reader_from_the_extension() {
+        let dir = tempfile::tempdir().unwrap();
+        let csv = dir.path().join("log.csv");
+        std::fs::write(&csv, "Time,rpm\n0.0,900\n").unwrap();
+
+        let (channels, entries) = read_log(&csv).unwrap();
+
+        assert_eq!(channels, vec!["rpm"]);
+        assert_eq!(entries[0].values, vec![900.0]);
+    }
+
+    #[test]
+    fn read_log_rejects_an_extension_it_has_no_reader_for() {
+        let dir = tempfile::tempdir().unwrap();
+        // Readable CSV under a .msl name: read_csv would happily parse it, so
+        // the rejection can only come from the extension, not the content.
+        let path = dir.path().join("log.msl");
+        std::fs::write(&path, "Time,rpm\n0.0,900\n").unwrap();
+
+        let error = read_log(&path).unwrap_err();
+
+        assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+        assert!(
+            error.to_string().contains("not a log format"),
+            "expected the extension to be named as the reason, got: {error}"
+        );
+    }
+    #[test]
+    fn read_log_sends_mlg_files_to_the_mlg_reader() {
+        let dir = tempfile::tempdir().unwrap();
+        // CSV text under an .mlg name, long enough to reach the signature
+        // check: only the MLG reader rejects it, so this proves the dispatch.
+        let path = dir.path().join("log.mlg");
+        std::fs::write(&path, "Time,rpm\n0.0,900\n1.0,1000\n2.0,1100\n").unwrap();
+
+        let error = read_log(&path).unwrap_err();
+
+        assert!(
+            error.to_string().contains("signature"),
+            "expected the MLG reader to reject it, got: {error}"
+        );
     }
 }
