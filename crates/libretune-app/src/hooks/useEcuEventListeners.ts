@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -36,6 +36,20 @@ export function useEcuEventListeners(deps: UseEcuEventListenersDeps) {
     hideLoading,
   } = deps;
 
+  // `doSync`/`checkStatus`/`fetchConstants`/`fetchMenuTree` are plain
+  // (non-memoized) functions on the App side, recreated every render. Hold
+  // the latest ones in refs (mirroring useAutoConnect.ts) so the listener
+  // effects below don't need them in their deps and aren't torn down/
+  // re-registered on every render.
+  const doSyncRef = useRef(doSync);
+  doSyncRef.current = doSync;
+  const checkStatusRef = useRef(checkStatus);
+  checkStatusRef.current = checkStatus;
+  const fetchConstantsRef = useRef(fetchConstants);
+  fetchConstantsRef.current = fetchConstants;
+  const fetchMenuTreeRef = useRef(fetchMenuTree);
+  fetchMenuTreeRef.current = fetchMenuTree;
+
   // Update window title with project name
   useEffect(() => {
     const base = "LibreTune";
@@ -67,7 +81,7 @@ export function useEcuEventListeners(deps: UseEcuEventListenersDeps) {
           if (event.payload === "resync_required" && status.state === "Connected") {
             showLoading("Syncing with ECU...");
             try {
-              await doSync();
+              await doSyncRef.current();
             } finally {
               hideLoading();
             }
@@ -78,7 +92,7 @@ export function useEcuEventListeners(deps: UseEcuEventListenersDeps) {
       }
     })();
     return () => { if (unlisten) unlisten(); };
-  }, [status.state, showLoading, hideLoading, doSync]);
+  }, [status.state, showLoading, hideLoading]);
 
   // Listen for demo:changed events
   useEffect(() => {
@@ -88,9 +102,9 @@ export function useEcuEventListeners(deps: UseEcuEventListenersDeps) {
       try {
         unlistenDemo = await listen('demo:changed', async (event) => {
           try {
-            await checkStatus();
-            const values = await fetchConstants();
-            await fetchMenuTree(values);
+            await checkStatusRef.current();
+            const values = await fetchConstantsRef.current();
+            await fetchMenuTreeRef.current(values);
             const demoEnabled = Boolean(event.payload as unknown as boolean);
             if (demoEnabled) {
               try { await invoke('start_realtime_stream', { intervalMs: 50 }); } catch (e) { /* ignore */ }
@@ -106,5 +120,5 @@ export function useEcuEventListeners(deps: UseEcuEventListenersDeps) {
       }
     })();
     return () => { if (unlistenDemo) unlistenDemo(); };
-  }, [isTauri, checkStatus, fetchConstants, fetchMenuTree]);
+  }, [isTauri]);
 }

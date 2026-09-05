@@ -32,6 +32,10 @@ type TableOperationResult = {
   z_values: number[][];
 };
 
+/** Stable empty-array reference so TableGrid's memo doesn't see a "new" prop
+ * every render just because the trail is hidden. */
+const EMPTY_HISTORY_TRAIL: [number, number][] = [];
+
 /**
  * Props for the TableEditor2D component.
  */
@@ -157,14 +161,37 @@ export default function TableEditor2D({
   const [localZValues, setLocalZValuesState] = useState<number[][]>([...safeZValues]);
   const [localXBins, setLocalXBins] = useState<number[]>([...safeXBins]);
   const [localYBins, setLocalYBins] = useState<number[]>([...safeYBins]);
-  
+
+  // Resync local edit state when the underlying table data changes out from
+  // under us — e.g. a tune:loaded refresh (useTableCurveRefresh) or this same
+  // mounted instance being reused for a different table/tune. Mirrors
+  // CurveEditor.tsx's equivalent effect. Without this, this component had no
+  // way to pick up new props once mounted (unless the caller happened to
+  // remount it via a changing `key`).
+  useEffect(() => {
+    if (hasValidData) {
+      setLocalZValuesState(z_values.map(row => [...row]));
+      setLocalXBins([...x_bins]);
+      setLocalYBins([...y_bins]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasValidData, z_values, x_bins, y_bins]);
+
   const [selectionRange, setSelectionRange] = useState<SelectionRange | null>(null);
   const [lockedCells, setLockedCells] = useState<Set<string>>(new Set());
   const [historyTrail, setHistoryTrail] = useState<[number, number, number][]>([]);
   const [showColorShade, setShowColorShade] = useState(true);
   const [showHistoryTrail, setShowHistoryTrail] = useState(true);
   const [show3D, setShow3D] = useState(false);
-  
+
+  // Memoized so TableGrid (React.memo'd) doesn't see a new array reference —
+  // and re-render every cell — on renders where the trail itself hasn't
+  // changed (e.g. an unrelated realtime tick).
+  const visibleHistoryTrail = useMemo<[number, number][]>(
+    () => (showHistoryTrail ? historyTrail.map(([x, y]) => [x, y] as [number, number]) : EMPTY_HISTORY_TRAIL),
+    [showHistoryTrail, historyTrail]
+  );
+
   // History Stack
   type HistorySnapshot = {
     z: number[][];
@@ -698,7 +725,10 @@ export default function TableEditor2D({
     setActiveCell([newX, newY]);
   };
 
-  const handleCellChange = (
+  // Memoized (React.memo'd TableGrid relies on these staying referentially
+  // stable across renders that don't actually change table state — e.g. a
+  // realtime tick unrelated to this table — otherwise memo does nothing).
+  const handleCellChange = useCallback((
     x: number,
     y: number,
     value: number,
@@ -707,7 +737,7 @@ export default function TableEditor2D({
     const prevValue = localZValues[y][x];
     const newValues = localZValues.map(row => [...row]);
     newValues[y][x] = value;
-    
+
     setLocalZValues(newValues);
     setSelectionRange({ start: [x,y], end: [x,y] });
     pushHistory(newValues, localXBins, localYBins);
@@ -716,9 +746,9 @@ export default function TableEditor2D({
     if (!options?.suppressAlert) {
       warnIfLargeChange(prevValue, value, options?.operation ?? 'Cell edit');
     }
-  };
+  }, [localZValues, localXBins, localYBins, setLocalZValues, pushHistory, onValuesChange, warnIfLargeChange]);
 
-  const handleAxisChange = (axis: 'x' | 'y', index: number, value: number) => {
+  const handleAxisChange = useCallback((axis: 'x' | 'y', index: number, value: number) => {
     if (axis === 'x') {
       const newBins = [...localXBins];
       newBins[index] = value;
@@ -732,7 +762,7 @@ export default function TableEditor2D({
       setRebinDialog(prev => ({ ...prev, newYBins: newBins }));
       pushHistory(localZValues, localXBins, newBins);
     }
-  };
+  }, [localXBins, localYBins, localZValues, pushHistory]);
 
   // TunerStudio-compatible .table file import/export for this one table.
   // import_table_from_file already writes the result to the tune/ECU cache
@@ -1065,14 +1095,14 @@ export default function TableEditor2D({
     handleCellChange(cellEditDialog.col, cellEditDialog.row, value, { operation: 'Cell edit' });
   };
 
-  const handleCellDoubleClick = (x: number, y: number) => {
+  const handleCellDoubleClick = useCallback((x: number, y: number) => {
     setCellEditDialog({
       show: true,
       row: y,
       col: x,
       value: localZValues[y][x],
     });
-  };
+  }, [localZValues]);
 
   const handleCopy = async () => {
     if (!selectionRange) return;
@@ -1207,7 +1237,7 @@ export default function TableEditor2D({
     }
   };
 
-  const handleCellLock = (x: number, y: number, locked: boolean) => {
+  const handleCellLock = useCallback((x: number, y: number, locked: boolean) => {
     const key = `${x},${y}`;
     const newLocked = new Set(lockedCells);
     if (locked) {
@@ -1216,15 +1246,15 @@ export default function TableEditor2D({
       newLocked.delete(key);
     }
     setLockedCells(newLocked);
-  };
+  }, [lockedCells]);
 
-  const handleSelectionChange = (range: SelectionRange | null) => {
+  const handleSelectionChange = useCallback((range: SelectionRange | null) => {
     setSelectionRange(range);
     if (range) {
       setActiveCell(range.end);
       setContextMenu({ visible: false, x: 0, y: 0, value: 0 });
     }
-  };
+  }, []);
 
   /**
    * Explicit re-send. Edits already persist as they are made, so this is now a
@@ -1455,7 +1485,7 @@ export default function TableEditor2D({
           selectionRange={selectionRange}
           onSelectionChange={handleSelectionChange}
           onCellDoubleClick={handleCellDoubleClick}
-          historyTrail={showHistoryTrail ? historyTrail.map(([x, y]) => [x, y] as [number, number]) : []}
+          historyTrail={visibleHistoryTrail}
           lockedCells={lockedCells}
           onCellLock={handleCellLock}
           // Live cursor - maps realtime values to table position

@@ -171,7 +171,13 @@ export const DatalogViewer: React.FC<DatalogViewerProps> = ({ tableName, isConne
       // Timestamps are re-based: an .msl exported from a longer recording
       // carries offsets from the original, which would put every sample in one
       // validation block.
-      const t0 = Math.min(...samples.map((s) => s.x));
+      // A plain loop (not Math.min(...samples.map(...))) avoids both the
+      // intermediate array and the call-stack overflow that a large spread
+      // would cause once a log has more than ~110k samples.
+      let t0 = Infinity;
+      for (const s of samples) {
+        if (s.x < t0) t0 = s.x;
+      }
       const report = await invoke<ReplayReport>('analyse_log', {
         tableName: table,
         log: {

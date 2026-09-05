@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
 import type { SignatureMismatchInfo } from "../components/dialogs/SignatureMismatchDialog";
 import type { TuneMismatchInfo } from "../components/dialogs/TuneMismatchDialog";
@@ -26,6 +26,13 @@ export function useBackendEventListeners(deps: BackendEventListenerDeps): void {
     setTuneMismatchOpen,
     checkStatus,
   } = deps;
+
+  // `checkStatus` is a plain (non-memoized) function on the App side that is
+  // recreated every render. Hold the latest one in a ref (mirroring
+  // useAutoConnect.ts) so the definition:loaded listener effect below doesn't
+  // need it in its deps and isn't torn down/re-registered on every render.
+  const checkStatusRef = useRef(checkStatus);
+  checkStatusRef.current = checkStatus;
 
   // Listen for signature mismatch events
   useEffect(() => {
@@ -77,7 +84,7 @@ export function useBackendEventListeners(deps: BackendEventListenerDeps): void {
           constants: number;
         }>("definition:loaded", (event) => {
           console.log("[App] definition:loaded event:", event.payload);
-          checkStatus();
+          checkStatusRef.current();
         });
       } catch (e) {
         console.error("Failed to listen for definition:loaded events:", e);
@@ -86,7 +93,7 @@ export function useBackendEventListeners(deps: BackendEventListenerDeps): void {
     return () => {
       if (unlisten) unlisten();
     };
-  }, [checkStatus]);
+  }, []);
 
   // Listen for tune mismatch events (after ECU sync)
   useEffect(() => {

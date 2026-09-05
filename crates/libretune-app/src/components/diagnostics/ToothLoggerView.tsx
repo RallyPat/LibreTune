@@ -12,6 +12,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useToast } from "../../contexts/ToastContext";
 import type { CurrentProject } from "../../types/app";
+import { minMax } from "../../utils/minMax";
 import "./ToothLoggerView.css";
 
 interface ToothLogEntry {
@@ -162,10 +163,13 @@ export const ToothLoggerView: React.FC<ToothLoggerViewProps> = ({ onClose }) => 
     ctx.fillStyle = "#1a1a2e";
     ctx.fillRect(0, 0, width, height);
 
-    // Find min/max tooth times for scaling
+    // Find min/max tooth times for scaling. logData can hold up to
+    // MAX_POINTS (20,000) entries, so a spread into Math.min/max is avoided
+    // in favor of a single-pass helper.
     const times = logData.map((t) => t.tooth_time_us);
-    const minTime = Math.min(...times) * 0.9;
-    const maxTime = Math.max(...times) * 1.1;
+    const { min: rawMinTime, max: rawMaxTime } = minMax(times);
+    const minTime = rawMinTime * 0.9;
+    const maxTime = rawMaxTime * 1.1;
     const timeRange = maxTime - minTime;
 
     // Calculate average time for reference line
@@ -350,8 +354,7 @@ export const ToothLoggerView: React.FC<ToothLoggerViewProps> = ({ onClose }) => 
     const avg = times.reduce((a, b) => a + b, 0) / times.length;
     const variance = times.reduce((sum, t) => sum + Math.pow(t - avg, 2), 0) / times.length;
     const stdDev = Math.sqrt(variance);
-    const min = Math.min(...times);
-    const max = Math.max(...times);
+    const { min, max } = minMax(times);
 
     // Detect missing tooth (should be ~2x average)
     const missingToothIndex = times.findIndex((t) => t > avg * 1.8);

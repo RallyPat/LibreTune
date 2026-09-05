@@ -227,16 +227,14 @@ export const RecursivePanel = memo(function RecursivePanel({
         y_output_channel={tableData.y_output_channel}
         embedded={true}
         onOpenInTab={() => openTable(name)}
-        onValuesChange={(values) => {
-          // Save changes to backend
-          invoke('update_table_data', {
-            tableName: tableData.name,
-            zValues: values,
-          }).then(() => {
-            onUpdate?.();
-          }).catch((err) => {
-            console.error('Failed to update table:', err);
-          });
+        onValuesChange={() => {
+          // TableEditor2D's setLocalZValues already persists every edit via
+          // `update_table_data` (it must, since it can be shown embedded here
+          // or standalone in a tab). Calling invoke again here just for the
+          // embedded case duplicated the backend write per cell edit; this
+          // callback only needs to notify the panel to refresh (e.g. re-fetch
+          // dependent state), not save again.
+          onUpdate?.();
         }}
       />
     );

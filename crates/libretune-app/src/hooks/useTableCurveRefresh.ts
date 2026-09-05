@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
 import {
@@ -25,7 +25,28 @@ export interface UseTableCurveRefreshDeps {
 export function useTableCurveRefresh(deps: UseTableCurveRefreshDeps) {
   const { tabs, tabContents, setTabContents, activeTabId } = deps;
 
-  // Listen for tune loaded events to refresh ALL open tables/curves
+  // Keep the latest tabs/tabContents in refs so the tune:loaded listener
+  // can read fresh values without needing to be torn down and
+  // re-registered on every table/curve edit (which re-runs the effect
+  // below on every keystroke otherwise).
+  const tabsRef = useRef(tabs);
+  const tabContentsRef = useRef(tabContents);
+  useEffect(() => {
+    tabsRef.current = tabs;
+  }, [tabs]);
+  useEffect(() => {
+    tabContentsRef.current = tabContents;
+  }, [tabContents]);
+
+  const setTabContentsRef = useRef(setTabContents);
+  useEffect(() => {
+    setTabContentsRef.current = setTabContents;
+  }, [setTabContents]);
+
+  // Listen for tune loaded events to refresh ALL open tables/curves.
+  // Registered once (empty deps) and reads the latest tabs/tabContents
+  // via refs, so table/curve edits don't tear down and re-subscribe
+  // this Tauri IPC listener.
   useEffect(() => {
     let unlisten: UnlistenFn | null = null;
 
@@ -34,6 +55,9 @@ export function useTableCurveRefresh(deps: UseTableCurveRefreshDeps) {
         unlisten = await listen<string>("tune:loaded", async (event) => {
           console.log("Tune loaded from:", event.payload);
           await new Promise(resolve => setTimeout(resolve, 50));
+
+          const tabs = tabsRef.current;
+          const tabContents = tabContentsRef.current;
 
           const tablesToRefresh: string[] = [];
           const curvesToRefresh: string[] = [];
@@ -73,7 +97,7 @@ export function useTableCurveRefresh(deps: UseTableCurveRefreshDeps) {
               })
             ]);
 
-            setTabContents(updatedTabs);
+            setTabContentsRef.current(updatedTabs);
             console.log(`[tune:loaded] ✓ Completed refreshing ${totalToRefresh} item(s)`);
           } else {
             console.log("[tune:loaded] No open tables or curves to refresh");
@@ -87,7 +111,7 @@ export function useTableCurveRefresh(deps: UseTableCurveRefreshDeps) {
     return () => {
       if (unlisten) unlisten();
     };
-  }, [tabs, tabContents, setTabContents]);
+  }, []);
 
   // Refresh table/curve data when its tab is activated
   useEffect(() => {
