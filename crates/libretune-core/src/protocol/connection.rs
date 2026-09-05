@@ -4252,7 +4252,10 @@ mod tests {
         assert_eq!(addr.port(), 29001);
         assert!(addr.ip().is_loopback());
 
-        let err = resolve_tcp_addr("", 29001).expect_err("an empty host cannot resolve");
+        // `.invalid` is reserved (RFC 2606) and never resolves; an empty host
+        // is not a portable failure case (Windows resolves it to localhost).
+        let err = resolve_tcp_addr("libretune.invalid", 29001)
+            .expect_err("a reserved .invalid host cannot resolve");
         assert!(matches!(err, ProtocolError::ConnectionFailed(_)), "{err:?}");
     }
 }
