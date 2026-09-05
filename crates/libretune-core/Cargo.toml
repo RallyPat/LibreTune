@@ -78,6 +78,10 @@ serial_test = "3.2.0"
 tempfile = "3.24.0"
 tokio = { workspace = true, features = ["test-util", "macros"] }
 tracing-subscriber = { workspace = true }
+# WAT text-format assembler, used to build tiny hand-written WASM modules for
+# plugin_system sandbox tests (e.g. an infinite-loop guest). Already pulled
+# in transitively by wasmtime, so this adds no new dependency.
+wat = "1.255.0"
 
 [package.metadata.docs.rs]
 all-features = true
