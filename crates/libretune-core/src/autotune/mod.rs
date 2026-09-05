@@ -25,7 +25,7 @@ pub mod replay;
 use crate::ini::{EcuDefinition, TableRole};
 use evalexpr::{eval_with_context, ContextWithMutableVariables, HashMapContext, Value};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// Why `table_name` must not be fuel-tuned, or `None` if it may be.
 ///
@@ -452,7 +452,13 @@ pub struct AutoTuneReferenceTables {
 #[derive(Debug)]
 pub struct AutoTuneState {
     pub is_running: bool,
-    pub locked_cells: Vec<(usize, usize)>,
+    /// A set, not a list: the UI resends the *whole* current selection on
+    /// every Lock click, so a `Vec` accumulated the same cell once per click
+    /// and `unlock_cells` - which removed a single match - left the backend
+    /// silently skipping a cell the frontend showed as unlocked. Set
+    /// semantics fix that, bound the growth, and make `is_cell_locked` (called
+    /// per accepted sample) constant-time instead of a linear scan.
+    pub locked_cells: HashSet<(usize, usize)>,
     pub recommendations: HashMap<(usize, usize), AutoTuneRecommendation>,
     // Lambda delay buffer - stores recent data points for delayed correlation
     data_buffer: std::collections::VecDeque<VEDataPoint>,
@@ -488,7 +494,7 @@ impl Default for AutoTuneState {
     fn default() -> Self {
         Self {
             is_running: false,
-            locked_cells: Vec::new(),
+            locked_cells: HashSet::new(),
             recommendations: HashMap::new(),
             data_buffer: std::collections::VecDeque::new(),
             buffer_max_age_ms: 500, // Keep 500ms of data for lambda delay correlation
@@ -662,9 +668,7 @@ impl AutoTuneState {
 
     pub fn unlock_cells(&mut self, cells: Vec<(usize, usize)>) {
         for cell in cells {
-            if let Some(pos) = self.locked_cells.iter().position(|c| c == &cell) {
-                self.locked_cells.remove(pos);
-            }
+            self.locked_cells.remove(&cell);
         }
     }
 
@@ -1184,15 +1188,32 @@ impl AutoTuneState {
     ) -> f64 {
         let delta = recommended_value - beginning_value;
 
-        // Clamp by absolute value change
-        let clamped_delta = delta.clamp(
-            -authority.max_cell_value_change,
-            authority.max_cell_value_change,
-        );
+        // Both limits are magnitudes, so take them as such rather than
+        // trusting the sign: `f64::clamp` panics when `lo > hi`, and a
+        // negative limit is exactly what the UI sends when a tuner types "-5"
+        // into a `<input type="number">` that carries no `min`. Same reasoning
+        // as `clamp_to_rails`, which orders its pair for the same reason - but
+        // here the panic lands on the *first* accepted sample, inside the
+        // spawned realtime-stream task, which then dies with the gauges frozen
+        // and nothing surfaced to the user.
+        let max_abs_delta = authority.max_cell_value_change.abs();
+        let clamped_delta = if max_abs_delta.is_finite() {
+            delta.clamp(-max_abs_delta, max_abs_delta)
+        } else {
+            delta
+        };
 
-        // Clamp by percentage change
-        let max_pct_delta = beginning_value * (authority.max_cell_percentage_change / 100.0);
-        let final_delta = clamped_delta.clamp(-max_pct_delta, max_pct_delta);
+        // Clamp by percentage change. A non-finite `beginning_value` reaches
+        // here from the replay path (`LogChannels::point` passes a parsed NaN
+        // VE straight through), and `NaN <= NaN` is false, so the clamp would
+        // panic rather than propagate.
+        let max_pct_delta =
+            (beginning_value * (authority.max_cell_percentage_change / 100.0)).abs();
+        let final_delta = if max_pct_delta.is_finite() {
+            clamped_delta.clamp(-max_pct_delta, max_pct_delta)
+        } else {
+            clamped_delta
+        };
 
         // Absolute rails last, so they bound the result no matter what the two
         // relative clamps allowed. Both of those are measured from
@@ -1214,6 +1235,22 @@ impl AutoTuneState {
             return Some(i);
         }
 
+        // Reject samples that fall outside the axis rather than pinning them to
+        // the nearest end bin. `axis_weight` deliberately hands an edge cell's
+        // sample full weight (there is no neighbour to share with), so an
+        // out-of-range sample used to vote at weight 1.0 in a cell it was never
+        // in - the exact over-weighting `HitWeighting` exists to remove. The
+        // defaults make it the normal case: `max_rpm` is 7000 while plenty of
+        // rpm axes stop at 6000, and `max_y_axis` is `None`, so every boost
+        // sample above the top load bin landed in the top row.
+        //
+        // "Outside" means further than half the adjacent bin span past the
+        // first/last bin, which is the same half-way rule that decides
+        // ownership between two interior bins.
+        if !Self::is_within_axis(value, bins) {
+            return None;
+        }
+
         bins.iter()
             .enumerate()
             .min_by(|(_, a), (_, b)| {
@@ -1222,6 +1259,33 @@ impl AutoTuneState {
                 da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
             })
             .map(|(i, _)| i)
+    }
+
+    /// Whether `value` is close enough to the axis to belong to one of its
+    /// bins. A single-bin axis has no span to reason about, so it accepts
+    /// everything, as it did before.
+    fn is_within_axis(value: f64, bins: &[f64]) -> bool {
+        let (Some(&first), Some(&last)) = (bins.first(), bins.last()) else {
+            return false;
+        };
+        if bins.len() < 2 {
+            return true;
+        }
+        // Axes are ascending in practice, but a descending one costs nothing
+        // to support and would otherwise reject every sample.
+        let (lo, lo_next) = if first <= last {
+            (first, bins[1])
+        } else {
+            (last, bins[bins.len() - 2])
+        };
+        let (hi, hi_prev) = if first <= last {
+            (last, bins[bins.len() - 2])
+        } else {
+            (first, bins[1])
+        };
+        let lo_margin = (lo_next - lo).abs() / 2.0;
+        let hi_margin = (hi - hi_prev).abs() / 2.0;
+        value >= lo - lo_margin && value <= hi + hi_margin
     }
 
     fn evaluate_custom_filter(&self, expr: &str, point: &VEDataPoint) -> Result<bool, String> {
@@ -2722,5 +2786,111 @@ mod weighting_approach_tests {
                 "{w:?} discounted a sample taken exactly at the cell centre"
             );
         }
+    }
+}
+
+/// Regressions for the 2026-09-05 audit findings that live in this module:
+/// authority-limit clamp ordering, `lock_cells` duplication and the missing
+/// axis range check in `find_bin_index`.
+#[cfg(test)]
+mod audit_regression_tests {
+    use super::*;
+
+    fn rails() -> AutoTuneAuthorityLimits {
+        AutoTuneAuthorityLimits {
+            max_cell_value_change: 10.0,
+            max_cell_percentage_change: 20.0,
+            min_cell_value: 0.0,
+            max_cell_value: 200.0,
+        }
+    }
+
+    /// `Max Change/Cell` is a bare `<input type="number">` with no `min`, so a
+    /// typed "-5" reaches this function verbatim. `f64::clamp` panics when
+    /// `lo > hi`, and this runs on the *first* accepted sample inside the
+    /// spawned realtime-stream task — which dies silently, freezing the gauges
+    /// with no error surfaced anywhere.
+    #[test]
+    fn a_negative_authority_limit_clamps_instead_of_panicking() {
+        let authority = AutoTuneAuthorityLimits {
+            max_cell_value_change: -5.0,
+            ..rails()
+        };
+        let got = AutoTuneState::apply_authority_limits(50.0, 55.0, &authority);
+        assert!(
+            (got - 55.0).abs() < 1e-9,
+            "a -5 limit must behave as a 5 limit, got {got}"
+        );
+
+        let authority = AutoTuneAuthorityLimits {
+            max_cell_percentage_change: -20.0,
+            ..rails()
+        };
+        let got = AutoTuneState::apply_authority_limits(50.0, 58.0, &authority);
+        assert!(
+            (got - 58.0).abs() < 1e-9,
+            "a -20% limit must behave as a 20% limit, got {got}"
+        );
+    }
+
+    /// The replay path parses a VE straight out of the log, so a `NaN` cell
+    /// value reaches here unfiltered. `NaN * 0.2` is `NaN`, and
+    /// `clamp(-NaN, NaN)` fails the `min <= max` assertion.
+    #[test]
+    fn a_non_finite_beginning_value_does_not_panic() {
+        for begin in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let got = AutoTuneState::apply_authority_limits(begin, 55.0, &rails());
+            assert!(
+                got.is_finite() || got.is_nan(),
+                "must return, not panic (begin={begin}, got={got})"
+            );
+        }
+    }
+
+    /// The UI sends the *current selection* on every Lock click, so locking A,
+    /// extending the selection to A+B and locking again stores A twice.
+    /// `unlock_cells` removed only the first match, leaving the backend
+    /// silently skipping a cell the frontend shows as unlocked.
+    #[test]
+    fn locking_a_cell_twice_still_unlocks_it_in_one_call() {
+        let mut state = AutoTuneState::new();
+        state.lock_cells(vec![(1, 2)]);
+        state.lock_cells(vec![(1, 2), (3, 4)]);
+        assert!(state.is_cell_locked(1, 2));
+
+        state.unlock_cells(vec![(1, 2)]);
+        assert!(
+            !state.is_cell_locked(1, 2),
+            "one unlock must undo any number of locks of the same cell"
+        );
+        assert!(state.is_cell_locked(3, 4), "unrelated locks must survive");
+    }
+
+    /// `find_bin_index` fell through to a nearest-bin search with no range
+    /// check, so a sample far outside the axis landed in the edge cell — and
+    /// `axis_weight` hands an edge cell's sample full weight, which is exactly
+    /// the over-weighting `HitWeighting` exists to remove. The default
+    /// `max_rpm` of 7000 on a 6000-rpm axis makes this the normal case.
+    #[test]
+    fn a_sample_far_outside_the_axis_gets_no_bin() {
+        let state = AutoTuneState::new();
+        let rpm = [1000.0, 2000.0, 3000.0, 4000.0, 5000.0, 6000.0];
+
+        assert_eq!(
+            state.find_bin_index(7000.0, &rpm),
+            None,
+            "1000 rpm past 6000"
+        );
+        assert_eq!(
+            state.find_bin_index(300.0, &rpm),
+            None,
+            "700 rpm below 1000"
+        );
+
+        // Within half the adjacent bin span the sample is genuinely the edge
+        // cell's, and rejecting it would discard the ends of the map.
+        assert_eq!(state.find_bin_index(6400.0, &rpm), Some(5));
+        assert_eq!(state.find_bin_index(600.0, &rpm), Some(0));
+        assert_eq!(state.find_bin_index(3400.0, &rpm), Some(2));
     }
 }

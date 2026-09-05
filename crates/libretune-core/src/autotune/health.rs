@@ -324,7 +324,15 @@ impl HealthScorer {
         let cruise_col_start = (idle_col_end + 1).min(cols - 1);
         let cruise_col_end = wot_col_start.saturating_sub(1).max(cruise_col_start);
         let cruise_row_start = (idle_row_end + 1).min(rows - 1);
-        let cruise_row_end = wot_row_start.saturating_sub(1).max(cruise_row_start);
+        // Do NOT clamp the end upward to meet the start. WOT owns every column
+        // from `wot_row_start` down, so raising the end to `cruise_row_start`
+        // when WOT begins at or below it tiles that row twice - and
+        // `overall_score` is a cell-count-weighted average, so every cell in
+        // the row is counted twice. On a boosted 20-250 kPa axis that is the
+        // ordinary case: the 0.3 idle fraction ends idle at row 4 and the
+        // 90 kPa absolute WOT threshold starts WOT at row 5. When the band is
+        // empty the region is simply not emitted; the rows are WOT's.
+        let cruise_row_end = wot_row_start.saturating_sub(1);
 
         if cruise_col_end >= cruise_col_start && cruise_row_end >= cruise_row_start {
             regions.push((
@@ -372,7 +380,8 @@ impl HealthScorer {
         // Cruise, or WOT rectangles so regions don't double-score the same
         // cells. Left slice = low-RPM/high-load, right slice = high-RPM/mid-load.
         let pt_row_start = (idle_row_end + 1).min(rows - 1);
-        let pt_row_end = wot_row_start.saturating_sub(1).max(pt_row_start);
+        // Same reasoning as `cruise_row_end` above.
+        let pt_row_end = wot_row_start.saturating_sub(1);
         if pt_row_end >= pt_row_start {
             if idle_col_end > 0 {
                 regions.push((
@@ -656,9 +665,9 @@ mod tests {
 
         let mut covered = vec![vec![0u32; cols]; rows];
         for (_, _, (r0, r1), (c0, c1)) in &regions {
-            for r in *r0..=*r1 {
-                for c in *c0..=*c1 {
-                    covered[r][c] += 1;
+            for row in covered.iter_mut().take(r1 + 1).skip(*r0) {
+                for cell in row.iter_mut().take(c1 + 1).skip(*c0) {
+                    *cell += 1;
                 }
             }
         }
@@ -827,9 +836,9 @@ mod tests {
             })
             .collect();
         // Inject a checkerboard wave (+/-5) on top of the planar ramp.
-        for r in 0..8 {
-            for c in 0..8 {
-                table[r][c] += if (r + c) % 2 == 0 { 5.0 } else { -5.0 };
+        for (r, row) in table.iter_mut().enumerate() {
+            for (c, cell) in row.iter_mut().enumerate() {
+                *cell += if (r + c) % 2 == 0 { 5.0 } else { -5.0 };
             }
         }
 
@@ -856,9 +865,10 @@ mod tests {
     fn test_monotonicity_floor_ignores_low_load() {
         // Bug #10: a VE drop below the configured load floor should not tank
         // the monotonicity score, but a drop above the floor should.
-        let mut config = HealthConfig::default();
-        config.monotonicity_load_floor_kpa = 35.0;
-        let scorer = HealthScorer::new(config);
+        let scorer = HealthScorer::new(HealthConfig {
+            monotonicity_load_floor_kpa: 35.0,
+            ..HealthConfig::default()
+        });
 
         // 8 load rows: 20..100 kPa. Cruise region covers rows with load >= 35.
         // Drop at row 5 (load 70 kPa, above floor); small drop at row 1 (load
@@ -970,5 +980,56 @@ mod tests {
                 cruise.row_range
             );
         }
+    }
+}
+
+/// Regression for the 2026-09-05 audit finding that the Cruise and
+/// Part-Throttle bands are clamped upward past the start of WOT.
+#[cfg(test)]
+mod audit_regression_tests {
+    use super::*;
+
+    /// `cruise_row_end`/`pt_row_end` were `wot_row_start - 1` clamped *up* to
+    /// the band start, so whenever WOT begins at or below the first non-idle
+    /// row the band swallows `wot_row_start` itself. WOT spans every column
+    /// from that row down, so the whole row is tiled twice and every cell in it
+    /// is counted twice by the cell-count-weighted `overall_score`.
+    ///
+    /// A 20–250 kPa boosted axis is the ordinary trigger: the 0.3 idle fraction
+    /// puts `idle_row_end` at row 4 and the 90 kPa absolute WOT threshold puts
+    /// `wot_row_start` at row 5, i.e. exactly the first cruise row.
+    #[test]
+    fn regions_tile_a_boosted_load_axis_exactly_once() {
+        let scorer = HealthScorer::new(HealthConfig::default());
+        let (rows, cols) = (16, 16);
+        let x_bins: Vec<f64> = (0..cols).map(|i| 500.0 + i as f64 * 500.0).collect();
+        let y_bins: Vec<f64> = (0..rows)
+            .map(|i| 20.0 + i as f64 * (230.0 / (rows - 1) as f64))
+            .collect();
+
+        let regions = scorer.define_regions(&x_bins, &y_bins, rows, cols);
+
+        let mut covered = vec![vec![0u32; cols]; rows];
+        for (_, _, (r0, r1), (c0, c1)) in &regions {
+            for row in covered.iter_mut().take(r1 + 1).skip(*r0) {
+                for cell in row.iter_mut().take(c1 + 1).skip(*c0) {
+                    *cell += 1;
+                }
+            }
+        }
+
+        let wrong: Vec<(usize, usize, u32)> = (0..rows)
+            .flat_map(|r| (0..cols).map(move |c| (r, c)))
+            .map(|(r, c)| (r, c, covered[r][c]))
+            .filter(|(_, _, n)| *n != 1)
+            .collect();
+
+        assert!(
+            wrong.is_empty(),
+            "{} of {} cells are not tiled exactly once (e.g. {:?})",
+            wrong.len(),
+            rows * cols,
+            &wrong[..wrong.len().min(6)]
+        );
     }
 }
