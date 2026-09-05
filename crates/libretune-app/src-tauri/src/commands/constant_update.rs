@@ -212,9 +212,12 @@ pub(crate) async fn update_constant_internal(
                 offset: read_offset,
                 data: existing_bytes,
             };
-            if let Err(e) = conn.write_memory(params) {
-                eprintln!("[WARN] Failed to write bits constant to ECU: {}", e);
-            }
+            // A failed ECU write must not report success: the cache,
+            // `current_tune` and `tune_modified` are already committed here, so
+            // swallowing the error leaves the app's copy silently diverged from
+            // the ECU. Offline editing is the `conn_guard == None` case, not this.
+            conn.write_memory(params)
+                .map_err(|e| format!("Failed to write bits constant '{name}' to ECU: {e}"))?;
         }
 
         eprintln!(
@@ -269,10 +272,12 @@ pub(crate) async fn update_constant_internal(
             data: raw_data.clone(),
         };
 
-        // Don't fail if ECU write fails - offline mode should still work
-        if let Err(e) = conn.write_memory(params) {
-            eprintln!("[WARN] Failed to write to ECU (offline mode?): {}", e);
-        }
+        // Offline mode is the `conn_guard == None` case above. Once a
+        // connection exists, a failed write is a real failure: the cache and
+        // `current_tune` already hold the new value, so returning Ok here would
+        // leave the app showing a value the ECU never took.
+        conn.write_memory(params)
+            .map_err(|e| format!("Failed to write constant '{name}' to ECU: {e}"))?;
     }
 
     Ok(())

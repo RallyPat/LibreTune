@@ -88,7 +88,7 @@ export const ActionRecorder: React.FC<ActionRecorderProps> = ({ isOpen, onClose 
       }).catch(() => null);
       
       if (filePath) {
-        await invoke('write_text_file', { path: filePath, content: json });
+        await invoke('write_file_contents', { path: filePath, content: json });
         console.log('Action set exported to:', filePath);
       }
     } catch (err) {
@@ -103,7 +103,7 @@ export const ActionRecorder: React.FC<ActionRecorderProps> = ({ isOpen, onClose 
       }).catch(() => null);
       
       if (filePath) {
-        const content = await invoke('read_text_file', { path: filePath });
+        const content = await invoke('read_file_contents', { path: filePath });
         const set = JSON.parse(content as string) as ActionSet;
         setActionSets([...actionSets, set]);
         console.log('Action set imported:', set.name);
