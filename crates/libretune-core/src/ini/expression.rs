@@ -95,10 +95,22 @@ pub enum Expr {
     FunctionCall(String, Vec<Expr>), // function name, arguments
 }
 
+/// Maximum nesting depth the expression parser will follow.
+///
+/// `parse_primary` recurses on every `(`, ternary arm and function argument,
+/// so INI text alone could drive the parser off the end of the stack. The AST
+/// `evaluate` walks can be no deeper than what the parser accepted, so this
+/// bounds evaluation too. Real INI expressions nest a handful of levels.
+const MAX_PARSE_DEPTH: usize = 64;
+
 /// Parser for expressions
 pub struct Parser<'a> {
     tokens: Vec<Token>,
     pos: usize,
+    depth: usize,
+    /// Set when the lexer met something it could not represent. Reported from
+    /// [`Parser::parse`] so `Parser::new` keeps its infallible signature.
+    lex_error: Option<String>,
     _input: &'a str,
 }
 
@@ -136,26 +148,62 @@ enum Token {
 
 impl<'a> Parser<'a> {
     pub fn new(input: &'a str) -> Self {
-        let tokens = lex(input);
+        let (tokens, lex_error) = match lex(input) {
+            Ok(tokens) => (tokens, None),
+            Err(e) => (Vec::new(), Some(e)),
+        };
         Self {
             tokens,
             pos: 0,
+            depth: 0,
+            lex_error,
             _input: input,
         }
     }
 
+    /// Parse the whole input.
+    ///
+    /// Errors if the lexer met an unrepresentable character or if any tokens
+    /// are left over: `parse` used to return whatever prefix it understood and
+    /// drop the rest, so `mapValue * 1e3` silently evaluated as `mapValue * 1`.
     pub fn parse(&mut self) -> Result<Expr, String> {
-        self.parse_conditional()
+        if let Some(e) = &self.lex_error {
+            return Err(e.clone());
+        }
+        let expr = self.parse_expr()?;
+        if self.pos != self.tokens.len() {
+            return Err(format!(
+                "Unexpected trailing input after expression (token {} of {})",
+                self.pos + 1,
+                self.tokens.len()
+            ));
+        }
+        Ok(expr)
+    }
+
+    /// One expression, without the end-of-input check - the recursion entry
+    /// point used by parentheses, ternary arms and function arguments.
+    fn parse_expr(&mut self) -> Result<Expr, String> {
+        self.depth += 1;
+        if self.depth > MAX_PARSE_DEPTH {
+            self.depth -= 1;
+            return Err(format!(
+                "Expression nested deeper than {MAX_PARSE_DEPTH} levels"
+            ));
+        }
+        let result = self.parse_conditional();
+        self.depth -= 1;
+        result
     }
 
     fn parse_conditional(&mut self) -> Result<Expr, String> {
         let node = self.parse_logical_or()?;
         if self.match_token(Token::Question) {
-            let true_expr = self.parse()?;
+            let true_expr = self.parse_expr()?;
             if !self.match_token(Token::Colon) {
                 return Err("Expected ':' in ternary expression".to_string());
             }
-            let false_expr = self.parse()?;
+            let false_expr = self.parse_expr()?;
             Ok(Expr::Ternary(
                 Box::new(node),
                 Box::new(true_expr),
@@ -339,7 +387,7 @@ impl<'a> Parser<'a> {
                     let mut args = Vec::new();
                     if !self.match_token(Token::RParen) {
                         loop {
-                            args.push(self.parse()?);
+                            args.push(self.parse_expr()?);
                             if self.match_token(Token::RParen) {
                                 break;
                             }
@@ -355,7 +403,7 @@ impl<'a> Parser<'a> {
             }
             Some(Token::String(s)) => Ok(Expr::Literal(Value::String(s.clone()))),
             Some(Token::LParen) => {
-                let expr = self.parse()?;
+                let expr = self.parse_expr()?;
                 if !self.match_token(Token::RParen) {
                     return Err("Expected ')'".to_string());
                 }
@@ -386,13 +434,23 @@ impl<'a> Parser<'a> {
     }
 }
 
-fn lex(input: &str) -> Vec<Token> {
+/// Tokenize an expression.
+///
+/// Returns `Err` for anything it cannot represent rather than dropping it: the
+/// old lexer silently discarded unknown characters and a lone `=`, so a typo
+/// in an INI expression produced a different, plausible-looking expression
+/// instead of a diagnosable error.
+fn lex(input: &str) -> Result<Vec<Token>, String> {
     let mut tokens = Vec::new();
     let mut chars = input.chars().peekable();
 
     while let Some(ch) = chars.next() {
         match ch {
             ' ' | '\t' | '\r' | '\n' => continue,
+            // INI wraps an expression - and often each variable inside it - in
+            // braces (`{rpm} / 1000`, `{ bitStringValue(units, algo) }`). They
+            // are delimiters, not operators, so they carry no meaning here.
+            '{' | '}' => continue,
             '(' => tokens.push(Token::LParen),
             ')' => tokens.push(Token::RParen),
             ',' => tokens.push(Token::Comma),
@@ -417,6 +475,8 @@ fn lex(input: &str) -> Vec<Token> {
                 if chars.peek() == Some(&'=') {
                     chars.next();
                     tokens.push(Token::EqEq);
+                } else {
+                    return Err("Unexpected '=' (assignment is not an expression)".to_string());
                 }
             }
             '<' => {
@@ -467,7 +527,12 @@ fn lex(input: &str) -> Vec<Token> {
                 }
                 tokens.push(Token::String(s));
             }
-            ch if ch.is_ascii_digit() => {
+            // A number: digits, an optional fraction, an optional exponent.
+            // `1e3` used to lex as `Number(1)` followed by `Ident("e3")`, and
+            // `.5` was dropped entirely by the catch-all arm below.
+            ch if ch.is_ascii_digit()
+                || (ch == '.' && chars.peek().is_some_and(char::is_ascii_digit)) =>
+            {
                 let mut s = String::new();
                 s.push(ch);
                 while let Some(&next_ch) = chars.peek() {
@@ -477,8 +542,27 @@ fn lex(input: &str) -> Vec<Token> {
                         break;
                     }
                 }
-                if let Ok(n) = s.parse::<f64>() {
-                    tokens.push(Token::Number(n));
+                if matches!(chars.peek(), Some('e') | Some('E')) {
+                    // Only consume the `e` if a valid exponent follows, so
+                    // `1exp` still lexes as `1` then the identifier `exp`.
+                    let mut lookahead = chars.clone();
+                    let e = lookahead.next().expect("peeked");
+                    let mut exponent = String::new();
+                    if matches!(lookahead.peek(), Some('+') | Some('-')) {
+                        exponent.push(lookahead.next().expect("peeked"));
+                    }
+                    if lookahead.peek().is_some_and(char::is_ascii_digit) {
+                        while lookahead.peek().is_some_and(char::is_ascii_digit) {
+                            exponent.push(lookahead.next().expect("peeked"));
+                        }
+                        s.push(e);
+                        s.push_str(&exponent);
+                        chars = lookahead;
+                    }
+                }
+                match s.parse::<f64>() {
+                    Ok(n) => tokens.push(Token::Number(n)),
+                    Err(_) => return Err(format!("Malformed number literal '{s}'")),
                 }
             }
             '$' => {
@@ -506,10 +590,10 @@ fn lex(input: &str) -> Vec<Token> {
                 }
                 tokens.push(Token::Ident(s));
             }
-            _ => {}
+            other => return Err(format!("Unexpected character '{other}' in expression")),
         }
     }
-    tokens
+    Ok(tokens)
 }
 
 type StringValueFn = dyn Fn(&str) -> Option<String> + Send + Sync;
@@ -1048,6 +1132,14 @@ fn evaluate_function(
     }
 }
 
+/// A shift count usable on `i64`, or `None` if the operand is out of range.
+fn shift_count(v: f64) -> Option<u32> {
+    if !v.is_finite() || !(0.0..64.0).contains(&v) {
+        return None;
+    }
+    Some(v as u32)
+}
+
 /// Evaluates an expression against a context
 pub fn evaluate(
     expr: &Expr,
@@ -1143,11 +1235,20 @@ pub fn evaluate(
                 BinOp::BitXor => Ok(Value::Number(
                     ((l.as_f64() as i64) ^ (r.as_f64() as i64)) as f64,
                 )),
+                // A shift count outside `0..64` is undefined for `i64`: Rust
+                // panics under debug `overflow-checks` and masks the count in
+                // release. INI text reaches here unvalidated, and evaluation
+                // happens on the realtime channel task, so an out-of-range
+                // shift used to kill that task the first time it ran.
                 BinOp::Shl => Ok(Value::Number(
-                    ((l.as_f64() as i64) << (r.as_f64() as i32)) as f64,
+                    shift_count(r.as_f64())
+                        .and_then(|n| (l.as_f64() as i64).checked_shl(n))
+                        .unwrap_or(0) as f64,
                 )),
                 BinOp::Shr => Ok(Value::Number(
-                    ((l.as_f64() as i64) >> (r.as_f64() as i32)) as f64,
+                    shift_count(r.as_f64())
+                        .and_then(|n| (l.as_f64() as i64).checked_shr(n))
+                        .unwrap_or(0) as f64,
                 )),
             }
         }
@@ -1335,14 +1436,16 @@ mod tests {
             Value::String(String::new())
         );
 
-        let mut string_ctx = StringContext::default();
-        string_ctx.get_string_value = Some(Box::new(|name| {
-            if name == "gpPwmNote1" {
-                Some("Radiator Fan".to_string())
-            } else {
-                None
-            }
-        }));
+        let string_ctx = StringContext {
+            get_string_value: Some(Box::new(|name| {
+                if name == "gpPwmNote1" {
+                    Some("Radiator Fan".to_string())
+                } else {
+                    None
+                }
+            })),
+            ..StringContext::default()
+        };
         assert_eq!(
             evaluate(&expr, &context, Some(&string_ctx)).unwrap(),
             Value::String("Radiator Fan".to_string())
@@ -1365,14 +1468,16 @@ mod tests {
             Value::String("INVALID[1]".to_string())
         );
 
-        let mut string_ctx = StringContext::default();
-        string_ctx.get_bit_options = Some(Box::new(|name| {
-            if name == "pwmAxisLabels" {
-                Some(vec!["RPM".into(), "MAP".into(), "TPS".into()])
-            } else {
-                None
-            }
-        }));
+        let string_ctx = StringContext {
+            get_bit_options: Some(Box::new(|name| {
+                if name == "pwmAxisLabels" {
+                    Some(vec!["RPM".into(), "MAP".into(), "TPS".into()])
+                } else {
+                    None
+                }
+            })),
+            ..StringContext::default()
+        };
         assert_eq!(
             evaluate(&expr, &context, Some(&string_ctx)).unwrap(),
             Value::String("MAP".to_string())
@@ -1386,5 +1491,92 @@ mod tests {
             evaluate_display_string("Engine Speed", &context, None),
             "Engine Speed"
         );
+    }
+
+    /// A shift amount outside `0..64` is undefined for `i64` - Rust panics in
+    /// debug and masks the count in release. INI text reaches here directly,
+    /// so it must be rejected rather than trusted.
+    #[test]
+    fn out_of_range_shifts_yield_zero_instead_of_panicking() {
+        let context = HashMap::new();
+        for src in [
+            "1 << 64",
+            "1 << 200",
+            "1 << (0 - 1)",
+            "1 >> 64",
+            "1 >> (0 - 3)",
+        ] {
+            let expr = Parser::new(src)
+                .parse()
+                .unwrap_or_else(|e| panic!("{src}: {e}"));
+            assert_eq!(
+                evaluate_simple(&expr, &context).unwrap(),
+                Value::Number(0.0),
+                "{src} should clamp to 0"
+            );
+        }
+
+        // In-range shifts still work.
+        let expr = Parser::new("1 << 3").parse().unwrap();
+        assert_eq!(
+            evaluate_simple(&expr, &context).unwrap(),
+            Value::Number(8.0)
+        );
+    }
+
+    /// `parse_primary` recurses on every `(`, so deeply nested parentheses in
+    /// INI text overflowed the stack. Depth is bounded and reported instead.
+    #[test]
+    fn deeply_nested_parentheses_error_instead_of_overflowing_the_stack() {
+        let deep = format!("{}1{}", "(".repeat(5000), ")".repeat(5000));
+        assert!(
+            Parser::new(&deep).parse().is_err(),
+            "unbounded recursion accepted"
+        );
+
+        // A sane nesting depth still parses.
+        let shallow = format!("{}1 + 1{}", "(".repeat(16), ")".repeat(16));
+        assert!(Parser::new(&shallow).parse().is_ok());
+    }
+
+    /// The lexer used to drop anything it did not recognise and the parser
+    /// used to ignore whatever tokens were left over, so `mapValue * 1e3`
+    /// silently evaluated as `mapValue * 1`.
+    #[test]
+    fn lexer_and_parser_reject_input_they_cannot_represent() {
+        assert!(
+            Parser::new("1 2").parse().is_err(),
+            "trailing tokens ignored"
+        );
+        assert!(
+            Parser::new("1 + 2 3").parse().is_err(),
+            "trailing tokens ignored"
+        );
+        assert!(
+            Parser::new("1 @ 2").parse().is_err(),
+            "unknown character ignored"
+        );
+        assert!(Parser::new("a = 1").parse().is_err(), "lone '=' ignored");
+    }
+
+    /// Exponent and leading-dot literals are ordinary INI numbers.
+    #[test]
+    fn lexer_understands_exponent_and_leading_dot_numbers() {
+        let context = HashMap::new();
+        for (src, want) in [
+            ("1e3", 1000.0),
+            ("1E3", 1000.0),
+            ("1.5e-2", 0.015),
+            ("2e+2", 200.0),
+            (".5", 0.5),
+        ] {
+            let expr = Parser::new(src)
+                .parse()
+                .unwrap_or_else(|e| panic!("{src}: {e}"));
+            match evaluate_simple(&expr, &context).unwrap() {
+                Value::Number(n) => assert!((n - want).abs() < 1e-12, "{src} -> {n}, want {want}"),
+                other => panic!("{src} -> {other:?}"),
+            }
+        }
     }
 }
