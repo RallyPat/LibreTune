@@ -170,12 +170,22 @@ mod tests {
     /// filesystem.
     #[tokio::test]
     async fn a_path_outside_every_allowed_root_is_refused() {
-        let err = read_file_contents("/etc/passwd".into())
+        // Absolute on the platform under test: a POSIX `/etc/...` path is not
+        // absolute on Windows and would be refused for the wrong reason.
+        #[cfg(windows)]
+        let (read_path, write_path) = (
+            r"C:\Windows\System32\drivers\etc\hosts",
+            r"C:\Windows\libretune-owned",
+        );
+        #[cfg(not(windows))]
+        let (read_path, write_path) = ("/etc/passwd", "/etc/libretune-owned");
+
+        let err = read_file_contents(read_path.into())
             .await
             .expect_err("reading a system file must be refused");
         assert!(err.contains("Refusing to touch"), "{err}");
 
-        let err = write_file_contents("/etc/libretune-owned".into(), "x".into())
+        let err = write_file_contents(write_path.into(), "x".into())
             .await
             .expect_err("writing a system file must be refused");
         assert!(err.contains("Refusing to touch"), "{err}");
