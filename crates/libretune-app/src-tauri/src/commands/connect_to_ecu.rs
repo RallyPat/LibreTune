@@ -241,6 +241,11 @@ pub async fn connect_to_ecu(
                 None
             };
 
+            // Issue #71: keep the cancel handle outside the connection mutex,
+            // so `disconnect_ecu` can interrupt a blocking read without first
+            // waiting for the very lock that read is holding.
+            crate::state::set_ecu_cancel_handle(conn.cancel_handle());
+
             let mut guard = state.connection.lock().await;
             // A disconnect that ran past the transition budget while we were
             // handshaking wins: installing now would leave the ECU connected

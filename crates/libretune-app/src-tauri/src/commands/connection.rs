@@ -40,6 +40,11 @@ async fn acquire_within(
 /// Returns: Nothing on success
 #[tauri::command]
 pub async fn disconnect_ecu(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    // Issue #71: raise the connection's cancel flag FIRST. The task we need out
+    // of the way is inside a blocking read holding `state.connection`, so any
+    // signal that has to acquire that lock arrives too late by construction.
+    // The flag is polled by `read_exact_by_deadline`, which aborts the read.
+    crate::state::request_ecu_cancel();
     // Every path that replaces `state.connection` takes this first, so a
     // teardown cannot race a demo transition or a connect that is midway
     // through installing its own connection.
@@ -77,10 +82,9 @@ pub async fn disconnect_ecu(state: tauri::State<'_, AppState>) -> Result<(), Str
     // Issue #71: the realtime stream task performs BLOCKING serial I/O inside the
     // connection lock (get_realtime_data -> send_raw_command/send_packet). Tokio's
     // task abort only takes effect at the next `.await`, so a mid-read task can hold
-    // the connection mutex for up to one full read timeout. Polling the lock with a
-    // deadline avoids hanging the UI ("disconnect does nothing") — we also signal
-    // cancellation through the connection's cancel flag once we hold it so any later
-    // in-flight read aborts promptly.
+    // the connection mutex for up to one full read timeout. The cancel flag raised
+    // above cuts that read short; polling the lock with a deadline covers the cases
+    // it cannot interrupt (a burn, a multi-page write) so the UI never hangs.
     let deadline = Instant::now() + Duration::from_secs(3);
     loop {
         match state.connection.try_lock() {
@@ -89,14 +93,16 @@ pub async fn disconnect_ecu(state: tauri::State<'_, AppState>) -> Result<(), Str
                     conn.disconnect();
                 }
                 *guard = None;
+                crate::state::clear_ecu_cancel_handle();
                 return Ok(());
             }
             Err(_) => {
                 if Instant::now() >= deadline {
-                    // Could not acquire the lock within the deadline. The streaming
-                    // task is stuck in a blocking read we cannot interrupt from here
-                    // without the cancel handle. Force-clear what we can and report a
-                    // clear error so the UI can recover on the next connect.
+                    // Could not acquire the lock within the deadline even though
+                    // cancellation was requested up front — the holder is in a
+                    // burn or a multi-page write, which the flag does not
+                    // interrupt. Fall back to the async lock so the runtime can
+                    // schedule other work while that finishes.
                     eprintln!(
                         "[WARN] disconnect_ecu: connection lock busy after 3s, \
                          forcing disconnect (Issue #71)"
@@ -108,6 +114,7 @@ pub async fn disconnect_ecu(state: tauri::State<'_, AppState>) -> Result<(), Str
                         conn.disconnect();
                     }
                     *guard = None;
+                    crate::state::clear_ecu_cancel_handle();
                     return Ok(());
                 }
                 // Yield to the runtime so the (aborted) streaming task can finish its
@@ -231,5 +238,37 @@ mod disconnect_tests {
             "it must not wait for the holder: gave up after {waited:?}"
         );
         drop(held);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::state::{clear_ecu_cancel_handle, request_ecu_cancel, set_ecu_cancel_handle};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+
+    /// Issue #71: `disconnect_ecu` raises the flag before it goes near the
+    /// connection mutex. That is only possible while the handle lives outside
+    /// that mutex, which is what this pins down — the whole mechanism was inert
+    /// because nothing ever held a handle to raise.
+    #[test]
+    fn the_cancel_flag_is_reachable_without_the_connection_lock() {
+        let flag = Arc::new(AtomicBool::new(false));
+        set_ecu_cancel_handle(Arc::clone(&flag));
+
+        request_ecu_cancel();
+        assert!(
+            flag.load(Ordering::Relaxed),
+            "the in-flight read must see the cancellation"
+        );
+
+        // Once the connection is gone its flag must not be touched again.
+        clear_ecu_cancel_handle();
+        flag.store(false, Ordering::Relaxed);
+        request_ecu_cancel();
+        assert!(
+            !flag.load(Ordering::Relaxed),
+            "a later disconnect must not raise a dropped connection's flag"
+        );
     }
 }
