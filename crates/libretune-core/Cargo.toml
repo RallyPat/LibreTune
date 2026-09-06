@@ -31,6 +31,9 @@ tracing = { workspace = true }
 # CRC for protocol
 crc32fast = { workspace = true }
 
+# zstd for .ltlog sample blocks
+zstd = "0.13"
+
 # Date/time
 chrono = { workspace = true }
 

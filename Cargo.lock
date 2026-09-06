@@ -2461,7 +2461,7 @@ dependencies = [
  "uuid",
  "wasmtime",
  "wat",
-]
+ "zstd",
 
 [[package]]
 name = "libudev"
