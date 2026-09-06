@@ -161,6 +161,119 @@ fn test_rebin_table_clamps_outside_range() {
     assert!((result.z_values[2][2] - 110.0).abs() < 0.001);
 }
 
+/// Regression: `interpolate_z: false` must not zero out the table. It should
+/// copy old Z values by cell index, preserving them when dims are unchanged.
+#[test]
+fn test_rebin_table_no_interpolate_same_size_preserves_values() {
+    let old_x_bins = vec![500.0, 1000.0, 2000.0, 3000.0];
+    let old_y_bins = vec![20.0, 40.0, 60.0, 80.0];
+    let old_z_values = vec![
+        vec![10.0, 15.0, 20.0, 25.0],
+        vec![20.0, 25.0, 30.0, 35.0],
+        vec![30.0, 35.0, 40.0, 45.0],
+        vec![40.0, 45.0, 50.0, 55.0],
+    ];
+
+    let result = rebin_table(
+        &old_x_bins,
+        &old_y_bins,
+        &old_z_values,
+        old_x_bins.clone(),
+        old_y_bins.clone(),
+        false,
+    );
+
+    assert_eq!(result.z_values, old_z_values);
+}
+
+/// Growing the grid with `interpolate_z: false` must preserve the original
+/// cells by index and fill new edge cells with the nearest (clamped) old
+/// cell rather than zeros.
+#[test]
+fn test_rebin_table_no_interpolate_grow_clamps_to_nearest_old_cell() {
+    let old_x_bins = vec![1.0, 2.0, 3.0];
+    let old_y_bins = vec![1.0, 2.0, 3.0];
+    let old_z_values = vec![
+        vec![1.0, 2.0, 3.0],
+        vec![4.0, 5.0, 6.0],
+        vec![7.0, 8.0, 9.0],
+    ];
+
+    let new_x_bins = vec![1.0, 2.0, 3.0, 4.0];
+    let new_y_bins = vec![1.0, 2.0, 3.0, 4.0];
+
+    let result = rebin_table(
+        &old_x_bins,
+        &old_y_bins,
+        &old_z_values,
+        new_x_bins,
+        new_y_bins,
+        false,
+    );
+
+    // Original 3x3 block preserved by index.
+    for (y, old_row) in old_z_values.iter().enumerate() {
+        assert_eq!(&result.z_values[y][..3], &old_row[..]);
+    }
+
+    // New row/col at index 3 has no old counterpart, so it clamps to the
+    // nearest existing old cell (index 2, the old grid's last row/col).
+    assert_eq!(result.z_values[3][0], old_z_values[2][0]);
+    assert_eq!(result.z_values[0][3], old_z_values[0][2]);
+    assert_eq!(result.z_values[3][3], old_z_values[2][2]);
+}
+
+/// Shrinking the grid with `interpolate_z: false` must keep the top-left
+/// block of old values (every new index still exists in the old grid).
+#[test]
+fn test_rebin_table_no_interpolate_shrink_keeps_top_left() {
+    let old_x_bins = vec![1.0, 2.0, 3.0, 4.0];
+    let old_y_bins = vec![1.0, 2.0, 3.0, 4.0];
+    let old_z_values = vec![
+        vec![1.0, 2.0, 3.0, 4.0],
+        vec![5.0, 6.0, 7.0, 8.0],
+        vec![9.0, 10.0, 11.0, 12.0],
+        vec![13.0, 14.0, 15.0, 16.0],
+    ];
+
+    let new_x_bins = vec![1.0, 2.0];
+    let new_y_bins = vec![1.0, 2.0];
+
+    let result = rebin_table(
+        &old_x_bins,
+        &old_y_bins,
+        &old_z_values,
+        new_x_bins,
+        new_y_bins,
+        false,
+    );
+
+    assert_eq!(result.z_values, vec![vec![1.0, 2.0], vec![5.0, 6.0]]);
+}
+
+/// An empty old grid (e.g. a brand-new table) must not panic and should
+/// return zeros for the new grid.
+#[test]
+fn test_rebin_table_no_interpolate_empty_old_grid_returns_zeros_no_panic() {
+    let old_x_bins: Vec<f64> = vec![];
+    let old_y_bins: Vec<f64> = vec![];
+    let old_z_values: Vec<Vec<f64>> = vec![];
+
+    let new_x_bins = vec![1.0, 2.0];
+    let new_y_bins = vec![1.0, 2.0];
+
+    let result = rebin_table(
+        &old_x_bins,
+        &old_y_bins,
+        &old_z_values,
+        new_x_bins,
+        new_y_bins,
+        false,
+    );
+
+    assert_eq!(result.z_values, vec![vec![0.0, 0.0], vec![0.0, 0.0]]);
+}
+
 #[test]
 fn test_smooth_table() {
     let z_values = vec![
@@ -389,4 +502,34 @@ fn test_interpolate_cells_out_of_bounds_selection_is_noop() {
     let result = interpolate_cells(&z_values, selected_cells);
 
     assert_eq!(result, z_values, "out-of-bounds selection must not mutate");
+}
+
+/// A selection left over from before "Set Table Size" shrank the grid must be
+/// a no-op in `smooth_table`, not an out-of-bounds write.
+///
+/// `handleSetTableSize` in `TableEditor2D.tsx` resizes the table without
+/// clearing `selectionRange`, so the next "Smooth" sends coordinates that no
+/// longer exist. A cell exactly one row/col past the edge still has an
+/// in-bounds `(-1,-1)` neighbour, so `weight_sum > 0.0` and the unchecked
+/// `result[y][x]` write panicked.
+#[test]
+fn test_smooth_table_out_of_bounds_selection_is_noop() {
+    let z_values = vec![vec![10.0, 20.0, 30.0]; 3];
+
+    // (3, 3) is one past the last row and column of a 3x3 grid.
+    let result = smooth_table(&z_values, vec![(3, 3)], 1.0);
+
+    assert_eq!(result, z_values, "out-of-bounds selection must not mutate");
+}
+
+/// Same guard, but with a partially-stale multi-cell selection: one valid cell
+/// and one past the edge. The whole operation is rejected rather than half
+/// applied, matching `interpolate_linear`/`fill_region`.
+#[test]
+fn test_smooth_table_partially_stale_selection_is_noop() {
+    let z_values = vec![vec![10.0, 90.0], vec![10.0, 10.0]];
+
+    let result = smooth_table(&z_values, vec![(0, 1), (2, 2)], 1.0);
+
+    assert_eq!(result, z_values, "stale selection must not mutate");
 }
