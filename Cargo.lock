@@ -2460,8 +2460,8 @@ dependencies = [
  "tracing-subscriber",
  "uuid",
  "wasmtime",
+ "wat",
  "zstd",
-]
 
 [[package]]
 name = "libudev"
