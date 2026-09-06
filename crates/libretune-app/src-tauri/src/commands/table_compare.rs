@@ -149,7 +149,8 @@ fn read_table_values(
                 return Err("Table data exceeds page bounds".to_string());
             }
 
-            let raw_value = read_raw_value(&page_data[offset..], &z_const.data_type)?;
+            let raw_value =
+                read_raw_value(&page_data[offset..], &z_const.data_type, def.endianness)?;
             let display_value = z_const.raw_to_display(raw_value);
             values.push(display_value);
 

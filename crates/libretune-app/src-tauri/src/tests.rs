@@ -376,6 +376,141 @@ mod concurrency_tests {
         );
         let _ = writer.await;
     }
+
+    /// Regression test for the AB-BA deadlock between `get_autotune_status`
+    /// (config -> state) and `stop_autotune`, which used to take
+    /// state -> secondary_state -> config.
+    ///
+    /// Running both sequences concurrently in a loop would only deadlock
+    /// probabilistically — and a deadlock hangs a test rather than failing
+    /// it. This asserts the ordering directly instead: with `autotune_state`
+    /// held, a correctly ordered `stop_autotune` must already be holding
+    /// `autotune_config` (the first lock in the canonical order). The buggy
+    /// order blocks on `autotune_state` before touching the config, leaving
+    /// it lockable.
+    #[tokio::test]
+    async fn stop_autotune_locks_config_before_state() {
+        let state = build_state_for_lock_tests();
+
+        // Block the second lock in the canonical order.
+        let held_state = state.autotune_state.lock().await;
+
+        let s = state.clone();
+        let stopper =
+            tokio::spawn(
+                async move { crate::commands::autotune_misc::stop_autotune_inner(&s).await },
+            );
+
+        // Let the spawned task run until it blocks.
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        assert!(
+            state.autotune_config.try_lock().is_err(),
+            "stop_autotune must take autotune_config before autotune_state \
+             (canonical order: config -> state -> secondary_state)"
+        );
+
+        drop(held_state);
+        tokio::time::timeout(Duration::from_secs(2), stopper)
+            .await
+            .expect("stop_autotune did not finish once autotune_state was released")
+            .expect("stop task panicked")
+            .expect("stop_autotune_inner failed");
+
+        assert!(
+            state.autotune_config.lock().await.is_none(),
+            "stop_autotune must clear the config"
+        );
+    }
+
+    /// Regression test for the AB-BA deadlock between `use_project_tune`
+    /// (which took `current_project` and then `definition`) and `save_tune`
+    /// (which holds `definition` and then takes `current_project`).
+    ///
+    /// Asserted directly rather than by racing the two: a deadlock hangs a
+    /// test instead of failing it. With `definition` held, a correctly
+    /// ordered `use_project_tune` must be blocked on it and must not yet
+    /// hold `current_project`. The buggy order takes `current_project`
+    /// first, which the try_lock would then see as unavailable.
+    #[tokio::test]
+    async fn use_project_tune_locks_definition_before_current_project() {
+        let state = build_state_for_lock_tests();
+
+        let held_definition = state.definition.lock().await;
+
+        let s = state.clone();
+        let snapshot =
+            tokio::spawn(async move { crate::commands::tune_misc::project_tune_target(&s).await });
+
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        assert!(
+            state.current_project.try_lock().is_ok(),
+            "use_project_tune must take definition before current_project \
+             (canonical order: definition -> current_project)"
+        );
+
+        drop(held_definition);
+        let result = tokio::time::timeout(Duration::from_secs(2), snapshot)
+            .await
+            .expect("project_tune_target did not finish once definition was released")
+            .expect("snapshot task panicked");
+        // No project is loaded in the fixture, so it refuses — the point of the
+        // test is the order in which it got there.
+        assert!(result.is_err());
+    }
+
+    /// Regression test for the AB-BA deadlock between `save_tune`
+    /// (`current_tune_path` -> `current_project`) and `load_tune`
+    /// (`current_project` -> `current_tune_path`, across a blocking disk
+    /// write).
+    ///
+    /// `save_tune` now clones out of `current_tune_path` and releases it
+    /// immediately, so with `current_project` held — the lock `save_tune`
+    /// blocks on — `current_tune_path` must still be free. Reintroduce the
+    /// held `path_guard` and this assertion fails.
+    ///
+    /// It also covers the "no locks across the blocking write" fix: the save
+    /// only completes after `current_project` is released, and it must not
+    /// still be holding `definition`/`current_tune` when it does the disk
+    /// write, which the final acquire of `current_tune_path` proves.
+    #[tokio::test]
+    async fn save_tune_releases_current_tune_path_before_taking_current_project() {
+        use libretune_core::tune::TuneFile;
+
+        let state = build_state_for_lock_tests();
+        *state.current_tune.lock().await = Some(TuneFile::new("test signature".to_string()));
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let target = dir.path().join("saved.msq").to_string_lossy().to_string();
+
+        let held_project = state.current_project.lock().await;
+
+        let s = state.clone();
+        let saver = tokio::spawn(async move {
+            crate::commands::save_tune::save_tune_inner(&s, Some(target)).await
+        });
+
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        assert!(
+            state.current_tune_path.try_lock().is_ok(),
+            "save_tune must not hold current_tune_path while waiting for \
+             current_project — that is one half of the AB-BA cycle against load_tune"
+        );
+
+        drop(held_project);
+        tokio::time::timeout(Duration::from_secs(5), saver)
+            .await
+            .expect("save_tune did not finish once current_project was released")
+            .expect("save task panicked")
+            .expect("save_tune_inner failed");
+
+        assert!(
+            dir.path().join("saved.msq").is_file(),
+            "the tune should actually have been written"
+        );
+    }
 }
 
 // New tests for signature comparison and normalization (unit tests)

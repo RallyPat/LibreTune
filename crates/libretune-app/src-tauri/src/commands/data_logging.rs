@@ -360,21 +360,16 @@ pub async fn load_log_file(path: String) -> Result<LoadedLogFile, String> {
     })
 }
 
+// Tooth/composite auto-save and graph-log setup still call these names;
+// they now go through the same user-folder fence as `commands::file_io`.
 #[tauri::command]
 pub async fn read_text_file(path: String) -> Result<String, String> {
-    std::fs::read_to_string(&path).map_err(|e| format!("Failed to read file: {}", e))
+    crate::commands::file_io::read_file_contents(path).await
 }
 
 #[tauri::command]
 pub async fn write_text_file(path: String, contents: String) -> Result<(), String> {
-    // Callers writing into a not-yet-created folder (e.g. tooth/composite
-    // capture auto-save into a project's datalogs/ before anything else has
-    // logged there) would otherwise fail with "path not found". Same
-    // create-parent-then-write pattern DataLogger::start_streaming uses.
-    if let Some(dir) = std::path::Path::new(&path).parent() {
-        let _ = std::fs::create_dir_all(dir);
-    }
-    std::fs::write(&path, contents).map_err(|e| format!("Failed to write file: {}", e))
+    crate::commands::file_io::write_file_contents(path, contents).await
 }
 
 // --- AI assistant read-tool support ---------------------------------------

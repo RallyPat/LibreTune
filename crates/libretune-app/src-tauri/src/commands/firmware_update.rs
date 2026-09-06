@@ -361,12 +361,17 @@ fn convert_bin_to_srec(bin_path: &Path, load_address: u32) -> Result<PathBuf, St
 /// Detect available external flash tools on the system.
 #[tauri::command]
 pub async fn get_firmware_flasher_info() -> Result<FirmwareFlasherInfo, String> {
-    Ok(FirmwareFlasherInfo {
-        stm32_programmer_cli: find_stm32_programmer_cli().map(|p| p.display().to_string()),
-        dfu_util: find_dfu_util().map(|p| p.display().to_string()),
-        bootcommander: find_bootcommander().map(|p| p.display().to_string()),
-        objcopy: find_objcopy().map(|p| p.display().to_string()),
+    // The find_* helpers shell out (`where` on Windows) and stat many
+    // directories, so they belong on a blocking worker too.
+    blocking_flash_step(|| {
+        Ok(FirmwareFlasherInfo {
+            stm32_programmer_cli: find_stm32_programmer_cli().map(|p| p.display().to_string()),
+            dfu_util: find_dfu_util().map(|p| p.display().to_string()),
+            bootcommander: find_bootcommander().map(|p| p.display().to_string()),
+            objcopy: find_objcopy().map(|p| p.display().to_string()),
+        })
     })
+    .await
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -430,6 +435,25 @@ fn resolve_bootloader_command(
             .ok_or_else(|| "This INI has no cmd_openblt controller command".to_string()),
         other => Err(format!("Unknown firmware update method: {}", other)),
     }
+}
+
+/// Run a synchronous flash step on a blocking worker.
+///
+/// The external flashers (`STM32_Programmer_CLI`, `dfu-util`, `BootCommander`,
+/// `arm-none-eabi-objcopy`) are driven with `std::process::Command::output()`,
+/// which parks the calling thread for the whole multi-minute flash. Called
+/// straight from an `async` Tauri command that parks a tokio worker thread;
+/// work-stealing migrates queued tasks off it, but the runtime loses a worker
+/// for the duration. Hand each step to `spawn_blocking` instead, where parking
+/// is what the pool is for.
+async fn blocking_flash_step<T, F>(step: F) -> Result<T, String>
+where
+    F: FnOnce() -> Result<T, String> + Send + 'static,
+    T: Send + 'static,
+{
+    tokio::task::spawn_blocking(step)
+        .await
+        .map_err(|e| format!("Firmware tool task failed: {e}"))?
 }
 
 fn run_command_capture(tool: &Path, args: &[&str]) -> Result<(bool, String), String> {
@@ -888,6 +912,16 @@ pub async fn update_ecu_firmware(
     send_controller_command_bytes(&state, &bytes).await?;
 
     stop_metrics_task(state.clone()).await;
+    // Abort the realtime stream before dropping the connection, the same way
+    // `release_serial_port_blockers` and `disconnect_ecu` do. Left running, the
+    // stream sees `None` every tick and emits a `realtime:error` to the webview
+    // — ~20 per second at the 50 ms default, for the whole multi-minute flash.
+    {
+        let mut task_guard = state.streaming_task.lock().await;
+        if let Some(handle) = task_guard.take() {
+            handle.abort();
+        }
+    }
     {
         let _transition = state.connection_transition.lock().await;
         let mut conn_guard = state.connection.lock().await;
@@ -916,10 +950,18 @@ pub async fn update_ecu_firmware(
                 } else {
                     push_log(&app, &mut log, format!("Flashing with {}…", cli.display()));
                 }
-                flash_with_stm32_programmer(&cli, &path, resolved_bin_address)?
+                let firmware = path.clone();
+                blocking_flash_step(move || {
+                    flash_with_stm32_programmer(&cli, &firmware, resolved_bin_address)
+                })
+                .await?
             } else if let Some(tool) = find_dfu_util() {
                 push_log(&app, &mut log, format!("Flashing with {}…", tool.display()));
-                flash_with_dfu_util(&tool, &path, resolved_bin_address)?
+                let firmware = path.clone();
+                blocking_flash_step(move || {
+                    flash_with_dfu_util(&tool, &firmware, resolved_bin_address)
+                })
+                .await?
             } else {
                 return Err(
                     "No DFU flasher found. Install STM32CubeProgrammer (STM32_Programmer_CLI) or dfu-util and ensure it is on PATH.".to_string(),
@@ -955,7 +997,8 @@ pub async fn update_ecu_firmware(
                         address
                     ),
                 );
-                convert_bin_to_srec(&path, address)?
+                let firmware = path.clone();
+                blocking_flash_step(move || convert_bin_to_srec(&firmware, address)).await?
             } else {
                 path.clone()
             };
@@ -970,7 +1013,11 @@ pub async fn update_ecu_firmware(
                     baud_rate
                 ),
             );
-            flash_with_bootcommander(&tool, &flash_path, &serial_port, baud_rate)?
+            let port_for_flash = serial_port.clone();
+            blocking_flash_step(move || {
+                flash_with_bootcommander(&tool, &flash_path, &port_for_flash, baud_rate)
+            })
+            .await?
         }
         other => return Err(format!("Unknown firmware update method: {}", other)),
     };
@@ -1136,13 +1183,17 @@ pub async fn recover_ecu_firmware_dfu(
     );
 
     if full_erase {
-        let port = stm32_programmer_port(&cli);
+        let erase_cli = cli.clone();
+        let port = blocking_flash_step(move || Ok(stm32_programmer_port(&erase_cli))).await?;
         push_log(
             &app,
             &mut log,
             "Performing full chip erase (required on STM32F7)…",
         );
-        let erase_output = stm32_full_chip_erase(&cli, &port)?;
+        let erase_cli = cli.clone();
+        let erase_port = port.clone();
+        let erase_output =
+            blocking_flash_step(move || stm32_full_chip_erase(&erase_cli, &erase_port)).await?;
         for line in erase_output
             .lines()
             .map(str::trim)
@@ -1153,8 +1204,10 @@ pub async fn recover_ecu_firmware_dfu(
     }
 
     push_log(&app, &mut log, format!("Flashing with {}…", cli.display()));
-    let flash_output =
-        flash_recovery_with_stm32_programmer(&cli, &bootloader, &app_firmware, app_address, false)?;
+    let flash_output = blocking_flash_step(move || {
+        flash_recovery_with_stm32_programmer(&cli, &bootloader, &app_firmware, app_address, false)
+    })
+    .await?;
     for line in flash_output
         .lines()
         .map(str::trim)
