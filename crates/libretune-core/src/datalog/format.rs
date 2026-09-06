@@ -11,10 +11,12 @@ use super::LogEntry;
 /// Supported log file formats
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LogFormat {
-    /// Comma-separated values
+    /// Comma-separated values (import of older LibreTune logs)
     Csv,
-    /// MegaLogViewer format (.mlg)
+    /// MegaLogViewer format (.mlg) — read only
     Mlg,
+    /// Native LibreTune binary log
+    Ltlog,
 }
 
 impl LogFormat {
@@ -23,6 +25,7 @@ impl LogFormat {
         match path.extension()?.to_str()?.to_lowercase().as_str() {
             "csv" => Some(LogFormat::Csv),
             "mlg" => Some(LogFormat::Mlg),
+            "ltlog" => Some(LogFormat::Ltlog),
             _ => None,
         }
     }
@@ -32,6 +35,32 @@ impl LogFormat {
         match self {
             LogFormat::Csv => "csv",
             LogFormat::Mlg => "mlg",
+            LogFormat::Ltlog => "ltlog",
+        }
+    }
+}
+
+/// Visit every sample without requiring the caller to hold the whole log.
+///
+/// `.ltlog` is streamed. CSV / `.mlg` still load, then iterate (those formats
+/// have no block reader).
+pub fn visit_log<P, F>(path: P, mut visit: F) -> io::Result<Vec<String>>
+where
+    P: AsRef<Path>,
+    F: FnMut(&LogEntry) -> io::Result<()>,
+{
+    let path = path.as_ref();
+    match LogFormat::from_extension(path) {
+        Some(LogFormat::Ltlog) => {
+            let schema = super::ltlog::visit_ltlog(path, visit)?;
+            Ok(schema.channel_names())
+        }
+        _ => {
+            let (channels, entries) = read_log(path)?;
+            for e in &entries {
+                visit(e)?;
+            }
+            Ok(channels)
         }
     }
 }
@@ -42,6 +71,7 @@ pub fn read_log<P: AsRef<Path>>(path: P) -> io::Result<(Vec<String>, Vec<LogEntr
     match LogFormat::from_extension(path) {
         Some(LogFormat::Csv) => read_csv(path),
         Some(LogFormat::Mlg) => super::mlg::read_mlg(path),
+        Some(LogFormat::Ltlog) => super::ltlog::read_ltlog(path),
         None => Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             format!("{} is not a log format LibreTune reads", path.display()),
@@ -186,6 +216,10 @@ mod tests {
         assert_eq!(
             LogFormat::from_extension(Path::new("log.mlg")),
             Some(LogFormat::Mlg)
+        );
+        assert_eq!(
+            LogFormat::from_extension(Path::new("log.ltlog")),
+            Some(LogFormat::Ltlog)
         );
         assert_eq!(LogFormat::from_extension(Path::new("log.txt")), None);
     }
