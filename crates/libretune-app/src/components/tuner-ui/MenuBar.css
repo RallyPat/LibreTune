@@ -171,3 +171,17 @@
   background: var(--border-default);
   margin: var(--space-1) var(--space-3);
 }
+
+/* The "⋯" overflow button sits at the right edge, so its dropdown (and any
+   nested submenus) must open leftward or they land outside the window. */
+.menubar-more-wrap > .menu-dropdown {
+  left: auto;
+  right: 0;
+}
+
+.menubar-more-wrap .menu-dropdown-level-1,
+.menubar-more-wrap .menu-dropdown-level-2,
+.menubar-more-wrap .menu-dropdown-level-3 {
+  left: auto;
+  right: 100%;
+}

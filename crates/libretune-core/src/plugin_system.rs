@@ -25,12 +25,78 @@ use crate::plugin_api;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
-use wasmtime::{Caller, Engine, Extern, Instance, Linker, Memory, Module, Store};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::thread;
+use std::time::Duration;
+use wasmtime::{
+    Caller, Config, Engine, Extern, Instance, Linker, Memory, Module, ResourceLimiter, Store,
+    StoreLimits, StoreLimitsBuilder,
+};
 
 /// Maximum length (bytes) accepted for a guest-supplied string argument
 /// (table/constant/channel name, action JSON). Guards against a malicious or
 /// buggy plugin claiming an absurd `len` and forcing a huge host allocation.
 const MAX_GUEST_STRING_LEN: usize = 64 * 1024;
+
+/// Fuel budget granted before every call into guest code (`plugin_init`,
+/// `plugin_execute`, `plugin_shutdown`, or a test's `call_i32_export`). Most
+/// wasm instructions burn 1 unit of fuel, so this bounds a single call to a
+/// few million executed instructions regardless of what the guest does —
+/// enough headroom for real plugin logic, but a `loop {}` guest exhausts it
+/// and traps instead of hanging the calling thread forever.
+const PLUGIN_FUEL_PER_CALL: u64 = 10_000_000;
+
+/// Maximum bytes a plugin's linear memory may grow to. Applied via
+/// `Store::limiter`; a `memory.grow` past this returns failure to the guest
+/// (or, with `trap_on_grow_failure`, would trap) rather than letting an
+/// unbounded plugin exhaust host memory.
+const PLUGIN_MEMORY_LIMIT_BYTES: usize = 64 * 1024 * 1024;
+
+/// How often the background [`EpochTicker`] advances a plugin's `Engine`
+/// epoch. Combined with [`EPOCH_TICKS_PER_CALL`], this bounds worst-case
+/// wall-clock time per call independently of fuel — a backstop for guest
+/// code whose instructions individually burn little fuel but still block
+/// for a long time (e.g. host calls that spin).
+const EPOCH_TICK_INTERVAL: Duration = Duration::from_millis(50);
+
+/// Epoch ticks allowed per call before wasmtime traps the guest, i.e. a
+/// `EPOCH_TICK_INTERVAL * EPOCH_TICKS_PER_CALL` wall-clock deadline (~1s).
+const EPOCH_TICKS_PER_CALL: u64 = 20;
+
+/// Background thread that periodically calls [`Engine::increment_epoch`] so
+/// `Store::set_epoch_deadline` has something to enforce a wall-clock timeout
+/// against. Epoch checks are injected into compiled guest code, but nothing
+/// advances the epoch on its own while a synchronous `Store` call (like
+/// `plugin_execute`) blocks the calling thread — this ticker is that
+/// external actor. It stops itself (checked once per tick) when the owning
+/// [`PluginInstance`] is dropped.
+struct EpochTicker {
+    stop: Arc<AtomicBool>,
+}
+
+impl EpochTicker {
+    /// Spawn the ticker for `engine`. `Engine` is a cheap `Arc`-backed
+    /// handle, so cloning it into the thread doesn't duplicate the compiled
+    /// module or runtime state.
+    fn start(engine: Engine) -> Self {
+        let stop = Arc::new(AtomicBool::new(false));
+        let stop_thread = Arc::clone(&stop);
+        thread::spawn(move || {
+            while !stop_thread.load(Ordering::Relaxed) {
+                thread::sleep(EPOCH_TICK_INTERVAL);
+                engine.increment_epoch();
+            }
+        });
+        Self { stop }
+    }
+}
+
+impl Drop for EpochTicker {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+    }
+}
 
 /// Sentinel return codes shared by every host function. Plugin-side glue code
 /// (bindgen or hand-written) should treat any negative value as failure.
@@ -138,6 +204,8 @@ struct PluginHostState {
     /// `subscribe_channel` handed back — `get_channel_value` resolves ids
     /// through this rather than trusting a guest-supplied name directly.
     subscribed_channels: Vec<String>,
+    /// Enforces [`PLUGIN_MEMORY_LIMIT_BYTES`] via `Store::limiter`.
+    limits: StoreLimits,
 }
 
 /// Fetch the guest's exported linear memory, or an [`host_result::INVALID_ARGS`] error.
@@ -478,6 +546,9 @@ pub struct PluginInstance {
     permissions: Vec<Permission>,
     /// Execution counter for debugging
     exec_count: u64,
+    /// Keeps the epoch-advancing background thread alive for as long as this
+    /// instance exists; never read directly, only relied on for its `Drop`.
+    _epoch_ticker: EpochTicker,
 }
 
 impl PluginInstance {
@@ -515,8 +586,15 @@ impl PluginInstance {
             .copied()
             .collect();
 
-        // Create WASM runtime
-        let engine = Engine::default();
+        // Create WASM runtime. Fuel and epoch interruption both must be
+        // enabled on the `Config` up front — they can't be turned on for a
+        // `Store` after the fact — so that every plugin call can be bounded
+        // with `set_fuel`/`set_epoch_deadline` below, and a memory cap
+        // enforced via `Store::limiter`. Without these a guest `loop {}`
+        // (or an unbounded `memory.grow`) would otherwise hang or OOM the
+        // host thread that's driving it.
+        let engine = Engine::new(Config::new().consume_fuel(true).epoch_interruption(true))
+            .map_err(|e| format!("Failed to create WASM engine: {}", e))?;
 
         // Read WASM file into bytes
         let wasm_bytes =
@@ -531,16 +609,30 @@ impl PluginInstance {
             snapshot: PluginDataSnapshot::default(),
             proposals: Vec::new(),
             subscribed_channels: Vec::new(),
+            limits: StoreLimitsBuilder::new()
+                .memory_size(PLUGIN_MEMORY_LIMIT_BYTES)
+                .build(),
         };
         let mut store = Store::new(&engine, host_state);
+        store.limiter(|state: &mut PluginHostState| &mut state.limits as &mut dyn ResourceLimiter);
         let mut linker: Linker<PluginHostState> = Linker::new(&engine);
         register_host_functions(&mut linker)?;
+
+        // Instantiation runs data/elem segment initialisers and the `start`
+        // function, which consume fuel and count against the epoch deadline
+        // like any other guest code — so it needs a budget too.
+        store
+            .set_fuel(PLUGIN_FUEL_PER_CALL)
+            .map_err(|e| format!("Failed to set plugin fuel budget: {}", e))?;
+        store.set_epoch_deadline(EPOCH_TICKS_PER_CALL);
 
         // Instantiate module against the permission-checked host-function
         // surface registered above.
         let instance = linker
             .instantiate(&mut store, &module)
             .map_err(|e| format!("Failed to instantiate module: {}", e))?;
+
+        let epoch_ticker = EpochTicker::start(engine);
 
         Ok(PluginInstance {
             manifest,
@@ -549,7 +641,22 @@ impl PluginInstance {
             state: PluginState::Loaded,
             permissions: granted,
             exec_count: 0,
+            _epoch_ticker: epoch_ticker,
         })
+    }
+
+    /// Grant this call's fuel and epoch-deadline budget just before invoking
+    /// a guest export (`plugin_init`/`plugin_execute`/`plugin_shutdown`, or a
+    /// test's [`PluginInstance::call_i32_export`]). Must be called anew
+    /// before every such call — fuel and the epoch deadline are both
+    /// consumed/advanced by wasmtime as execution proceeds, so a stale
+    /// budget from a previous call would leave the next one with none.
+    fn arm_call_budget(&mut self) -> Result<(), String> {
+        self.store
+            .set_fuel(PLUGIN_FUEL_PER_CALL)
+            .map_err(|e| format!("Failed to set plugin fuel budget: {}", e))?;
+        self.store.set_epoch_deadline(EPOCH_TICKS_PER_CALL);
+        Ok(())
     }
 
     /// Initialize plugin with configuration.
@@ -570,6 +677,7 @@ impl PluginInstance {
             .instance
             .get_typed_func::<(i32, i32, i32), i32>(&mut self.store, "plugin_init")
         {
+            self.arm_call_budget()?;
             // Pass simple parameters: config size, ecu_type ptr, version ptr
             let _ = init
                 .call(&mut self.store, (0, 0, 0))
@@ -602,6 +710,7 @@ impl PluginInstance {
             .instance
             .get_typed_func::<(), i32>(&mut self.store, name)
             .map_err(|e| format!("Export '{}' not found or wrong signature: {}", name, e))?;
+        self.arm_call_budget()?;
         func.call(&mut self.store, ())
             .map_err(|e| format!("Call to '{}' failed: {}", name, e))
     }
@@ -648,6 +757,7 @@ impl PluginInstance {
             .instance
             .get_typed_func::<(), i32>(&mut self.store, "plugin_execute")
         {
+            self.arm_call_budget()?;
             result_code = Some(
                 exec.call(&mut self.store, ())
                     .map_err(|e| format!("Plugin execution failed: {}", e))?,
@@ -672,6 +782,9 @@ impl PluginInstance {
             .instance
             .get_typed_func::<(), i32>(&mut self.store, "plugin_shutdown")
         {
+            // Best-effort: unloading proceeds regardless of whether the
+            // budget re-arms or the shutdown call itself succeeds.
+            let _ = self.arm_call_budget();
             let _ = shutdown.call(&mut self.store, ()).ok();
         }
 
@@ -902,6 +1015,60 @@ mod tests {
         };
         assert_eq!(stats.exec_count, 5);
         assert_eq!(stats.permissions, 3);
+    }
+
+    /// Builds a tiny WASM module (via WAT text format) that exports a
+    /// `plugin_execute` which loops forever, plus a 1-page linear memory so
+    /// it satisfies `PluginInstance::load`'s usual expectations. Written to a
+    /// temp file so it can be handed to `PluginInstance::load` like any real
+    /// plugin binary.
+    fn write_infinite_loop_plugin(dir: &tempfile::TempDir) -> std::path::PathBuf {
+        let wat_src = r#"
+            (module
+                (memory (export "memory") 1)
+                (func (export "plugin_execute") (result i32)
+                    (loop $forever
+                        br $forever
+                    )
+                    (i32.const 0)
+                )
+            )
+        "#;
+        let wasm_bytes = wat::parse_str(wat_src).expect("valid WAT source");
+        let path = dir.path().join("infinite_loop.wasm");
+        std::fs::write(&path, wasm_bytes).expect("write test wasm module");
+        path
+    }
+
+    #[test]
+    fn test_infinite_loop_plugin_traps_instead_of_hanging() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let wasm_path = write_infinite_loop_plugin(&dir);
+
+        let manifest = PluginManifest {
+            name: "infinite_loop".to_string(),
+            version: "1.0.0".to_string(),
+            description: "Test plugin with a runaway loop".to_string(),
+            author: "Test Author".to_string(),
+            permissions: vec![],
+        };
+
+        let mut plugin = PluginInstance::load(manifest, &wasm_path, &test_config(), &[])
+            .expect("plugin with an infinite loop still loads and instantiates fine");
+        plugin
+            .initialize(&test_config())
+            .expect("plugin has no plugin_init export, so init is a no-op");
+
+        // Without a fuel/epoch budget this call would hang the calling
+        // thread forever; with it, wasmtime traps once the budget set in
+        // PluginInstance::arm_call_budget is exhausted and execute()
+        // surfaces that as an Err instead of blocking.
+        let result = plugin.execute(PluginDataSnapshot::default());
+        assert!(
+            result.is_err(),
+            "expected an infinite loop to be terminated by the fuel/epoch budget, got {:?}",
+            result
+        );
     }
 
     #[test]
