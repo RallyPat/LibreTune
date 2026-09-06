@@ -343,7 +343,6 @@ export const DataLogView: React.FC = () => {
         // not connected / no logger yet
       }
     })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   
   // Seed channel list once when ECU data first arrives (avoid subscribing to all channels at 20Hz).
