@@ -64,10 +64,21 @@ pub fn parse_dash_file(xml: &str) -> Result<DashFile, DashParseError> {
                 handle_empty_element(&mut dash, &mut state, e)?;
             }
             Ok(Event::Text(ref e)) => {
-                text_buf = e.decode().map(|c| c.into_owned()).unwrap_or_default();
+                // Accumulate, don't overwrite: an escaped character (a
+                // condition's `>`/`<`/`&`) arrives as its own text fragment, so
+                // overwriting kept only the last piece ("rpm > 3000" -> "3000").
+                text_buf.push_str(&e.decode().map(|c| c.into_owned()).unwrap_or_default());
             }
             Ok(Event::CData(ref e)) => {
-                text_buf = String::from_utf8_lossy(e.as_ref()).to_string();
+                text_buf.push_str(&String::from_utf8_lossy(e.as_ref()));
+            }
+            // quick-xml delivers each `&gt;`/`&amp;`/… as its own event; resolve
+            // it back into the text so an escaped condition read from a
+            // TunerStudio file keeps its operators.
+            Ok(Event::GeneralRef(ref e)) => {
+                if let Some(c) = resolve_entity(&String::from_utf8_lossy(e.as_ref())) {
+                    text_buf.push(c);
+                }
             }
             Ok(Event::Eof) => break,
             Err(e) => return Err(DashParseError::XmlError(e)),
@@ -77,6 +88,18 @@ pub fn parse_dash_file(xml: &str) -> Result<DashFile, DashParseError> {
     }
 
     Ok(dash)
+}
+
+/// Resolve one of the five predefined XML entities to its character.
+fn resolve_entity(name: &str) -> Option<char> {
+    match name {
+        "amp" => Some('&'),
+        "lt" => Some('<'),
+        "gt" => Some('>'),
+        "quot" => Some('"'),
+        "apos" => Some('\''),
+        _ => None,
+    }
 }
 
 /// Parse a TunerStudio .gauge file from a string.
@@ -169,10 +192,15 @@ pub fn parse_gauge_file(xml: &str) -> Result<GaugeFile, DashParseError> {
                 }
             }
             Ok(Event::Text(ref e)) => {
-                text_buf = e.decode().map(|c| c.into_owned()).unwrap_or_default();
+                text_buf.push_str(&e.decode().map(|c| c.into_owned()).unwrap_or_default());
             }
             Ok(Event::CData(ref e)) => {
-                text_buf = String::from_utf8_lossy(e.as_ref()).to_string();
+                text_buf.push_str(&String::from_utf8_lossy(e.as_ref()));
+            }
+            Ok(Event::GeneralRef(ref e)) => {
+                if let Some(c) = resolve_entity(&String::from_utf8_lossy(e.as_ref())) {
+                    text_buf.push(c);
+                }
             }
             Ok(Event::Eof) => break,
             Err(e) => return Err(DashParseError::XmlError(e)),
@@ -642,6 +670,14 @@ fn set_gauge_property(gauge: &mut GaugeConfig, prop: &str, value: &str) {
         "GaugeStyle" => gauge.gauge_style = value.to_string(),
         "GaugePainter" => gauge.gauge_painter = GaugePainter::from_ts_string(value),
         "RunDemo" => gauge.run_demo = value.parse().unwrap_or(false),
+        "EnabledCondition" => {
+            gauge.enabled_condition = if value.is_empty() {
+                None
+            } else {
+                Some(value.to_string())
+            }
+        }
+        "Hysteresis" => gauge.hysteresis = value.parse().ok(),
         // Preserve unrecognized properties (painter-specific lt_* attributes,
         // future TunerStudio additions) instead of silently dropping them —
         // the writer emits `extra_attrs` back out, so they round-trip.
@@ -706,7 +742,20 @@ fn set_indicator_property(indicator: &mut IndicatorConfig, prop: &str, value: &s
         }
         "Painter" => indicator.indicator_painter = IndicatorPainter::from_ts_string(value),
         "RunDemo" => indicator.run_demo = value.parse().unwrap_or(false),
-        _ => {}
+        "EnabledCondition" => {
+            indicator.enabled_condition = if value.is_empty() {
+                None
+            } else {
+                Some(value.to_string())
+            }
+        }
+        // Preserve unrecognized properties so the writer's extra_attrs loop can
+        // round-trip them, matching the gauge reader (was silently dropped).
+        other => {
+            indicator
+                .extra_attrs
+                .insert(other.to_string(), value.to_string());
+        }
     }
 }
 

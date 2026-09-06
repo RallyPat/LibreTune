@@ -237,8 +237,14 @@ pub async fn run_turn_observed(
             });
         }
 
-        // If we've hit the round cap, tell the model to wrap up.
-        if _round == MAX_READ_ROUNDS {
+        // If we're about to hit the round cap, tell the model to wrap up —
+        // this must fire one round early (MAX_READ_ROUNDS - 1) so the
+        // following iteration still has a `client.chat()` call left in the
+        // `0..=MAX_READ_ROUNDS` bound to actually send it. Firing on
+        // `_round == MAX_READ_ROUNDS` composes the message on the loop's
+        // final iteration, which then exits without ever calling the model
+        // again — the wrap-up request is built but never sent.
+        if _round == MAX_READ_ROUNDS - 1 {
             messages.push(Message::user(
                 "I've gathered enough data. Please give me your final analysis and any proposed changes.",
             ));
@@ -647,5 +653,94 @@ mod tests {
         };
         let pa = map_tool_call(&tc, &inputs, &auth());
         assert!(matches!(pa.validation, ValidationResult::Ok { .. }));
+    }
+
+    /// A [`Provider`](crate::llm::provider::Provider) that always requests a
+    /// read tool call (so `run_turn_observed`'s loop never exits early via
+    /// `reads.is_empty()`) and records every [`ChatRequest`] it was handed,
+    /// so the test below can inspect exactly what the final round sent.
+    struct AlwaysReadsProvider {
+        requests: std::sync::Arc<std::sync::Mutex<Vec<ChatRequest>>>,
+    }
+
+    #[async_trait::async_trait]
+    impl crate::llm::provider::Provider for AlwaysReadsProvider {
+        fn name(&self) -> &str {
+            "always-reads-mock"
+        }
+
+        async fn chat(
+            &self,
+            req: &ChatRequest,
+        ) -> Result<crate::llm::types::ChatResponse, LlmError> {
+            self.requests.lock().unwrap().push(req.clone());
+            Ok(crate::llm::types::ChatResponse {
+                content: String::new(),
+                tool_calls: vec![ToolCall {
+                    id: "1".into(),
+                    name: tools::tool_names::LIST_TABLES.into(),
+                    arguments: "{}".into(),
+                }],
+                finish_reason: FinishReason::ToolCalls,
+                usage: None,
+            })
+        }
+    }
+
+    /// Answers every read tool call with an empty JSON object — its content
+    /// doesn't matter for this test, only that the loop keeps running.
+    struct StubReadExecutor;
+
+    #[async_trait::async_trait]
+    impl ReadToolExecutor for StubReadExecutor {
+        fn handles(&self, _tool_name: &str) -> bool {
+            true
+        }
+
+        async fn execute(&self, _tool_name: &str, _arguments: &str) -> String {
+            "{}".to_string()
+        }
+    }
+
+    /// Regression test for the round-cap wrap-up bug: previously the
+    /// "please wrap up" message was appended to `messages` only after the
+    /// loop's final `client.chat()` call had already happened, so it was
+    /// composed but never actually sent. With the fix (guard moved to
+    /// `MAX_READ_ROUNDS - 1`), the model keeps requesting reads every round,
+    /// so the loop runs all `MAX_READ_ROUNDS + 1` rounds, and the last
+    /// request sent to the client must contain the wrap-up instruction.
+    #[tokio::test]
+    async fn wrap_up_message_is_actually_sent_to_client_at_round_cap() {
+        let recorded: std::sync::Arc<std::sync::Mutex<Vec<ChatRequest>>> = Default::default();
+        let provider = AlwaysReadsProvider {
+            requests: recorded.clone(),
+        };
+        let client = LlmClient::from_provider(Box::new(provider));
+
+        let inputs = OrchestratorInputs {
+            capability_tier: CapabilityTier::Config,
+            ..Default::default()
+        };
+
+        let result = run_turn(&client, &inputs, &auth(), Some(&StubReadExecutor)).await;
+        assert!(result.is_ok(), "run_turn should not error: {result:?}");
+
+        let calls = recorded.lock().unwrap();
+        assert_eq!(
+            calls.len(),
+            MAX_READ_ROUNDS + 1,
+            "expected one client.chat() call per round, including the final round-cap round"
+        );
+
+        let last_request = calls.last().expect("at least one call recorded");
+        let sent_wrap_up = last_request
+            .messages
+            .iter()
+            .any(|m| m.content.contains("I've gathered enough data"));
+        assert!(
+            sent_wrap_up,
+            "expected the final round's request to actually include the wrap-up instruction, got: {:#?}",
+            last_request.messages
+        );
     }
 }

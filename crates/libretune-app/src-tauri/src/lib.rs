@@ -82,8 +82,8 @@ use commands::dash_layout::{
     reset_dashboards_to_defaults,
 };
 use commands::data_logging::{
-    clear_log, get_log_entries, get_logging_status, read_text_file, save_log, start_logging,
-    stop_logging, write_text_file,
+    clear_log, get_log_entries, get_logging_status, load_log_file, read_text_file, save_log,
+    start_logging, stop_logging, write_text_file,
 };
 use commands::debug_realtime::debug_single_realtime_read;
 use commands::demo::{get_demo_mode, set_demo_mode};
@@ -148,9 +148,8 @@ use commands::restore_points::{
 };
 use commands::save_tune::{save_tune, save_tune_as};
 use commands::sensor_calibration::{
-    auto_calibrate_afr, build_thermistor_curve, get_temperature_calibration_bins,
-    list_calibration_presets, preview_afr_calibration, write_afr_calibration,
-    write_temperature_calibration,
+    build_thermistor_curve, get_temperature_calibration_bins, list_calibration_presets,
+    preview_afr_calibration, write_afr_calibration, write_temperature_calibration,
 };
 use commands::settings::{
     get_settings, update_heatmap_custom_stops, update_setting, update_settings,
@@ -388,7 +387,6 @@ pub fn run() {
             get_temperature_calibration_bins,
             list_calibration_presets,
             preview_afr_calibration,
-            auto_calibrate_afr,
             build_thermistor_curve,
             write_temperature_calibration,
             write_afr_calibration,
@@ -414,6 +412,7 @@ pub fn run() {
             get_log_entries,
             clear_log,
             save_log,
+            load_log_file,
             read_text_file,
             write_text_file,
             // Diagnostic commands (stubs)
@@ -425,6 +424,7 @@ pub fn run() {
             commands::tooth_logger::list_diagnostic_loggers,
             commands::ini_meta::list_tunable_tables,
             commands::analyse_log::analyse_log,
+            commands::analyse_log::analyse_log_file,
             compare_tables,
             reset_tune_to_defaults,
             export_tune_as_csv,

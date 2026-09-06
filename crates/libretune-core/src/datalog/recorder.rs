@@ -1,35 +1,25 @@
 //! Data logger / recorder
 //!
-//! Records real-time data from the ECU.
+//! Samples are written straight to a `.ltlog` file. RAM holds only a short
+//! live-graph tail plus the writer's current compression block.
 
 use std::collections::VecDeque;
-use std::fs::File;
-use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
+use super::ltlog::{LtlogChannel, LtlogSchema, LtlogWriter};
 use super::LogEntry;
 
-/// Hard ceiling on entries kept in memory. Once reached, the oldest entries
-/// are discarded (and counted — see `discarded`).
-///
-/// The old ceiling was 10,000 samples. At the ~8 Hz the legacy read path
-/// managed that was ~21 minutes, and an ordinary 28-minute drive silently
-/// lost its first ~7 minutes (D7). Raising the realtime read rate (the
-/// expected-length read exit) makes this far worse: at 50 Hz, 10,000 samples
-/// is only ~3.3 minutes. This ceiling gives ~66 min at 50 Hz / ~5.5 h at
-/// 10 Hz. At ~77 f64 channels/entry that is roughly 120 MB worst case, which
-/// is acceptable for a desktop tool; streaming straight to disk removes the
-/// ceiling entirely and is the longer-term fix.
-const MAX_BUFFER_SIZE: usize = 200_000;
+/// Samples kept in RAM for the live graph. The file is the log.
+const LIVE_TAIL: usize = 2048;
 
 /// Data logger state
 pub struct DataLogger {
     /// Channel names
     channels: Vec<String>,
-    /// In-memory log buffer
-    buffer: VecDeque<LogEntry>,
-    /// Start time of logging
+    /// Rolling window for the live graph only — not the session log.
+    tail: VecDeque<LogEntry>,
+    /// Start time of the current file
     start_time: Option<Instant>,
     /// Whether logging is active
     is_recording: bool,
@@ -37,74 +27,129 @@ pub struct DataLogger {
     sample_rate: f64,
     /// Last sample time
     last_sample: Option<Instant>,
-    /// Oldest entries discarded because the buffer hit `max_buffer_size`.
-    /// Nonzero means the saved log is missing its earliest samples — surfaced
-    /// so the truncation is never silent (the failure mode behind D7).
-    discarded: u64,
-    /// Hard ceiling on retained entries. Defaults to `MAX_BUFFER_SIZE`; a
-    /// field (rather than the const directly) so tests can exercise the
-    /// discard path without pushing hundreds of thousands of samples.
-    max_buffer_size: usize,
-    /// Continuous stream-to-disk writer (TunerStudio-style: the log is written
-    /// to a file as it is recorded, so it is saved the whole time and survives
-    /// a crash). `None` = in-memory only.
-    stream: Option<BufWriter<File>>,
-    /// Path of the file being streamed to, if any.
+    /// Timestamp of the last accepted sample in this file
+    last_timestamp: Duration,
+    /// Continuous stream-to-disk writer. `None` = not streaming.
+    stream: Option<LtlogWriter>,
+    /// Path of the file currently being written.
     stream_path: Option<PathBuf>,
-    /// Rows written to the stream file (used to flush periodically).
+    /// Directory used to open timestamped files (for rotate-on-clear).
+    stream_dir: Option<PathBuf>,
+    /// Last finished file, so Save As / AI can still find it after stop.
+    finished_path: Option<PathBuf>,
+    /// Rows written to the current file (and accepted without a stream in tests).
     rows_written: u64,
+    /// Rows dropped because their column count did not match `channels` — a
+    /// torn/misaligned serial read. Nonzero means a few samples were skipped
+    /// (never written with wrong columns), surfaced rather than silent.
+    malformed: u64,
+    /// ECU INI signature captured into the `.ltlog` header.
+    ini_signature: Option<String>,
+    /// Per-channel units (parallel to `channels`; empty strings if unknown).
+    channel_units: Vec<String>,
+    /// Per-channel INI type names (parallel to `channels`).
+    channel_ini_types: Vec<String>,
 }
 
 impl DataLogger {
     /// Create a new data logger with the given channels
     pub fn new(channels: Vec<String>) -> Self {
+        let n = channels.len();
         Self {
             channels,
-            buffer: VecDeque::with_capacity(MAX_BUFFER_SIZE),
+            tail: VecDeque::with_capacity(LIVE_TAIL),
             start_time: None,
             is_recording: false,
             sample_rate: 10.0, // Default 10 Hz
             last_sample: None,
-            discarded: 0,
-            max_buffer_size: MAX_BUFFER_SIZE,
+            last_timestamp: Duration::ZERO,
             stream: None,
             stream_path: None,
+            stream_dir: None,
+            finished_path: None,
             rows_written: 0,
+            malformed: 0,
+            ini_signature: None,
+            channel_units: vec![String::new(); n],
+            channel_ini_types: vec![String::new(); n],
         }
     }
 
-    /// Begin streaming the log to `path` as CSV (`Time` + channel columns),
-    /// written as each sample is recorded. Overwrites any existing file.
-    /// Returns the error if the file cannot be created.
+    /// Begin streaming the log to `path` as `.ltlog`.
+    /// Overwrites any existing file. Returns the error if the file cannot be created.
     pub fn start_streaming<P: AsRef<Path>>(&mut self, path: P) -> std::io::Result<()> {
+        if let Some(mut prev) = self.stream.take() {
+            let _ = prev.finish();
+            if let Some(old) = self.stream_path.take() {
+                self.finished_path = Some(old);
+            }
+        }
         let path = path.as_ref().to_path_buf();
         if let Some(dir) = path.parent() {
-            let _ = std::fs::create_dir_all(dir);
+            self.stream_dir = Some(dir.to_path_buf());
         }
-        let mut w = BufWriter::new(File::create(&path)?);
-        write!(w, "Time")?;
-        for c in &self.channels {
-            write!(w, ",{c}")?;
-        }
-        writeln!(w)?;
-        w.flush()?;
-        self.stream = Some(w);
+        let writer = LtlogWriter::create(&path, &self.capture_schema())?;
+        self.stream = Some(writer);
         self.stream_path = Some(path);
         self.rows_written = 0;
+        self.tail.clear();
+        self.last_timestamp = Duration::ZERO;
         Ok(())
     }
 
-    /// Path of the file being streamed to, if streaming is active.
+    /// INI signature / channel units written into the `.ltlog` header.
+    pub fn set_capture_meta(
+        &mut self,
+        signature: Option<String>,
+        units: Vec<String>,
+        ini_types: Vec<String>,
+    ) {
+        self.ini_signature = signature.filter(|s| !s.is_empty());
+        if units.len() == self.channels.len() {
+            self.channel_units = units;
+        }
+        if ini_types.len() == self.channels.len() {
+            self.channel_ini_types = ini_types;
+        }
+    }
+
+    /// Schema that a manual save or stream file should carry.
+    pub fn capture_schema(&self) -> LtlogSchema {
+        LtlogSchema {
+            created_utc: chrono::Utc::now().to_rfc3339(),
+            ini_signature: self.ini_signature.clone(),
+            sample_rate_hz: self.sample_rate,
+            channels: self
+                .channels
+                .iter()
+                .enumerate()
+                .map(|(i, name)| LtlogChannel {
+                    name: name.clone(),
+                    unit: self.channel_units.get(i).cloned().unwrap_or_default(),
+                    ini_type: self.channel_ini_types.get(i).cloned().unwrap_or_default(),
+                })
+                .collect(),
+        }
+    }
+
+    /// Path of the file being streamed to, if a writer is open.
     pub fn stream_path(&self) -> Option<&Path> {
         self.stream_path.as_deref()
     }
 
-    /// Override the buffer ceiling. Test-only: lets the discard/counter path
-    /// be exercised without pushing `MAX_BUFFER_SIZE` samples through the
-    /// real-time rate limiter.
-    #[cfg(test)]
-    fn set_max_buffer_size(&mut self, n: usize) {
-        self.max_buffer_size = n;
+    /// Current open file, or the last file that was finished.
+    pub fn log_path(&self) -> Option<&Path> {
+        self.stream_path
+            .as_deref()
+            .or(self.finished_path.as_deref())
+    }
+
+    /// Flush pending compressed samples so a reader/copy sees them.
+    pub fn flush_stream(&mut self) -> std::io::Result<()> {
+        if let Some(w) = self.stream.as_mut() {
+            w.flush_pending()?;
+        }
+        Ok(())
     }
 
     /// Set the target sample rate in Hz
@@ -117,32 +162,25 @@ impl DataLogger {
         self.sample_rate
     }
 
-    /// Start (or resume) recording.
-    ///
-    /// Recording appends to the existing buffer: the timeline continues from
-    /// the last recorded entry, so stop/start cycles produce one continuous
-    /// log with no gaps. Use [`clear`](Self::clear) to begin a fresh log.
+    /// Start recording into the current stream file (timeline from zero).
     pub fn start(&mut self) {
-        let now = Instant::now();
-        let elapsed = self.duration();
-        self.start_time = now.checked_sub(elapsed).or(Some(now));
+        self.start_time = Some(Instant::now());
         self.is_recording = true;
         self.last_sample = None;
+        self.last_timestamp = Duration::ZERO;
+        self.rows_written = 0;
+        self.tail.clear();
     }
 
-    /// Stop recording and finalize the continuous log file.
-    ///
-    /// The stream writer is flushed and dropped (closing the OS file handle), so
-    /// the on-disk log is complete and nothing further can be appended to it.
-    /// This is what ends logging cleanly on ECU disconnect: with the stream
-    /// closed and recording off, the file can never grow with post-disconnect
-    /// junk or be left half-open. A fresh `start_streaming` opens a new file.
+    /// Stop recording and finalize the log file.
     pub fn stop(&mut self) {
         self.is_recording = false;
         if let Some(mut w) = self.stream.take() {
-            let _ = w.flush();
+            let _ = w.finish();
         }
-        self.stream_path = None;
+        if let Some(path) = self.stream_path.take() {
+            self.finished_path = Some(path);
+        }
     }
 
     /// Check if recording is active
@@ -150,9 +188,33 @@ impl DataLogger {
         self.is_recording
     }
 
+    /// Test helper: record ignoring the sample-rate limiter.
+    #[cfg(test)]
+    fn record_unthrottled(&mut self, values: Vec<f64>) {
+        self.last_sample = None;
+        self.record(values);
+    }
+
     /// Record a sample
     pub fn record(&mut self, values: Vec<f64>) {
         if !self.is_recording {
+            return;
+        }
+
+        // Guard the append point against a torn/misaligned read. A row with the
+        // wrong column count would desync every column after it; dropping it
+        // and counting is safer than persisting corrupt data. Empty `channels`
+        // = no schema to check against, so accept (keeps existing tests).
+        if !self.channels.is_empty() && values.len() != self.channels.len() {
+            if self.malformed == 0 {
+                tracing::warn!(
+                    "Data log row had {} values but {} channels; dropping it (and any \
+                     further mismatched rows). Likely a partial serial read.",
+                    values.len(),
+                    self.channels.len()
+                );
+            }
+            self.malformed += 1;
             return;
         }
 
@@ -171,76 +233,59 @@ impl DataLogger {
             .map(|start| now.duration_since(start))
             .unwrap_or_default();
 
-        // Stream this sample straight to disk (saved the whole time). Any error
-        // here is a disk/file I/O failure (disk full, file gone) — NOT ECU data:
-        // engine cut codes and the like are ordinary channel values and are
-        // recorded in `values` above. Rather than fail silently, a write error
-        // is logged once and the stream is dropped, so a broken file surfaces
-        // instead of quietly stopping and never stalls the realtime path.
-        if self.stream.is_some() {
-            self.rows_written += 1;
-            let should_flush = self.rows_written.is_multiple_of(25);
-            let ts = timestamp.as_secs_f64();
-            let w = self.stream.as_mut().unwrap();
-            let res: std::io::Result<()> = (|| {
-                write!(w, "{ts:.3}")?;
-                for v in &values {
-                    write!(w, ",{v}")?;
-                }
-                writeln!(w)?;
-                if should_flush {
-                    w.flush()?;
-                }
-                Ok(())
-            })();
-            if let Err(e) = res {
+        let entry = LogEntry::new(timestamp, values);
+
+        // Disk is the log. A write failure stops recording rather than
+        // silently filling RAM.
+        if let Some(w) = self.stream.as_mut() {
+            if let Err(e) = w.push(&entry) {
                 tracing::warn!(
-                    "Data log stream write failed ({e}); stopping the continuous \
-                     file at {:?}. In-memory recording continues and can still be \
-                     saved manually.",
+                    "Data log stream write failed ({e}); stopping recording at {:?}.",
                     self.stream_path
                 );
                 self.stream = None;
-                self.stream_path = None;
+                if let Some(path) = self.stream_path.take() {
+                    self.finished_path = Some(path);
+                }
+                self.is_recording = false;
+                return;
             }
         }
 
-        let entry = LogEntry::new(timestamp, values);
-
-        // Manage buffer size. Discarding the oldest entry means the saved log
-        // will be missing its start; count it (and warn the first time) so the
-        // loss is visible rather than silent (D7).
-        if self.buffer.len() >= self.max_buffer_size {
-            self.buffer.pop_front();
-            if self.discarded == 0 {
-                tracing::warn!(
-                    "Data log hit the {}-sample memory ceiling; oldest samples are now \
-                     being discarded. Save more often, or lower the sample rate, to keep \
-                     the whole session.",
-                    self.max_buffer_size
-                );
-            }
-            self.discarded += 1;
+        self.rows_written += 1;
+        self.last_timestamp = timestamp;
+        if self.tail.len() >= LIVE_TAIL {
+            self.tail.pop_front();
         }
-
-        self.buffer.push_back(entry);
+        self.tail.push_back(entry);
         self.last_sample = Some(now);
     }
 
-    /// Number of oldest samples discarded because the buffer hit its memory
-    /// ceiling. Nonzero means the log no longer covers the whole session.
-    pub fn discarded_count(&self) -> u64 {
-        self.discarded
+    /// Rows dropped for having the wrong column count (a torn serial read).
+    pub fn malformed_count(&self) -> u64 {
+        self.malformed
     }
 
-    /// Get the number of recorded entries
+    /// Samples written to the current file (session length, not RAM size).
     pub fn entry_count(&self) -> usize {
-        self.buffer.len()
+        self.rows_written as usize
     }
 
-    /// Get all entries
+    /// Live-graph tail (not the full session).
     pub fn entries(&self) -> impl Iterator<Item = &LogEntry> {
-        self.buffer.iter()
+        self.tail.iter()
+    }
+
+    /// Slice of the live tail using absolute session indices.
+    pub fn live_window(&self, start_index: usize, count: usize) -> impl Iterator<Item = &LogEntry> {
+        let total = self.rows_written as usize;
+        let origin = total.saturating_sub(self.tail.len());
+        let start = start_index.min(total);
+        let end = start.saturating_add(count).min(total);
+        let from = start.max(origin);
+        let skip = from.saturating_sub(origin);
+        let take = end.saturating_sub(from);
+        self.tail.iter().skip(skip).take(take)
     }
 
     /// Get the channel names
@@ -248,16 +293,33 @@ impl DataLogger {
         &self.channels
     }
 
-    /// Clear all recorded data
+    /// Reset the live session. The file on disk is kept; if still recording,
+    /// a new timestamped file is opened in the same directory.
     pub fn clear(&mut self) {
-        self.buffer.clear();
-        self.start_time = None;
-        self.discarded = 0;
+        self.tail.clear();
+        self.rows_written = 0;
+        self.last_timestamp = Duration::ZERO;
+        self.malformed = 0;
+        if self.is_recording {
+            if let Some(dir) = self.stream_dir.clone() {
+                let name = chrono::Local::now().format("%Y-%m-%d_%H.%M.%S").to_string();
+                let path = dir.join(format!("{name}.ltlog"));
+                if self.start_streaming(&path).is_ok() {
+                    self.start_time = Some(Instant::now());
+                    self.last_sample = None;
+                    return;
+                }
+            }
+            self.start_time = Some(Instant::now());
+            self.last_sample = None;
+        } else {
+            self.start_time = None;
+        }
     }
 
-    /// Get the duration of the log
+    /// Get the duration of the current file
     pub fn duration(&self) -> Duration {
-        self.buffer.back().map(|e| e.timestamp).unwrap_or_default()
+        self.last_timestamp
     }
 }
 
@@ -270,6 +332,20 @@ impl Default for DataLogger {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn temp_path(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "lt_rec_{}_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos(),
+            name
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir.join("session.ltlog")
+    }
 
     #[test]
     fn test_logger_basic() {
@@ -288,7 +364,23 @@ mod tests {
     }
 
     #[test]
-    fn test_restart_appends_with_continuous_timeline() {
+    fn test_malformed_row_is_dropped_not_stored() {
+        let mut logger = DataLogger::new(vec!["rpm".into(), "map".into()]);
+        logger.start();
+
+        logger.record(vec![1000.0, 100.0]); // ok
+        logger.record(vec![1000.0]); // short — torn read
+        logger.record(vec![1.0, 2.0, 3.0]); // long — misaligned
+
+        // Only the well-formed row is stored; the two mismatched rows are
+        // dropped and counted (the sample-rate limiter is downstream of the
+        // guard, so it never even sees them).
+        assert_eq!(logger.entry_count(), 1);
+        assert_eq!(logger.malformed_count(), 2);
+    }
+
+    #[test]
+    fn start_begins_a_new_timeline() {
         let mut logger = DataLogger::new(vec!["rpm".into()]);
         logger.set_sample_rate(200.0);
 
@@ -296,16 +388,12 @@ mod tests {
         logger.record(vec![1000.0]);
         logger.stop();
         assert_eq!(logger.entry_count(), 1);
-        let first_ts = logger.duration();
 
-        // Restarting must keep the previous entries and continue the timeline
         logger.start();
         std::thread::sleep(Duration::from_millis(10));
         logger.record(vec![2000.0]);
-        assert_eq!(logger.entry_count(), 2);
-        assert!(logger.duration() >= first_ts);
+        assert_eq!(logger.entry_count(), 1);
 
-        // Only clear() wipes the log
         logger.clear();
         assert_eq!(logger.entry_count(), 0);
         logger.start();
@@ -314,33 +402,33 @@ mod tests {
     }
 
     #[test]
-    fn discards_oldest_past_ceiling_and_counts_them() {
+    fn live_tail_stays_bounded_full_log_is_the_file() {
+        let path = temp_path("tail");
         let mut logger = DataLogger::new(vec!["rpm".into()]);
-        logger.set_max_buffer_size(3);
-        logger.set_sample_rate(200.0); // 5 ms min interval
+        logger.set_sample_rate(200.0);
+        logger.start_streaming(&path).expect("open stream file");
         logger.start();
 
-        // Push 5 samples spaced past the rate-limit interval so each is kept.
-        for i in 0..5 {
-            logger.record(vec![i as f64]);
-            std::thread::sleep(Duration::from_millis(7));
+        let n = LIVE_TAIL + 32;
+        for i in 0..n {
+            logger.record_unthrottled(vec![i as f64]);
         }
+        logger.stop();
 
-        // Buffer holds only the last 3; the 2 oldest were discarded and counted.
-        assert_eq!(logger.entry_count(), 3);
-        assert_eq!(logger.discarded_count(), 2);
+        assert_eq!(logger.entry_count(), n);
+        assert_eq!(logger.entries().count(), LIVE_TAIL);
 
-        // clear() resets the discard counter for a fresh session.
-        logger.clear();
-        assert_eq!(logger.discarded_count(), 0);
+        let (_, entries) = crate::datalog::ltlog::read_ltlog(&path).expect("read stream file");
+        assert_eq!(entries.len(), n);
+        let _ = std::fs::remove_file(&path);
+        if let Some(dir) = path.parent() {
+            let _ = std::fs::remove_dir_all(dir);
+        }
     }
 
     #[test]
     fn streams_samples_to_disk_continuously() {
-        // Each recorded sample must land in the file as it happens (saved the
-        // whole time), with a Time + channel header.
-        let dir = std::env::temp_dir().join(format!("lt_stream_{}", std::process::id()));
-        let path = dir.join("session.csv");
+        let path = temp_path("stream");
         let mut logger = DataLogger::new(vec!["rpm".into(), "map".into()]);
         logger.set_sample_rate(200.0);
         logger.start_streaming(&path).expect("open stream file");
@@ -349,13 +437,21 @@ mod tests {
         logger.record(vec![1000.0, 50.0]);
         std::thread::sleep(Duration::from_millis(7));
         logger.record(vec![2000.0, 60.0]);
-        logger.stop(); // flushes
+        logger.stop();
 
-        let content = std::fs::read_to_string(&path).expect("read stream file");
-        let lines: Vec<&str> = content.lines().collect();
-        assert_eq!(lines[0], "Time,rpm,map");
-        assert!(lines.len() >= 3, "header + 2 rows, got {}", lines.len());
-        assert!(lines[1].contains("1000") && lines[1].contains("50"));
-        let _ = std::fs::remove_dir_all(&dir);
+        let (channels, entries) =
+            crate::datalog::ltlog::read_ltlog(&path).expect("read stream file");
+        assert_eq!(channels, vec!["rpm", "map"]);
+        assert!(
+            entries.len() >= 2,
+            "expected 2 samples, got {}",
+            entries.len()
+        );
+        assert!((entries[0].values[0] - 1000.0).abs() < 0.01);
+        assert!((entries[1].values[1] - 60.0).abs() < 0.01);
+        let _ = std::fs::remove_file(&path);
+        if let Some(dir) = path.parent() {
+            let _ = std::fs::remove_dir_all(dir);
+        }
     }
 }

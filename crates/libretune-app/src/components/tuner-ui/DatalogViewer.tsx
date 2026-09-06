@@ -76,6 +76,8 @@ export interface DatalogViewerProps {
 
 export const DatalogViewer: React.FC<DatalogViewerProps> = ({ tableName, isConnected }) => {
   const [samples, setSamples] = useState<LogSample[]>([]);
+  const [logPath, setLogPath] = useState<string | null>(null);
+  const [sampleCount, setSampleCount] = useState(0);
   const [logName, setLogName] = useState<string>('');
   const [channels, setChannels] = useState<string[]>([]);
   const [tables, setTables] = useState<string[]>([]);
@@ -124,13 +126,27 @@ export const DatalogViewer: React.FC<DatalogViewerProps> = ({ tableName, isConne
       const path = await open({
         multiple: false,
         filters: [
-          { name: 'Data logs', extensions: ['csv', 'msl', 'txt'] },
+          { name: 'Data logs', extensions: ['ltlog', 'csv', 'msl', 'mlg', 'txt'] },
           { name: 'All files', extensions: ['*'] },
         ],
       });
       if (!path || typeof path !== 'string') return;
-      const text = await invoke<string>('read_file_contents', { path });
-      const parsed = parseLogFile(text);
+      const ext = path.toLowerCase().split('.').pop();
+      let parsed: { data: LogSample[]; channels: string[] };
+      let count = 0;
+      if (ext === 'ltlog' || ext === 'mlg') {
+        const loaded = await invoke<{
+          channels: string[];
+          samples: LogSample[];
+          sample_count?: number;
+        }>('load_log_file', { path });
+        parsed = { data: loaded.samples, channels: loaded.channels };
+        count = loaded.sample_count ?? loaded.samples.length;
+      } else {
+        const text = await invoke<string>('read_file_contents', { path });
+        parsed = parseLogFile(text);
+        count = parsed.data.length;
+      }
       if (!parsed.data.length) {
         setError('No samples could be read from that file.');
         return;
@@ -138,6 +154,8 @@ export const DatalogViewer: React.FC<DatalogViewerProps> = ({ tableName, isConne
       setSamples(parsed.data);
       setChannels(parsed.channels);
       setLogName(path.split(/[\\/]/).pop() || path);
+      setLogPath(ext === 'ltlog' ? path : null);
+      setSampleCount(count);
       setReport(null);
     } catch (e) {
       setError(String(e));
@@ -168,58 +186,74 @@ export const DatalogViewer: React.FC<DatalogViewerProps> = ({ tableName, isConne
         if (!name) return [];
         return samples.map((s) => s.values[name] ?? NaN);
       };
-      // Timestamps are re-based: an .msl exported from a longer recording
-      // carries offsets from the original, which would put every sample in one
-      // validation block.
-      const t0 = Math.min(...samples.map((s) => s.x));
-      const report = await invoke<ReplayReport>('analyse_log', {
-        tableName: table,
-        log: {
-          time_ms: samples.map((s) => s.x - t0),
-          rpm: col('rpm'), load: col('load'), afr: col('afr'),
-          ve: col('ve'), clt: col('clt'), tps: col('tps'),
-          tps_rate: col('tps_rate'),
-          fuel_cut: col('fuel_cut'), accel_enrich: col('accel_enrich'),
+      const config = {
+        settings: {
+          target_afr: 14.7,
+          algorithm: 'simple',
+          update_rate_ms: 100,
+          lambda_delay_ms: delayMs,
+          lambda_delay_flow_scaled: false,
+          lambda_delay_floor_ms: 120,
+          hit_weighting: weighting,
+          base_weight: baseWeight,
+          min_change: minChange,
         },
-        config: {
-          settings: {
-            target_afr: 14.7,
-            algorithm: 'simple',
-            update_rate_ms: 100,
-            lambda_delay_ms: delayMs,
-            lambda_delay_flow_scaled: false,
-            lambda_delay_floor_ms: 120,
-            hit_weighting: weighting,
-            base_weight: baseWeight,
-            min_change: minChange,
-          },
-          filters: {
-            min_rpm: 1000, max_rpm: 8000,
-            min_y_axis: null, max_y_axis: null,
-            min_clt: minClt, custom_filter: null,
-            max_tps_rate: maxTpsRate,
-            exclude_accel_enrich: true,
-            min_steady_ms: minSteadyMs,
-          },
-          authority: {
-            max_cell_value_change: 10,
-            max_cell_percentage_change: 20,
-            min_cell_value: 0,
-            max_cell_value: 255,
-          },
-          strict_lambda_match: true,
-          validate: true,
+        filters: {
+          min_rpm: 1000, max_rpm: 8000,
+          min_y_axis: null, max_y_axis: null,
+          min_clt: minClt, custom_filter: null,
+          max_tps_rate: maxTpsRate,
+          exclude_accel_enrich: true,
+          min_steady_ms: minSteadyMs,
         },
-        targetAfrTableName: null,
-        lambdaDelayTableName: null,
-      });
+        authority: {
+          max_cell_value_change: 10,
+          max_cell_percentage_change: 20,
+          min_cell_value: 0,
+          max_cell_value: 255,
+        },
+        strict_lambda_match: true,
+        validate: true,
+      };
+      const report = logPath
+        ? await invoke<ReplayReport>('analyse_log_file', {
+            path: logPath,
+            tableName: table,
+            columns: {
+              rpm: mapping.rpm,
+              load: mapping.load,
+              afr: mapping.afr,
+              ve: mapping.ve,
+              clt: mapping.clt,
+              tps: mapping.tps,
+              tps_rate: mapping.tps_rate,
+              fuel_cut: mapping.fuel_cut,
+              accel_enrich: mapping.accel_enrich,
+            },
+            config,
+            targetAfrTableName: null,
+            lambdaDelayTableName: null,
+          })
+        : await invoke<ReplayReport>('analyse_log', {
+            tableName: table,
+            log: {
+              time_ms: samples.map((s) => s.x - Math.min(...samples.map((s) => s.x))),
+              rpm: col('rpm'), load: col('load'), afr: col('afr'),
+              ve: col('ve'), clt: col('clt'), tps: col('tps'),
+              tps_rate: col('tps_rate'),
+              fuel_cut: col('fuel_cut'), accel_enrich: col('accel_enrich'),
+            },
+            config,
+            targetAfrTableName: null,
+            lambdaDelayTableName: null,
+          });
       setReport(report);
     } catch (e) {
       setError(String(e));
     } finally {
       setBusy(false);
     }
-  }, [samples, table, mapping, weighting, baseWeight, minChange, minSteadyMs, minClt, maxTpsRate, delayMs]);
+  }, [samples, logPath, table, mapping, weighting, baseWeight, minChange, minSteadyMs, minClt, maxTpsRate, delayMs]);
 
   const apply = useCallback(async () => {
     if (!report || !tableData) return;
@@ -275,7 +309,7 @@ export const DatalogViewer: React.FC<DatalogViewerProps> = ({ tableName, isConne
           <Check size={15} /> Apply {changed > 0 ? `${changed} cells` : ''}
         </button>
         {samples.length > 0 && (
-          <span className="dv-meta">{samples.length.toLocaleString()} samples</span>
+          <span className="dv-meta">{(sampleCount || samples.length).toLocaleString()} samples</span>
         )}
         {!isConnected && <span className="dv-meta dv-warn">offline — reading the project tune</span>}
       </div>
@@ -370,7 +404,6 @@ export const DatalogViewer: React.FC<DatalogViewerProps> = ({ tableName, isConne
           )}
           {report && (
             <Timeline
-              samples={samples}
               verdicts={report.verdicts}
               selected={selected}
             />
@@ -528,10 +561,9 @@ const VERDICT_COLOURS: Record<string, string> = {
  * happened to land last.
  */
 const Timeline: React.FC<{
-  samples: LogSample[];
   verdicts: SampleVerdict[];
   selected: [number, number] | null;
-}> = ({ samples, verdicts, selected }) => {
+}> = ({ verdicts, selected }) => {
   const ref = useRef<HTMLCanvasElement>(null);
   const [hover, setHover] = useState<string | null>(null);
 
@@ -542,7 +574,7 @@ const Timeline: React.FC<{
     if (!ctx) return;
     const w = cv.width, h = cv.height;
     ctx.clearRect(0, 0, w, h);
-    const n = Math.min(samples.length, verdicts.length);
+    const n = verdicts.length;
     if (!n) return;
 
     for (let px = 0; px < w; px++) {
@@ -567,7 +599,7 @@ const Timeline: React.FC<{
         ctx.fillRect(px, h - 4, 1, 4);
       }
     }
-  }, [samples, verdicts, selected]);
+  }, [verdicts, selected]);
 
   const legend = useMemo(() => {
     const tally: Record<string, number> = {};

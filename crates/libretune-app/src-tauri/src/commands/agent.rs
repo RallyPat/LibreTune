@@ -646,8 +646,9 @@ impl LiveReadExecutor {
 
     /// `query_datalog`: summary stats or tail rows over a saved log (by
     /// name, from the project's `datalogs/` folder) or the current
-    /// in-memory session. Responses are bounded (≤50 channels for summary,
-    /// ≤50 rows × ≤12 columns for tail) to control token cost.
+    /// session file. Responses are bounded (≤50 channels for summary,
+    /// ≤50 rows × ≤12 columns for tail) to control token cost. `.ltlog`
+    /// is streamed; the whole file is never loaded.
     async fn exec_query_datalog(&self, arguments: &str) -> String {
         let state = self.app.state::<AppState>();
         let log_name = json_str_field(arguments, "log");
@@ -659,8 +660,6 @@ impl LiveReadExecutor {
                 match crate::commands::data_logging::load_datalog_file(&state, &name).await {
                     Ok(d) => d,
                     Err(e) => {
-                        // Self-healing: hand back the available log names so
-                        // the model can retry with a real one.
                         let logs = crate::commands::data_logging::list_datalog_files(&state).await;
                         return serde_json::to_string(&serde_json::json!({
                             "error": e,
@@ -673,16 +672,6 @@ impl LiveReadExecutor {
             None => crate::commands::data_logging::current_session_datalog(&state).await,
         };
 
-        if data.entries.is_empty() {
-            return serde_json::to_string(&serde_json::json!({
-                "source": data.source,
-                "entry_count": 0,
-                "note": "no entries recorded; start datalogging or name a saved log ('log' parameter)",
-            }))
-            .unwrap_or_else(|_| json_err("serialize failed"));
-        }
-
-        // Resolve the channel column indexes the caller asked for (or all).
         let indexes: Vec<usize> = data
             .channels
             .iter()
@@ -694,25 +683,75 @@ impl LiveReadExecutor {
             .map(|(i, _)| i)
             .collect();
 
-        let entry_count = data.entries.len();
-        let duration_s = data
-            .entries
-            .last()
-            .map(|e| e.timestamp.as_secs_f64())
-            .unwrap_or(0.0);
+        let stat_idx: Vec<usize> = indexes.iter().copied().take(50).collect();
+        let tail_cols: Vec<(String, usize)> = indexes
+            .iter()
+            .copied()
+            .take(12)
+            .map(|i| (data.channels[i].clone(), i))
+            .collect();
+
+        struct Acc {
+            min: f64,
+            max: f64,
+            sum: f64,
+            n: u64,
+            last: Option<f64>,
+        }
+        let mut stats: Vec<Acc> = stat_idx
+            .iter()
+            .map(|_| Acc {
+                min: f64::INFINITY,
+                max: f64::NEG_INFINITY,
+                sum: 0.0,
+                n: 0,
+                last: None,
+            })
+            .collect();
+        let mut entry_count = 0u64;
+        let mut duration_s = 0.0;
+        let mut ring: std::collections::VecDeque<libretune_core::datalog::LogEntry> =
+            std::collections::VecDeque::with_capacity(50);
+
+        if let Err(e) = data.for_each(|e| {
+            entry_count += 1;
+            duration_s = e.timestamp.as_secs_f64();
+            for (acc, &i) in stats.iter_mut().zip(&stat_idx) {
+                if let Some(&v) = e.values.get(i) {
+                    if v.is_finite() {
+                        acc.min = acc.min.min(v);
+                        acc.max = acc.max.max(v);
+                        acc.sum += v;
+                        acc.n += 1;
+                        acc.last = Some(v);
+                    }
+                }
+            }
+            if mode == "tail" {
+                if ring.len() == 50 {
+                    ring.pop_front();
+                }
+                ring.push_back(e.clone());
+            }
+        }) {
+            return json_err(&e);
+        }
+
+        if entry_count == 0 {
+            return serde_json::to_string(&serde_json::json!({
+                "source": data.source,
+                "entry_count": 0,
+                "note": "no entries recorded; start datalogging or name a saved log ('log' parameter)",
+            }))
+            .unwrap_or_else(|_| json_err("serialize failed"));
+        }
 
         if mode == "tail" {
-            let tail_start = entry_count.saturating_sub(50);
-            let columns: Vec<(String, usize)> = indexes
-                .into_iter()
-                .take(12)
-                .map(|i| (data.channels[i].clone(), i))
-                .collect();
-            let rows: Vec<serde_json::Value> = data.entries[tail_start..]
+            let rows: Vec<serde_json::Value> = ring
                 .iter()
                 .map(|e| {
                     let mut row = serde_json::json!({ "t": e.timestamp.as_secs_f64() });
-                    for (name, i) in &columns {
+                    for (name, i) in &tail_cols {
                         row[name] = serde_json::json!(e.values.get(*i).copied());
                     }
                     row
@@ -728,35 +767,18 @@ impl LiveReadExecutor {
             .unwrap_or_else(|_| json_err("serialize failed"));
         }
 
-        // summary (default)
         let mut channel_stats: Vec<serde_json::Value> = Vec::new();
-        for &i in indexes.iter().take(50) {
-            let mut min = f64::INFINITY;
-            let mut max = f64::NEG_INFINITY;
-            let mut sum = 0.0;
-            let mut n = 0u64;
-            let mut last = None;
-            for e in &data.entries {
-                if let Some(v) = e.values.get(i) {
-                    if v.is_finite() {
-                        min = min.min(*v);
-                        max = max.max(*v);
-                        sum += *v;
-                        n += 1;
-                        last = Some(*v);
-                    }
-                }
-            }
-            if n == 0 {
+        for (acc, &i) in stats.iter().zip(&stat_idx) {
+            if acc.n == 0 {
                 continue;
             }
             channel_stats.push(serde_json::json!({
                 "channel": data.channels[i],
-                "min": min,
-                "max": max,
-                "mean": sum / n as f64,
-                "last": last,
-                "samples": n,
+                "min": acc.min,
+                "max": acc.max,
+                "mean": acc.sum / acc.n as f64,
+                "last": acc.last,
+                "samples": acc.n,
             }));
         }
         serde_json::to_string(&serde_json::json!({

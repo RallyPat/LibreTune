@@ -15,7 +15,7 @@
  *   </Dialog>
  */
 
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useId, useRef } from 'react';
 import { X } from 'lucide-react';
 import './Dialog.css';
 
@@ -59,6 +59,7 @@ export function Dialog({
   ariaLabel,
 }: DialogProps) {
   const cardRef = useRef<HTMLDivElement>(null);
+  const titleId = useId();
 
   useEffect(() => {
     if (!open || !closeOnEscape) return;
@@ -83,11 +84,12 @@ export function Dialog({
         className={`lt-dialog lt-dialog--${size}${className ? ` ${className}` : ''}`}
         role="dialog"
         aria-modal="true"
-        aria-label={typeof title === 'string' ? title : ariaLabel}
+        aria-labelledby={title && !noHeader ? titleId : undefined}
+        aria-label={title && !noHeader ? undefined : ariaLabel}
       >
         {!noHeader && (title || !hideClose) && (
           <header className="lt-dialog__header">
-            <div className="lt-dialog__title">
+            <div className="lt-dialog__title" id={titleId}>
               {title}
               {titleAdornment}
             </div>

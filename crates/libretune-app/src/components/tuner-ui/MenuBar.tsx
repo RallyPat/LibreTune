@@ -161,8 +161,8 @@ export function MenuBar({ items }: MenuBarProps) {
   const openItem = openMenuId ? items.find((item) => item.id === openMenuId) : undefined;
 
   return (
-    <div className="menubar" ref={menuBarRef} role="menubar">
-      <div className="menubar-items" onScroll={handleItemsScroll}>
+    <div className="menubar" ref={menuBarRef}>
+      <div className="menubar-items" onScroll={handleItemsScroll} role="menubar">
         {items.map((item, index) => {
           // Top-level separators render as a non-focusable vertical rule.
           if (item.separator) {
@@ -179,7 +179,7 @@ export function MenuBar({ items }: MenuBarProps) {
           const isOpen = openMenuId === item.id;
 
           return (
-            <div key={item.id} className="menubar-item-wrapper">
+            <div key={item.id} className="menubar-item-wrapper" role="none">
               <button
                 ref={(el) => {
                   itemRefs.current[item.id] = el;
