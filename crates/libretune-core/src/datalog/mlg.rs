@@ -1,7 +1,7 @@
 //! MegaLogViewer binary logs (`.mlg`, format version 2).
 //!
 //! The format TunerStudio writes and MegaLogViewer reads. Only reading is
-//! implemented: LibreTune records to CSV, and the reason to understand `.mlg`
+//! implemented: LibreTune records to `.ltlog`, and the reason to understand `.mlg`
 //! is to open logs captured by TunerStudio.
 //!
 //! Layout, all values big-endian:
