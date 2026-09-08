@@ -319,11 +319,22 @@ pub fn parse_constant_line(
         constant.units = parts[units_idx].trim_matches('"').to_string();
     }
 
-    // Parse scale, translate, min, max, digits.
-    // scale/translate may be `{expr}` referencing other constants (Speeduino's
-    // `{fuelLoadRes}`); those are kept for deferred resolution instead of
-    // silently collapsing to the literal fallback.
-    let scale_idx = units_idx + 1;
+    apply_scale_and_range(&mut constant, &parts, units_idx + 1);
+
+    Some(constant)
+}
+
+/// Read the trailing `scale, translate, min, max, digits` columns into
+/// `constant`, starting at `scale_idx`.
+///
+/// Any of scale/translate/min/max may be a `{expr}` reference to another
+/// constant (Speeduino's `{fuelLoadRes}`); those are recorded for deferred
+/// resolution instead of silently collapsing to the literal fallback, and a
+/// deferred min/max clears `range_resolved` so `display_to_raw` does not clamp
+/// against a range the INI never declared. Shared by `[Constants]` and
+/// `[PcVariables]`, which used to disagree: the PcVariable path parsed the same
+/// columns without any of the deferral, fabricating a 0..255 range.
+fn apply_scale_and_range(constant: &mut Constant, parts: &[&str], scale_idx: usize) {
     if parts.len() > scale_idx {
         constant.scale_expr = deferred_expr(parts[scale_idx]);
         constant.scale = parts[scale_idx].parse().unwrap_or(1.0);
@@ -344,8 +355,6 @@ pub fn parse_constant_line(
     if parts.len() > scale_idx + 4 {
         constant.digits = parts[scale_idx + 4].parse().unwrap_or(0);
     }
-
-    Some(constant)
 }
 
 /// Parse a PcVariable constant line (no offset field)
@@ -401,21 +410,7 @@ pub fn parse_pc_variable_line(name: &str, value: &str, help: Option<String>) -> 
         if parts.len() > 3 {
             constant.units = parts[3].trim_matches('"').to_string();
         }
-        if parts.len() > 4 {
-            constant.scale = parts[4].parse().unwrap_or(1.0);
-        }
-        if parts.len() > 5 {
-            constant.translate = parts[5].parse().unwrap_or(0.0);
-        }
-        if parts.len() > 6 {
-            constant.min = parts[6].parse().unwrap_or(0.0);
-        }
-        if parts.len() > 7 {
-            constant.max = parts[7].parse().unwrap_or(255.0);
-        }
-        if parts.len() > 8 {
-            constant.digits = parts[8].parse().unwrap_or(0);
-        }
+        apply_scale_and_range(&mut constant, &parts, 4);
         return Some(constant);
     }
 
@@ -423,24 +418,14 @@ pub fn parse_pc_variable_line(name: &str, value: &str, help: Option<String>) -> 
     if parts.len() > 2 {
         constant.units = parts[2].trim_matches('"').to_string();
     }
-    if parts.len() > 3 {
-        constant.scale = parts[3].parse().unwrap_or(1.0);
-    }
-    if parts.len() > 4 {
-        constant.translate = parts[4].parse().unwrap_or(0.0);
-    }
-    if parts.len() > 5 {
-        constant.min = parts[5].parse().unwrap_or(0.0);
-    }
-    if parts.len() > 6 {
-        constant.max = parts[6].parse().unwrap_or(255.0);
-    }
-    if parts.len() > 7 {
-        constant.digits = parts[7].parse().unwrap_or(0);
-    }
+    apply_scale_and_range(&mut constant, &parts, 3);
 
     Some(constant)
 }
+
+/// Widest bit index a TunerStudio bit field may name: bit fields are backed by
+/// at most a 32-bit storage type, so `[0:31]` is the largest legal range.
+const MAX_BIT_INDEX: u8 = 32;
 
 /// Parse TunerStudio bit range `[start:end]` or `[start:end+N]` / `[start:end-N]`.
 /// Returns `(start_bit, bit_count, display_offset)` where `bit_count = end - start + 1`.
@@ -473,7 +458,18 @@ fn parse_bit_range_spec(spec: &str) -> Option<(u8, u8, i8)> {
         (end_part.parse().ok()?, 0)
     };
 
-    let size = if end >= start { end - start + 1 } else { 1 };
+    // `end - start + 1` on `u8` overflows for a range like `[0:255]`: a panic
+    // under the default debug `overflow-checks`, a silent `bit_size = 0` in
+    // release. Both bounds also have to fit the widest storage type a bit
+    // field may use, which is 32 bits.
+    if start >= MAX_BIT_INDEX || end >= MAX_BIT_INDEX {
+        return None;
+    }
+    let size = if end >= start {
+        (end - start).checked_add(1)?
+    } else {
+        1
+    };
     Some((start, size, display_offset))
 }
 
@@ -710,5 +706,60 @@ mod declared_range_tests {
         c.max = -40.0;
         assert_eq!(c.display_to_raw(200.0), c.display_to_raw(70.0));
         assert_eq!(c.display_to_raw(-500.0), c.display_to_raw(-40.0));
+    }
+
+    /// `[PcVariables]` scalars go through the same `{expr}` deferral as
+    /// `[Constants]` ones. Without it a `{maxRpm}` min/max collapsed to the
+    /// literal 0.0/255.0 fallback and `display_to_raw` clamped against a range
+    /// the INI never declared.
+    #[test]
+    fn pc_variable_scalars_defer_brace_expressions_like_constants_do() {
+        let c = parse_pc_variable_line(
+            "rpmwarn",
+            "scalar, U16, \"RPM\", {rpmScale}, {rpmOffset}, {rpmMin}, {rpmMax}, 0",
+            None,
+        )
+        .expect("parses");
+
+        assert_eq!(c.scale_expr.as_deref(), Some("rpmScale"));
+        assert_eq!(c.translate_expr.as_deref(), Some("rpmOffset"));
+        assert_eq!(c.min_expr.as_deref(), Some("rpmMin"));
+        assert_eq!(c.max_expr.as_deref(), Some("rpmMax"));
+        assert!(
+            !c.range_resolved,
+            "a deferred min/max must not be treated as resolved"
+        );
+    }
+
+    /// Literal min/max still resolve immediately.
+    #[test]
+    fn pc_variable_scalars_with_literal_ranges_stay_resolved() {
+        let c = parse_pc_variable_line("rpmwarn", "scalar, U16, \"RPM\", 1, 0, 100, 9000, 0", None)
+            .expect("parses");
+
+        assert!(c.range_resolved);
+        assert!((c.min - 100.0).abs() < f64::EPSILON);
+        assert!((c.max - 9000.0).abs() < f64::EPSILON);
+    }
+
+    /// `end - start + 1` on `u8` overflows for `[0:255]`: a panic under the
+    /// default debug `overflow-checks`, a silent `bit_size = 0` in release.
+    /// The spec caps a bit field at the 32 bits of its storage type.
+    #[test]
+    fn wide_bit_ranges_are_rejected_instead_of_overflowing() {
+        let c = parse_constant_line("wide", "bits, U08, 0, [0:255], \"a\", \"b\"", 0, 0, None)
+            .expect("parses");
+        assert_eq!(c.bit_size, None, "an impossible bit range must be rejected");
+        assert_eq!(c.bit_position, None);
+
+        let pc =
+            parse_pc_variable_line("widePc", "bits, U08, [0:255], \"a\"", None).expect("parses");
+        assert_eq!(pc.bit_size, None);
+
+        // A legal range is unaffected.
+        let ok = parse_constant_line("narrow", "bits, U08, 0, [4:7], \"a\"", 0, 0, None)
+            .expect("parses");
+        assert_eq!(ok.bit_position, Some(4));
+        assert_eq!(ok.bit_size, Some(4));
     }
 }

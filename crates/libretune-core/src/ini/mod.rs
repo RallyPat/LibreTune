@@ -1045,10 +1045,7 @@ mod tests {
         let field = d
             .components
             .iter()
-            .find_map(|c| match c {
-                DialogComponent::Field { name, .. } if name == "algorithm" => Some(c),
-                _ => None,
-            })
+            .find(|c| matches!(c, DialogComponent::Field { name, .. } if name == "algorithm"))
             .expect("algorithm field must be synthesized when the constant exists");
         match field {
             DialogComponent::Field { label, .. } => {

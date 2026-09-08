@@ -175,9 +175,18 @@ pub fn analyze_events(samples: &[AeSample], cfg: &AeConfig) -> Vec<AeEvent> {
             let resp_lo = peak_ts + cfg.delay_ms;
             let resp_hi = resp_lo + settle_ms;
 
+            // `samples` is time-ordered, so the response window and the two
+            // baseline windows that bracket it are one contiguous slice.
+            // Binary-searching for its bounds turns what was a full rescan of
+            // the log per tip-in - O(events x n) - into O(events x window).
+            let lo_ts = (start_ts - base_span_ms).min(resp_lo);
+            let hi_ts = resp_hi + base_span_ms;
+            let from = samples.partition_point(|s| (s.timestamp_ms as f64) < lo_ts);
+            let to = samples.partition_point(|s| (s.timestamp_ms as f64) <= hi_ts);
+
             let mut resp = Vec::new();
             let mut base = Vec::new();
-            for s in samples {
+            for s in &samples[from..to] {
                 let ts = s.timestamp_ms as f64;
                 if ts >= resp_lo && ts <= resp_hi {
                     resp.push(afr_err(s, cfg.target_afr_fallback));
@@ -361,6 +370,94 @@ mod tests {
             assert_eq!(
                 r.recommended_rate, r.current_rate,
                 "an unseen bin must be held, not moved"
+            );
+        }
+    }
+}
+
+/// Regression for the 2026-09-05 audit finding that `analyze_events` rescans
+/// the whole log for every tip-in.
+#[cfg(test)]
+mod audit_regression_tests {
+    use super::*;
+
+    /// `samples` is documented as time-ordered, so the response and baseline
+    /// windows are a contiguous slice: binary-searching for it turns the
+    /// O(events x n) pass into O(events x window + n log n).
+    fn drive_log(events: usize) -> Vec<AeSample> {
+        let dt = 20u64; // 50 Hz
+        let target = 14.7;
+        // One tip-in every 100 samples (2 s), which is wider than the whole
+        // response-plus-baseline bracket of 800..1860 ms after the tip.
+        let gap = 100u64;
+        let mut v = Vec::new();
+        for i in 0..(events * gap as usize) {
+            let t = i as u64 * dt;
+            let is_tip = i as u64 % gap == 10;
+            let since_tip = (i as u64 % gap) as i64 - 10;
+            // delay_ms = 800 -> +40 samples; settle = aeTime 160 + 500 -> +33.
+            let in_response = (40..=73).contains(&since_tip);
+            v.push(AeSample {
+                timestamp_ms: t,
+                tps_dot: if is_tip { 100.0 } else { 0.0 },
+                afr: target + if in_response { 0.6 } else { 0.0 },
+                afr_target: target,
+                clt: 85.0,
+            });
+        }
+        v
+    }
+
+    /// Cost must scale with the log length, not with length x events.
+    ///
+    /// Quadrupling a log quadruples both its sample count and its tip-in count,
+    /// so a full rescan per event costs ~16x while a windowed scan costs ~4x.
+    /// Comparing the two runs makes the assertion about the algorithm's shape
+    /// rather than about how fast the machine happens to be.
+    #[test]
+    fn cost_scales_with_log_length_not_length_times_events() {
+        let cfg = AeConfig {
+            min_events: 1,
+            delay_ms: 800.0,
+            ..Default::default()
+        };
+        let time_for = |events: usize| {
+            let samples = drive_log(events);
+            let began = std::time::Instant::now();
+            let found = analyze_events(&samples, &cfg);
+            assert!(!found.is_empty(), "the synthetic tip-ins must be detected");
+            began.elapsed().as_nanos().max(1)
+        };
+
+        // Warm the allocator/caches so the small run is not paying for both.
+        let _ = time_for(500);
+        let small = time_for(500);
+        let large = time_for(2_000);
+
+        let ratio = large as f64 / small as f64;
+        assert!(
+            ratio < 8.0,
+            "4x the log took {ratio:.1}x the time: the scan is still per-event \
+             (linear would be ~4x, quadratic ~16x)"
+        );
+    }
+
+    /// Narrowing the scan must not change which samples land in the response
+    /// and baseline windows.
+    #[test]
+    fn windowing_still_finds_the_same_residual() {
+        let cfg = AeConfig {
+            min_events: 1,
+            delay_ms: 800.0,
+            ..Default::default()
+        };
+        let events = analyze_events(&drive_log(3), &cfg);
+        assert!(!events.is_empty());
+        for e in &events {
+            assert!(
+                (e.residual_afr - 0.6).abs() < 0.2,
+                "a +0.6 AFR excursion must survive the narrowed scan, got {}",
+                e.residual_afr
             );
         }
     }

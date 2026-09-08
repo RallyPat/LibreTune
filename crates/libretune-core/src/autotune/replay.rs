@@ -434,6 +434,20 @@ pub fn validate(
 /// window covers the whole exhaust path.
 pub const VALIDATION_STEADY_MS: f64 = 800.0;
 
+/// Hard cap on how many samples the backward steadiness walk may inspect.
+///
+/// The walk is otherwise bounded only by [`VALIDATION_STEADY_MS`] of log time,
+/// which a broken or constant time column never satisfies - the walk then runs
+/// to index 0 for every sample and the pass becomes O(n²). The rpm/load
+/// tolerances usually cut it short, but a long idle or steady-state hold keeps
+/// those satisfied too.
+///
+/// 512 samples is far beyond any real 800 ms window (8 samples at 10 Hz, 80 at
+/// 100 Hz), so this changes no verdict on a sane log. On an insane one the walk
+/// simply stops without setting `reached_back`, which already means "not
+/// evidence of steadiness".
+const MAX_STEADY_LOOKBACK: usize = 512;
+
 /// Which samples had rpm and load unchanged for the whole window before them.
 ///
 /// Independent of [`AutoTuneFilters::min_steady_ms`] on purpose: the score must
@@ -450,7 +464,7 @@ fn steady_mask(log: &LogChannels) -> Vec<bool> {
         let start = log.time_ms[i] - VALIDATION_STEADY_MS;
         let mut reached_back = false;
         let mut steady = true;
-        for j in (0..=i).rev() {
+        for j in (i.saturating_sub(MAX_STEADY_LOOKBACK)..=i).rev() {
             if log.time_ms[j] < start {
                 reached_back = true;
                 break;
@@ -585,5 +599,79 @@ mod tests {
         assert_eq!(log.len(), 40);
         let report = replay(&log, &X, &Y, &tables(), &config());
         assert_eq!(report.verdicts.len(), 40);
+    }
+}
+
+/// Regression for the 2026-09-05 audit finding that `steady_mask`'s backward
+/// walk is bounded only by log time.
+#[cfg(test)]
+mod audit_regression_tests {
+    use super::*;
+
+    /// A log whose time channel does not advance never satisfies
+    /// `time_ms[j] < start`, so the walk runs to index 0 for every sample and
+    /// the whole pass becomes O(n²). The rpm/load tolerances usually cut it
+    /// short, but a long steady hold (or an idle) keeps them satisfied too.
+    /// Capping the walk by index as well as by time bounds the cost without
+    /// changing the verdict: not reaching back far enough is still not
+    /// evidence of steadiness.
+    #[test]
+    fn a_stalled_time_channel_does_not_take_quadratic_time() {
+        let n = 20_000;
+        let log = LogChannels {
+            time_ms: vec![0.0; n],
+            rpm: vec![3000.0; n],
+            load: vec![50.0; n],
+            afr: vec![14.7; n],
+            ve: vec![50.0; n],
+            clt: vec![90.0; n],
+            tps: vec![20.0; n],
+            tps_rate: vec![0.0; n],
+            fuel_cut: vec![0.0; n],
+            accel_enrich: vec![0.0; n],
+        };
+
+        let began = std::time::Instant::now();
+        let mask = steady_mask(&log);
+        let elapsed = began.elapsed();
+
+        assert_eq!(mask.len(), n);
+        assert!(
+            mask.iter().all(|s| !s),
+            "a log that never reaches back 800ms cannot claim steadiness"
+        );
+        assert!(
+            elapsed < std::time::Duration::from_secs(3),
+            "the backward walk must be bounded, took {elapsed:?} for {n} samples"
+        );
+    }
+
+    /// The index cap must sit far above any realistic sample rate, so a normal
+    /// log's verdicts are untouched: 800ms holds 8 samples at 10Hz and 80 at
+    /// 100Hz, against a cap in the hundreds.
+    #[test]
+    fn a_normal_log_still_reports_its_steady_stretch() {
+        let n = 200;
+        let log = LogChannels {
+            time_ms: (0..n).map(|i| i as f64 * 100.0).collect(),
+            rpm: vec![3000.0; n],
+            load: vec![50.0; n],
+            afr: vec![14.7; n],
+            ve: vec![50.0; n],
+            clt: vec![90.0; n],
+            tps: vec![20.0; n],
+            tps_rate: vec![0.0; n],
+            fuel_cut: vec![0.0; n],
+            accel_enrich: vec![0.0; n],
+        };
+
+        let mask = steady_mask(&log);
+        // The first 800ms cannot reach back; everything after it is steady.
+        assert!(!mask[0], "the start of the log has no history");
+        assert!(mask[100], "a long steady hold must be marked steady");
+        assert!(
+            mask.iter().filter(|s| **s).count() > n / 2,
+            "most of a wholly steady log must be marked steady"
+        );
     }
 }

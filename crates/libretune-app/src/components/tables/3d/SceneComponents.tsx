@@ -507,14 +507,19 @@ export function AxisLabels({
   y_label, 
   z_label,
   x_bins,
-  y_bins
+  y_bins,
+  yAxisBottom = false
 }: { 
   x_label?: string; 
   y_label?: string; 
   z_label?: string;
   x_bins: number[];
   y_bins: number[];
+  /** Data group is mirrored along world Z, so the near/far Y labels swap. */
+  yAxisBottom?: boolean;
 }) {
+  const yNear = yAxisBottom ? y_bins[y_bins.length - 1] : y_bins[0];
+  const yFar = yAxisBottom ? y_bins[0] : y_bins[y_bins.length - 1];
   return (
     <>
       {/* 3D Box Frame (The "Z lines") */}
@@ -583,16 +588,16 @@ export function AxisLabels({
       
       {/* Axis value labels - Corners */}
       <Text position={[-0.3, -0.3, -0.3]} fontSize={0.25} color="#888888">
-        {x_bins[0]?.toFixed(0)}/{y_bins[0]?.toFixed(0)}
+        {x_bins[0]?.toFixed(0)}/{yNear?.toFixed(0)}
       </Text>
       <Text position={[10.3, -0.3, -0.3]} fontSize={0.25} color="#888888">
         {x_bins[x_bins.length - 1]?.toFixed(0)}
       </Text>
       <Text position={[-0.3, -0.3, 10.3]} fontSize={0.25} color="#888888">
-        {y_bins[y_bins.length - 1]?.toFixed(0)}
+        {yFar?.toFixed(0)}
       </Text>
       <Text position={[10.3, -0.3, 10.3]} fontSize={0.25} color="#888888">
-        {x_bins[x_bins.length - 1]?.toFixed(0)}/{y_bins[y_bins.length - 1]?.toFixed(0)}
+        {x_bins[x_bins.length - 1]?.toFixed(0)}/{yFar?.toFixed(0)}
       </Text>
     </>
   );
@@ -641,7 +646,8 @@ export function Scene({
   liveCell,
   historyTrail,
   wireframe,
-  showCells
+  showCells,
+  yAxisBottom = false
 }: {
   x_bins: number[];
   y_bins: number[];
@@ -656,6 +662,8 @@ export function Scene({
   historyTrail?: Array<{ row: number; col: number; time: number }>;
   wireframe: boolean;
   showCells: boolean;
+  /** Mirror table Y (world Z) so the lowest Y bin sits nearest the camera, matching the 2D grid. */
+  yAxisBottom?: boolean;
 }) {
   const [hoveredCell, _setHoveredCell] = useState<{ x: number; y: number } | null>(null);
 
@@ -675,7 +683,10 @@ export function Scene({
       <directionalLight position={[10, 15, 10]} intensity={0.8} castShadow />
       <directionalLight position={[-5, 10, -5]} intensity={0.3} />
       
-      {/* Surface mesh */}
+      {/* Data group. A negative Z scale mirrors table Y about the box centre;
+          three.js flips front-face winding for negative-determinant matrices,
+          so lighting and picking keep working. */}
+      <group position={[0, 0, yAxisBottom ? 10 : 0]} scale={[1, 1, yAxisBottom ? -1 : 1]}>
       <SurfaceMesh
         x_bins={x_bins}
         y_bins={y_bins}
@@ -705,6 +716,7 @@ export function Scene({
           historyTrail={historyTrail}
         />
       )}
+      </group>
       
       {/* Axis labels and grid */}
       <AxisLabels 
@@ -713,6 +725,7 @@ export function Scene({
         z_label={z_label}
         x_bins={x_bins}
         y_bins={y_bins}
+        yAxisBottom={yAxisBottom}
       />
       
       {/* Tooltip */}

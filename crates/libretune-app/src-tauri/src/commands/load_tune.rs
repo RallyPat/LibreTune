@@ -662,9 +662,20 @@ pub async fn load_tune(
 
     // If a project is open, save the tune to the project's CurrentTune.msq
     // This ensures it will be auto-loaded next time the project is opened
-    let proj_guard = state.current_project.lock().await;
-    if let Some(ref project) = *proj_guard {
-        let project_tune_path = project.path.join("CurrentTune.msq");
+    //
+    // Lock order (see the module comment on `save_tune.rs`): `current_tune_path`
+    // comes before `current_project`, so the project path is resolved and the
+    // guard released *before* the blocking save and the `current_tune_path`
+    // write. Holding `current_project` across those two closed an AB-BA cycle
+    // against `save_tune`, which held `current_tune_path` and then waited for
+    // `current_project`.
+    let project_tune_path = {
+        let proj_guard = state.current_project.lock().await;
+        proj_guard
+            .as_ref()
+            .map(|project| project.path.join("CurrentTune.msq"))
+    };
+    if let Some(project_tune_path) = project_tune_path {
         if let Err(e) = tune.save(&project_tune_path) {
             eprintln!("[WARN] Failed to save tune to project folder: {}", e);
         } else {
@@ -673,7 +684,6 @@ pub async fn load_tune(
             *state.current_tune_path.lock().await = Some(project_tune_path);
         }
     }
-    drop(proj_guard);
 
     // Emit event to notify UI that tune was loaded
     let _ = app.emit("tune:loaded", "file");

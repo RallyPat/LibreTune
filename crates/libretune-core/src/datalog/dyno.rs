@@ -568,8 +568,12 @@ where
                 Some(v1 + t * (v2 - v1))
             }
         }
-        (Some((_, v)), None) | (None, Some((_, v))) => Some(v),
-        (None, None) => None,
+        // Outside the run's own measured range there is nothing to
+        // interpolate between, and holding the nearest endpoint flat invents
+        // data: a run measured 3000-6000 rpm was reported as making its 6000
+        // rpm power at 6500 and again at 7000, and `DynoComparison::compare`
+        // folds those fabricated points into the headline mean change.
+        (Some(_), None) | (None, Some(_)) | (None, None) => None,
     }
 }
 
@@ -745,6 +749,67 @@ mod tests {
         // HP should be +10 at 3000, +15 at 5000
         assert!((cmp.hp_diff[0].1 - 10.0).abs() < 1e-6);
         assert!((cmp.hp_diff[1].1 - 15.0).abs() < 1e-6);
+    }
+
+    /// A run queried outside its own measured RPM range used to report its
+    /// nearest endpoint value, so a short run was extrapolated flat across
+    /// every RPM the other run covered — and those fabricated points were
+    /// folded into the headline `total_hp_change` mean.
+    #[test]
+    fn comparison_excludes_rpm_outside_the_other_runs_range() {
+        let point = |rpm: f64, hp: f64| DynoDataPoint {
+            rpm,
+            hp: Some(hp),
+            torque: Some(hp * 2.0),
+            afr: None,
+            boost: None,
+            time: None,
+        };
+
+        let mut run_a = DynoRun::new("Baseline", "#ff0000");
+        run_a.data = vec![
+            point(2000.0, 80.0),
+            point(3000.0, 100.0),
+            point(6000.0, 200.0),
+            point(7000.0, 210.0),
+        ];
+
+        // Run B only covers 3000-6000 rpm.
+        let mut run_b = DynoRun::new("After Tune", "#00ff00");
+        run_b.data = vec![point(3000.0, 110.0), point(6000.0, 215.0)];
+
+        let cmp = DynoComparison::compare(run_a, run_b);
+        let rpms: Vec<f64> = cmp.hp_diff.iter().map(|(rpm, _)| *rpm).collect();
+        assert_eq!(
+            rpms,
+            vec![3000.0, 6000.0],
+            "only the overlapping rpm range may be compared"
+        );
+
+        // Both overlapping points are +10/+15, so the mean is 12.5. The two
+        // extrapolated points used to drag it toward +30 and +10.
+        let mean = cmp.total_hp_change.expect("an overlap exists");
+        assert!((mean - 12.5).abs() < 1e-9, "got {mean}");
+    }
+
+    /// The interpolator itself must refuse out-of-range queries — it is the
+    /// single place `compare` gets its values from.
+    #[test]
+    fn interpolate_at_rpm_returns_none_outside_the_measured_range() {
+        let point = |rpm: f64, hp: f64| DynoDataPoint {
+            rpm,
+            hp: Some(hp),
+            torque: None,
+            afr: None,
+            boost: None,
+            time: None,
+        };
+        let data = vec![point(3000.0, 100.0), point(6000.0, 200.0)];
+
+        assert_eq!(interpolate_at_rpm(&data, 2999.0, |p| p.hp), None);
+        assert_eq!(interpolate_at_rpm(&data, 6001.0, |p| p.hp), None);
+        assert_eq!(interpolate_at_rpm(&data, 3000.0, |p| p.hp), Some(100.0));
+        assert_eq!(interpolate_at_rpm(&data, 6000.0, |p| p.hp), Some(200.0));
     }
 
     #[test]

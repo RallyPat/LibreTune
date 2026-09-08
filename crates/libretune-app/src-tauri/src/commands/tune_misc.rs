@@ -90,14 +90,40 @@ pub async fn update_constant_string(
             offset: constant.offset,
             data: raw_data,
         };
-        if let Err(e) = conn.write_memory(params) {
-            eprintln!("[WARN] Failed to write string constant to ECU: {}", e);
-        }
+        // A failed ECU write must not report success: the cache, `current_tune`
+        // and `tune_modified` are already committed at this point, so swallowing
+        // the error leaves the app's copy silently diverged from the ECU.
+        // Offline editing is the `conn_guard == None` case above, not this one.
+        conn.write_memory(params)
+            .map_err(|e| format!("Failed to write string constant '{name}' to ECU: {e}"))?;
     }
 
     eprintln!("Updated string constant '{}' to: '{}'", name, value);
 
     Ok(())
+}
+
+/// Snapshot the project's tune path plus the signature to stamp on it.
+///
+/// Lock order: `definition` **before** `current_project`, the convention
+/// `project_mgmt.rs` documents and `save_tune.rs` follows. Taking them the
+/// other way round (which `use_project_tune` used to do) closes an AB-BA
+/// cycle against `save_tune`, and `tokio::Mutex` is FIFO-fair so neither
+/// side yields. `definition` is released before `current_project` is taken,
+/// so the two are never held together at all.
+pub(crate) async fn project_tune_target(
+    state: &AppState,
+) -> Result<(std::path::PathBuf, String), String> {
+    let def_signature = {
+        let def_guard = state.definition.lock().await;
+        def_guard.as_ref().map(|d| d.signature.clone())
+    };
+
+    let project_guard = state.current_project.lock().await;
+    let project = project_guard.as_ref().ok_or("No project loaded")?;
+    let tune_path = project.current_tune_path();
+    let ini_signature = def_signature.unwrap_or_else(|| project.config.signature.clone());
+    Ok((tune_path, ini_signature))
 }
 
 /// Use LibreTune / project settings: merge MSQ constants onto the ECU base, save, write, burn.
@@ -108,19 +134,7 @@ pub async fn use_project_tune(
     state: tauri::State<'_, AppState>,
     app: tauri::AppHandle,
 ) -> Result<(), String> {
-    let (tune_path, ini_signature) = {
-        let project_guard = state.current_project.lock().await;
-        let project = project_guard.as_ref().ok_or("No project loaded")?;
-        let tune_path = project.current_tune_path();
-        let ini_signature = {
-            let def_guard = state.definition.lock().await;
-            def_guard
-                .as_ref()
-                .map(|d| d.signature.clone())
-                .unwrap_or_else(|| project.config.signature.clone())
-        };
-        (tune_path, ini_signature)
-    };
+    let (tune_path, ini_signature) = project_tune_target(&state).await?;
 
     let mut project_msq = if tune_path.exists() {
         TuneFile::load(&tune_path).map_err(|e| format!("Failed to load project tune: {}", e))?
@@ -180,50 +194,18 @@ pub async fn use_project_tune(
     let _ = app.emit("tune:loaded", "project");
 
     if state.connection.lock().await.is_some() {
-        let write_result = crate::commands::project_tune_sync::write_project_tune_to_ecu(
-            app.clone(),
-            state.clone(),
-        )
-        .await;
-        if let Err(e) = write_result {
-            let _ = crate::commands::realtime_stream::start_realtime_stream(
-                app.clone(),
-                state.clone(),
-                Some(50),
-            )
-            .await;
-            return Err(format!(
-                "Saved CurrentTune.msq, but failed to write to ECU: {}",
-                e
-            ));
-        }
-
-        // Loading an existing tune is not a pin-assignment action: the pin
-        // lint must not block persisting a tune the user already runs. Burn
-        // with force — interactive conflict resolution lives in BurnDialog,
-        // which surfaces the same scan with an explicit acknowledge-and-force
-        // checkbox before its own burn.
-        let burn_result =
-            crate::commands::tune_io::burn_to_ecu(app.clone(), state.clone(), Some(true)).await;
-        {
-            let mut conn_guard = state.connection.lock().await;
-            if let Some(conn) = conn_guard.as_mut() {
-                conn.clear_rx_buffer();
-            }
-        }
-        let _ = crate::commands::realtime_stream::start_realtime_stream(
-            app.clone(),
-            state.clone(),
-            Some(50),
-        )
-        .await;
-
-        burn_result.map_err(|e| {
-            format!(
-                "Saved CurrentTune.msq and wrote RAM, but burn failed: {}",
-                e
-            )
-        })
+        // write_project_tune_to_ecu writes every page, burns once, and
+        // restarts the realtime stream on both paths — do not burn again here.
+        //
+        // No pin-conflict scan runs on this path, matching the previous
+        // `burn_to_ecu(.., force = true)`: loading an existing tune is not a
+        // pin-assignment action, so the lint must not block persisting a tune
+        // the user already runs. Interactive conflict resolution lives in
+        // BurnDialog, which surfaces the same scan with an explicit
+        // acknowledge-and-force checkbox before its own burn.
+        crate::commands::project_tune_sync::write_project_tune_to_ecu(app.clone(), state.clone())
+            .await
+            .map_err(|e| format!("Saved CurrentTune.msq, but failed to write to ECU: {}", e))
     } else {
         Ok(())
     }

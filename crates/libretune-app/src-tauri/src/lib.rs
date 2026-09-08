@@ -82,8 +82,8 @@ use commands::dash_layout::{
     reset_dashboards_to_defaults,
 };
 use commands::data_logging::{
-    clear_log, get_log_entries, get_logging_status, read_text_file, save_log, start_logging,
-    stop_logging, write_text_file,
+    clear_log, get_log_entries, get_logging_status, load_log_file, read_text_file, save_log,
+    start_logging, stop_logging, write_text_file,
 };
 use commands::debug_realtime::debug_single_realtime_read;
 use commands::demo::{get_demo_mode, set_demo_mode};
@@ -322,11 +322,6 @@ pub fn run() {
             commands::autotune_preflight::save_delay_model,
             commands::temperature_units::get_temperature_units_status,
             commands::temperature_units::set_temperature_units,
-            commands::autotune_preflight::preflight_autotune,
-            commands::analyze_filters::get_declared_analyze_filters,
-            commands::autotune_export::build_autotune_proposal,
-            commands::autotune_export::save_autotune_proposal,
-            commands::autotune_preflight::save_delay_model,
             get_autotune_recommendations,
             get_autotune_heatmap,
             send_autotune_recommendations,
@@ -412,6 +407,7 @@ pub fn run() {
             get_log_entries,
             clear_log,
             save_log,
+            load_log_file,
             read_text_file,
             write_text_file,
             // Diagnostic commands (stubs)
@@ -423,6 +419,7 @@ pub fn run() {
             commands::tooth_logger::list_diagnostic_loggers,
             commands::ini_meta::list_tunable_tables,
             commands::analyse_log::analyse_log,
+            commands::analyse_log::analyse_log_file,
             compare_tables,
             reset_tune_to_defaults,
             export_tune_as_csv,

@@ -1,8 +1,7 @@
-//! Misc AutoTune commands (stop, recommendations, heatmap, send/burn, lock/unlock, autosend).
+//! Misc AutoTune commands (stop, recommendations, heatmap, send/burn, lock/unlock).
 
 use crate::AppState;
 use serde::Serialize;
-use tauri::Manager;
 
 /// Refuses to apply/burn recommendations computed against a different ECU
 /// definition than the one currently loaded (e.g. reconnected to a
@@ -134,6 +133,15 @@ pub async fn get_autotune_status(
 
 #[tauri::command]
 pub async fn stop_autotune(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    stop_autotune_inner(&state).await
+}
+
+pub(crate) async fn stop_autotune_inner(state: &AppState) -> Result<(), String> {
+    // Canonical AutoTune lock order: autotune_config -> autotune_state ->
+    // autotune_secondary_state (see AppState in state.rs). Taking the config
+    // last here deadlocked against get_autotune_status, which takes it first.
+    let mut config_guard = state.autotune_config.lock().await;
+
     let mut guard = state.autotune_state.lock().await;
     tracing::info!(
         accepted_samples = guard.total_samples(),
@@ -146,7 +154,7 @@ pub async fn stop_autotune(state: tauri::State<'_, AppState>) -> Result<(), Stri
     secondary_guard.stop();
 
     // Clear the config
-    *state.autotune_config.lock().await = None;
+    *config_guard = None;
     Ok(())
 }
 
@@ -510,189 +518,6 @@ pub async fn lock_autotune_cells(
     } else {
         let mut guard = state.autotune_state.lock().await;
         guard.lock_cells(cells);
-    }
-    Ok(())
-}
-
-/// Starts automatic periodic sending of AutoTune recommendations.
-///
-/// Spawns a background task that applies AutoTune recommendations
-/// at the specified interval.
-///
-/// # Arguments
-/// * `table_name` - Target VE table name
-/// * `interval_ms` - Send interval in milliseconds (default: 15000)
-///
-/// Returns: Nothing on success
-#[allow(dead_code)]
-#[tauri::command]
-pub async fn start_autotune_autosend(
-    app: tauri::AppHandle,
-    state: tauri::State<'_, AppState>,
-    table_name: String,
-    interval_ms: Option<u64>,
-) -> Result<(), String> {
-    let interval = interval_ms.unwrap_or(15000);
-
-    // Ensure connection and definition exist
-    {
-        let conn_guard = state.connection.lock().await;
-        let def_guard = state.definition.lock().await;
-        if conn_guard.is_none() || def_guard.is_none() {
-            return Err("Connection or definition missing".to_string());
-        }
-    }
-
-    let mut task_guard = state.autotune_send_task.lock().await;
-    if task_guard.is_some() {
-        // Already running
-        return Ok(());
-    }
-
-    let app_handle = app.clone();
-    let table = table_name.clone();
-
-    let handle = tokio::spawn(async move {
-        let app_state = app_handle.state::<AppState>();
-        let mut ticker = tokio::time::interval(tokio::time::Duration::from_millis(interval));
-        loop {
-            ticker.tick().await;
-
-            // Run send_autotune_recommendations logic
-            let (secondary_name, session_signature) = {
-                let config_guard = app_state.autotune_config.lock().await;
-                let config = config_guard.as_ref();
-                (
-                    config.and_then(|c| c.secondary_table_name.clone()),
-                    config.map(|c| c.definition_signature.clone()),
-                )
-            };
-
-            let recs = if matches!(
-                (Some(table.as_str()), secondary_name.as_deref()),
-                (Some(table_name), Some(secondary)) if table_name == secondary
-            ) {
-                let guard = app_state.autotune_secondary_state.lock().await;
-                guard.get_recommendations()
-            } else {
-                let guard = app_state.autotune_state.lock().await;
-                guard.get_recommendations()
-            };
-
-            if recs.is_empty() {
-                continue;
-            }
-
-            // Acquire definition snapshot first, then connection. Do not hold both locks
-            // simultaneously to avoid deadlocks with other code paths.
-            let def = {
-                let def_guard = app_state.definition.lock().await;
-                match def_guard.as_ref() {
-                    Some(d) => d.clone(),
-                    None => continue,
-                }
-            };
-
-            // Skip this tick if the definition changed out from under the
-            // session (e.g. reconnected to a different ECU/INI) — see
-            // send_autotune_recommendations for why this matters.
-            if check_definition_matches(&session_signature, &def.signature, "autosending").is_err()
-            {
-                continue;
-            }
-
-            let mut conn_guard = app_state.connection.lock().await;
-            let conn = match conn_guard.as_mut() {
-                Some(c) => c,
-                None => continue,
-            };
-
-            // Find table constant
-            let table_def = match def.get_table_by_name_or_map(&table) {
-                Some(t) => t.clone(),
-                None => continue,
-            };
-
-            let constant = match def.constants.get(&table_def.map) {
-                Some(cnst) => cnst.clone(),
-                None => continue,
-            };
-
-            // Read current data
-            let params = libretune_core::protocol::commands::ReadMemoryParams {
-                can_id: 0,
-                page: constant.page,
-                offset: constant.offset,
-                length: constant.size_bytes() as u16,
-            };
-            let raw_data = match conn.read_memory(params) {
-                Ok(d) => d,
-                Err(_) => continue,
-            };
-
-            let element_count = constant.shape.element_count();
-            let element_size = constant.data_type.size_bytes();
-            let mut values: Vec<f64> = Vec::with_capacity(element_count);
-            for i in 0..element_count {
-                let off = i * element_size;
-                if let Some(rv) = constant
-                    .data_type
-                    .read_from_bytes(&raw_data, off, def.endianness)
-                {
-                    values.push(constant.raw_to_display(rv));
-                } else {
-                    values.push(0.0);
-                }
-            }
-
-            let x_size = table_def.x_size;
-            let y_size = table_def.y_size;
-
-            // Apply recommendations
-            for r in recs.iter() {
-                if r.cell_x >= x_size || r.cell_y >= y_size {
-                    continue;
-                }
-                let idx = r.cell_y * x_size + r.cell_x;
-                values[idx] = r.recommended_value;
-            }
-
-            // Convert back to bytes
-            let mut raw_out = vec![0u8; constant.size_bytes()];
-            for (i, v) in values.iter().enumerate() {
-                let rv = constant.display_to_raw(*v);
-                let offset = i * element_size;
-                constant
-                    .data_type
-                    .write_to_bytes(&mut raw_out, offset, rv, def.endianness);
-            }
-
-            let write_params = libretune_core::protocol::commands::WriteMemoryParams {
-                can_id: 0,
-                page: constant.page,
-                offset: constant.offset,
-                data: raw_out,
-            };
-            let _ = conn.write_memory(write_params);
-        }
-    });
-
-    *task_guard = Some(handle);
-
-    Ok(())
-}
-
-/// Stops the AutoTune autosend background task.
-///
-/// Aborts the periodic recommendation sending task.
-///
-/// Returns: Nothing on success
-#[allow(dead_code)]
-#[tauri::command]
-pub async fn stop_autotune_autosend(state: tauri::State<'_, AppState>) -> Result<(), String> {
-    let mut task_guard = state.autotune_send_task.lock().await;
-    if let Some(h) = task_guard.take() {
-        h.abort();
     }
     Ok(())
 }
