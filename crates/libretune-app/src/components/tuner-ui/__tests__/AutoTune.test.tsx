@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { vi } from 'vitest';
 
@@ -264,4 +264,44 @@ test('tables that are not fuel tables are kept out of the picker', async () => {
     expect(screen.getByRole('option', { name: /VE Table/i })).toBeInTheDocument();
   });
   expect(screen.queryByRole('option', { name: /Spark Advance/i })).not.toBeInTheDocument();
+});
+
+// A negative authority limit is nonsensical (it pairs with a backend fix
+// that now rejects/clamps it too) - the UI should never even let a tuner
+// type one in.
+describe('AutoTune authority limit inputs reject negative values', () => {
+  const authorityInput = async (labelPattern: RegExp) => {
+    const label = await screen.findByText(labelPattern);
+    const input = label.parentElement?.querySelector('input[type="number"]');
+    if (!input) throw new Error(`authority input not found next to label matching ${labelPattern}`);
+    return input as HTMLInputElement;
+  };
+
+  beforeEach(() => {
+    localStorage.clear();
+    mockInvoke();
+  });
+
+  it('marks Max Change/Cell (VE) and Max Change/Cell (%) with min="0"', async () => {
+    render(<ToastProvider><AutoTune isConnected onClose={() => {}} /></ToastProvider>);
+
+    const perCell = await authorityInput(/Max Change\/Cell \(VE\):/);
+    const percent = await authorityInput(/Max Change\/Cell \(%\):/);
+
+    expect(perCell.min).toBe('0');
+    expect(percent.min).toBe('0');
+  });
+
+  it('clamps a negative value back to 0 instead of accepting it', async () => {
+    render(<ToastProvider><AutoTune isConnected onClose={() => {}} /></ToastProvider>);
+
+    const perCell = await authorityInput(/Max Change\/Cell \(VE\):/);
+    // A single change event (as a paste, or the number input's up/down
+    // arrows past 0, would deliver) rather than userEvent.type's
+    // per-keystroke simulation, which — being a controlled input — re-renders
+    // mid-sequence and no longer reflects what one real "-5" entry produces.
+    fireEvent.change(perCell, { target: { value: '-5' } });
+
+    await waitFor(() => expect(perCell.value).toBe('0'));
+  });
 });

@@ -215,6 +215,16 @@ export const DatalogViewer: React.FC<DatalogViewerProps> = ({ tableName, isConne
         strict_lambda_match: true,
         validate: true,
       };
+      // Timestamps are re-based: an .msl exported from a longer recording
+      // carries offsets from the original, which would put every sample in one
+      // validation block. (analyse_log_file re-bases on the backend.)
+      // A plain loop (not Math.min(...samples.map(...))) avoids both the
+      // intermediate array and the call-stack overflow that a large spread
+      // would cause once a log has more than ~110k samples.
+      let t0 = Infinity;
+      for (const s of samples) {
+        if (s.x < t0) t0 = s.x;
+      }
       const report = logPath
         ? await invoke<ReplayReport>('analyse_log_file', {
             path: logPath,
@@ -237,7 +247,7 @@ export const DatalogViewer: React.FC<DatalogViewerProps> = ({ tableName, isConne
         : await invoke<ReplayReport>('analyse_log', {
             tableName: table,
             log: {
-              time_ms: samples.map((s) => s.x - Math.min(...samples.map((s) => s.x))),
+              time_ms: samples.map((s) => s.x - t0),
               rpm: col('rpm'), load: col('load'), afr: col('afr'),
               ve: col('ve'), clt: col('clt'), tps: col('tps'),
               tps_rate: col('tps_rate'),

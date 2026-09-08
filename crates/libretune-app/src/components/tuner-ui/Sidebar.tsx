@@ -294,11 +294,9 @@ export function Sidebar({ items, width, onResize, onItemSelect, searchIndex, pro
   }, []);
 
   const handleItemClick = useCallback((item: SidebarNode) => {
-    console.log('[Sidebar] handleItemClick called', { id: item.id, label: item.label, type: item.type, hasChildren: !!(item.children && item.children.length > 0) });
     if (item.children && item.children.length > 0) {
       toggleExpand(item.id);
     } else {
-      console.log('[Sidebar] Calling onItemSelect for leaf item', item);
       // Pass searchQuery as highlightTerm so the dialog can highlight matching fields
       onItemSelect(item, searchQuery.trim() || undefined);
     }
