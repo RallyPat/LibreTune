@@ -32,13 +32,9 @@ interface OnboardingDialogProps {
   onComplete: () => void;
 }
 
-/**
- * OnboardingDialog Component
- *
- * Comprehensive first-run welcome experience.
- */
 export default function OnboardingDialog({ isOpen, onClose, onComplete }: OnboardingDialogProps) {
   const [currentStep, setCurrentStep] = useState(0);
+  const [hide, setHide] = useState(false);
 
   const steps: OnboardingStep[] = [
     {
@@ -147,7 +143,7 @@ export default function OnboardingDialog({ isOpen, onClose, onComplete }: Onboar
     if (currentStep < steps.length - 1) {
       setCurrentStep(currentStep + 1);
     } else {
-      handleComplete();
+      onComplete();
     }
   };
 
@@ -155,11 +151,6 @@ export default function OnboardingDialog({ isOpen, onClose, onComplete }: Onboar
     if (currentStep > 0) {
       setCurrentStep(currentStep - 1);
     }
-  };
-
-  const handleComplete = () => {
-    onComplete();
-    onClose();
   };
 
   const step = steps[currentStep];
@@ -180,7 +171,7 @@ export default function OnboardingDialog({ isOpen, onClose, onComplete }: Onboar
   return (
     <Dialog
       open={isOpen}
-      onClose={onClose}
+      onClose={hide ? onComplete : onClose}
       title={titleNode}
       size="md"
       className="onboarding-dialog-wrapper"
@@ -203,14 +194,10 @@ export default function OnboardingDialog({ isOpen, onClose, onComplete }: Onboar
         <label className="onboarding-checkbox">
           <input
             type="checkbox"
-            defaultChecked={false}
-            onChange={(e) => {
-              if (!e.target.checked) {
-                localStorage.setItem('libretune-onboarding-completed', 'false');
-              }
-            }}
+            checked={hide}
+            onChange={(e) => setHide(e.target.checked)}
           />
-          Show this welcome on next startup
+          Disable on every startup
         </label>
       </Dialog.Body>
 
