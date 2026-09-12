@@ -6,7 +6,7 @@ use libretune_core::protocol::Connection;
 use libretune_core::tune::TuneFile;
 use serde::Serialize;
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 pub struct CurveData {
     pub name: String,
     pub title: String,
@@ -240,9 +240,10 @@ pub async fn get_curve_data(
     // Lock order: connection before current_tune, matching the convention used
     // by every write path (get_constant_value, update_constant, etc.) — the
     // reverse order deadlocks against those.
+    let skip_live = crate::commands::constants_read::skip_live_ecu_read(&state).await;
     let mut conn_guard = state.connection.lock().await;
     let tune_guard = state.current_tune.lock().await;
-    let mut conn = conn_guard.as_mut();
+    let mut conn = if skip_live { None } else { conn_guard.as_mut() };
 
     let x_bins = read_const_from_source(&x_const, tune_guard.as_ref(), &mut conn, endianness)?;
     let y_bins = read_const_from_source(&y_const, tune_guard.as_ref(), &mut conn, endianness)?;

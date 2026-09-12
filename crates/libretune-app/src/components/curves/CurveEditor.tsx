@@ -13,6 +13,7 @@ import { TsGaugeConfig } from '../dashboards/dashTypes';
 import { valueToHeatmapColor, textColorForBackground } from '../../utils/heatmapColors';
 import { askNumber } from '../../utils/askNumber';
 import { useChannelValue } from '../../stores/realtimeStore';
+import { useDialogValueSource } from '../dialogs/DialogValueSource';
 import './CurveEditor.css';
 
 /** Simple gauge info from backend INI [GaugeConfigurations] */
@@ -139,6 +140,7 @@ export default function CurveEditor({
   onBack,
   menuLabel,
 }: CurveEditorProps) {
+  const readOnly = !!useDialogValueSource()?.readOnly;
   // Normalize data in case curve data is provided in table-shaped format (xAxis/zValues)
   let data = rawData as CurveData & {
     xAxis?: number[];
@@ -424,6 +426,7 @@ export default function CurveEditor({
 
   // Persist changes to backend
   const persistCurveValues = useCallback(async (xBins: number[], yBins: number[]) => {
+    if (readOnly) return;
     try {
       await invoke('update_curve_data', {
         curveName: data.name,
@@ -434,7 +437,7 @@ export default function CurveEditor({
     } catch (err) {
       console.error('Failed to update curve:', err);
     }
-  }, [data.name, onValuesChange]);
+  }, [data.name, onValuesChange, readOnly]);
 
   const currentSnapshot = useCallback(
     (): CurveBinValues => ({ xBins: [...localXBins], yBins: [...localYBins] }),

@@ -142,7 +142,7 @@ fn add_visibility_flags(
 }
 
 /// Evaluate visibility condition - returns true if visible (or on error/missing condition)
-fn evaluate_visibility(
+pub(crate) fn evaluate_visibility(
     condition: &Option<String>,
     context: &HashMap<String, f64>,
     string_ctx: &StringContext,

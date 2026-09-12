@@ -1,58 +1,91 @@
-/* TuneMismatchDialog — only the bits the shared Dialog/Button primitives don't cover. */
-
-.tune-mismatch-warning {
-  background: var(--bg-elevated);
-  border: 1px solid var(--state-warning, var(--accent-primary));
-  border-left-width: 3px;
-  border-radius: var(--radius-md);
-  padding: var(--space-3);
-  margin-bottom: var(--space-4);
-  color: var(--text-primary);
+.lt-dialog.tune-mismatch-dialog {
+  height: min(620px, 78vh);
 }
 
-.tune-mismatch-warning p {
-  margin: 0 0 var(--space-2) 0;
-  font-size: var(--font-size-sm);
-  line-height: 1.5;
-}
-
-.tune-mismatch-warning p:last-child {
-  margin-bottom: 0;
-}
-
-.tune-mismatch-options {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: var(--space-3);
-}
-
-.tune-option {
+.tune-mismatch-body {
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
-  background: var(--bg-elevated);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  padding: var(--space-3);
+  min-height: 0;
 }
 
-.tune-option h3 {
-  margin: 0;
+.tune-mismatch-lead {
+  margin: 0 0 var(--space-3);
   font-size: var(--font-size-sm);
-  font-weight: 600;
-  color: var(--text-primary);
-}
-
-.tune-option p {
-  margin: 0;
-  flex: 1;
-  font-size: var(--font-size-xs);
   color: var(--text-secondary);
   line-height: 1.5;
 }
 
-@media (max-width: 600px) {
-  .tune-mismatch-options {
+.tune-diff-columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-3);
+  min-height: 0;
+  flex: 1;
+}
+
+.tune-diff-pane {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+  overflow: hidden;
+}
+
+.tune-diff-pane h3 {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.tune-diff-pane .dialog-view {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.tune-diff-pane .editor-header,
+.tune-diff-pane .dialog-description-panel {
+  display: none;
+}
+
+.tune-mismatch-diff-status {
+  margin: var(--space-3) 0 0;
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+}
+
+.tune-mismatch-diff-status.error {
+  color: var(--state-danger, #e66);
+}
+
+.tune-diff-page {
+  min-width: 8rem;
+  text-align: center;
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+}
+
+.tune-diff-footer-spacer {
+  flex: 1;
+}
+
+.dialog-field.tune-diff-changed,
+.settings-field.tune-diff-changed {
+  outline: 1px solid var(--state-warning, var(--accent-primary));
+  background: color-mix(in srgb, var(--state-warning, #c90) 12%, transparent);
+}
+
+.table-editor-2d.is-readonly .table-grid {
+  pointer-events: none;
+}
+
+@media (max-width: 900px) {
+  .tune-diff-columns {
     grid-template-columns: 1fr;
   }
 }

@@ -13,7 +13,6 @@ import HelpViewer, { HelpTopicData } from "./dialogs/HelpViewer";
 import UserManualViewer from "./dialogs/UserManualViewer";
 import SignatureMismatchDialog, { SignatureMismatchInfo } from "./dialogs/SignatureMismatchDialog";
 import TuneMismatchDialog, { TuneMismatchInfo } from "./dialogs/TuneMismatchDialog";
-import TuneComparisonDialog from "./dialogs/TuneComparisonDialog";
 import TableComparisonDialog from "./dialogs/TableComparisonDialog";
 import PerformanceFieldsDialog from "./dialogs/PerformanceFieldsDialog";
 import RestorePointsDialog from "./dialogs/RestorePointsDialog";
@@ -150,9 +149,6 @@ export interface DialogOverlaysProps {
   setTempCalibrationOpen: (v: boolean) => void;
 
   // Comparison dialogs
-  tuneComparisonOpen: boolean;
-  setTuneComparisonOpen: (v: boolean) => void;
-  checkStatus: () => Promise<void> | void;
   tableComparisonOpen: boolean;
   setTableComparisonOpen: (v: boolean) => void;
   tuneFileDiffOpen: boolean;
@@ -242,7 +238,6 @@ export function DialogOverlays(props: DialogOverlaysProps) {
     baseMapDialogOpen, setBaseMapDialogOpen, handleBaseMapApply,
     afrCalibrationOpen, setAfrCalibrationOpen,
     tempCalibrationOpen, setTempCalibrationOpen,
-    tuneComparisonOpen, setTuneComparisonOpen, checkStatus,
     tableComparisonOpen, setTableComparisonOpen,
     tuneFileDiffOpen, setTuneFileDiffOpen,
     dynoOverlayOpen, setDynoOverlayOpen,
@@ -376,12 +371,6 @@ export function DialogOverlays(props: DialogOverlaysProps) {
         onClose={() => setTempCalibrationOpen(false)}
         connected={status.state === "Connected"}
         showToast={showToast}
-      />
-      <TuneComparisonDialog
-        isOpen={tuneComparisonOpen}
-        onClose={() => setTuneComparisonOpen(false)}
-        onUseProjectTune={async () => { await checkStatus(); }}
-        onUseEcuTune={async () => { await checkStatus(); }}
       />
       <TableComparisonDialog isOpen={tableComparisonOpen} onClose={() => setTableComparisonOpen(false)} />
       <TuneFileDiffDialog isOpen={tuneFileDiffOpen} onClose={() => setTuneFileDiffOpen(false)} />

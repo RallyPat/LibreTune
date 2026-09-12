@@ -31,6 +31,7 @@ import { CommandButton } from './fields/CommandButton';
 import DialogField from './fields/DialogField';
 import { RuntimeValueReadout } from './fields/RuntimeValueReadout';
 import { isUserTableLiveChannel, isGppwmLiveChannel, isCommandButtonPanel, inferLiveStateGateExpression } from './dialogLayout';
+import { useDialogValueSource } from './DialogValueSource';
 
 export const RecursivePanel = memo(function RecursivePanel({
   name,
@@ -57,6 +58,7 @@ export const RecursivePanel = memo(function RecursivePanel({
   const [portEditor, setPortEditor] = useState<PortEditorConfig | null>(null);
   const [panelType, setPanelType] = useState<'loading' | 'dialog' | 'indicatorPanel' | 'readoutPanel' | 'table' | 'curve' | 'portEditor' | 'unknown'>('loading');
   const [reloadTick, setReloadTick] = useState(0);
+  const valueSource = useDialogValueSource();
 
   // Re-fetch when a new tune is loaded (backend emits on every load path)
   useEffect(() => {
@@ -79,6 +81,31 @@ export const RecursivePanel = memo(function RecursivePanel({
     setCurveData(null);
     setGaugeConfig(null);
     setPortEditor(null);
+
+    const injectedTable = valueSource?.tables[name];
+    if (injectedTable) {
+      setTableInfo({ name: injectedTable.name, title: injectedTable.title });
+      setTableData(injectedTable);
+      setPanelType('table');
+      return () => {
+        cancelled = true;
+      };
+    }
+    const injectedCurve = valueSource?.curves[name];
+    if (injectedCurve) {
+      setCurveData(injectedCurve);
+      setPanelType('curve');
+      if (injectedCurve.gauge) {
+        invoke<SimpleGaugeInfo>('get_gauge_config', { gaugeName: injectedCurve.gauge })
+          .then((gc) => {
+            if (!cancelled) setGaugeConfig(gc);
+          })
+          .catch(() => {});
+      }
+      return () => {
+        cancelled = true;
+      };
+    }
 
     // `std_*` panels (like std_injection) are synthesized on the backend in
     // get_dialog_definition → EcuDefinition::std_panel_definition, so they
@@ -120,7 +147,10 @@ export const RecursivePanel = memo(function RecursivePanel({
                 if (cancelled) return;
                 console.debug(`[RecursivePanel] '${name}' resolved as table: ${info.title}`);
                 setTableInfo(info);
-                // Now fetch full table data for embedded rendering
+                if (valueSource) {
+                  setPanelType('table');
+                  return;
+                }
                 invoke<BackendTableData>('get_table_data', { tableName: name })
                   .then((data) => {
                     if (cancelled) return;
@@ -139,6 +169,16 @@ export const RecursivePanel = memo(function RecursivePanel({
                 console.debug(`Panel '${name}' is not a table:`, err);
                 // Not a table, try as curve
                 console.log(`[RecursivePanel] Trying to resolve '${name}' as curve...`);
+                if (valueSource) {
+                  const fallback = buildStdPlaceholderDefinition(name);
+                  if (fallback) {
+                    setDefinition(fallback);
+                    setPanelType('dialog');
+                  } else {
+                    setPanelType('unknown');
+                  }
+                  return;
+                }
                 invoke<CurveData>('get_curve_data', { curveName: name })
                   .then((data) => {
                     if (cancelled) return;
@@ -205,7 +245,7 @@ export const RecursivePanel = memo(function RecursivePanel({
     return () => {
       cancelled = true;
     };
-  }, [name, reloadTick]);
+  }, [name, reloadTick, valueSource]);
 
   if (panelType === 'loading') {
     return <div className="panel-loading">Loading {name}...</div>;
