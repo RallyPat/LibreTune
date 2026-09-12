@@ -4,6 +4,10 @@ use crate::state::AppState;
 use crate::ConstantInfo;
 use libretune_core::ini::DataType;
 
+pub(crate) async fn skip_live_ecu_read(state: &AppState) -> bool {
+    state.tune_mismatch_snapshot.lock().await.is_some()
+}
+
 /// Retrieves constant metadata from the INI definition.
 ///
 /// Gets information about a constant including its type, units, min/max,
@@ -89,17 +93,20 @@ pub async fn get_constant_string_value(
         .clone();
     drop(def_guard);
 
+    let skip_live = skip_live_ecu_read(&state).await;
     let mut conn_guard = state.connection.lock().await;
+    let cache_guard = state.tune_cache.lock().await;
     let tune_guard = state.current_tune.lock().await;
-    let conn = conn_guard.as_mut();
+    let conn = if skip_live { None } else { conn_guard.as_mut() };
 
     // For string type, read the raw bytes and convert to UTF-8 string
     if constant.data_type != DataType::String {
         return Err(format!("Constant {} is not a string type", name));
     }
 
-    // When offline, try reading directly from TuneFile first (simpler and more reliable)
-    if conn.is_none() {
+    // When offline, try reading directly from TuneFile first (simpler and more reliable).
+    // During a mismatch the named XML can be stale — use page bytes below.
+    if conn.is_none() && !skip_live {
         if let Some(tune) = tune_guard.as_ref() {
             if let Some(tune_value) = tune.constants.get(&name) {
                 use libretune_core::tune::TuneValue;
@@ -132,7 +139,23 @@ pub async fn get_constant_string_value(
         return Ok(s);
     }
 
-    // If offline and not in TuneFile, return empty string (should always be in TuneFile)
+    if let Some(cache) = cache_guard.as_ref() {
+        if let Some(raw) = cache.read_bytes(constant.page, constant.offset, length) {
+            let s = String::from_utf8_lossy(raw);
+            return Ok(s.trim_end_matches('\0').to_string());
+        }
+    }
+    if let Some(tune) = tune_guard.as_ref() {
+        if let Some(page) = tune.pages.get(&constant.page) {
+            let start = usize::from(constant.offset);
+            let end = start + usize::from(length);
+            if end <= page.len() {
+                let s = String::from_utf8_lossy(&page[start..end]);
+                return Ok(s.trim_end_matches('\0').to_string());
+            }
+        }
+    }
+
     Ok(String::new())
 }
 
@@ -165,10 +188,11 @@ pub async fn get_constant_value(
     let endianness = def.endianness;
     drop(def_guard);
 
+    let skip_live = skip_live_ecu_read(&state).await;
     let mut conn_guard = state.connection.lock().await;
     let cache_guard = state.tune_cache.lock().await;
     let tune_guard = state.current_tune.lock().await;
-    let conn = conn_guard.as_mut();
+    let conn = if skip_live { None } else { conn_guard.as_mut() };
 
     // PC variables are stored locally, not on ECU
     if constant.is_pc_variable {
@@ -188,7 +212,8 @@ pub async fn get_constant_value(
 
     // When offline, read the named constant from the TuneFile (MSQ) first —
     // MSQs that store values as `<constant>` tags carry them here.
-    if conn.is_none() {
+    // During a mismatch those named tags can be stale; use cache page bytes.
+    if conn.is_none() && !skip_live {
         if let Some(tune) = tune_guard.as_ref() {
             if let Some(tune_value) = tune.constants.get(&name) {
                 use libretune_core::tune::TuneValue;

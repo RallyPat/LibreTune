@@ -24,6 +24,7 @@ import './TableComponents.css';
 import './TableEditor2D.css';
 import TableLiveReadout from './TableLiveReadout';
 import { hasEmbeddedTableLiveReadout, resolveEmbeddedTableOutputChannel } from './tableLiveChannels';
+import { useDialogValueSource } from '../dialogs/DialogValueSource';
 
 type TableOperationResult = {
   table_name: string;
@@ -131,6 +132,7 @@ export default function TableEditor2D({
   onOpenInTab,
   onValuesChange,
 }: TableEditor2DProps) {
+  const readOnly = !!useDialogValueSource()?.readOnly;
   // Determine if data is valid - used for conditional rendering after hooks
   const hasValidData = 
     z_values && Array.isArray(z_values) && z_values.length > 0 &&
@@ -242,6 +244,10 @@ export default function TableEditor2D({
   const { showToast } = useToast();
 
   useEffect(() => {
+    if (readOnly) {
+      setSizeInfo(null);
+      return;
+    }
     let cancelled = false;
     invoke<BackendTableData>('get_table_data', { tableName: table_name })
       .then((data) => {
@@ -253,7 +259,7 @@ export default function TableEditor2D({
     return () => {
       cancelled = true;
     };
-  }, [table_name]);
+  }, [table_name, readOnly]);
 
   const [alertLargeChangeEnabled, setAlertLargeChangeEnabled] = useState(true);
   const [alertLargeChangeAbs, setAlertLargeChangeAbs] = useState(5);
@@ -330,12 +336,13 @@ export default function TableEditor2D({
   const setLocalZValues = useCallback(
     (values: number[][]) => {
       setLocalZValuesState(values);
+      if (readOnly) return;
       invoke('update_table_data', { tableName: table_name, zValues: values })
         // Loudly. The previous `.then(() => {})` had no catch at all, so a
         // rejected write left the grid showing values the ECU never received.
         .catch((err) => handleOperationError('Saving table', err));
     },
-    [table_name, handleOperationError]
+    [table_name, handleOperationError, readOnly]
   );
 
   useEffect(() => {
@@ -1322,7 +1329,7 @@ export default function TableEditor2D({
 
   return (
     <div
-      className={`table-editor-2d ${embedded ? 'embedded' : 'standalone'}${fitVeViewport ? ' table-editor-2d--ve-fit' : ''}`}
+      className={`table-editor-2d ${embedded ? 'embedded' : 'standalone'}${fitVeViewport ? ' table-editor-2d--ve-fit' : ''}${readOnly ? ' is-readonly' : ''}`}
     >
       {/* Embedded mode: compact title bar with pop-out button */}
       {embedded && (

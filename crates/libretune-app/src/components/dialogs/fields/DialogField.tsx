@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { HelpCircle } from 'lucide-react';
 import type { Constant, FieldInfo } from '../types';
 import { isIncompleteNumericInput } from '../types';
+import { useDialogValueSource } from '../DialogValueSource';
 
 export default function DialogField({ 
   label, 
@@ -29,44 +30,47 @@ export default function DialogField({
   const [strValue, setStrValue] = useState<string>('');
   const [selectedBit, setSelectedBit] = useState<number>(0);
   const [isEnabled, setIsEnabled] = useState<boolean>(true);
+  const valueSource = useDialogValueSource();
+  const readOnly = !!valueSource?.readOnly;
+  const isChanged = !!valueSource?.changedNames.has(name);
 
   useEffect(() => {
     invoke<Constant>('get_constant', { name }).then((c) => {
-      console.log(`[DialogField] Fetched constant '${name}':`, {
-        value_type: c.value_type,
-        bit_options_count: c.bit_options?.length || 0,
-        bit_options: c.bit_options?.slice(0, 5) || [],
-      });
       setConstant(c);
-      // Fetch value based on type
       if (c.value_type === 'string') {
+        if (valueSource) {
+          setStrValue(valueSource.strings[name] ?? '');
+          return;
+        }
         invoke<string>('get_constant_string_value', { name })
           .then(setStrValue)
           .catch(() => setStrValue(''));
       } else if (c.value_type === 'bits') {
-        invoke<number>('get_constant_value', { name })
-          .then((v) => {
-            console.log(`[DialogField] Got value for '${name}':`, v);
-            let bit = Math.round(v);
-            // PcVariables stuck on an INVALID option display as the first
-            // valid option; write that value back so controller commands
-            // send what the dropdown shows.
-            const opts = c.bit_options || [];
-            if (c.is_pc_variable && opts[bit]?.trim().toUpperCase() === 'INVALID') {
-              const firstValid = opts.findIndex(
-                (o) => o?.trim().toUpperCase() !== 'INVALID',
-              );
-              if (firstValid >= 0) {
-                bit = firstValid;
-                invoke('update_constant', { name, value: firstValid }).catch(() => {});
-              }
+        const applyBit = (v: number) => {
+          let bit = Math.round(v);
+          const opts = c.bit_options || [];
+          if (!readOnly && c.is_pc_variable && opts[bit]?.trim().toUpperCase() === 'INVALID') {
+            const firstValid = opts.findIndex(
+              (o) => o?.trim().toUpperCase() !== 'INVALID',
+            );
+            if (firstValid >= 0) {
+              bit = firstValid;
+              invoke('update_constant', { name, value: firstValid }).catch(() => {});
             }
-            setSelectedBit(bit);
-          })
-          .catch((e) => {
-            console.error(`[DialogField] Failed to get value for '${name}':`, e);
-            setSelectedBit(0);
-          });
+          }
+          setSelectedBit(bit);
+        };
+        if (valueSource) {
+          applyBit(valueSource.numbers[name] ?? 0);
+          return;
+        }
+        invoke<number>('get_constant_value', { name })
+          .then(applyBit)
+          .catch(() => setSelectedBit(0));
+      } else if (valueSource) {
+        const v = valueSource.numbers[name] ?? 0;
+        setNumValue(v);
+        setNumInputStr(v.toString());
       } else {
         invoke<number>('get_constant_value', { name })
           .then((v) => {
@@ -81,7 +85,7 @@ export default function DialogField({
     }).catch((e) => {
       console.error(`[DialogField] Failed to fetch constant '${name}':`, e);
     });
-  }, [name]);
+  }, [name, valueSource, readOnly]);
 
   // Visibility is now handled by DialogFieldWrapper, not here
 
@@ -149,7 +153,7 @@ export default function DialogField({
   const displayLabel = label || constant.label || constant.name;
 
   const fieldRowClass = (extra?: string) =>
-    ['settings-field', 'dialog-field', !isEnabled ? 'is-disabled' : '', extra]
+    ['settings-field', 'dialog-field', !isEnabled || readOnly ? 'is-disabled' : '', isChanged ? 'tune-diff-changed' : '', extra]
       .filter(Boolean)
       .join(' ');
 
@@ -244,10 +248,11 @@ export default function DialogField({
           <input
             type="text"
             value={strValue}
-            disabled={!isEnabled}
+            disabled={!isEnabled || readOnly}
             onChange={(e) => setStrValue(e.target.value)}
             onFocus={handleFocus}
             onBlur={async () => {
+              if (readOnly) return;
               try {
                 await invoke('update_constant_string', { name: constant.name, value: strValue });
               } catch (err) {
@@ -316,9 +321,10 @@ export default function DialogField({
         <div className="field-input-wrap">
           <select
             value={safeSelectedBit}
-            disabled={!isEnabled}
+            disabled={!isEnabled || readOnly}
             onFocus={handleFocus}
             onChange={(e) => {
+              if (readOnly) return;
               const filteredVal = parseInt(e.target.value, 10);
               // Convert filtered index back to original index using the map
               const originalVal = filteredToOriginalMap.get(filteredVal);
@@ -382,7 +388,7 @@ export default function DialogField({
           type="text"
           inputMode="decimal"
           value={numInputStr}
-          disabled={!isEnabled}
+          disabled={!isEnabled || readOnly}
           onFocus={handleFocus}
           onChange={(e) => {
             // Store raw string value to preserve partial input like "1." or ""
@@ -393,6 +399,7 @@ export default function DialogField({
             }
           }}
           onBlur={() => {
+            if (readOnly) return;
             // Parse and validate on blur
             const parsed = parseFloat(numInputStr);
             if (!isNaN(parsed)) {

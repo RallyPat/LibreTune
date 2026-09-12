@@ -137,8 +137,7 @@ use commands::project_mgmt::{
 };
 use commands::project_misc::{delete_project, get_msq_info};
 use commands::project_tune_sync::{
-    compare_project_and_ecu_tunes, mark_tune_modified, save_tune_to_project,
-    write_project_tune_to_ecu,
+    mark_tune_modified, save_tune_to_project, write_project_tune_to_ecu,
 };
 use commands::realtime_get::get_realtime_data;
 use commands::realtime_stop::stop_realtime_stream;
@@ -175,6 +174,7 @@ use commands::tune_migration::{
     clear_migration_report, get_migration_report, get_tune_constant_manifest, get_tune_ini_metadata,
 };
 use commands::tune_misc::{update_constant_string, use_ecu_tune, use_project_tune};
+use commands::tune_mismatch_view::{get_tune_mismatch_dialog_index, get_tune_mismatch_dialog_view};
 use commands::update_project_ini::update_project_ini;
 use commands::wasm_plugin::{
     execute_wasm_plugin, get_wasm_plugin_info, list_wasm_plugins, load_wasm_plugin,
@@ -250,6 +250,8 @@ pub fn run() {
             get_available_inis,
             connect_to_ecu,
             sync_ecu_data,
+            get_tune_mismatch_dialog_index,
+            get_tune_mismatch_dialog_view,
             disconnect_ecu,
             enable_adaptive_timing,
             disable_adaptive_timing,
@@ -394,7 +396,6 @@ pub fn run() {
             use_project_tune,
             use_ecu_tune,
             mark_tune_modified,
-            compare_project_and_ecu_tunes,
             write_project_tune_to_ecu,
             save_tune_to_project,
             // Tune cache commands

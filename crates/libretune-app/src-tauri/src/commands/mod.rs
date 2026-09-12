@@ -86,6 +86,7 @@ pub mod tune_info;
 pub mod tune_io;
 pub mod tune_migration;
 pub mod tune_misc;
+pub mod tune_mismatch_view;
 pub mod types;
 pub mod update_project_ini;
 pub mod util_helpers;

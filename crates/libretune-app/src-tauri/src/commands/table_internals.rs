@@ -75,7 +75,7 @@ pub(crate) async fn mirror_write_into_tune(
     *state.tune_modified.lock().await = true;
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 pub(crate) struct TableData {
     pub name: String,
     pub title: String,

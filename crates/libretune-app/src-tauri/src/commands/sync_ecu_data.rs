@@ -251,8 +251,28 @@ pub async fn sync_ecu_data(
         {
             let mut snapshot_guard = state.tune_mismatch_snapshot.lock().await;
             *snapshot_guard = Some(TuneMismatchSnapshot {
+                project_pages: project_pages.clone(),
                 ecu_pages: ecu_tune.pages.clone(),
             });
+        }
+        // Keep UI on the project tune until the user resolves the wizard.
+        {
+            let mut cache_guard = state.tune_cache.lock().await;
+            if let Some(cache) = cache_guard.as_mut() {
+                for (page_num, page_data) in &project_pages {
+                    cache.load_page(*page_num, page_data.clone());
+                }
+            }
+        }
+        {
+            let mut tune = TuneFile::new(&signature);
+            if let Some(msq) = &project_msq {
+                tune.constants = msq.constants.clone();
+            }
+            for (page_num, page_data) in &project_pages {
+                tune.pages.insert(*page_num, page_data.clone());
+            }
+            *state.current_tune.lock().await = Some(tune);
         }
         let _ = app.emit(
             "tune:mismatch",

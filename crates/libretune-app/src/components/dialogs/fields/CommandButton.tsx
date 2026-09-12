@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { AlertTriangle } from 'lucide-react';
 import { useToast } from '../../../contexts/ToastContext';
 import type { DialogComponent } from '../types';
+import { useDialogValueSource } from '../DialogValueSource';
 
 // Settings key for command warning preference
 const COMMAND_WARNINGS_DISABLED_KEY = 'libretune_command_warnings_disabled';
@@ -17,6 +18,7 @@ export function CommandButton({
   comp: DialogComponent;
   context: Record<string, number>;
 }) {
+  const readOnly = !!useDialogValueSource()?.readOnly;
   const [isEnabled, setIsEnabled] = useState(true);
   const [isExecuting, setIsExecuting] = useState(false);
   const [showWarning, setShowWarning] = useState(false);
@@ -115,7 +117,7 @@ export function CommandButton({
         <button
           className={`command-button ${isExecuting ? 'executing' : ''}`}
           onClick={handleClick}
-          disabled={!isEnabled || isExecuting}
+          disabled={!isEnabled || isExecuting || readOnly}
         >
           {isExecuting ? 'Executing...' : displayLabel}
         </button>
