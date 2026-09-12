@@ -4,6 +4,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { Dialog, Button } from '../../common';
 import { DialogProps, BuildInfo } from './types';
+import { UpdateSection } from './UpdateSection';
 import '../Dialogs.css';
 
 export function AboutDialog({ isOpen, onClose }: DialogProps) {
@@ -32,6 +33,8 @@ export function AboutDialog({ isOpen, onClose }: DialogProps) {
         <p className="dialog-build">
           Build {buildInfo?.build_id ?? 'unknown'}
         </p>
+
+        <UpdateSection />
 
         <p>Open-source ECU tuning software compatible with standard INI definition files.</p>
 
