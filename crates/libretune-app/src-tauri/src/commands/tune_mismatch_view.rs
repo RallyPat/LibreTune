@@ -216,10 +216,8 @@ fn visit_menu_targets(
                 visibility_condition,
                 visible,
                 ..
-            } => {
-                if menu_visible(*visible, visibility_condition, project, ecu, strings) {
-                    dialogs.push((target.clone(), label.clone()));
-                }
+            } if menu_visible(*visible, visibility_condition, project, ecu, strings) => {
+                dialogs.push((target.clone(), label.clone()));
             }
             MenuItem::Table {
                 label,
@@ -227,10 +225,8 @@ fn visit_menu_targets(
                 visibility_condition,
                 visible,
                 ..
-            } => {
-                if menu_visible(*visible, visibility_condition, project, ecu, strings) {
-                    tables.push((target.clone(), label.clone()));
-                }
+            } if menu_visible(*visible, visibility_condition, project, ecu, strings) => {
+                tables.push((target.clone(), label.clone()));
             }
             MenuItem::Std {
                 label,
@@ -238,23 +234,19 @@ fn visit_menu_targets(
                 visibility_condition,
                 visible,
                 ..
-            } => {
-                if menu_visible(*visible, visibility_condition, project, ecu, strings)
-                    && (lookup_dialog(def, target).is_some()
-                        || def.std_panel_definition(target).is_some())
-                {
-                    dialogs.push((target.clone(), label.clone()));
-                }
+            } if menu_visible(*visible, visibility_condition, project, ecu, strings)
+                && (lookup_dialog(def, target).is_some()
+                    || def.std_panel_definition(target).is_some()) =>
+            {
+                dialogs.push((target.clone(), label.clone()));
             }
             MenuItem::SubMenu {
                 items,
                 visibility_condition,
                 visible,
                 ..
-            } => {
-                if menu_visible(*visible, visibility_condition, project, ecu, strings) {
-                    visit_menu_targets(def, items, project, ecu, strings, dialogs, tables);
-                }
+            } if menu_visible(*visible, visibility_condition, project, ecu, strings) => {
+                visit_menu_targets(def, items, project, ecu, strings, dialogs, tables);
             }
             _ => {}
         }
