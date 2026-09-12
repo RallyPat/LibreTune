@@ -346,6 +346,21 @@ Tiers are cumulative — each includes the previous one:
 - **Config — tune + propose constant changes** — constants and feature
   toggles; pin-affecting changes are flagged **Dangerous**.
 
+### MCP server (local)
+
+Exposes LibreTune's read-only tune tools to external MCP clients (Claude
+Code, Claude Desktop, …) on `127.0.0.1` only. Off by default, and it cannot
+change anything — see [MCP Server](../features/mcp-server.md).
+
+- **Expose tools over MCP** — starts/stops the server; the label shows the
+  bound address while it runs.
+- **Port** — minimum 1024, default 8765. **Apply port** restarts the server.
+- **Access token** — the bearer token every client must send. **Show**
+  reveals it; **Regenerate** invalidates the old one immediately.
+
+These three apply the moment you use them, not on **OK**, because each one
+binds or releases a real socket.
+
 ---
 
 ## AutoTune Settings

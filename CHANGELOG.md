@@ -13,6 +13,42 @@ relevant.
 
 ## [Unreleased]
 
+### 2026-08-31 — Local MCP server (read-only)
+
+Ported OpenTune's MCP server onto LibreTune's agent tooling. External MCP
+clients (Claude Code, Claude Desktop, …) can now read the loaded tune with
+the same eight deterministic tools the in-app assistant uses.
+
+#### Added
+
+- **MCP server** (`crates/libretune-app/src-tauri/src/mcp/`): loopback HTTP
+  transport (rmcp 2.2 + axum 0.8) exposing `list_tables`, `read_table`,
+  `read_constant`, `list_features`, `summarize_tune_context`,
+  `tune_health_check`, `get_realtime_snapshot`, and `query_datalog`.
+  Dispatched through the existing `LiveReadExecutor`, so the external and
+  in-app tool surfaces cannot drift apart.
+- **Settings UI**: *AI Assistant → MCP server (local)* — enable toggle with
+  live status, port field, token show/regenerate, and a ready-to-copy
+  `claude mcp add` command. These controls apply immediately rather than on
+  OK, because each binds or releases a socket.
+- **Documentation**: `docs/src/features/mcp-server.md`, linked from the AI
+  Assistant page and synced into the in-app manual.
+
+#### Security
+
+- Binds `127.0.0.1` only; never `0.0.0.0`.
+- Bearer token required on every request, compared in constant time.
+- rmcp's Host **and** Origin allow-lists pinned to loopback forms — the
+  library's Origin default is an empty list, which skips validation entirely.
+- Per-install token stored in its own `mcp-token` file (mode 0600 on unix),
+  never in `settings.json` and never logged. Regenerating restarts a running
+  server on the same port so the old token stops working at once.
+- No write surface: the assistant's `propose_*` tools are withheld from
+  `tools/list` *and* refused when called by name.
+
+Off by default. Propose-over-MCP is deliberately deferred — a proposal needs
+the in-app review queue to mean anything.
+
 ### 2026-08-28 — AutoTune second-table picker & table trace line (issue #132 follow-ups)
 
 Two reports from the issue #132 thread after the Aug 20 fixes: a
