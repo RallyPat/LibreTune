@@ -3,6 +3,7 @@ import DialogRenderer, { DialogDefinition } from '../DialogRenderer';
 import { ToastProvider } from '../../../contexts/ToastContext';
 import { setupTauriMocks, tearDownTauriMocks } from '../../../test-utils/tauriMocks';
 import { invoke } from '@tauri-apps/api/core';
+import { useRealtimeStore } from '../../../stores/realtimeStore';
 
 describe('DialogRenderer CommandButton', () => {
   let tauriHandle: ReturnType<typeof setupTauriMocks> | null = null;
@@ -55,6 +56,50 @@ describe('DialogRenderer CommandButton', () => {
       commandName: 'cmd_set_engine_type_default',
     });
     expect(invoke).not.toHaveBeenCalledWith('sync_ecu_data', expect.anything());
+  });
+
+  it('merges live output channels into command-button enable context', async () => {
+    useRealtimeStore.getState().clearChannels();
+    useRealtimeStore.getState().updateChannels({
+      hasIgnitionVoltage: 1,
+      etbFeedForwardTuneActive: 0,
+    });
+
+    const def: DialogDefinition = {
+      name: 'etbTpsBiasDialog',
+      title: 'ETB Bias Curve (Feed Forward)',
+      components: [
+        {
+          type: 'CommandButton',
+          label: 'Start guarded feed-forward tune',
+          command: 'cmd_etb_ff_autotune',
+          enabled_condition: 'hasIgnitionVoltage && isEtbEnabled && !etbFeedForwardTuneActive',
+        },
+      ],
+    };
+
+    render(
+      <ToastProvider>
+        <DialogRenderer
+          definition={def}
+          onBack={() => {}}
+          openTable={() => {}}
+          context={{ isEtbEnabled: 1 }}
+        />
+      </ToastProvider>
+    );
+
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith('evaluate_expression', {
+        expression: 'hasIgnitionVoltage && isEtbEnabled && !etbFeedForwardTuneActive',
+        context: expect.objectContaining({
+          hasIgnitionVoltage: 1,
+          isEtbEnabled: 1,
+          etbFeedForwardTuneActive: 0,
+        }),
+      })
+    );
+    useRealtimeStore.getState().clearChannels();
   });
 });
 

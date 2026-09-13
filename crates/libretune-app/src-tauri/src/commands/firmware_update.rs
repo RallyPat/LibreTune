@@ -2,6 +2,7 @@
 
 use crate::commands::metrics::stop_metrics_task;
 use crate::commands::tune_io::{resolve_controller_command, send_controller_command_bytes};
+use crate::commands::update_project_ini::update_project_ini;
 use crate::state::AppState;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
@@ -384,6 +385,7 @@ pub struct FirmwareCompanionSuggestion {
 /// Optional hint when the user picks a firmware file.
 #[tauri::command]
 pub async fn suggest_firmware_companion(
+    state: tauri::State<'_, AppState>,
     firmware_path: String,
 ) -> Result<FirmwareCompanionSuggestion, String> {
     let path = PathBuf::from(&firmware_path);
@@ -392,7 +394,7 @@ pub async fn suggest_firmware_companion(
     }
 
     let ext = firmware_extension(&path);
-    let message = match ext.as_str() {
+    let mut message = match ext.as_str() {
         "bin" => {
             "rusefi.bin is the correct file for a normal serial update (same as rusEFI Console \
              and epicEFI). LibreTune converts it automatically for BootCommander."
@@ -409,11 +411,124 @@ pub async fn suggest_firmware_companion(
         _ => String::new(),
     };
 
+    let prefer = current_ini_prefer_prefix(&state).await;
+    let companion_path =
+        find_bundled_ini(&path, prefer.as_deref()).map(|p| p.display().to_string());
+    if let Some(ref ini) = companion_path {
+        let name = Path::new(ini)
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| ini.clone());
+        let note = format!(
+            " Found {name} next to the firmware — it will be copied into the project after a successful flash."
+        );
+        if message.is_empty() {
+            message = note.trim().to_string();
+        } else {
+            message.push_str(&note);
+        }
+    }
+
     Ok(FirmwareCompanionSuggestion {
-        companion_path: None,
+        companion_path,
         companion_kind: ext,
         message,
     })
+}
+
+fn ini_prefer_prefix(signature: Option<&str>) -> Option<String> {
+    let s = signature?.to_ascii_lowercase();
+    if s.contains("epicefi") || s.contains("epicecu") {
+        Some("epicefi".into())
+    } else if s.contains("rusefi") {
+        Some("rusefi".into())
+    } else if s.contains("speeduino") {
+        Some("speeduino".into())
+    } else if s.contains("fome") {
+        Some("fome".into())
+    } else {
+        None
+    }
+}
+
+async fn current_ini_prefer_prefix(state: &tauri::State<'_, AppState>) -> Option<String> {
+    let def = state.definition.lock().await;
+    def.as_ref()
+        .and_then(|d| ini_prefer_prefix(Some(d.signature.as_str())))
+}
+
+/// INI sitting next to a `.bin` / `.hex` in a firmware bundle.
+fn find_bundled_ini(firmware: &Path, prefer: Option<&str>) -> Option<PathBuf> {
+    let dir = firmware.parent()?;
+    let stem = firmware.file_stem()?.to_string_lossy().to_ascii_lowercase();
+    let mut inis: Vec<PathBuf> = std::fs::read_dir(dir)
+        .ok()?
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| {
+            p.is_file()
+                && p.extension()
+                    .and_then(|e| e.to_str())
+                    .is_some_and(|e| e.eq_ignore_ascii_case("ini"))
+        })
+        .collect();
+    if inis.is_empty() {
+        return None;
+    }
+    inis.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
+    let name = |p: &Path| {
+        p.file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("")
+            .to_ascii_lowercase()
+    };
+    if let Some(p) = inis.iter().find(|p| {
+        p.file_stem()
+            .and_then(|s| s.to_str())
+            .is_some_and(|s| s.eq_ignore_ascii_case(&stem))
+    }) {
+        return Some(p.clone());
+    }
+    if let Some(pref) = prefer {
+        if let Some(p) = inis.iter().find(|p| name(p).starts_with(pref)) {
+            return Some(p.clone());
+        }
+    }
+    inis.into_iter().next()
+}
+
+async fn install_bundled_ini(
+    app: &AppHandle,
+    state: &tauri::State<'_, AppState>,
+    firmware: &Path,
+    log: &mut Vec<String>,
+) {
+    let prefer = current_ini_prefer_prefix(state).await;
+    let Some(ini) = find_bundled_ini(firmware, prefer.as_deref()) else {
+        return;
+    };
+    let name = ini
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| ini.display().to_string());
+    match update_project_ini(
+        app.clone(),
+        state.clone(),
+        ini.to_string_lossy().into_owned(),
+        false,
+    )
+    .await
+    {
+        Ok(()) => push_log(
+            app,
+            log,
+            format!("Copied {name} from the firmware folder into the project."),
+        ),
+        Err(e) => push_log(
+            app,
+            log,
+            format!("Could not install bundled INI {name}: {e}"),
+        ),
+    }
 }
 
 fn resolve_bootloader_command(
@@ -1037,6 +1152,7 @@ pub async fn update_ecu_firmware(
     };
 
     push_log(&app, &mut log, message);
+    install_bundled_ini(&app, &state, &path, &mut log).await;
     Ok(FirmwareUpdateResult {
         success: true,
         log,
@@ -1141,6 +1257,7 @@ fn flash_recovery_with_stm32_programmer(
 #[tauri::command]
 pub async fn recover_ecu_firmware_dfu(
     app: AppHandle,
+    state: tauri::State<'_, AppState>,
     bootloader_path: String,
     app_firmware_path: String,
     app_flash_address: Option<String>,
@@ -1204,8 +1321,9 @@ pub async fn recover_ecu_firmware_dfu(
     }
 
     push_log(&app, &mut log, format!("Flashing with {}…", cli.display()));
+    let app_for_flash = app_firmware.clone();
     let flash_output = blocking_flash_step(move || {
-        flash_recovery_with_stm32_programmer(&cli, &bootloader, &app_firmware, app_address, false)
+        flash_recovery_with_stm32_programmer(&cli, &bootloader, &app_for_flash, app_address, false)
     })
     .await?;
     for line in flash_output
@@ -1218,10 +1336,65 @@ pub async fn recover_ecu_firmware_dfu(
 
     let message = "Recovery flash complete. Disconnect USB, power-cycle the ECU, then reconnect in normal mode.";
     push_log(&app, &mut log, message);
+    install_bundled_ini(&app, &state, &app_firmware, &mut log).await;
     Ok(FirmwareUpdateResult {
         success: true,
         log,
         message: message.to_string(),
         should_reconnect: false,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::path::PathBuf;
+
+    fn write(dir: &Path, name: &str) -> PathBuf {
+        let p = dir.join(name);
+        fs::write(&p, b"x").unwrap();
+        p
+    }
+
+    #[test]
+    fn bundled_ini_same_stem_wins() {
+        let dir = tempfile::tempdir().unwrap();
+        let bin = write(dir.path(), "rusefi.bin");
+        write(dir.path(), "epicefi_board.ini");
+        write(dir.path(), "rusefi.ini");
+        let found = find_bundled_ini(&bin, Some("epicefi")).unwrap();
+        assert_eq!(found.file_name().unwrap(), "rusefi.ini");
+    }
+
+    #[test]
+    fn bundled_ini_prefers_signature_prefix() {
+        let dir = tempfile::tempdir().unwrap();
+        let bin = write(dir.path(), "rusefi.bin");
+        write(dir.path(), "epicefi_alphax-8chan.ini");
+        write(dir.path(), "rusefi_alphax-8chan.ini");
+        let found = find_bundled_ini(&bin, Some("epicefi")).unwrap();
+        assert_eq!(found.file_name().unwrap(), "epicefi_alphax-8chan.ini");
+        let found = find_bundled_ini(&bin, Some("rusefi")).unwrap();
+        assert_eq!(found.file_name().unwrap(), "rusefi_alphax-8chan.ini");
+    }
+
+    #[test]
+    fn bundled_ini_none_without_sidecar() {
+        let dir = tempfile::tempdir().unwrap();
+        let bin = write(dir.path(), "rusefi.bin");
+        assert!(find_bundled_ini(&bin, Some("epicefi")).is_none());
+    }
+
+    #[test]
+    fn ini_prefer_prefix_from_signature() {
+        assert_eq!(
+            ini_prefer_prefix(Some("epicEFI master.2026.09.02.epicECUv1.1")).as_deref(),
+            Some("epicefi")
+        );
+        assert_eq!(
+            ini_prefer_prefix(Some("rusEFI master.2026.09.02")).as_deref(),
+            Some("rusefi")
+        );
+    }
 }

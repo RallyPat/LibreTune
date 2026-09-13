@@ -610,8 +610,12 @@ pub async fn start_realtime_stream(
         // Refreshed on the same cadence as the string context, and for the same
         // reason - the tune can change mid-session but not per tick.
         let mut numeric_ctx = {
+            let def = app_state.definition.lock().await;
             let tune = app_state.current_tune.lock().await;
-            crate::commands::string_context::numeric_context_from_tune(tune.as_ref())
+            crate::commands::string_context::numeric_context_from_tune_def(
+                tune.as_ref(),
+                def.as_ref(),
+            )
         };
 
         // Cache app settings once — load_settings() reads from disk and must not run every tick.
@@ -673,8 +677,12 @@ pub async fn start_realtime_stream(
                 )
                 .await;
                 numeric_ctx = {
+                    let def = app_state.definition.lock().await;
                     let tune = app_state.current_tune.lock().await;
-                    crate::commands::string_context::numeric_context_from_tune(tune.as_ref())
+                    crate::commands::string_context::numeric_context_from_tune_def(
+                        tune.as_ref(),
+                        def.as_ref(),
+                    )
                 };
             }
 

@@ -1287,7 +1287,8 @@ function AppContent() {
       await invoke("load_tune", { path: tunePath });
       // Refresh constants so the UI reflects the loaded tune
       // (open views refresh via the backend's tune:loaded event)
-      await fetchConstants();
+      const values = await fetchConstants();
+      await fetchMenuTree(values);
       showToast("Tune file loaded successfully", "success");
     } catch (e) {
       showToast("Failed to load tune: " + e, "error");

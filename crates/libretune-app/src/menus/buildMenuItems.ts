@@ -250,7 +250,7 @@ export function buildMenuItems(deps: BuildMenuItemsDeps): TunerMenuItem[] {
         id: "firmware-update",
         label: t('tools.updateFirmware'),
         onClick: () => setFirmwareUpdateDialogOpen(true),
-        disabled: !currentProject || status.state !== "Connected",
+        disabled: !currentProject,
       });
     }
     if (caps.dfu_command_name) {

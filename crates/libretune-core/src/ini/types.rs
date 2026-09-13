@@ -42,11 +42,12 @@ impl EcuType {
             return EcuType::FOME;
         }
 
-        // Check for epicEFI (contains "epicECU" or filename suggests it)
-        if sig_lower.contains("epicECU")
+        // Check for epicEFI (signature is "epicEFI …"; board names use epicECU)
+        if sig_lower.contains("epicefi")
+            || sig_lower.contains("epicecu")
             || filename_lower
                 .as_ref()
-                .is_some_and(|f| f.contains("epicECU"))
+                .is_some_and(|f| f.contains("epicefi") || f.contains("epicecu"))
         {
             return EcuType::EpicEFI;
         }
@@ -1160,6 +1161,19 @@ impl ProtocolSettings {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn detect_epicefi_from_lowercased_signature() {
+        assert_eq!(
+            EcuType::detect("epicEFI dev.2026.09.12.alphax-8chan_f7.134812558", None),
+            EcuType::EpicEFI
+        );
+        assert_eq!(
+            EcuType::detect("epicECU test", Some("rusEFI2025.epicECU.ini")),
+            EcuType::EpicEFI
+        );
+        assert!(EcuType::EpicEFI.supports_console());
+    }
 
     #[test]
     fn test_data_type_parsing() {

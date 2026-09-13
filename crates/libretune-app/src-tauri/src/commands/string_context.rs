@@ -28,37 +28,48 @@ pub fn refresh_inc_table_paths(
     }
 }
 
-/// Build a numeric evaluation context from tune scalar/bool constants.
+/// Build a numeric evaluation context from tune scalar/bool/bits constants.
 pub fn numeric_context_from_tune(tune: Option<&TuneFile>) -> HashMap<String, f64> {
+    numeric_context_from_tune_def(tune, None)
+}
+
+/// Like [`numeric_context_from_tune`], resolving quoted bitfield labels to indices.
+pub fn numeric_context_from_tune_def(
+    tune: Option<&TuneFile>,
+    def: Option<&EcuDefinition>,
+) -> HashMap<String, f64> {
     let mut context = HashMap::new();
     let Some(tune) = tune else {
         return context;
     };
-    for (name, value) in &tune.constants {
-        match value {
-            TuneValue::Scalar(n) => {
-                context.insert(name.clone(), *n);
-            }
-            TuneValue::Bool(b) => {
-                context.insert(name.clone(), if *b { 1.0 } else { 0.0 });
-            }
-            TuneValue::Array(arr) if !arr.is_empty() => {
-                // Index expressions often reference the constant name for the first bin.
-                context.insert(name.clone(), arr[0]);
-            }
-            _ => {}
+    let resolve = |name: &str, value: &TuneValue, dest: &mut HashMap<String, f64>| match value {
+        TuneValue::Scalar(n) => {
+            dest.insert(name.to_string(), *n);
         }
+        TuneValue::Bool(b) => {
+            dest.insert(name.to_string(), if *b { 1.0 } else { 0.0 });
+        }
+        TuneValue::Array(arr) if !arr.is_empty() => {
+            dest.insert(name.to_string(), arr[0]);
+        }
+        TuneValue::String(s) => {
+            if let Some(idx) = def.and_then(|d| d.constants.get(name)).and_then(|c| {
+                c.bit_options.iter().position(|opt| opt == s).or_else(|| {
+                    c.bit_options
+                        .iter()
+                        .position(|opt| opt.eq_ignore_ascii_case(s))
+                })
+            }) {
+                dest.insert(name.to_string(), idx as f64);
+            }
+        }
+        _ => {}
+    };
+    for (name, value) in &tune.constants {
+        resolve(name, value, &mut context);
     }
     for (name, value) in &tune.pc_variables {
-        match value {
-            TuneValue::Scalar(n) => {
-                context.insert(name.clone(), *n);
-            }
-            TuneValue::Bool(b) => {
-                context.insert(name.clone(), if *b { 1.0 } else { 0.0 });
-            }
-            _ => {}
-        }
+        resolve(name, value, &mut context);
     }
     context
 }
@@ -334,5 +345,34 @@ mod filter_tests {
     #[test]
     fn an_expression_naming_nothing_yields_nothing() {
         assert!(referenced_identifiers("1 + 2 * (3 - 4)").is_empty());
+    }
+}
+
+#[cfg(test)]
+mod numeric_context_tests {
+    use super::numeric_context_from_tune_def;
+    use libretune_core::ini::{Constant, DataType, EcuDefinition};
+    use libretune_core::tune::{TuneFile, TuneValue};
+
+    #[test]
+    fn bits_string_becomes_option_index() {
+        let mut etb = Constant::new("etbFunctions1", 0, 0, DataType::Bits);
+        etb.bit_options = vec!["None".into(), "Throttle 1".into()];
+        let mut def = EcuDefinition::default();
+        def.constants.insert("etbFunctions1".into(), etb);
+
+        let mut tune = TuneFile::new("test");
+        tune.constants.insert(
+            "etbFunctions1".into(),
+            TuneValue::String("Throttle 1".into()),
+        );
+
+        assert!(super::numeric_context_from_tune(Some(&tune))
+            .get("etbFunctions1")
+            .is_none());
+        assert_eq!(
+            numeric_context_from_tune_def(Some(&tune), Some(&def)).get("etbFunctions1"),
+            Some(&1.0)
+        );
     }
 }

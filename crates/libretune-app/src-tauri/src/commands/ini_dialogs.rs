@@ -29,6 +29,17 @@ pub async fn evaluate_expression(
     // Speeduino tune) to answer a question about one or two names.
     let names = referenced_identifiers(&expression);
     let string_ctx = build_string_context_filtered(&state, Some(&names)).await;
+    let def_guard = state.definition.lock().await;
+    let mut context = context;
+    if let Some(def) = def_guard.as_ref() {
+        for (name, ch) in &def.output_channels {
+            if ch.is_computed() {
+                context.remove(name);
+            }
+        }
+        def.fold_computed_output_channels(&mut context);
+    }
+    drop(def_guard);
     let mut parser = Parser::new(&expression);
     let expr = parser.parse()?;
     let val = evaluate(&expr, &context, Some(&string_ctx))?;

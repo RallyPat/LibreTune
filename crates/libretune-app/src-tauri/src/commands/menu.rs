@@ -1,5 +1,6 @@
 //! Menu tree and searchable index commands.
 
+use crate::commands::constant_values::collect_scalar_constant_values;
 use crate::commands::string_context::build_string_context;
 use crate::state::AppState;
 use libretune_core::ini::expression::StringContext;
@@ -17,20 +18,32 @@ pub async fn get_menu_tree(
 
     // Always return all menu items - visibility conditions are evaluated but items are never filtered out
     // This allows the frontend to show all items (grayed out if disabled) and enables search to find everything
-    if let Some(context) = filter_context {
-        let mut all_menus = Vec::new();
-        for menu in &def.menus {
-            let items_with_flags = add_visibility_flags(&menu.items, &context, &string_ctx);
-            all_menus.push(Menu {
-                name: menu.name.clone(),
-                title: menu.title.clone(),
-                items: items_with_flags,
-            });
+    let cache_guard = state.tune_cache.lock().await;
+    let tune_guard = state.current_tune.lock().await;
+    let mut context =
+        collect_scalar_constant_values(def, tune_guard.as_ref(), cache_guard.as_ref());
+    if let Some(extra) = filter_context {
+        for (k, v) in extra {
+            if !def
+                .output_channels
+                .get(&k)
+                .is_some_and(|ch| ch.is_computed())
+            {
+                context.insert(k, v);
+            }
         }
-        Ok(all_menus)
-    } else {
-        Ok(def.menus.clone())
+        def.fold_computed_output_channels(&mut context);
     }
+    let mut all_menus = Vec::new();
+    for menu in &def.menus {
+        let items_with_flags = add_visibility_flags(&menu.items, &context, &string_ctx);
+        all_menus.push(Menu {
+            name: menu.name.clone(),
+            title: menu.title.clone(),
+            items: items_with_flags,
+        });
+    }
+    Ok(all_menus)
 }
 
 /// Recursively add visibility/enabled flags to menu items without filtering them out

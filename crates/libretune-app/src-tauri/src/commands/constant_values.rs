@@ -49,6 +49,7 @@ pub(crate) fn collect_scalar_constant_values(
 
         values.insert(name.clone(), value);
     }
+    def.fold_computed_output_channels(&mut values);
     values
 }
 
@@ -138,8 +139,10 @@ pub(crate) fn read_constant_from_cache(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use libretune_core::ini::{Constant, DataType, EcuDefinition, Endianness, Shape};
-    use libretune_core::tune::{TuneCache, TuneFile};
+    use libretune_core::ini::{
+        Constant, DataType, EcuDefinition, Endianness, OutputChannel, Shape,
+    };
+    use libretune_core::tune::{TuneCache, TuneFile, TuneValue};
 
     /// Reproduce the issue behind the offline constant read bug: an MSQ that
     /// stores its data as `<pageData>` blobs has an EMPTY `tune.constants` map.
@@ -291,5 +294,83 @@ mod tests {
             (val - 9.5).abs() < 1e-9,
             "named constant should win, expected 9.5 got {val}"
         );
+    }
+
+    #[test]
+    fn collect_includes_computed_etb_enable() {
+        let mut def = EcuDefinition::default();
+        def.constants.insert(
+            "etbFunctions1".into(),
+            Constant::new("etbFunctions1", 0, 0, DataType::U08),
+        );
+        def.constants.insert(
+            "etbFunctions2".into(),
+            Constant::new("etbFunctions2", 0, 1, DataType::U08),
+        );
+        def.output_channels.insert(
+            "isEtb1Enabled".into(),
+            OutputChannel {
+                name: "isEtb1Enabled".into(),
+                expression: Some("etbFunctions1 == 1 || etbFunctions2 == 1".into()),
+                ..Default::default()
+            },
+        );
+        def.output_channels.insert(
+            "isEtbEnabled".into(),
+            OutputChannel {
+                name: "isEtbEnabled".into(),
+                expression: Some("isEtb1Enabled".into()),
+                ..Default::default()
+            },
+        );
+
+        let mut tune = TuneFile::new("test");
+        tune.constants
+            .insert("etbFunctions1".into(), TuneValue::Scalar(1.0));
+        tune.constants
+            .insert("etbFunctions2".into(), TuneValue::Scalar(0.0));
+
+        let values = collect_scalar_constant_values(&def, Some(&tune), None);
+        assert_eq!(values.get("isEtbEnabled").copied(), Some(1.0));
+    }
+
+    #[test]
+    fn collect_resolves_bits_option_label_like_msq() {
+        let mut etb = Constant::new("etbFunctions1", 0, 0, DataType::Bits);
+        etb.bit_options = vec!["None".into(), "Throttle 1".into(), "Throttle 2".into()];
+        let mut def = EcuDefinition::default();
+        def.constants.insert("etbFunctions1".into(), etb);
+        def.constants.insert(
+            "etbFunctions2".into(),
+            Constant::new("etbFunctions2", 0, 1, DataType::U08),
+        );
+        def.output_channels.insert(
+            "isEtb1Enabled".into(),
+            OutputChannel {
+                name: "isEtb1Enabled".into(),
+                expression: Some("etbFunctions1 == 1 || etbFunctions2 == 1".into()),
+                ..Default::default()
+            },
+        );
+        def.output_channels.insert(
+            "isEtbEnabled".into(),
+            OutputChannel {
+                name: "isEtbEnabled".into(),
+                expression: Some("isEtb1Enabled".into()),
+                ..Default::default()
+            },
+        );
+
+        let mut tune = TuneFile::new("test");
+        tune.constants.insert(
+            "etbFunctions1".into(),
+            TuneValue::String("Throttle 1".into()),
+        );
+        tune.constants
+            .insert("etbFunctions2".into(), TuneValue::Scalar(0.0));
+
+        let values = collect_scalar_constant_values(&def, Some(&tune), None);
+        assert_eq!(values.get("etbFunctions1").copied(), Some(1.0));
+        assert_eq!(values.get("isEtbEnabled").copied(), Some(1.0));
     }
 }

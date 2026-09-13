@@ -1,7 +1,6 @@
 //! Pin assignment conflict checks (pre-burn / before pin constant writes).
 
 use crate::commands::constant_values::read_constant_from_cache_or_tune;
-use crate::commands::string_context::numeric_context_from_tune;
 use crate::AppState;
 use libretune_core::ini::expression::{evaluate, Parser};
 use libretune_core::ini::{DialogComponent, EcuDefinition};
@@ -29,7 +28,7 @@ use std::collections::HashMap;
 /// An unparseable or unevaluatable condition keeps the constant in the scan:
 /// a missed conflict is worse than a spurious one.
 fn disabled_pin_constants(def: &EcuDefinition, tune: Option<&TuneFile>) -> HashMap<String, bool> {
-    let context = numeric_context_from_tune(tune);
+    let context = crate::commands::string_context::numeric_context_from_tune_def(tune, Some(def));
     let mut out = HashMap::new();
 
     for dialog in def.dialogs.values() {

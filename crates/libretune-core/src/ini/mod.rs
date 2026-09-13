@@ -570,6 +570,24 @@ impl EcuDefinition {
         false
     }
 
+    /// Evaluate computed `[OutputChannels]` formulas into `values`.
+    /// Constants and measured channels already in `values` are inputs; computed
+    /// names are always rewritten so a stale `0` cannot stick.
+    pub fn fold_computed_output_channels(&self, values: &mut HashMap<String, f64>) {
+        for _ in 0..3 {
+            for (name, channel) in &self.output_channels {
+                if !channel.is_computed() {
+                    continue;
+                }
+                if let Some(val) = channel.parse_with_context(&[], self.endianness, values) {
+                    if val.is_finite() {
+                        values.insert(name.clone(), val);
+                    }
+                }
+            }
+        }
+    }
+
     /// Resolve `scale`/`translate` fields that the INI expresses as
     /// `{expression}` rather than a literal.
     ///
@@ -594,25 +612,7 @@ impl EcuDefinition {
         // channels, so evaluate them into the context first. Two passes let a
         // helper depend on another helper without ordering assumptions.
         let mut context = values.clone();
-        for _ in 0..2 {
-            for (name, channel) in &self.output_channels {
-                let Some(expr) = channel.expression.as_ref() else {
-                    continue;
-                };
-                if values.contains_key(name) {
-                    continue; // a real measured value always wins
-                }
-                let mut parser = expression::Parser::new(expr);
-                if let Ok(ast) = parser.parse() {
-                    if let Ok(v) = expression::evaluate(&ast, &context, None) {
-                        let v = v.as_f64();
-                        if v.is_finite() {
-                            context.insert(name.clone(), v);
-                        }
-                    }
-                }
-            }
-        }
+        self.fold_computed_output_channels(&mut context);
 
         /// Which deferred field an expression resolves into.
         enum Field {
@@ -1139,5 +1139,44 @@ mod tests {
         def.constants
             .insert("rtc_mode".to_string(), scalar_const("rtc_mode"));
         assert!(def.std_panel_definition("std_ms3Rtc").is_none());
+    }
+
+    #[test]
+    fn fold_computed_channels_enables_etb_menu_formula() {
+        let mut def = EcuDefinition::default();
+        def.output_channels.insert(
+            "isEtb1Enabled".into(),
+            OutputChannel {
+                name: "isEtb1Enabled".into(),
+                expression: Some("etbFunctions1 == 1 || etbFunctions2 == 1".into()),
+                ..Default::default()
+            },
+        );
+        def.output_channels.insert(
+            "isEtb2Enabled".into(),
+            OutputChannel {
+                name: "isEtb2Enabled".into(),
+                expression: Some("etbFunctions1 == 2 || etbFunctions2 == 2".into()),
+                ..Default::default()
+            },
+        );
+        def.output_channels.insert(
+            "isEtbEnabled".into(),
+            OutputChannel {
+                name: "isEtbEnabled".into(),
+                expression: Some("isEtb1Enabled || isEtb2Enabled".into()),
+                ..Default::default()
+            },
+        );
+
+        let mut values = HashMap::new();
+        values.insert("etbFunctions1".into(), 1.0);
+        values.insert("etbFunctions2".into(), 0.0);
+        def.fold_computed_output_channels(&mut values);
+        assert_eq!(values.get("isEtbEnabled").copied(), Some(1.0));
+
+        values.insert("etbFunctions1".into(), 0.0);
+        def.fold_computed_output_channels(&mut values);
+        assert_eq!(values.get("isEtbEnabled").copied(), Some(0.0));
     }
 }
