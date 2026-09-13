@@ -25,6 +25,7 @@ import { BaseMapResult } from "./components/dialogs/BaseMapDialog";
 import { useErrorDialog } from "./components/dialogs/ErrorDetailsDialog";
 import ErrorBoundary from "./components/common/ErrorBoundary";
 import { DialogOverlays } from "./components/DialogOverlays";
+import { checkForUpdateQuietly } from "./components/tuner-ui/dialogs/UpdateSection";
 import { useBackendEventListeners } from "./hooks/useBackendEventListeners";
 import { useRealtimeStream } from "./hooks/useRealtimeStream";
 import { useTabPopout } from "./hooks/useTabPopout";
@@ -122,6 +123,20 @@ function AppContent() {
   const { showLoading, hideLoading } = useLoading();
   const { showToast } = useToast();
   const { isOpen: errorDialogOpen, errorInfo, showError, hideError } = useErrorDialog();
+
+  // Startup update check: one non-blocking request, one toast if a newer
+  // signed release exists. Install happens from Help → About LibreTune.
+  useEffect(() => {
+    let active = true;
+    void checkForUpdateQuietly().then((version) => {
+      if (active && version) {
+        showToast(`LibreTune ${version} is available — Help → About LibreTune to install.`, "info", 10000);
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, [showToast]);
 
   // Project state
   const [currentProject, setCurrentProject] = useState<CurrentProject | null>(null);

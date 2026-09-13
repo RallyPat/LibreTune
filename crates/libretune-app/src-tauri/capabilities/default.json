@@ -9,6 +9,8 @@
     "core:default",
     "opener:default",
     "dialog:default",
+    "updater:default",
+    "process:allow-restart",
     "core:window:allow-create",
     "core:webview:allow-create-webview-window",
     "core:window:allow-close",

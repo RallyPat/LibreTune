@@ -29,6 +29,8 @@ async-trait = { workspace = true }
 dirs = "5"
 tokio = { workspace = true }
 tauri-plugin-dialog = "2"
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
 chrono = { workspace = true }
 byteorder = "1"
 tracing = { workspace = true }
