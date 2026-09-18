@@ -11,8 +11,14 @@ import RebinDialog from '../dialogs/RebinDialog';
 import SetTableSizeDialog from '../dialogs/SetTableSizeDialog';
 import CellEditDialog from '../dialogs/CellEditDialog';
 import GenerateTableDialog from '../dialogs/GenerateTableDialog';
+import TableAdjustDialog from './TableAdjustDialog';
 import { classifyGeneratableTable, generatableTableLabel } from '../../utils/tableGenerator';
-import { Dialog, Button, FormField } from '../common';
+import {
+  parseTableAdjustInput,
+  tableAdjustResultError,
+  tableAdjustTransform,
+  type TableAdjustKind,
+} from '../../utils/tableAdjustInput';
 import type { BackendTableData, TableSizeInfo } from '../../types/app';
 import LambdaPreviewTable from './LambdaPreviewTable';
 import { useHeatmapSettings } from '../../utils/useHeatmapSettings';
@@ -233,10 +239,12 @@ export default function TableEditor2D({
     value: 0,
   });
 
-  const [scaleDialog, setScaleDialog] = useState<{ show: boolean; factor: string }>({
-    show: false,
-    factor: '1.05',
-  });
+  const [adjustDialog, setAdjustDialog] = useState<{
+    show: boolean;
+    kind: TableAdjustKind;
+    raw: string;
+    error: string | null;
+  }>({ show: false, kind: 'mul', raw: '0.9', error: null });
 
   const [followMode, setFollowMode] = useState(true);
   const [activeCell, setActiveCell] = useState<[number, number] | null>(null);
@@ -509,6 +517,7 @@ export default function TableEditor2D({
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
         return;
       }
+      if (adjustDialog.show) return;
 
       const isCtrl = e.ctrlKey || e.metaKey;
       const isShift = e.shiftKey;
@@ -611,7 +620,7 @@ export default function TableEditor2D({
       }
       if (matchesAction('table.scale') || e.key === '*') {
         e.preventDefault();
-        openScaleDialog();
+        openAdjust('mul');
         return;
       }
       if (matchesAction('table.interpolate') || e.key === '/') {
@@ -688,7 +697,7 @@ export default function TableEditor2D({
 
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [selectionRange, followMode, activeCell, localZValues, yAxisBottom]);
+  }, [selectionRange, followMode, activeCell, localZValues, yAxisBottom, adjustDialog.show]);
 
   // Arrow key navigation helper
   const handleArrowNavigation = (key: string, extendSelection: boolean) => {
@@ -867,10 +876,6 @@ export default function TableEditor2D({
     handleSetEqual();
   };
 
-  const handleScaleWrapper = () => {
-    openScaleDialog();
-  };
-
   const handleContextMenuSetEqual = (_value: number) => {
     setContextMenu({ visible: false, x: 0, y: 0, value: 0 });
     handleSetEqual();
@@ -922,17 +927,33 @@ export default function TableEditor2D({
     }
   };
 
-  const openScaleDialog = () => {
+  const openAdjust = (kind: TableAdjustKind) => {
     if (selectedCellsCoords.length === 0) return;
     setContextMenu({ visible: false, x: 0, y: 0, value: 0 });
-    setScaleDialog(prev => ({ ...prev, show: true }));
+    setAdjustDialog({
+      show: true,
+      kind,
+      raw: kind === 'mul' ? '0.9' : '10',
+      error: null,
+    });
   };
 
-  const handleScaleDialogApply = () => {
-    const factor = parseFloat(scaleDialog.factor);
-    if (!Number.isFinite(factor)) return;
-    setScaleDialog(prev => ({ ...prev, show: false }));
-    handleScale(factor);
+  const applyAdjust = () => {
+    const parsed = parseTableAdjustInput(adjustDialog.raw, adjustDialog.kind);
+    if (!parsed.ok) {
+      setAdjustDialog((d) => ({ ...d, error: parsed.error }));
+      return;
+    }
+    const values = selectedCellsCoords.map(([x, y]) => localZValues[y][x]);
+    const next = tableAdjustTransform(adjustDialog.kind, parsed.value);
+    const resultError = tableAdjustResultError(values, next, { tableKind: generatableKind });
+    if (resultError) {
+      setAdjustDialog((d) => ({ ...d, error: resultError }));
+      return;
+    }
+    if (adjustDialog.kind === 'mul') handleScale(parsed.value);
+    else handleAddOffset(adjustDialog.kind === 'add' ? parsed.value : -parsed.value);
+    setAdjustDialog((d) => ({ ...d, show: false, error: null }));
   };
 
   const handleSmooth = async () => {
@@ -1446,9 +1467,9 @@ export default function TableEditor2D({
       {!embedded && (
         <TableToolbar
           onSetEqual={handleSetEqualWrapper}
-          onIncrease={handleIncrease}
-          onDecrease={handleDecrease}
-          onScale={handleScaleWrapper}
+          onIncrease={() => openAdjust('add')}
+          onDecrease={() => openAdjust('sub')}
+          onScale={() => openAdjust('mul')}
           onInterpolate={handleInterpolate}
           onSmooth={handleSmooth}
           onRebin={() => setRebinDialog({ ...rebinDialog, show: true })}
@@ -1624,45 +1645,16 @@ export default function TableEditor2D({
         yAxisName={y_axis_name}
       />
 
-      <Dialog
-        open={scaleDialog.show}
-        onClose={() => setScaleDialog(prev => ({ ...prev, show: false }))}
-        size="sm"
-        title="Scale Selected Cells"
-      >
-        <Dialog.Body>
-          <FormField
-            label="Multiplier"
-            help={`Applied to ${selectedCellsCoords.length} selected cell(s). 1.05 = +5%, 0.95 = -5%.`}
-          >
-            {id => (
-              <input
-                id={id}
-                type="number"
-                step="any"
-                autoFocus
-                value={scaleDialog.factor}
-                onChange={e => setScaleDialog(prev => ({ ...prev, factor: e.target.value }))}
-                onKeyDown={e => {
-                  if (e.key === 'Enter') handleScaleDialogApply();
-                }}
-              />
-            )}
-          </FormField>
-        </Dialog.Body>
-        <Dialog.Footer>
-          <Button variant="secondary" onClick={() => setScaleDialog(prev => ({ ...prev, show: false }))}>
-            Cancel
-          </Button>
-          <Button
-            variant="primary"
-            onClick={handleScaleDialogApply}
-            disabled={!Number.isFinite(parseFloat(scaleDialog.factor))}
-          >
-            Apply
-          </Button>
-        </Dialog.Footer>
-      </Dialog>
+      <TableAdjustDialog
+        open={adjustDialog.show}
+        kind={adjustDialog.kind}
+        raw={adjustDialog.raw}
+        error={adjustDialog.error}
+        cellCount={selectedCellsCoords.length}
+        onChange={(raw) => setAdjustDialog((d) => ({ ...d, raw, error: null }))}
+        onClose={() => setAdjustDialog((d) => ({ ...d, show: false, error: null }))}
+        onApply={applyAdjust}
+      />
     </div>
   );
 }

@@ -132,7 +132,7 @@ describe('TableEditor2D table operations', () => {
 
   it('prompts for a scale factor and sends camelCase args', async () => {
     renderEditor();
-    fireEvent.click(screen.getByTitle('Scale selected cells (*)'));
+    fireEvent.click(screen.getByTitle('Multiply selected cells (×)'));
 
     const input = await screen.findByLabelText('Multiplier');
     fireEvent.change(input, { target: { value: '1.1' } });
@@ -146,9 +146,34 @@ describe('TableEditor2D table operations', () => {
     });
   });
 
+  it('rejects a non-number in the multiply dialog', async () => {
+    renderEditor();
+    fireEvent.click(screen.getByTitle('Multiply selected cells (×)'));
+    const input = await screen.findByLabelText('Multiplier');
+    fireEvent.change(input, { target: { value: 'abc' } });
+    fireEvent.click(screen.getByText('Apply'));
+    expect(await screen.findByText('Enter a number')).toBeInTheDocument();
+    expect(invokeMock.mock.calls.some(([cmd]) => cmd === 'scale_cells')).toBe(false);
+  });
+
+  it('subtracts an amount from selected cells', async () => {
+    renderEditor();
+    fireEvent.click(screen.getByTitle('Decrease — subtract an amount (−)'));
+    const input = await screen.findByLabelText('Amount to subtract');
+    fireEvent.change(input, { target: { value: '2' } });
+    fireEvent.click(screen.getByText('Apply'));
+
+    await waitFor(() => expect(lastTableOpCall().command).toBe('add_offset'));
+    expect(lastTableOpCall().args).toEqual({
+      tableName: 'veTable1Tbl',
+      selectedCells: [[0, 0]],
+      offset: -2,
+    });
+  });
+
   it('nudges by a percentage rather than multiplying', () => {
     const { container } = renderEditor();
-    fireEvent.click(screen.getByTitle('Increase by 1% (> or .)'));
+    fireEvent.keyDown(document, { key: '>' });
 
     const firstCell = container.querySelector('.table-cell .cell-value');
     expect(firstCell?.textContent).toBe((Z_VALUES[0][0] * 1.01).toFixed(1));

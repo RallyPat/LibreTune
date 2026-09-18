@@ -11,7 +11,14 @@ import TableEditor3D from '../tables/TableEditor3D';
 import TableToolbar from './table-editor/TableToolbar';
 import TableContextMenu from './table-editor/TableContextMenu';
 import GenerateTableDialog from '../dialogs/GenerateTableDialog';
+import TableAdjustDialog from '../tables/TableAdjustDialog';
 import { classifyGeneratableTable, generatableTableLabel } from '../../utils/tableGenerator';
+import {
+  parseTableAdjustInput,
+  tableAdjustResultError,
+  tableAdjustTransform,
+  type TableAdjustKind,
+} from '../../utils/tableAdjustInput';
 import { toTunerTableData, BackendTableData } from '../../types/app';
 
 export interface TableData {
@@ -136,6 +143,12 @@ export function TableEditor({
     stepCount: 10,
     stepPercent: 1,
   });
+  const [adjustDialog, setAdjustDialog] = useState<{
+    show: boolean;
+    kind: TableAdjustKind;
+    raw: string;
+    error: string | null;
+  }>({ show: false, kind: 'sub', raw: '10', error: null });
   
   // Track if heatmap coloring is enabled
   const [heatmapEnabled, setHeatmapEnabled] = useState(true);
@@ -615,6 +628,38 @@ export function TableEditor({
     onChange({ ...data, zValues: newZValues });
   }, [data, getSelectedCells, onChange, pushHistory]);
 
+  const openAdjust = useCallback((kind: TableAdjustKind) => {
+    setAdjustDialog({
+      show: true,
+      kind,
+      raw: kind === 'mul' ? '0.9' : '10',
+      error: null,
+    });
+  }, []);
+
+  const applyAdjust = useCallback(() => {
+    const parsed = parseTableAdjustInput(adjustDialog.raw, adjustDialog.kind);
+    if (!parsed.ok) {
+      setAdjustDialog((d) => ({ ...d, error: parsed.error }));
+      return;
+    }
+    const cells = getSelectedCells();
+    const values = cells.map((c) => data.zValues[c.row][c.col]);
+    const next = tableAdjustTransform(adjustDialog.kind, parsed.value);
+    const resultError = tableAdjustResultError(values, next, {
+      tableKind: generatableKind,
+      min: data.min,
+      max: data.max,
+    });
+    if (resultError) {
+      setAdjustDialog((d) => ({ ...d, error: resultError }));
+      return;
+    }
+    if (adjustDialog.kind === 'mul') scaleValues(parsed.value);
+    else adjustValues(adjustDialog.kind === 'add' ? parsed.value : -parsed.value);
+    setAdjustDialog((d) => ({ ...d, show: false, error: null }));
+  }, [adjustDialog, data, generatableKind, getSelectedCells, adjustValues, scaleValues]);
+
   const interpolate = useCallback(() => {
     const cells = getSelectedCells();
     if (cells.length < 3) return; // Need at least 3 cells
@@ -874,6 +919,7 @@ export function TableEditor({
 
   // Keyboard navigation
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
+    if (adjustDialog.show) return;
     if (editingCell) {
       if (e.key === 'Enter') {
         finishEdit(true);
@@ -959,7 +1005,7 @@ export function TableEditor({
         break;
       case '*':
         e.preventDefault();
-        scaleValues(1.01 * multiplier);
+        openAdjust('mul');
         break;
       case '/':
         e.preventDefault();
@@ -1035,9 +1081,10 @@ export function TableEditor({
     }
   }, [
     selection, editingCell, data, finishEdit, getSelectedCells, setEqual,
-    adjustValues, scaleValues, interpolate, interpolateHorizontal, interpolateVertical,
+    adjustValues, openAdjust, interpolate, interpolateHorizontal, interpolateVertical,
     smooth, copySelection, pasteSelection, selectAll, resetToOriginal, floodFill,
-    undo, redo, handleCellDoubleClick, followMode, setFollowMode, yAxisBottom
+    undo, redo, handleCellDoubleClick, followMode, setFollowMode, yAxisBottom,
+    adjustDialog.show,
   ]);
 
   // Focus input when editing
@@ -1113,21 +1160,9 @@ export function TableEditor({
           }}
           onStepUp={() => { adjustValues(incrementSettings.stepAmount); closeContextMenu(); }}
           onStepDown={() => { adjustValues(-incrementSettings.stepAmount); closeContextMenu(); }}
-          onAddAmount={() => {
-            const amt = askNumber('Enter amount to add:');
-            if (amt !== null) adjustValues(amt);
-            closeContextMenu();
-          }}
-          onSubtractAmount={() => {
-            const amt = askNumber('Enter amount to subtract:');
-            if (amt !== null) adjustValues(-amt);
-            closeContextMenu();
-          }}
-          onMultiplyBy={() => {
-            const factor = askNumber('Enter multiplier (e.g., 1.02 for +2%):');
-            if (factor !== null) scaleValues(factor);
-            closeContextMenu();
-          }}
+          onAddAmount={() => { closeContextMenu(); openAdjust('add'); }}
+          onSubtractAmount={() => { closeContextMenu(); openAdjust('sub'); }}
+          onMultiplyBy={() => { closeContextMenu(); openAdjust('mul'); }}
           onInterpolate={() => { interpolate(); closeContextMenu(); }}
           onInterpolateHorizontal={() => { interpolateHorizontal(); closeContextMenu(); }}
           onInterpolateVertical={() => { interpolateVertical(); closeContextMenu(); }}
@@ -1163,12 +1198,9 @@ export function TableEditor({
         }}
         onIncrease={() => adjustValues(0.1)}
         onDecrease={() => adjustValues(-0.1)}
-        onIncreaseMore={() => adjustValues(1)}
-        onDecreaseMore={() => adjustValues(-1)}
-        onScale={() => {
-          const factor = askNumber('Enter scale factor (e.g., 1.02 for +2%):');
-          if (factor !== null) scaleValues(factor);
-        }}
+        onIncreaseMore={() => openAdjust('add')}
+        onDecreaseMore={() => openAdjust('sub')}
+        onScale={() => openAdjust('mul')}
         onInterpolate={interpolate}
         onSmooth={smooth}
         onCopy={copySelection}
@@ -1327,6 +1359,16 @@ export function TableEditor({
           onApply={applyGeneratedValues}
         />
       )}
+      <TableAdjustDialog
+        open={adjustDialog.show}
+        kind={adjustDialog.kind}
+        raw={adjustDialog.raw}
+        error={adjustDialog.error}
+        cellCount={getSelectedCells().length}
+        onChange={(raw) => setAdjustDialog((d) => ({ ...d, raw, error: null }))}
+        onClose={() => setAdjustDialog((d) => ({ ...d, show: false, error: null }))}
+        onApply={applyAdjust}
+      />
     </div>
   );
 }

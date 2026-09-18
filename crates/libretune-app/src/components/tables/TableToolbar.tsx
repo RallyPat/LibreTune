@@ -23,8 +23,8 @@ import {
 
 interface TableToolbarProps {
   onSetEqual: () => void;
-  onIncrease: (amount: number) => void;
-  onDecrease: (amount: number) => void;
+  onIncrease: () => void;
+  onDecrease: () => void;
   onScale: () => void;
   onInterpolate: () => void;
   onSmooth: () => void;
@@ -100,16 +100,16 @@ export default function TableToolbar({
         </button>
         <button 
           className="ts-toolbar-btn" 
-          title="Increase by 1% (> or .)"
-          onClick={() => onIncrease(0.01)}
+          title="Increase — add an amount (+)"
+          onClick={onIncrease}
         >
           <Plus size={14} />
           <span className="ts-toolbar-key">&gt;</span>
         </button>
         <button 
           className="ts-toolbar-btn" 
-          title="Decrease by 1% (<)"
-          onClick={() => onDecrease(0.01)}
+          title="Decrease — subtract an amount (−)"
+          onClick={onDecrease}
         >
           <Minus size={14} />
           <span className="ts-toolbar-key">&lt;</span>
@@ -122,7 +122,7 @@ export default function TableToolbar({
       <div className="ts-toolbar-group">
         <button 
           className="ts-toolbar-btn" 
-          title="Scale selected cells (*)"
+          title="Multiply selected cells (×)"
           onClick={onScale}
         >
           <X size={14} />

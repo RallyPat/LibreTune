@@ -96,7 +96,7 @@ export default function TableToolbar({
           className="table-toolbar-btn"
           onClick={onDecreaseMore}
           disabled={!hasSelection}
-          title="Decrease More (-)"
+          title="Decrease — subtract an amount (−)"
         >
           −
         </button>
@@ -104,7 +104,7 @@ export default function TableToolbar({
           className="table-toolbar-btn"
           onClick={onIncreaseMore}
           disabled={!hasSelection}
-          title="Increase More (+)"
+          title="Increase — add an amount (+)"
         >
           +
         </button>
@@ -117,7 +117,7 @@ export default function TableToolbar({
           className="table-toolbar-btn"
           onClick={onScale}
           disabled={!hasSelection}
-          title="Scale (*)"
+          title="Multiply (×)"
         >
           ×
         </button>
