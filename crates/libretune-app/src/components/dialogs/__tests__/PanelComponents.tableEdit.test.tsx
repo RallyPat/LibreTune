@@ -1,4 +1,4 @@
-import { render, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { invoke } from '@tauri-apps/api/core';
 import { RecursivePanel } from '../PanelComponents';
 import { ToastProvider } from '../../../contexts/ToastContext';
@@ -91,5 +91,17 @@ describe('RecursivePanel embedded table edit (PanelComponents.tsx wiring)', () =
     // persist, doubling the backend write per cell edit.
     expect(updateCalls).toHaveLength(1);
     expect(onUpdate).toHaveBeenCalled();
+  });
+
+  it('opens the amount dialog from +/−/× on the Fuel VE header', async () => {
+    const { container } = render(
+      <ToastProvider>
+        <RecursivePanel name="veTable1Tbl" openTable={() => {}} context={{}} />
+      </ToastProvider>
+    );
+    await waitFor(() => expect(container.querySelectorAll('.table-cell').length).toBeGreaterThan(0));
+    fireEvent.mouseDown(container.querySelectorAll('.table-cell')[0]);
+    fireEvent.click(container.querySelector('[title="Decrease — subtract an amount (−)"]')!);
+    expect(await screen.findByLabelText('Amount to subtract')).toBeInTheDocument();
   });
 });

@@ -232,9 +232,14 @@
   opacity: 0.6;
 }
 
-.embedded-toggle:hover {
+.embedded-toggle:hover:not(:disabled) {
   background: rgba(74, 158, 255, 0.3);
   opacity: 1;
+}
+
+.embedded-toggle:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
 }
 
 .embedded-toggle.active {

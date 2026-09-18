@@ -1356,6 +1356,34 @@ export default function TableEditor2D({
       {embedded && (
         <div className="embedded-header">
           <span className="embedded-title">{title}</span>
+          {!readOnly && (
+            <>
+              <button
+                className="embedded-toggle"
+                disabled={selectedCellsCoords.length === 0}
+                onClick={() => openAdjust('sub')}
+                title="Decrease — subtract an amount (−)"
+              >
+                −
+              </button>
+              <button
+                className="embedded-toggle"
+                disabled={selectedCellsCoords.length === 0}
+                onClick={() => openAdjust('add')}
+                title="Increase — add an amount (+)"
+              >
+                +
+              </button>
+              <button
+                className="embedded-toggle"
+                disabled={selectedCellsCoords.length === 0}
+                onClick={() => openAdjust('mul')}
+                title="Multiply (×)"
+              >
+                ×
+              </button>
+            </>
+          )}
           <button 
             className={`embedded-toggle ${showColorShade ? 'active' : ''}`}
             onClick={() => setShowColorShade(!showColorShade)}
