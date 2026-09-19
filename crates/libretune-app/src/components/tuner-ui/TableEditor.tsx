@@ -173,6 +173,15 @@ export function TableEditor({
   const generatableKind = useMemo(() => classifyGeneratableTable(data.name), [data.name]);
   const [showGenerateDialog, setShowGenerateDialog] = useState(false);
 
+  // Tab contents only live in React. Without this, cell/Smooth edits never
+  // reach the tune cache or the ECU (issue #325), while Generate/import did.
+  const persistChange = useCallback((newData: TableData) => {
+    onChange(newData);
+    invoke('update_table_data', { tableName: newData.name, zValues: newData.zValues }).catch(
+      (err) => console.error('Failed to persist table:', err),
+    );
+  }, [onChange]);
+
   // TunerStudio-compatible .table file import/export for this one table.
   const handleExportTable = useCallback(async () => {
     try {
@@ -558,38 +567,34 @@ export function TableEditor({
             interpolateZ: false,
           });
         }
-        await invoke('update_table_data', {
-          tableName: data.name,
-          zValues: result.zValues,
-        });
       } catch (e) {
         console.error('Failed to persist generated table:', e);
       }
-      onChange({
+      persistChange({
         ...data,
         zValues: result.zValues,
         xAxis: result.xBins ?? data.xAxis,
         yAxis: result.yBins ?? data.yAxis,
       });
     },
-    [data, onChange, pushHistory],
+    [data, persistChange, pushHistory],
   );
 
   // Undo
   const undo = useCallback(() => {
     if (historyIndex >= 0) {
-      onChange(history[historyIndex]);
+      persistChange(history[historyIndex]);
       setHistoryIndex(historyIndex - 1);
     }
-  }, [history, historyIndex, onChange]);
+  }, [history, historyIndex, persistChange]);
 
   // Redo
   const redo = useCallback(() => {
     if (historyIndex < history.length - 1) {
       setHistoryIndex(historyIndex + 1);
-      onChange(history[historyIndex + 1]);
+      persistChange(history[historyIndex + 1]);
     }
-  }, [history, historyIndex, onChange]);
+  }, [history, historyIndex, persistChange]);
 
   // Table operations
   const setEqual = useCallback((value: number) => {
@@ -601,8 +606,8 @@ export function TableEditor({
     cells.forEach(({ row, col }) => {
       newZValues[row][col] = value;
     });
-    onChange({ ...data, zValues: newZValues });
-  }, [data, getSelectedCells, onChange, pushHistory]);
+    persistChange({ ...data, zValues: newZValues });
+  }, [data, getSelectedCells, persistChange, pushHistory]);
 
   const adjustValues = useCallback((delta: number) => {
     const cells = getSelectedCells();
@@ -613,8 +618,8 @@ export function TableEditor({
     cells.forEach(({ row, col }) => {
       newZValues[row][col] = Number((newZValues[row][col] + delta).toFixed(data.precision ?? 2));
     });
-    onChange({ ...data, zValues: newZValues });
-  }, [data, getSelectedCells, onChange, pushHistory]);
+    persistChange({ ...data, zValues: newZValues });
+  }, [data, getSelectedCells, persistChange, pushHistory]);
 
   const scaleValues = useCallback((factor: number) => {
     const cells = getSelectedCells();
@@ -625,8 +630,8 @@ export function TableEditor({
     cells.forEach(({ row, col }) => {
       newZValues[row][col] = Number((newZValues[row][col] * factor).toFixed(data.precision ?? 2));
     });
-    onChange({ ...data, zValues: newZValues });
-  }, [data, getSelectedCells, onChange, pushHistory]);
+    persistChange({ ...data, zValues: newZValues });
+  }, [data, getSelectedCells, persistChange, pushHistory]);
 
   const openAdjust = useCallback((kind: TableAdjustKind) => {
     setAdjustDialog({
@@ -693,8 +698,8 @@ export function TableEditor({
       });
     }
     
-    onChange({ ...data, zValues: newZValues });
-  }, [data, getSelectedCells, onChange, pushHistory]);
+    persistChange({ ...data, zValues: newZValues });
+  }, [data, getSelectedCells, persistChange, pushHistory]);
 
   const smooth = useCallback(() => {
     const cells = getSelectedCells();
@@ -723,8 +728,8 @@ export function TableEditor({
       newZValues[row][col] = Number((sum / weight).toFixed(data.precision ?? 2));
     });
     
-    onChange({ ...data, zValues: newZValues });
-  }, [data, getSelectedCells, onChange, pushHistory]);
+    persistChange({ ...data, zValues: newZValues });
+  }, [data, getSelectedCells, persistChange, pushHistory]);
 
   // Interpolate horizontal only (H key)
   const interpolateHorizontal = useCallback(() => {
@@ -754,8 +759,8 @@ export function TableEditor({
       });
     });
     
-    onChange({ ...data, zValues: newZValues });
-  }, [data, getSelectedCells, onChange, pushHistory]);
+    persistChange({ ...data, zValues: newZValues });
+  }, [data, getSelectedCells, persistChange, pushHistory]);
 
   // Interpolate vertical only (V key)
   const interpolateVertical = useCallback(() => {
@@ -785,8 +790,8 @@ export function TableEditor({
       });
     });
     
-    onChange({ ...data, zValues: newZValues });
-  }, [data, getSelectedCells, onChange, pushHistory]);
+    persistChange({ ...data, zValues: newZValues });
+  }, [data, getSelectedCells, persistChange, pushHistory]);
 
   // Flood fill (fill up and right from selection) - F key
   const floodFill = useCallback(() => {
@@ -805,8 +810,8 @@ export function TableEditor({
       }
     }
     
-    onChange({ ...data, zValues: newZValues });
-  }, [selection, data, onChange, pushHistory]);
+    persistChange({ ...data, zValues: newZValues });
+  }, [selection, data, persistChange, pushHistory]);
 
   // Reset to original values (Escape with selection)
   const resetToOriginal = useCallback(() => {
@@ -821,8 +826,8 @@ export function TableEditor({
       }
     });
     
-    onChange({ ...data, zValues: newZValues });
-  }, [data, getSelectedCells, onChange, pushHistory, originalData]);
+    persistChange({ ...data, zValues: newZValues });
+  }, [data, getSelectedCells, persistChange, pushHistory, originalData]);
 
   // Select all cells (Ctrl+A)
   const selectAll = useCallback(() => {
@@ -871,8 +876,8 @@ export function TableEditor({
       });
     });
     
-    onChange({ ...data, zValues: newZValues });
-  }, [selection, clipboard, data, onChange, pushHistory]);
+    persistChange({ ...data, zValues: newZValues });
+  }, [selection, clipboard, data, persistChange, pushHistory]);
 
   // Handle cell click
   const handleCellMouseDown = useCallback((row: number, col: number, e: React.MouseEvent) => {
@@ -910,12 +915,12 @@ export function TableEditor({
         pushHistory();
         const newZValues = data.zValues.map((row) => [...row]);
         newZValues[editingCell.row][editingCell.col] = Number(value.toFixed(data.precision ?? 2));
-        onChange({ ...data, zValues: newZValues });
+        persistChange({ ...data, zValues: newZValues });
       }
     }
     setEditingCell(null);
     setEditValue('');
-  }, [editingCell, editValue, data, onChange, pushHistory]);
+  }, [editingCell, editValue, data, persistChange, pushHistory]);
 
   // Keyboard navigation
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
