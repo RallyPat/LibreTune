@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { invoke } from '@tauri-apps/api/core';
 import type { ConnectionStatus, CurrentProject } from '../types/app';
 import type { ConnectionPhase } from '../utils/connectionWorkflow';
 
@@ -26,18 +27,10 @@ export interface UseAutoConnectDeps {
   connecting: boolean;
   syncing: boolean;
   connect: (options?: ConnectOptions) => Promise<void>;
-  refreshPorts: () => Promise<string[]>;
 }
 
-// Poll cadence for the auto-connect loop. 2500ms balances responsiveness
-// (the user notices a plugged-in ECU within a few seconds) against avoiding
-// serial-port enumeration spam that can itself interfere with a freshly
-// appearing device.
-const POLL_INTERVAL_MS = 2500;
-// Brief startup grace period before the first poll. Gives the OS time to
-// finish enumerating ports (and any pending reconnect from a previous session
-// time to settle) so the first auto-connect attempt sees a stable port list.
-const INITIAL_DELAY_MS = 600;
+const POLL_INTERVAL_MS = 400;
+const INITIAL_DELAY_MS = 200;
 
 function isConnectedStatus(connection: ConnectionStatus): boolean {
   return connection.state === 'Connected';
@@ -54,10 +47,8 @@ export function useAutoConnect({
   connecting,
   syncing,
   connect,
-  refreshPorts,
 }: UseAutoConnectDeps): ConnectionPhase | null {
   const connectRef = useRef(connect);
-  const refreshPortsRef = useRef(refreshPorts);
   const statusRef = useRef(status);
   const connectingRef = useRef(connecting);
   const syncingRef = useRef(syncing);
@@ -65,7 +56,6 @@ export function useAutoConnect({
   const [autoConnectPhase, setAutoConnectPhase] = useState<ConnectionPhase | null>(null);
 
   connectRef.current = connect;
-  refreshPortsRef.current = refreshPorts;
   statusRef.current = status;
   connectingRef.current = connecting;
   syncingRef.current = syncing;
@@ -97,7 +87,7 @@ export function useAutoConnect({
         return;
       }
 
-      const portList = await refreshPortsRef.current();
+      const portList = await invoke<string[]>('get_serial_ports', { probe: false });
       if (cancelled) {
         return;
       }

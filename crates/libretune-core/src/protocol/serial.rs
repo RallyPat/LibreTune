@@ -89,9 +89,18 @@ fn is_port_actually_present(name: &str) -> bool {
         .is_ok()
 }
 
-/// List all available serial ports, with /dev fallbacks and deterministic ordering
+/// List serial ports, filtering Windows ghost COM entries with an open-probe.
 pub fn list_ports() -> Vec<PortInfo> {
-    // Collect from serialport API
+    collect_ports(true)
+}
+
+/// Registry/device-node names only — no open-probe. Used by auto-connect so a
+/// just-appeared ECU is visible immediately and is not DTR-reset by a probe.
+pub fn list_ports_unprobed() -> Vec<PortInfo> {
+    collect_ports(false)
+}
+
+fn collect_ports(probe_windows: bool) -> Vec<PortInfo> {
     let mut map: HashMap<String, PortInfo> = HashMap::new();
     for info in serialport::available_ports()
         .unwrap_or_default()
@@ -101,11 +110,12 @@ pub fn list_ports() -> Vec<PortInfo> {
         map.entry(p.name.clone()).or_insert(p);
     }
 
-    // Windows-only: drop ports whose registry entry outlived the device (see
-    // `is_port_actually_present`). Other platforms remove the device node
-    // (/dev/ttyUSB*, /dev/cu.*) immediately on unplug, so this doesn't apply.
     #[cfg(target_os = "windows")]
-    map.retain(|name, _| is_port_actually_present(name));
+    if probe_windows {
+        map.retain(|name, _| is_port_actually_present(name));
+    }
+    #[cfg(not(target_os = "windows"))]
+    let _ = probe_windows;
 
     // Linux-only: Add /dev/ttyACM* and /dev/ttyUSB* entries if present but not found by API
     #[cfg(target_os = "linux")]
@@ -188,11 +198,8 @@ mod tests {
 
     #[test]
     fn test_list_ports() {
-        // This test just ensures the function doesn't panic
-        let ports = list_ports();
-        for port in &ports {
-            println!("Found port: {} - {:?}", port.name, port.product);
-        }
+        let _ = list_ports();
+        let _ = list_ports_unprobed();
     }
 
     #[test]

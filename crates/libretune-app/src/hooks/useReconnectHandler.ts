@@ -14,7 +14,6 @@ export interface UseReconnectHandlerDeps {
   projectPort: string | null;
   lastSerialPort: string | null;
   connect: (options?: ConnectOptions) => Promise<void>;
-  refreshPorts: () => Promise<string[]>;
   showToast: (msg: string, type: 'info' | 'success' | 'error' | 'warning') => void;
 }
 
@@ -38,7 +37,6 @@ export function useReconnectHandler(deps: UseReconnectHandlerDeps) {
         projectPort,
         lastSerialPort,
         connect,
-        refreshPorts,
         showToast,
       } = depsRef.current;
 
@@ -95,7 +93,7 @@ export function useReconnectHandler(deps: UseReconnectHandlerDeps) {
           return;
         }
 
-        const ports = await refreshPorts();
+        const ports = await invoke<string[]>('get_serial_ports', { probe: false });
         const port =
           targetPort && ports.includes(targetPort)
             ? targetPort
@@ -104,7 +102,7 @@ export function useReconnectHandler(deps: UseReconnectHandlerDeps) {
               : undefined;
 
         if (!port) {
-          await sleep(2500);
+          await sleep(400);
           continue;
         }
 
@@ -125,7 +123,7 @@ export function useReconnectHandler(deps: UseReconnectHandlerDeps) {
           console.debug('Reconnect attempt failed:', e);
         }
 
-        await sleep(2500);
+        await sleep(400);
       }
 
       showToast(
