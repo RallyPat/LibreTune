@@ -70,11 +70,6 @@ pub(crate) async fn update_constant_internal(
         .ok_or_else(|| format!("Constant {} not found", name))?
         .clone();
     let endianness = def.endianness;
-    let default_page_bytes = def
-        .page_sizes
-        .get(constant.page as usize)
-        .copied()
-        .unwrap_or(256) as usize;
     drop(def_guard);
 
     // Block assigning a pin that another output already uses (rusEFI Settings Error).
@@ -119,24 +114,30 @@ pub(crate) async fn update_constant_internal(
         let read_offset = constant.offset + byte_offset;
         let new_bit_val = value as u32;
 
-        // Read existing bytes from cache or ECU
-        let mut existing_bytes = vec![0u8; bytes_needed];
-        if let Some(cache) = cache_guard.as_ref() {
-            if let Some(bytes) = cache.read_bytes(constant.page, read_offset, bytes_needed as u16) {
-                existing_bytes.copy_from_slice(bytes);
-            }
-        } else if let Some(conn) = conn_guard.as_mut() {
-            let params = libretune_core::protocol::commands::ReadMemoryParams {
-                can_id: 0,
-                page: constant.page,
-                offset: read_offset,
-                length: bytes_needed as u16,
-            };
-            if let Ok(bytes) = conn.read_memory(params) {
-                let copy_len = bytes.len().min(existing_bytes.len());
-                existing_bytes[..copy_len].copy_from_slice(&bytes[..copy_len]);
+        let mut existing_bytes = if let Some(cache) = cache_guard.as_ref() {
+            cache
+                .read_bytes(constant.page, read_offset, bytes_needed as u16)
+                .map(|b| b.to_vec())
+        } else {
+            None
+        };
+        if existing_bytes.is_none() {
+            if let Some(conn) = conn_guard.as_mut() {
+                let params = libretune_core::protocol::commands::ReadMemoryParams {
+                    can_id: 0,
+                    page: constant.page,
+                    offset: read_offset,
+                    length: bytes_needed as u16,
+                };
+                if let Ok(bytes) = conn.read_memory(params) {
+                    if bytes.len() >= bytes_needed {
+                        existing_bytes = Some(bytes[..bytes_needed].to_vec());
+                    }
+                }
             }
         }
+        let mut existing_bytes = existing_bytes
+            .ok_or_else(|| format!("Cannot update bits constant '{name}': page not loaded"))?;
 
         // Apply the new bit value using masks
         // For single-byte case (most common for flags like [1:1])
@@ -186,15 +187,7 @@ pub(crate) async fn update_constant_internal(
         let mut tune_guard = state.current_tune.lock().await;
         if let Some(tune) = tune_guard.as_mut() {
             // Update page data
-            let page_data = tune
-                .pages
-                .entry(constant.page)
-                .or_insert_with(|| vec![0u8; default_page_bytes]);
-            let start = read_offset as usize;
-            let end = start + existing_bytes.len();
-            if end <= page_data.len() {
-                page_data[start..end].copy_from_slice(&existing_bytes);
-            }
+            tune.patch_page_bytes(constant.page, read_offset, &existing_bytes);
 
             // Update constants HashMap for offline reads
             tune.constants
@@ -241,17 +234,7 @@ pub(crate) async fn update_constant_internal(
             let mut tune_guard = state.current_tune.lock().await;
             if let Some(tune) = tune_guard.as_mut() {
                 // Get or create page data
-                let page_data = tune
-                    .pages
-                    .entry(constant.page)
-                    .or_insert_with(|| vec![0u8; default_page_bytes]);
-
-                // Update the page data
-                let start = constant.offset as usize;
-                let end = start + raw_data.len();
-                if end <= page_data.len() {
-                    page_data[start..end].copy_from_slice(&raw_data);
-                }
+                tune.patch_page_bytes(constant.page, constant.offset, &raw_data);
 
                 // Update constants HashMap for offline reads
                 tune.constants

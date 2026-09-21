@@ -60,10 +60,7 @@ pub async fn update_project_ini(
     // Re-apply project tune constants with new definition
     if let Some(tune) = project_tune {
         if let Some(cache) = cache_guard.as_mut() {
-            // Load any raw page data first
-            for (page_num, page_data) in &tune.pages {
-                cache.load_page(*page_num, page_data.clone());
-            }
+            crate::commands::tune_apply::load_msq_pages_into_cache(cache, &tune);
 
             // Apply constants from tune file to cache (same logic as open_project)
             use libretune_core::tune::TuneValue;

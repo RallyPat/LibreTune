@@ -49,11 +49,10 @@ pub struct TuneCache {
 impl TuneCache {
     /// Create a new tune cache from ECU definition
     pub fn from_definition(definition: &EcuDefinition) -> Self {
-        let mut pages = HashMap::new();
+        let pages = HashMap::new();
         let mut page_states = HashMap::new();
 
-        for (i, size) in definition.page_sizes.iter().enumerate() {
-            pages.insert(i as u8, vec![0u8; *size as usize]);
+        for i in 0..definition.page_sizes.len() {
             page_states.insert(i as u8, PageState::NotLoaded);
         }
 
@@ -141,43 +140,40 @@ impl TuneCache {
         }
     }
 
-    /// Write raw bytes to a page (marks as dirty)
+    /// Write raw bytes to a page (marks as dirty).
+    ///
+    /// Refuses if the page has no real image yet, or if the write would grow
+    /// the buffer — inventing zeros here is what later gets burned to the ECU.
     pub fn write_bytes(&mut self, page: u8, offset: u16, data: &[u8]) -> bool {
-        let start = offset as usize;
-        let end = start + data.len();
-
-        // Get page size from definition before mutable borrow
-        let default_page_size = self.page_size(page).unwrap_or_else(|| {
-            eprintln!(
-                "[WARN] write_bytes: page {} not in page_sizes (n_pages={}), creating dynamically",
-                page, self.n_pages
-            );
-            0
-        }) as usize;
-
-        // Get or create the page
-        let page_data = self.pages.entry(page).or_insert_with(|| {
-            // If page doesn't exist, create it with size from definition, or expand to fit the write
-            let min_size = end.max(default_page_size);
-            vec![0u8; min_size]
-        });
-
-        // Expand page if needed
-        if end > page_data.len() {
-            let new_size = end.max(default_page_size);
-            page_data.resize(new_size, 0);
+        match self.page_state(page) {
+            PageState::Clean | PageState::Dirty | PageState::Pending => {}
+            _ => return false,
         }
 
-        // Write the data
+        let start = offset as usize;
+        let end = start + data.len();
+        let Some(page_data) = self.pages.get_mut(&page) else {
+            return false;
+        };
+        if end > page_data.len() {
+            return false;
+        }
+
         page_data[start..end].copy_from_slice(data);
         self.shadow.mark_dirty(page, offset, data.len() as u16);
         self.page_states.insert(page, PageState::Dirty);
         true
     }
 
-    /// Get a complete page
+    /// Get a complete page. `None` until the page has been loaded from the ECU
+    /// or a real tune image — never a synthetic zero buffer.
     pub fn get_page(&self, page: u8) -> Option<&[u8]> {
-        self.pages.get(&page).map(|v| v.as_slice())
+        match self.page_state(page) {
+            PageState::Clean | PageState::Dirty | PageState::Pending => {
+                self.pages.get(&page).map(|v| v.as_slice())
+            }
+            _ => None,
+        }
     }
 
     /// Check if there are any local modifications
@@ -331,6 +327,19 @@ mod tests {
         cache.load_page(1, vec![0u8; 512]);
         assert!(cache.is_fully_loaded());
         assert!(cache.pages_to_load().is_empty());
+    }
+
+    #[test]
+    fn from_definition_does_not_invent_zero_pages() {
+        let mut def = crate::ini::EcuDefinition::default();
+        def.n_pages = 1;
+        def.page_sizes = vec![256];
+        let mut cache = TuneCache::from_definition(&def);
+        assert!(cache.get_page(0).is_none());
+        assert!(!cache.write_bytes(0, 0, &[1, 2, 3]));
+        cache.load_page(0, vec![9u8; 256]);
+        assert!(cache.write_bytes(0, 0, &[1, 2, 3]));
+        assert_eq!(&cache.get_page(0).unwrap()[..3], &[1, 2, 3]);
     }
 
     #[test]

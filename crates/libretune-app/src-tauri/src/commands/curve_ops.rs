@@ -264,11 +264,9 @@ pub async fn get_curve_data(
 
 /// Snapshot of the definition-derived facts `write_constant_array_values`
 /// needs, taken before `state.definition`'s lock is dropped (see
-/// `update_curve_data`). Bundled into one struct rather than passed as two
-/// separate params to stay under clippy's too-many-arguments threshold.
+/// `update_curve_data`).
 struct WriteContext {
     endianness: libretune_core::ini::Endianness,
-    default_page_bytes: usize,
 }
 
 fn write_constant_array_values(
@@ -307,16 +305,7 @@ fn write_constant_array_values(
                 libretune_core::tune::TuneValue::Array(values.to_vec()),
             );
 
-            let page_data = tune
-                .pages
-                .entry(constant.page)
-                .or_insert_with(|| vec![0u8; ctx.default_page_bytes]);
-
-            let start = constant.offset as usize;
-            let end = start + raw_data.len();
-            if end <= page_data.len() {
-                page_data[start..end].copy_from_slice(&raw_data);
-            }
+            tune.patch_page_bytes(constant.page, constant.offset, &raw_data);
         }
 
         *tune_modified = true;
@@ -391,19 +380,9 @@ pub async fn update_curve_data(
 
         let x_ctx = WriteContext {
             endianness: def.endianness,
-            default_page_bytes: def
-                .page_sizes
-                .get(x_const.page as usize)
-                .copied()
-                .unwrap_or(256) as usize,
         };
         let y_ctx = WriteContext {
             endianness: def.endianness,
-            default_page_bytes: def
-                .page_sizes
-                .get(y_const.page as usize)
-                .copied()
-                .unwrap_or(256) as usize,
         };
 
         (x_ctx, x_const, y_ctx, y_const)

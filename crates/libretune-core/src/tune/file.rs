@@ -1153,6 +1153,18 @@ impl TuneFile {
         self.modified = Some(Utc::now().to_rfc3339());
     }
 
+    /// Overlay bytes onto an existing page image. Does not create or zero-pad pages.
+    pub fn patch_page_bytes(&mut self, page: u8, offset: u16, data: &[u8]) {
+        let Some(page_data) = self.pages.get_mut(&page) else {
+            return;
+        };
+        let start = offset as usize;
+        let end = start + data.len();
+        if end <= page_data.len() {
+            page_data[start..end].copy_from_slice(data);
+        }
+    }
+
     /// Set a page's raw data
     pub fn set_page(&mut self, page: u8, data: Vec<u8>) {
         self.pages.insert(page, data);
