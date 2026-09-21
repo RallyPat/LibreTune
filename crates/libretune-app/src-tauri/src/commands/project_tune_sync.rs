@@ -111,8 +111,22 @@ pub async fn write_project_tune_to_ecu(
 
     pause_realtime_stream(&state).await;
 
-    let mut pages: Vec<(u8, Vec<u8>)> = tune.pages.iter().map(|(k, v)| (*k, v.clone())).collect();
+    let mut pages: Vec<(u8, Vec<u8>)> = tune
+        .pages
+        .iter()
+        .filter(|(_, v)| crate::commands::tune_apply::page_has_content(v))
+        .map(|(k, v)| (*k, v.clone()))
+        .collect();
     pages.sort_by_key(|(p, _)| *p);
+    if pages.is_empty() {
+        let _ =
+            crate::commands::realtime_stream::start_realtime_stream(app, state.clone(), Some(50))
+                .await;
+        return Err(
+            "Tune has no real page data to write (empty or all zeros). Sync from the ECU first."
+                .into(),
+        );
+    }
 
     let write_result = {
         let mut conn_guard = state.connection.lock().await;

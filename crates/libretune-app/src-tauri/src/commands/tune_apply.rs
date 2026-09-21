@@ -14,16 +14,32 @@ use libretune_core::ini::{DataType, EcuDefinition};
 use libretune_core::tune::{TuneCache, TuneFile, TuneValue};
 use std::collections::{HashMap, HashSet};
 
+/// True when a stored page image has at least one non-zero byte.
+pub fn page_has_content(data: &[u8]) -> bool {
+    data.iter().any(|&b| b != 0)
+}
+
 /// Pages in `tune` that already have a full raw image matching the INI page size.
+/// All-zero blobs are not treated as complete — they are how a missing ECU
+/// base used to get burned.
 pub fn pages_with_complete_page_data(def: &EcuDefinition, tune: &TuneFile) -> HashSet<u8> {
     let mut complete = HashSet::new();
     for (page_num, page_data) in &tune.pages {
         let expected = def.page_sizes.get(*page_num as usize).copied().unwrap_or(0) as usize;
-        if expected > 0 && page_data.len() == expected {
+        if expected > 0 && page_data.len() == expected && page_has_content(page_data) {
             complete.insert(*page_num);
         }
     }
     complete
+}
+
+/// Load MSQ `<pageData>` that is actually a real image (not a zero fill).
+pub fn load_msq_pages_into_cache(cache: &mut TuneCache, tune: &TuneFile) {
+    for (page_num, page_data) in &tune.pages {
+        if page_has_content(page_data) {
+            cache.load_page(*page_num, page_data.clone());
+        }
+    }
 }
 
 /// Build full page images = `ecu_base` + optional complete MSQ page blobs + MSQ constants.
@@ -158,12 +174,13 @@ fn apply_bits_constant(
     let bytes_needed_usize = bytes_needed as usize;
     let read_offset = constant.offset + byte_offset;
 
-    let mut current_bytes: Vec<u8> = cache
-        .read_bytes(constant.page, read_offset, bytes_needed as u16)
-        .map(|s| s.to_vec())
-        .unwrap_or_else(|| vec![0u8; bytes_needed_usize]);
-    while current_bytes.len() < bytes_needed_usize {
-        current_bytes.push(0u8);
+    let mut current_bytes: Vec<u8> =
+        match cache.read_bytes(constant.page, read_offset, bytes_needed as u16) {
+            Some(s) => s.to_vec(),
+            None => return,
+        };
+    if current_bytes.len() < bytes_needed_usize {
+        return;
     }
 
     let bit_value = match tune_value {
@@ -268,5 +285,39 @@ mod tests {
 
         let pages = materialize_project_pages(&def, &msq, &ecu_base);
         assert_eq!(pages.get(&0).unwrap()[0], 0x00);
+    }
+
+    #[test]
+    fn wrong_length_page_data_is_not_authoritative() {
+        let def = tiny_def();
+        let mut ecu_base = HashMap::new();
+        ecu_base.insert(0u8, vec![0x01, 0x00, 0x00, 0x00]);
+
+        let mut msq = TuneFile::new("test");
+        msq.pages.insert(0, vec![0x01, 0x00]);
+        msq.constants
+            .insert("flagBits".into(), TuneValue::String("false".into()));
+
+        let pages = materialize_project_pages(&def, &msq, &ecu_base);
+        assert_eq!(pages.get(&0).unwrap()[0], 0x00);
+    }
+
+    #[test]
+    fn all_zero_page_data_is_not_authoritative() {
+        let def = tiny_def();
+        let mut ecu_base = HashMap::new();
+        ecu_base.insert(0u8, vec![0x01, 0x00, 0x00, 0x00]);
+
+        let mut msq = TuneFile::new("test");
+        msq.pages.insert(0, vec![0, 0, 0, 0]);
+        msq.constants
+            .insert("flagBits".into(), TuneValue::String("false".into()));
+
+        let pages = materialize_project_pages(&def, &msq, &ecu_base);
+        assert_eq!(pages.get(&0).unwrap()[0], 0x00);
+        assert!(
+            !pages_with_complete_page_data(&def, &msq).contains(&0),
+            "zero-filled pageData must not mask the ECU image"
+        );
     }
 }

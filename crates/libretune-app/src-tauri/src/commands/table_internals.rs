@@ -26,23 +26,11 @@ pub(crate) fn sync_constant_into_tune(
     tune: &mut TuneFile,
     constant: &Constant,
     raw_data: &[u8],
-    default_page_bytes: usize,
+    _default_page_bytes: usize,
     value: TuneValue,
 ) {
-    // TuneCache::write_bytes creates the page if absent and grows it if short,
-    // so it has no failure path to branch on.
     cache.write_bytes(constant.page, constant.offset, raw_data);
-
-    let page_data = tune
-        .pages
-        .entry(constant.page)
-        .or_insert_with(|| vec![0u8; default_page_bytes]);
-    let start = constant.offset as usize;
-    let end = start + raw_data.len();
-    if end <= page_data.len() {
-        page_data[start..end].copy_from_slice(raw_data);
-    }
-
+    tune.patch_page_bytes(constant.page, constant.offset, raw_data);
     tune.set_constant_with_page(constant.name.clone(), value, constant.page);
 }
 
@@ -748,6 +736,8 @@ mod sync_constant_into_tune_tests {
         let (def, c) = def_and_constant();
         let mut cache = TuneCache::from_definition(&def);
         let mut tune = TuneFile::default();
+        cache.load_page(3, vec![0xFF; 64]);
+        tune.pages.insert(3, vec![0xFF; 64]);
 
         sync_constant_into_tune(
             &mut cache,
@@ -765,5 +755,23 @@ mod sync_constant_into_tune_tests {
         );
         assert_eq!(&tune.pages[&3][2..6], &[1u8, 2, 3, 4], "tune pages");
         assert!(tune.constants.contains_key("veTable"), "tune constants");
+    }
+
+    #[test]
+    fn does_not_invent_a_zero_page() {
+        let (def, c) = def_and_constant();
+        let mut cache = TuneCache::from_definition(&def);
+        let mut tune = TuneFile::default();
+        sync_constant_into_tune(
+            &mut cache,
+            &mut tune,
+            &c,
+            &[1, 2, 3, 4],
+            64,
+            TuneValue::Array(vec![1.0, 2.0, 3.0, 4.0]),
+        );
+        assert!(cache.get_page(3).is_none());
+        assert!(!tune.pages.contains_key(&3));
+        assert!(tune.constants.contains_key("veTable"));
     }
 }

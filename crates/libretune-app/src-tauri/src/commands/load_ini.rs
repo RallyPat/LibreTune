@@ -100,6 +100,10 @@ pub async fn load_ini(
             // Re-apply current tune to new cache if we have one
             if let Some(tune) = current_tune {
                 eprintln!("[DEBUG] load_ini: Re-applying tune data to new INI definition");
+                crate::commands::tune_apply::load_msq_pages_into_cache(
+                    cache_guard.as_mut().unwrap(),
+                    &tune,
+                );
                 use libretune_core::tune::TuneValue;
 
                 let mut applied_count = 0;
@@ -156,14 +160,16 @@ pub async fn load_ini(
 
                             // Read current byte(s) value (or 0 if not present)
                             let read_offset = constant.offset + byte_offset;
-                            let mut current_bytes: Vec<u8> = cache
+                            let Some(mut current_bytes) = cache
                                 .read_bytes(constant.page, read_offset, bytes_needed as u16)
                                 .map(|s| s.to_vec())
-                                .unwrap_or_else(|| vec![0u8; bytes_needed_usize]);
-
-                            // Ensure we have enough bytes
-                            while current_bytes.len() < bytes_needed_usize {
-                                current_bytes.push(0u8);
+                            else {
+                                skipped_count += 1;
+                                continue;
+                            };
+                            if current_bytes.len() < bytes_needed_usize {
+                                skipped_count += 1;
+                                continue;
                             }
 
                             // Get the bit value from MSQ (index into bit_options)

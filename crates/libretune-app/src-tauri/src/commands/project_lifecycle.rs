@@ -66,10 +66,7 @@ pub async fn create_project(
             {
                 let mut cache_guard = state.tune_cache.lock().await;
                 if let Some(cache) = cache_guard.as_mut() {
-                    // Load any raw page data
-                    for (page_num, page_data) in &tune.pages {
-                        cache.load_page(*page_num, page_data.clone());
-                    }
+                    crate::commands::tune_apply::load_msq_pages_into_cache(cache, &tune);
 
                     // Apply constants from tune file to cache
                     use libretune_core::tune::TuneValue;
@@ -323,10 +320,7 @@ pub async fn open_project(
 
         // Populate cache from project tune
         if let Some(cache) = cache_guard.as_mut() {
-            // Load any raw page data first
-            for (page_num, page_data) in &tune.pages {
-                cache.load_page(*page_num, page_data.clone());
-            }
+            crate::commands::tune_apply::load_msq_pages_into_cache(cache, &tune);
 
             // Apply constants from tune file to cache (same logic as load_tune)
             use libretune_core::tune::TuneValue;
@@ -437,14 +431,14 @@ pub async fn open_project(
 
                         // Read current byte(s) value (or 0 if not present)
                         let read_offset = constant.offset + byte_offset;
-                        let mut current_bytes: Vec<u8> = cache
+                        let Some(mut current_bytes) = cache
                             .read_bytes(constant.page, read_offset, bytes_needed as u16)
                             .map(|s| s.to_vec())
-                            .unwrap_or_else(|| vec![0u8; bytes_needed_usize]);
-
-                        // Ensure we have enough bytes
-                        while current_bytes.len() < bytes_needed_usize {
-                            current_bytes.push(0u8);
+                        else {
+                            continue;
+                        };
+                        if current_bytes.len() < bytes_needed_usize {
+                            continue;
                         }
 
                         // Get the bit value from MSQ (index into bit_options)

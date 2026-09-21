@@ -218,36 +218,26 @@ pub async fn load_tune(
         let def = def_guard.as_ref();
         let mut cache_guard = state.tune_cache.lock().await;
 
-        // Always reset the cache. Overlaying an MSQ onto a previous ECU sync leaves
-        // stale bytes that later look like a "project tune" and can corrupt the ECU.
-        if let Some(def) = def {
-            eprintln!("[DEBUG] load_tune: Initializing cache from definition");
-            *cache_guard = Some(TuneCache::from_definition(def));
-        } else {
-            eprintln!("[WARN] load_tune: No definition loaded, cannot initialize cache");
-            return Err("No ECU definition loaded. Please open a project first.".to_string());
+        // Keep any ECU pages already in the cache. Resetting to a zero-filled
+        // definition and then overlaying MSQ constants is what later gets
+        // burned as a full page of zeros.
+        if cache_guard.is_none() {
+            if let Some(def) = def {
+                *cache_guard = Some(TuneCache::from_definition(def));
+            } else {
+                eprintln!("[WARN] load_tune: No definition loaded, cannot initialize cache");
+                return Err("No ECU definition loaded. Please open a project first.".to_string());
+            }
         }
 
         if let Some(cache) = cache_guard.as_mut() {
-            // First, load any raw page data
-            for (page_num, page_data) in &tune.pages {
-                cache.load_page(*page_num, page_data.clone());
-                eprintln!(
-                    "[DEBUG] load_tune: populated cache page {} with {} bytes",
-                    page_num,
-                    page_data.len()
-                );
-            }
-
-            // Then, apply constants from tune file to cache
             if let Some(def) = def {
-                // Complete <pageData> is authoritative — do not re-apply stale
-                // named constants over those pages (can flip packed bits / brick).
+                crate::commands::tune_apply::load_msq_pages_into_cache(cache, &tune);
                 let complete_pages =
                     crate::commands::tune_apply::pages_with_complete_page_data(def, &tune);
                 eprintln!(
-                    "[DEBUG] load_tune: Definition loaded - {} constants in definition, {} pages with complete pageData",
-                    def.constants.len(),
+                    "[DEBUG] load_tune: populated {} pages with content; {} complete pageData",
+                    tune.pages.len(),
                     complete_pages.len()
                 );
 
@@ -338,14 +328,16 @@ pub async fn load_tune(
 
                             // Read current byte(s) value (or 0 if not present)
                             let read_offset = constant.offset + byte_offset;
-                            let mut current_bytes: Vec<u8> = cache
+                            let Some(mut current_bytes) = cache
                                 .read_bytes(constant.page, read_offset, bytes_needed as u16)
                                 .map(|s| s.to_vec())
-                                .unwrap_or_else(|| vec![0u8; bytes_needed_usize]);
-
-                            // Ensure we have enough bytes
-                            while current_bytes.len() < bytes_needed_usize {
-                                current_bytes.push(0u8);
+                            else {
+                                skipped_count += 1;
+                                continue;
+                            };
+                            if current_bytes.len() < bytes_needed_usize {
+                                skipped_count += 1;
+                                continue;
                             }
 
                             // Get the bit value from MSQ (index into bit_options)

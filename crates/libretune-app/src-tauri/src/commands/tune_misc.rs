@@ -19,7 +19,7 @@ pub async fn update_constant_string(
     // conn.write_memory() call starves every other command that needs the
     // definition. This command is also used by LuaConsole's script-upload
     // flow ("Upload + Burn + Reset"), not just direct string-constant edits.
-    let (constant, default_page_bytes) = {
+    let constant = {
         let def_guard = state.definition.lock().await;
         let def = def_guard.as_ref().ok_or("Definition not loaded")?;
 
@@ -34,13 +34,7 @@ pub async fn update_constant_string(
             return Err(format!("Constant {} is not a string type", name));
         }
 
-        let default_page_bytes = def
-            .page_sizes
-            .get(constant.page as usize)
-            .copied()
-            .unwrap_or(256) as usize;
-
-        (constant, default_page_bytes)
+        constant
     };
 
     let max_len = constant.size_bytes();
@@ -63,15 +57,7 @@ pub async fn update_constant_string(
     // Update TuneFile in memory
     let mut tune_guard = state.current_tune.lock().await;
     if let Some(tune) = tune_guard.as_mut() {
-        let page_data = tune
-            .pages
-            .entry(constant.page)
-            .or_insert_with(|| vec![0u8; default_page_bytes]);
-        let start = constant.offset as usize;
-        let end = start + raw_data.len();
-        if end <= page_data.len() {
-            page_data[start..end].copy_from_slice(&raw_data);
-        }
+        tune.patch_page_bytes(constant.page, constant.offset, &raw_data);
         tune.constants.insert(
             name.clone(),
             libretune_core::tune::TuneValue::String(value.clone()),
@@ -256,12 +242,8 @@ pub async fn use_ecu_tune(
             .get(page_num as usize)
             .copied()
             .unwrap_or(page_data.len() as u16) as usize;
-        if expected > 0 {
-            if page_data.len() < expected {
-                page_data.resize(expected, 0);
-            } else if page_data.len() > expected {
-                page_data.truncate(expected);
-            }
+        if expected > 0 && page_data.len() > expected {
+            page_data.truncate(expected);
         }
         normalized.insert(page_num, page_data);
     }
