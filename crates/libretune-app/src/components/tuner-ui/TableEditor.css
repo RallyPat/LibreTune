@@ -89,7 +89,10 @@
 .table-grid {
   border-collapse: collapse;
   font-family: var(--font-mono);
-  font-size: var(--font-size-sm);
+  /* Parity with dialog-embedded tables (TableEditor2D compact, 0.85rem):
+     VE and ignition tables must render the same number size whether opened
+     as a tab or inside an ECU dialog. */
+  font-size: 0.85rem;
   user-select: none;
 }
 
