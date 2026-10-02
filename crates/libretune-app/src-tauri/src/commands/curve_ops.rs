@@ -14,6 +14,10 @@ pub struct CurveData {
     pub y_bins: Vec<f64>,
     pub x_label: String,
     pub y_label: String,
+    /// Display precision for the X bins, from the constant's `digits` column.
+    pub x_digits: u8,
+    /// Display precision for the Y bins, from the constant's `digits` column.
+    pub y_digits: u8,
     /// X-axis range: (min, max, step)
     pub x_axis: Option<(f32, f32, f32)>,
     /// Y-axis range: (min, max, step)
@@ -229,6 +233,8 @@ pub async fn get_curve_data(
     let curve_title = curve.title.clone();
     let x_label = curve.column_labels.0.clone();
     let y_label = curve.column_labels.1.clone();
+    let x_digits = x_const.digits;
+    let y_digits = y_const.digits;
     let x_axis = curve.x_axis;
     let y_axis = curve.y_axis;
     let x_output_channel = curve.x_output_channel.clone();
@@ -255,6 +261,8 @@ pub async fn get_curve_data(
         y_bins,
         x_label,
         y_label,
+        x_digits,
+        y_digits,
         x_axis,
         y_axis,
         x_output_channel,

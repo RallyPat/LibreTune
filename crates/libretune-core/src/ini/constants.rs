@@ -513,6 +513,22 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_array_constant_preserves_digits() {
+        // Issue #331 reproducer: IAT volts need 0.001 resolution, digits = 3.
+        let c = parse_constant_line(
+            "IAT_X_Voltage",
+            "array, U16, 19, [16], \"V\", 0.001, 0, 0, 5.000, 3",
+            2,
+            0,
+            None,
+        );
+        assert!(c.is_some());
+        let c = c.unwrap();
+        assert_eq!(c.digits, 3);
+        assert!((c.scale - 0.001).abs() < 1e-9);
+    }
+
+    #[test]
     fn test_parse_constant_line_lastoffset() {
         // Test the lastOffset keyword - should use the provided last_offset value
         let c = parse_constant_line(
