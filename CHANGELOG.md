@@ -13,6 +13,24 @@ relevant.
 
 ## [Unreleased]
 
+### 2026-10-02 — Curve Editor honors INI `digits` precision (issue #331)
+
+The Curve Editor ignored the `digits` column of the underlying `[Constants]`
+and always rendered 2 decimals, so a `digits = 3` calibration (e.g. ADC volts
+at 0.001 resolution) showed `1.23` instead of `1.234` — and the edit box
+prefilled the truncated value, silently quantizing the tune on save.
+
+#### Fixed
+
+- **Backend** (`commands/curve_ops.rs`, `commands/tune_mismatch_view.rs`):
+  `CurveData` now carries `x_digits`/`y_digits` from `Constant.digits`
+  (parsing itself was already correct).
+- **Frontend** (`CurveEditor.tsx`, `types/app.ts`, `PopOutWindow.tsx`):
+  table cells, edit prefill, and axis labels format with the per-axis digits,
+  falling back to 2 decimals for payloads from an older backend.
+- **Tests**: INI reproducer-line parse test plus `CurveEditor.digits.test.tsx`
+  (render precision, legacy fallback, edit prefill).
+
 ### 2026-08-31 — Local MCP server (read-only)
 
 Ported OpenTune's MCP server onto LibreTune's agent tooling. External MCP

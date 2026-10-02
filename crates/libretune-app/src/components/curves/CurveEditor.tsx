@@ -106,6 +106,10 @@ export interface CurveData {
   y_axis?: [number, number, number] | null;
   x_output_channel?: string | null;
   gauge?: string | null;
+  /** Display precision for X bins, from the constant's `digits` column. Absent on stale payloads. */
+  x_digits?: number | null;
+  /** Display precision for Y bins, from the constant's `digits` column. Absent on stale payloads. */
+  y_digits?: number | null;
 }
 
 /** Values edited in a curve table (X = coolant/temperature bins, Y = PWM/output). */
@@ -171,6 +175,11 @@ export default function CurveEditor({
   const safeYBins = hasValidData ? data.y_bins : [0];
   const safeXBinsArray = hasValidData ? data.x_bins : [0];
   const safeXOutputChannel = hasValidData && data.x_output_channel ? data.x_output_channel : '';
+
+  // Display precision from the INI `digits` column (issue #331). Falls back
+  // to the historical 2 decimals for payloads from an older backend.
+  const xDigits = data.x_digits ?? 2;
+  const yDigits = data.y_digits ?? 2;
 
   // Get realtime value for the X output channel from Zustand store
   const xOutputChannelValue = useChannelValue(safeXOutputChannel, undefined);
@@ -367,7 +376,7 @@ export default function CurveEditor({
       lines.push({
         x1: scaleX(roundedX), y1: padding.top,
         x2: scaleX(roundedX), y2: chartHeight - padding.bottom,
-        label: roundedX.toFixed(0),
+        label: roundedX.toFixed(xDigits),
         isAxis: roundedX === xAxis.min
       });
     }
@@ -381,13 +390,13 @@ export default function CurveEditor({
       lines.push({
         x1: padding.left, y1: scaleY(y),
         x2: chartWidth - padding.right, y2: scaleY(y),
-        label: y.toFixed(2),
+        label: y.toFixed(yDigits),
         isAxis: Math.abs(y - yAxis.min) < 0.001
       });
     }
     
     return lines;
-  }, [xAxis, yAxis, scaleX, scaleY, chartWidth, chartHeight, padding]);
+  }, [xAxis, yAxis, scaleX, scaleY, chartWidth, chartHeight, padding, xDigits, yDigits]);
 
   // Polyline points
   const polylinePoints = useMemo(() => {
@@ -606,7 +615,7 @@ export default function CurveEditor({
     pushHistory();
     setEditingCell({ index, axis });
     setEditValue(
-      (axis === 'x' ? localXBins[index] : localYBins[index]).toFixed(2),
+      (axis === 'x' ? localXBins[index] : localYBins[index]).toFixed(axis === 'x' ? xDigits : yDigits),
     );
   };
 
@@ -776,7 +785,7 @@ Suggestion: {errorInfo.suggestion}
                 autoFocus
               />
             ) : (
-              xValue.toFixed(2)
+              xValue.toFixed(xDigits)
             )}
           </td>
           <td
@@ -794,7 +803,7 @@ Suggestion: {errorInfo.suggestion}
                 autoFocus
               />
             ) : (
-              yValue.toFixed(2)
+              yValue.toFixed(yDigits)
             )}
           </td>
         </tr>

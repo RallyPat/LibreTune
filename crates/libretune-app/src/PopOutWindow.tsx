@@ -46,6 +46,8 @@ interface BackendCurveData {
   y_axis?: [number, number, number] | null;
   x_output_channel?: string | null;
   gauge?: string | null;
+  x_digits?: number | null;
+  y_digits?: number | null;
 }
 
 interface PopOutData {
@@ -208,6 +210,8 @@ export default function PopOutWindow() {
             y_axis: data.y_axis ?? null,
             x_output_channel: data.x_output_channel ?? null,
             gauge: data.gauge ?? null,
+            x_digits: data.x_digits ?? null,
+            y_digits: data.y_digits ?? null,
           };
 
           let gaugeInfo: SimpleGaugeInfo | null = null;

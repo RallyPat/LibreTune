@@ -124,6 +124,8 @@ export interface BackendCurveData {
   y_axis?: [number, number, number] | null;
   x_output_channel?: string | null;
   gauge?: string | null;
+  x_digits?: number | null;
+  y_digits?: number | null;
 }
 
 export interface ChannelInfo {
@@ -156,6 +158,8 @@ export const toCurveData = (data: BackendCurveData): CurveData => ({
   y_axis: data.y_axis,
   x_output_channel: data.x_output_channel,
   gauge: data.gauge,
+  x_digits: data.x_digits ?? null,
+  y_digits: data.y_digits ?? null,
 });
 
 export interface BackendMenu {
