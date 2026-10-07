@@ -30,6 +30,7 @@ import { DialogGaugeStack } from './fields/DialogGauge';
 import { CommandButton } from './fields/CommandButton';
 import DialogField from './fields/DialogField';
 import { RuntimeValueReadout } from './fields/RuntimeValueReadout';
+import { SettingSelectorField } from './fields/SettingSelectorField';
 import { isUserTableLiveChannel, isGppwmLiveChannel, isCommandButtonPanel, inferLiveStateGateExpression } from './dialogLayout';
 import { useDialogValueSource } from './DialogValueSource';
 
@@ -637,6 +638,9 @@ export function DialogComponentRenderer({
   onFieldFocus?: (info: FieldInfo) => void;
   showAllHelpIcons?: boolean;
 }) {
+  if (comp.type === 'SettingSelector') {
+    return <SettingSelectorField comp={comp} context={context} onUpdate={onUpdate} onOptimisticUpdate={onOptimisticUpdate} />;
+  }
   if (comp.type === 'Field' && comp.name) {
     return <DialogFieldWrapper comp={comp} context={context} onUpdate={onUpdate} onOptimisticUpdate={onOptimisticUpdate} onFieldFocus={onFieldFocus} showAllHelpIcons={showAllHelpIcons} />;
   }

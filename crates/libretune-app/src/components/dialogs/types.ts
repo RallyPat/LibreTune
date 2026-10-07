@@ -5,7 +5,7 @@
 // and `get_port_editor`.
 
 export interface DialogComponent {
-  type: 'Panel' | 'Field' | 'RuntimeValue' | 'LiveGraph' | 'Table' | 'Label' | 'Indicator' | 'CommandButton' | 'Gauge';
+  type: 'Panel' | 'Field' | 'RuntimeValue' | 'LiveGraph' | 'Table' | 'Label' | 'Indicator' | 'CommandButton' | 'Gauge' | 'SettingSelector';
   name?: string;
   label?: string;
   text?: string;
@@ -18,6 +18,8 @@ export interface DialogComponent {
   visibility_condition?: string;  // Visibility condition (hides field if false)
   enabled_condition?: string;     // Enable condition (disables field if false)
   condition?: string;             // Legacy: single condition (treated as enabled_condition)
+  // SettingSelector specific fields (TunerStudio preset dropdown)
+  options?: Array<{ label: string; assignments: Array<{ name: string; value: number }> }>;
   // CommandButton specific fields
   command?: string;               // Command name from [ControllerCommands]
   on_close_behavior?: 'ClickOnCloseIfEnabled' | 'ClickOnCloseIfDisabled' | 'ClickOnClose';
