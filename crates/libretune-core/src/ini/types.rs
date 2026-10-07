@@ -469,6 +469,23 @@ pub struct SettingOption {
     pub label: String,
 }
 
+/// One `constant = value` assignment from a dialog's `settingOption` line
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SettingAssignment {
+    /// Constant name to set when the option is chosen
+    pub name: String,
+    pub value: f64,
+}
+
+/// An entry in a dialog `settingSelector` preset dropdown
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SettingSelectorOption {
+    /// Display label
+    pub label: String,
+    /// Constant assignments applied when the option is chosen
+    pub assignments: Vec<SettingAssignment>,
+}
+
 /// A high-level menu container
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Menu {
@@ -626,6 +643,13 @@ pub enum DialogComponent {
         visibility_condition: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         enabled_condition: Option<String>,
+    },
+    /// Preset dropdown (`settingSelector`) that applies constant assignments
+    SettingSelector {
+        label: String,
+        options: Vec<SettingSelectorOption>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        visibility_condition: Option<String>,
     },
     /// Live output-channel readout (TunerStudio runtimeValue)
     RuntimeValue {

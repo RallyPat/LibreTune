@@ -239,6 +239,9 @@ pub async fn get_searchable_index(
                 libretune_core::ini::DialogComponent::Gauge { name, .. } => {
                     terms.push(name.clone());
                 }
+                libretune_core::ini::DialogComponent::SettingSelector { label, .. } => {
+                    terms.push(label.clone());
+                }
             }
         }
     }

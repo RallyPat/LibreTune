@@ -17,8 +17,9 @@ use super::{
         DialogComponent, DialogDefinition, EcuType, FTPBrowserConfig, FilterOperator,
         FrontPageConfig, FrontPageIndicator, GammaEConfig, HelpTopic, IndicatorDefinition,
         IndicatorPanel, KeyAction, LoggerDefinition, MaintainConstantValue, Menu, MenuItem,
-        PortEditorConfig, ReadoutDefinition, ReadoutPanel, ReferenceTable, SettingGroup,
-        SettingOption, Shape, ThermistorOption, VeAnalyzeConfig, WueAnalyzeConfig,
+        PortEditorConfig, ReadoutDefinition, ReadoutPanel, ReferenceTable, SettingAssignment,
+        SettingGroup, SettingOption, SettingSelectorOption, Shape, ThermistorOption,
+        VeAnalyzeConfig, WueAnalyzeConfig,
     },
     EcuDefinition, IniError,
 };
@@ -2941,6 +2942,76 @@ fn parse_user_defined_entry(
                 }
             }
         }
+        "settingselector" => {
+            // Format: settingSelector = "Label" [, {visibility condition}]
+            // Followed by indented `settingOption` lines belonging to it.
+            if let Some(name) = current_dialog {
+                if let Some(dialog) = def.dialogs.get_mut(name) {
+                    let parts = split_ini_line(value);
+                    if !parts.is_empty() {
+                        let label = parts[0].trim().trim_matches('"').to_string();
+                        let visibility_condition = parts
+                            .iter()
+                            .skip(1)
+                            .find(|p| p.trim().starts_with('{'))
+                            .map(|p| p.trim().trim_matches(|c| c == '{' || c == '}').to_string());
+                        dialog.components.push(DialogComponent::SettingSelector {
+                            label,
+                            options: Vec::new(),
+                            visibility_condition,
+                        });
+                    }
+                }
+            }
+        }
+        "settingoption" => {
+            // Format: settingOption = "Label", constName=value [, constName=value...]
+            // Only valid in a dialog when it immediately follows a
+            // `settingSelector` line — the `[SettingGroups]` `settingOption` is
+            // handled separately in `parse_setting_group_entry`.
+            if let Some(name) = current_dialog {
+                if let Some(dialog) = def.dialogs.get_mut(name) {
+                    let selector_open = matches!(
+                        dialog.components.last(),
+                        Some(DialogComponent::SettingSelector { .. })
+                    );
+                    if !selector_open {
+                        tracing::warn!(
+                            "ini: settingOption outside a settingSelector block - dropped"
+                        );
+                        return;
+                    }
+                    let parts = split_ini_line(value);
+                    if let Some(first) = parts.first() {
+                        let label = first.trim().trim_matches('"').to_string();
+                        let mut assignments = Vec::new();
+                        for part in parts.iter().skip(1) {
+                            match part.split_once('=') {
+                                Some((k, v)) => match v.trim().parse::<f64>() {
+                                    Ok(value) => assignments.push(SettingAssignment {
+                                        name: k.trim().to_string(),
+                                        value,
+                                    }),
+                                    Err(_) => tracing::warn!(
+                                        "ini: settingOption assignment '{}' is not numeric - dropped",
+                                        part
+                                    ),
+                                },
+                                None => tracing::warn!(
+                                    "ini: settingOption part '{}' is not name=value - dropped",
+                                    part
+                                ),
+                            }
+                        }
+                        if let Some(DialogComponent::SettingSelector { options, .. }) =
+                            dialog.components.last_mut()
+                        {
+                            options.push(SettingSelectorOption { label, assignments });
+                        }
+                    }
+                }
+            }
+        }
         "gauge" => {
             if let Some(name) = current_dialog {
                 if let Some(dialog) = def.dialogs.get_mut(name) {
@@ -4663,6 +4734,58 @@ indicator = { (tps > tpsflood) && (rpm < crankRPM) }, "FLOOD OFF", "FLOOD CLEAR"
                 group.options
             );
         }
+    }
+
+    /// `settingSelector`/`settingOption` inside a dialog must produce a
+    /// `SettingSelector` component with its options attached.
+    #[test]
+    #[serial(default_symbols)]
+    fn setting_selector_parses_options_with_assignments() {
+        set_default_symbols(Vec::<String>::new());
+
+        let ini = concat!(
+            "[MegaTune]\n",
+            "signature = \"x\"\n",
+            "queryCommand = \"Q\"\n",
+            "[UserDefined]\n",
+            "dialog = sensorCal, \"Calibrate MAP/Baro\"\n",
+            "\tsettingSelector = \"Common MAP Sensors\", {iat_adcChannel != 0}\n",
+            "\t\tsettingOption = \"MPX4115\", EngineCylinder=10.6, EngineVolume=121.7\n",
+            "\t\tsettingOption = \"GM 1-BAR\", EngineCylinder=10, EngineVolume=105\n",
+            "\tfield = \"Value At 0.0 Volts\", EngineCylinder\n",
+        );
+
+        let def = parse_ini(ini).expect("parses");
+        let dialog = def.dialogs.get("sensorCal").expect("dialog");
+        let selector = dialog
+            .components
+            .iter()
+            .find_map(|c| match c {
+                DialogComponent::SettingSelector {
+                    label,
+                    options,
+                    visibility_condition,
+                } => Some((label, options, visibility_condition)),
+                _ => None,
+            })
+            .expect("SettingSelector component present");
+        assert_eq!(selector.0, "Common MAP Sensors");
+        assert_eq!(selector.2.as_deref(), Some("iat_adcChannel != 0"));
+        assert_eq!(selector.1.len(), 2);
+        assert_eq!(selector.1[0].label, "MPX4115");
+        let names: Vec<&str> = selector.1[0]
+            .assignments
+            .iter()
+            .map(|a| a.name.as_str())
+            .collect();
+        assert_eq!(names, vec!["EngineCylinder", "EngineVolume"]);
+        assert!((selector.1[0].assignments[0].value - 10.6).abs() < f64::EPSILON * 10.0);
+        assert_eq!(selector.1[1].label, "GM 1-BAR");
+        // The following `field` line still lands as a separate component.
+        assert!(dialog
+            .components
+            .iter()
+            .any(|c| matches!(c, DialogComponent::Field { .. })));
     }
 
     /// `$tsCanId` used to resolve to byte 0 unconditionally, which misaddresses
