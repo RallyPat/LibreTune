@@ -46,7 +46,7 @@ jobs:
       - uses: ./.github/actions/setup-linux-deps
 
       - name: Setup Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "24"
           cache: npm
@@ -66,7 +66,7 @@ jobs:
           dest: crates/libretune-app/artifacts/linux
 
       - name: Upload Linux artifacts
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: linux-x86_64
           path: crates/libretune-app/artifacts/linux/*
@@ -86,7 +86,7 @@ jobs:
           cache_key: release-windows
 
       - name: Setup Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "24"
           cache: npm
@@ -106,7 +106,7 @@ jobs:
           dest: crates/libretune-app/artifacts/windows
 
       - name: Upload Windows artifacts
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: windows-x86_64
           path: crates/libretune-app/artifacts/windows/*
@@ -126,7 +126,7 @@ jobs:
           cache_key: release-macos
 
       - name: Setup Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "24"
           cache: npm
@@ -155,7 +155,7 @@ jobs:
           dest: crates/libretune-app/artifacts/macos
 
       - name: Upload macOS artifacts
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: macos-aarch64-x86_64
           path: crates/libretune-app/artifacts/macos/*
@@ -169,7 +169,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Download all artifacts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           path: artifacts
           pattern: "*"
@@ -203,7 +203,7 @@ jobs:
 
       - name: Upload artifacts (manual build)
         if: ${{ !startsWith(github.ref, 'refs/tags/') }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: build-artifacts
           path: artifacts/**
