@@ -644,6 +644,19 @@ pub enum DialogComponent {
         #[serde(skip_serializing_if = "Option::is_none")]
         enabled_condition: Option<String>,
     },
+    /// A checkbox bound to a constant (`checkbox = "Label", name, [flipValue],
+    /// [{enable}]`). Without `flipValue` the box is checked when the value is
+    /// non-zero and writes 1/0; with `flipValue` the sense is inverted
+    /// (checked ⇄ 0, unchecked ⇄ 1).
+    Checkbox {
+        label: String,
+        name: String,
+        flip_value: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        visibility_condition: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        enabled_condition: Option<String>,
+    },
     /// Preset dropdown (`settingSelector`) that applies constant assignments
     SettingSelector {
         label: String,

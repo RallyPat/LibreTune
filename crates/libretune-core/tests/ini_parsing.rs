@@ -457,6 +457,138 @@ dialog = userTable1left, ""
     let _ = std::fs::remove_file(&temp_path);
 }
 
+/// The `checkbox` dialog directive must be parsed into a distinct
+/// DialogComponent::Checkbox, not silently dropped (issue #338). Covers the
+/// dual-checkbox pattern from the report: two checkboxes bound to the same
+/// constant with opposite enable conditions, the second using `flipValue`.
+#[test]
+fn test_parse_checkbox_dialog_components() {
+    use libretune_core::ini::DialogComponent;
+
+    let ini_content = r#"
+[MegaTune]
+signature = "Test ECU"
+queryCommand = "Q"
+
+[Constants]
+page = 1
+
+[UserDefined]
+dialog = moreIgnitionOptions2, ""
+    field = "Use Prediction", use_prediction
+    checkbox = "Use Prediction", use_prediction, { !use_prediction }
+    checkbox = "Don't use Prediction", use_prediction, flipValue, { use_prediction }
+"#;
+
+    let temp_path = std::env::temp_dir().join("test_checkbox_dialog.ini");
+    std::fs::write(&temp_path, ini_content).expect("Failed to write temp file");
+
+    let def = EcuDefinition::from_file(&temp_path).expect("Failed to parse INI");
+    let dialog = def
+        .dialogs
+        .get("moreIgnitionOptions2")
+        .expect("dialog missing");
+    assert_eq!(dialog.components.len(), 3);
+
+    match &dialog.components[1] {
+        DialogComponent::Checkbox {
+            label,
+            name,
+            flip_value,
+            visibility_condition,
+            enabled_condition,
+        } => {
+            assert_eq!(label, "Use Prediction");
+            assert_eq!(name, "use_prediction");
+            assert!(!*flip_value);
+            // Single brace condition = enable-only (greyed out, not hidden)
+            assert_eq!(enabled_condition.as_deref(), Some("!use_prediction"));
+            assert!(visibility_condition.is_none());
+        }
+        other => panic!("expected Checkbox, got {other:?}"),
+    }
+
+    match &dialog.components[2] {
+        DialogComponent::Checkbox {
+            label,
+            name,
+            flip_value,
+            enabled_condition,
+            ..
+        } => {
+            assert_eq!(label, "Don't use Prediction");
+            assert_eq!(name, "use_prediction");
+            assert!(*flip_value, "flipValue token must set flip_value");
+            assert_eq!(enabled_condition.as_deref(), Some("use_prediction"));
+        }
+        other => panic!("expected Checkbox, got {other:?}"),
+    }
+
+    let _ = std::fs::remove_file(&temp_path);
+}
+
+/// Minimal checkbox form (label + constant only) and the dual-brace
+/// visibility+enable form.
+#[test]
+fn test_parse_checkbox_minimal_and_dual_condition_forms() {
+    use libretune_core::ini::DialogComponent;
+
+    let ini_content = r#"
+[MegaTune]
+signature = "Test ECU"
+queryCommand = "Q"
+
+[Constants]
+page = 1
+
+[UserDefined]
+dialog = checkboxForms, ""
+    checkbox = "Simple", simpleFlag
+    checkbox = "Full", fullFlag, flipValue, { always }, { never }
+"#;
+
+    let temp_path = std::env::temp_dir().join("test_checkbox_forms.ini");
+    std::fs::write(&temp_path, ini_content).expect("Failed to write temp file");
+
+    let def = EcuDefinition::from_file(&temp_path).expect("Failed to parse INI");
+    let dialog = def.dialogs.get("checkboxForms").expect("dialog missing");
+    assert_eq!(dialog.components.len(), 2);
+
+    match &dialog.components[0] {
+        DialogComponent::Checkbox {
+            label,
+            name,
+            flip_value,
+            visibility_condition,
+            enabled_condition,
+        } => {
+            assert_eq!(label, "Simple");
+            assert_eq!(name, "simpleFlag");
+            assert!(!*flip_value);
+            assert!(visibility_condition.is_none());
+            assert!(enabled_condition.is_none());
+        }
+        other => panic!("expected Checkbox, got {other:?}"),
+    }
+
+    match &dialog.components[1] {
+        DialogComponent::Checkbox {
+            flip_value,
+            visibility_condition,
+            enabled_condition,
+            ..
+        } => {
+            assert!(*flip_value);
+            // Two braces = first visibility, second enable
+            assert_eq!(visibility_condition.as_deref(), Some("always"));
+            assert_eq!(enabled_condition.as_deref(), Some("never"));
+        }
+        other => panic!("expected Checkbox, got {other:?}"),
+    }
+
+    let _ = std::fs::remove_file(&temp_path);
+}
+
 #[test]
 fn test_parse_readout_panel() {
     let ini_content = r#"
