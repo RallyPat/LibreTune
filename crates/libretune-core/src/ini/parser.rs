@@ -2899,6 +2899,62 @@ fn parse_user_defined_entry(
                 }
             }
         }
+        "slider" => {
+            // Format: slider = "Label", name [, horizontal|vertical] [, {visibility}, {enable}]
+            // The orientation token is optional (lowercased when captured).
+            // Any other bare token (e.g. legacy outputChannel refs) is
+            // ignored leniently, matching the parser's recovery strategy.
+            if let Some(name) = current_dialog {
+                if let Some(dialog) = def.dialogs.get_mut(name) {
+                    let parts = split_ini_line(value);
+                    if parts.len() >= 2 {
+                        let label = parts[0].trim_matches('"').to_string();
+                        let field_name = parts[1].trim().to_string();
+
+                        let mut orientation: Option<String> = None;
+                        let mut conditions: Vec<String> = Vec::new();
+                        for part in parts.iter().skip(2) {
+                            let trimmed = part.trim();
+                            if trimmed.starts_with('{') && trimmed.ends_with('}') {
+                                conditions.push(
+                                    trimmed
+                                        .trim_matches(|c| c == '{' || c == '}')
+                                        .trim()
+                                        .to_string(),
+                                );
+                            } else {
+                                let lower = trimmed.to_lowercase();
+                                if lower == "horizontal" || lower == "vertical" {
+                                    orientation = Some(lower);
+                                }
+                            }
+                        }
+
+                        let visibility_condition = if conditions.len() >= 2 {
+                            Some(conditions[0].clone())
+                        } else {
+                            None
+                        };
+
+                        let enabled_condition = if conditions.len() >= 2 {
+                            Some(conditions[1].clone())
+                        } else if conditions.len() == 1 {
+                            Some(conditions[0].clone())
+                        } else {
+                            None
+                        };
+
+                        dialog.components.push(DialogComponent::Slider {
+                            label,
+                            name: field_name,
+                            orientation,
+                            visibility_condition,
+                            enabled_condition,
+                        });
+                    }
+                }
+            }
+        }
         "table" => {
             if let Some(name) = current_dialog {
                 if let Some(dialog) = def.dialogs.get_mut(name) {

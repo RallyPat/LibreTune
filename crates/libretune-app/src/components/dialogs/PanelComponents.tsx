@@ -30,6 +30,7 @@ import { DialogGaugeStack } from './fields/DialogGauge';
 import { CommandButton } from './fields/CommandButton';
 import DialogField from './fields/DialogField';
 import CheckboxField from './fields/CheckboxField';
+import SliderField from './fields/SliderField';
 import { RuntimeValueReadout } from './fields/RuntimeValueReadout';
 import { SettingSelectorField } from './fields/SettingSelectorField';
 import { isUserTableLiveChannel, isGppwmLiveChannel, isCommandButtonPanel, inferLiveStateGateExpression } from './dialogLayout';
@@ -491,6 +492,21 @@ export function DialogFieldWrapper({
     );
   }
 
+  if (comp.type === 'Slider') {
+    return (
+      <SliderField
+        label={comp.label || ''}
+        name={comp.name}
+        onUpdate={onUpdate}
+        context={context}
+        fieldEnabledCondition={fieldEnabled}
+        onOptimisticUpdate={onOptimisticUpdate}
+        onFieldFocus={onFieldFocus}
+        showAllHelpIcons={showAllHelpIcons}
+      />
+    );
+  }
+
   return <DialogField
     label={comp.label || ''}
     name={comp.name}
@@ -664,6 +680,10 @@ export function DialogComponentRenderer({
   if (comp.type === 'Checkbox' && comp.name) {
     // Reuse the wrapper so visibility/enable conditions are evaluated the
     // same way as Field; the wrapper dispatches to CheckboxField.
+    return <DialogFieldWrapper comp={comp} context={context} onUpdate={onUpdate} onOptimisticUpdate={onOptimisticUpdate} onFieldFocus={onFieldFocus} showAllHelpIcons={showAllHelpIcons} />;
+  }
+  if (comp.type === 'Slider' && comp.name) {
+    // Same wrapper reuse: visibility/enable conditions like Field.
     return <DialogFieldWrapper comp={comp} context={context} onUpdate={onUpdate} onOptimisticUpdate={onOptimisticUpdate} onFieldFocus={onFieldFocus} showAllHelpIcons={showAllHelpIcons} />;
   }
   if (comp.type === 'RuntimeValue' && comp.name) {

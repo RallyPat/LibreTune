@@ -366,3 +366,121 @@ describe('DialogRenderer checkbox field', () => {
     await waitFor(() => expect(dontUseIt.checked).toBe(false));
   });
 });
+
+describe('DialogRenderer slider field', () => {
+  // ADCFILTER_* sliders in speeduino.ini: U08 0..240, digits 0
+  const mockSliderConstant = {
+    name: 'ADCFILTER_TPS',
+    label: 'Throttle Position sensor',
+    units: '%',
+    digits: 0,
+    min: 0,
+    max: 240,
+    value_type: 'scalar',
+    bit_options: [],
+  };
+
+  const setupSliderMocks = (constantValue: number, extra: Record<string, any> = {}) =>
+    setupTauriMocks({
+      get_constant: mockSliderConstant,
+      get_constant_value: constantValue,
+      update_constant: null,
+      get_settings: { show_all_help_icons: true },
+      ...extra,
+    });
+
+  afterEach(() => {
+    tearDownTauriMocks();
+  });
+
+  const renderDialog = (components: DialogDefinition['components']) =>
+    render(
+      <ToastProvider>
+        <DialogRenderer
+          definition={{ name: 'sensorFilters', title: 'Analog sensor filters', components }}
+          onBack={() => {}}
+          openTable={() => {}}
+          context={{}}
+        />
+      </ToastProvider>
+    );
+
+  it('renders a range control bounded by the constant min/max with a value readout', async () => {
+    setupSliderMocks(50);
+    renderDialog([{ type: 'Slider', label: 'Throttle Position sensor', name: 'ADCFILTER_TPS' }]);
+
+    const slider = (await screen.findByRole('slider', {
+      name: /throttle position sensor/i,
+    })) as HTMLInputElement;
+    expect(slider).toBeInTheDocument();
+    expect(parseFloat(slider.min)).toBe(0);
+    expect(parseFloat(slider.max)).toBe(240);
+    expect(slider.value).toBe('50');
+    // Value readout with units next to the control
+    expect(screen.getByText('50 %')).toBeInTheDocument();
+  });
+
+  it('updates the display while dragging but only writes on release', async () => {
+    setupSliderMocks(50);
+    renderDialog([{ type: 'Slider', label: 'Throttle Position sensor', name: 'ADCFILTER_TPS' }]);
+
+    const slider = (await screen.findByRole('slider', {
+      name: /throttle position sensor/i,
+    })) as HTMLInputElement;
+
+    // Drag to 60: display follows, no ECU write yet
+    fireEvent.change(slider, { target: { value: '60' } });
+    await waitFor(() => expect(screen.getByText('60 %')).toBeInTheDocument());
+    expect(invoke).not.toHaveBeenCalledWith('update_constant', expect.anything());
+
+    // Release: single committed write (invoke also carries get_constant* calls)
+    fireEvent.pointerUp(slider, { target: { value: '60' } });
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith('update_constant', {
+        name: 'ADCFILTER_TPS',
+        value: 60,
+      })
+    );
+    const updateCalls = (invoke as any).mock.calls.filter(
+      ([cmd]: [string]) => cmd === 'update_constant'
+    );
+    expect(updateCalls).toHaveLength(1);
+  });
+
+  it('reverts cleanly when released at the original position (no write)', async () => {
+    setupSliderMocks(50);
+    renderDialog([{ type: 'Slider', label: 'Throttle Position sensor', name: 'ADCFILTER_TPS' }]);
+
+    const slider = (await screen.findByRole('slider', {
+      name: /throttle position sensor/i,
+    })) as HTMLInputElement;
+
+    // Drag away and back, then release at the original value
+    fireEvent.change(slider, { target: { value: '80' } });
+    fireEvent.change(slider, { target: { value: '50' } });
+    fireEvent.pointerUp(slider, { target: { value: '50' } });
+
+    // Give any accidental write a chance to surface
+    await new Promise((r) => setTimeout(r, 50));
+    expect(invoke).not.toHaveBeenCalledWith('update_constant', expect.anything());
+    expect(screen.getByText('50 %')).toBeInTheDocument();
+  });
+
+  it('disables the slider when the enable condition is false', async () => {
+    setupSliderMocks(50, { evaluate_expression: false });
+    renderDialog([
+      {
+        type: 'Slider',
+        label: 'Throttle Position sensor',
+        name: 'ADCFILTER_TPS',
+        enabled_condition: 'alwaysOn',
+      },
+    ]);
+
+    const slider = (await screen.findByRole('slider', {
+      name: /throttle position sensor/i,
+    })) as HTMLInputElement;
+    await waitFor(() => expect(slider.disabled).toBe(true));
+    expect(slider).toBeDisabled();
+  });
+});

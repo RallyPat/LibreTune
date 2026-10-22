@@ -589,6 +589,97 @@ dialog = checkboxForms, ""
     let _ = std::fs::remove_file(&temp_path);
 }
 
+/// The `slider` dialog directive must parse into
+/// DialogComponent::Slider (previously silently dropped). Covers the real
+/// speeduino.ini forms: orientation + enable condition, orientation only,
+/// and the bare label+constant form.
+#[test]
+fn test_parse_slider_dialog_components() {
+    use libretune_core::ini::DialogComponent;
+
+    let ini_content = r#"
+[MegaTune]
+signature = "Test ECU"
+queryCommand = "Q"
+
+[Constants]
+page = 1
+
+[UserDefined]
+dialog = sensorFilters, "Analog sensor filters"
+    slider = "Flex sensor filter", FILTER_FLEX, horizontal, { flexEnabled }
+    slider = "Battery Voltage reading offset", batVoltCorrect, Horizontal
+    slider = "Baro sensor", ADCFILTER_BARO, horizontal, { useExtBaro }, { useExtBaro > 0 }
+    slider = "Simple", simpleConst
+"#;
+
+    let temp_path = std::env::temp_dir().join("test_slider_dialog.ini");
+    std::fs::write(&temp_path, ini_content).expect("Failed to write temp file");
+
+    let def = EcuDefinition::from_file(&temp_path).expect("Failed to parse INI");
+    let dialog = def.dialogs.get("sensorFilters").expect("dialog missing");
+    assert_eq!(dialog.components.len(), 4);
+
+    // Orientation + single brace condition (= enable-only, like field/checkbox)
+    match &dialog.components[0] {
+        DialogComponent::Slider {
+            label,
+            name,
+            orientation,
+            visibility_condition,
+            enabled_condition,
+        } => {
+            assert_eq!(label, "Flex sensor filter");
+            assert_eq!(name, "FILTER_FLEX");
+            assert_eq!(orientation.as_deref(), Some("horizontal"));
+            assert_eq!(enabled_condition.as_deref(), Some("flexEnabled"));
+            assert!(visibility_condition.is_none());
+        }
+        other => panic!("expected Slider, got {other:?}"),
+    }
+
+    // Orientation token is case-insensitive
+    match &dialog.components[1] {
+        DialogComponent::Slider { orientation, .. } => {
+            assert_eq!(orientation.as_deref(), Some("horizontal"));
+        }
+        other => panic!("expected Slider, got {other:?}"),
+    }
+
+    // Two braces = visibility then enable
+    match &dialog.components[2] {
+        DialogComponent::Slider {
+            visibility_condition,
+            enabled_condition,
+            ..
+        } => {
+            assert_eq!(visibility_condition.as_deref(), Some("useExtBaro"));
+            assert_eq!(enabled_condition.as_deref(), Some("useExtBaro > 0"));
+        }
+        other => panic!("expected Slider, got {other:?}"),
+    }
+
+    // Bare form: no orientation, no conditions
+    match &dialog.components[3] {
+        DialogComponent::Slider {
+            label,
+            name,
+            orientation,
+            visibility_condition,
+            enabled_condition,
+        } => {
+            assert_eq!(label, "Simple");
+            assert_eq!(name, "simpleConst");
+            assert!(orientation.is_none());
+            assert!(visibility_condition.is_none());
+            assert!(enabled_condition.is_none());
+        }
+        other => panic!("expected Slider, got {other:?}"),
+    }
+
+    let _ = std::fs::remove_file(&temp_path);
+}
+
 #[test]
 fn test_parse_readout_panel() {
     let ini_content = r#"

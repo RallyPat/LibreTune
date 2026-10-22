@@ -317,6 +317,41 @@
   font-weight: 400;
 }
 
+/* Slider rows — range control with live value readout */
+.dialog-view .field-slider-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+}
+
+.dialog-view .field-input-wrap input[type='range'] {
+  /* Override the generic text-input styling (border/padding/background) */
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.dialog-view .field-input-wrap input[type='range']:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.dialog-view .field-slider-value {
+  min-width: 52px;
+  text-align: right;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
 .help-icon {
   display: inline-flex;
   align-items: center;

@@ -215,6 +215,10 @@ pub async fn get_searchable_index(
                     terms.push(label.clone());
                     terms.push(name.clone());
                 }
+                libretune_core::ini::DialogComponent::Slider { label, name, .. } => {
+                    terms.push(label.clone());
+                    terms.push(name.clone());
+                }
                 libretune_core::ini::DialogComponent::RuntimeValue { label, name, .. } => {
                     terms.push(label.clone());
                     terms.push(name.clone());

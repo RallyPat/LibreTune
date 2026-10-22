@@ -13,6 +13,41 @@ relevant.
 
 ## [Unreleased]
 
+### 2026-10-22 — INI `slider` dialog directives render as range controls
+
+Follow-up to the checkbox fix (issue #338): the `slider` directive was
+likewise silently dropped by the parser, so settings exposed only through
+sliders were invisible and uneditable — e.g. every analog-sensor filter in
+speeduino's `sensorFilters` dialog, the flex-sensor filter, battery-voltage
+offset, boost-control sensitivity, and the VVT angle filter.
+
+#### Added
+
+- **`DialogComponent::Slider`** (`crates/libretune-core/src/ini/types.rs`)
+  with `label`, `name`, `orientation`, `visibility_condition`,
+  `enabled_condition`.
+- **Parser arm** for `slider = "Label", name, [horizontal|vertical],
+  [{visibility}, {enable}]` — the orientation token is case-insensitive and
+  captured lowercased; unrecognized bare tokens are ignored leniently.
+- **Frontend rendering** (`SliderField.tsx`, wired via
+  `DialogComponentRenderer`/`DialogFieldWrapper`): a range control bounded
+  by the constant's own min/max with a step from its `digits` precision, and
+  a live value readout with units. Dragging updates the display only — the
+  write is committed on release (pointer/key up, blur) so a drag can't spam
+  the ECU with serial writes. The INI orientation token is captured for
+  fidelity but the control renders horizontally regardless (vertical sliders
+  don't fit the dialog row grid).
+- **Search index**: slider labels and constant names are searchable
+  (`commands/menu.rs`).
+
+#### Tests
+
+- `tests/ini_parsing.rs`: the real speeduino forms (orientation + condition,
+  case-insensitive orientation, dual conditions, bare form).
+- `DialogRenderer.test.tsx`: bounds/readout rendering, drag-then-commit
+  write timing (exactly one `update_constant` per drag), no write when
+  released at the original position, enable-condition disabling.
+
 ### 2026-10-22 — INI `checkbox` dialog directives render as checkboxes (issue #338)
 
 `checkbox = ...` lines inside `[UserDefined]` dialogs were silently dropped

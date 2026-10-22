@@ -116,11 +116,13 @@ dialog = moreIgnitionOptions, "Ignition Options"
     field = "Use Prediction", use_prediction
     checkbox = "Use Prediction", use_prediction, { !use_prediction }
     checkbox = "Don't use Prediction", use_prediction, flipValue, { use_prediction }
+    slider = "Prediction filter", predictionFilter, horizontal, { use_prediction }
 ```
 
 Common directives: `field` (labeled constant editor), `checkbox` (bound
-toggle), `panel` (embed another dialog), `commandButton`, `settingSelector`,
-`gauge`, `indicator`, `runtimeValue`, `table`.
+toggle), `slider` (range control using the constant's own min/max), `panel`
+(embed another dialog), `commandButton`, `settingSelector`, `gauge`,
+`indicator`, `runtimeValue`, `table`.
 
 **Checkbox directives** render as real checkboxes bound to the constant:
 checked ⇄ non-zero by default; the optional `flipValue` token inverts the
@@ -129,6 +131,11 @@ a single `{ expression }` enables/disables the control (greyed out, not
 hidden), two braces give visibility then enable. Two checkboxes on the same
 constant with opposite conditions act as a radio pair, exactly as in
 TunerStudio.
+
+**Slider directives** render as a range control bounded by the constant's
+own min/max, committing the written value when the handle is released. The
+optional orientation token (`horizontal`/`vertical`) is accepted;
+LibreTune renders the control horizontally either way.
 
 ## Gauge Definitions
 

@@ -215,6 +215,7 @@ dialog = moreIgnitionOptions2, ""
 |---|---|---|
 | `field` | `Field` | Label + constant; brace conditions (single = enable, two = visibility+enable) |
 | `checkbox` | `Checkbox` | Label + constant; optional bare `flipValue` token inverts sense (checked ⇄ 0); same brace-condition split as `field` |
+| `slider` | `Slider` | Label + constant bound to a range control; optional `horizontal`/`vertical` orientation token (case-insensitive); same brace-condition split as `field` |
 | `panel` | `Panel` | Embeds a dialog/indicator/readout panel; TunerStudio condition order (`{enable}, {visibility}`) |
 | `runtimeValue` | `RuntimeValue` | Live output-channel readout |
 | `liveGraph` / `graphLine` | `LiveGraph` | Live graph placeholder |
@@ -225,7 +226,7 @@ dialog = moreIgnitionOptions2, ""
 | `gauge` | `Gauge` | Embedded gauge |
 | `field` with no constant | `Label` | Single-part `field = "text"` becomes a static label; `#` marks a section header, `!` a note |
 
-Unsupported directives (e.g. `slider`, `displayOnlyField`) are silently
+Unsupported directives (e.g. `displayOnlyField`) are silently
 dropped, matching the parser's lenient recovery strategy (see
 [Error Recovery](#error-recovery)).
 

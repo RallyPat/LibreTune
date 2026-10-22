@@ -657,6 +657,21 @@ pub enum DialogComponent {
         #[serde(skip_serializing_if = "Option::is_none")]
         enabled_condition: Option<String>,
     },
+    /// A range slider bound to a constant
+    /// (`slider = "Label", name, [horizontal|vertical], [{enable}]`). The
+    /// orientation token is captured for fidelity; LibreTune renders a
+    /// horizontal range control either way.
+    Slider {
+        label: String,
+        name: String,
+        /// "horizontal" or "vertical" (lowercased); None when omitted
+        #[serde(skip_serializing_if = "Option::is_none")]
+        orientation: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        visibility_condition: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        enabled_condition: Option<String>,
+    },
     /// Preset dropdown (`settingSelector`) that applies constant assignments
     SettingSelector {
         label: String,
