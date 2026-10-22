@@ -105,6 +105,31 @@ menu = "Fuel"
   subMenu = injCharacteristics, "Injector Characteristics"
 ```
 
+## Dialog Definitions
+
+Settings screens are built in the `[UserDefined]` section from named dialogs
+referenced by `subMenu` (or embedded via `panel =`):
+
+```ini
+[UserDefined]
+dialog = moreIgnitionOptions, "Ignition Options"
+    field = "Use Prediction", use_prediction
+    checkbox = "Use Prediction", use_prediction, { !use_prediction }
+    checkbox = "Don't use Prediction", use_prediction, flipValue, { use_prediction }
+```
+
+Common directives: `field` (labeled constant editor), `checkbox` (bound
+toggle), `panel` (embed another dialog), `commandButton`, `settingSelector`,
+`gauge`, `indicator`, `runtimeValue`, `table`.
+
+**Checkbox directives** render as real checkboxes bound to the constant:
+checked ⇄ non-zero by default; the optional `flipValue` token inverts the
+sense (checked ⇄ 0). Brace conditions follow the same convention as fields —
+a single `{ expression }` enables/disables the control (greyed out, not
+hidden), two braces give visibility then enable. Two checkboxes on the same
+constant with opposite conditions act as a radio pair, exactly as in
+TunerStudio.
+
 ## Gauge Definitions
 
 Configure gauges:

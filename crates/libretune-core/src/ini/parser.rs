@@ -2843,6 +2843,62 @@ fn parse_user_defined_entry(
                 }
             }
         }
+        "checkbox" => {
+            // Format: checkbox = "Label", name [, flipValue] [, {visibility}, {enable}]
+            // A bare `flipValue` token inverts the sense of the checkbox
+            // (checked ⇄ 0 instead of checked ⇄ non-zero). Brace conditions
+            // follow the same split as `field`: two braces are
+            // visibility+enable, a single brace is enable-only (greyed out,
+            // not hidden) — the dual-checkbox pattern from issue #338 relies
+            // on the enable-only reading.
+            if let Some(name) = current_dialog {
+                if let Some(dialog) = def.dialogs.get_mut(name) {
+                    let parts = split_ini_line(value);
+                    if parts.len() >= 2 {
+                        let label = parts[0].trim_matches('"').to_string();
+                        let field_name = parts[1].trim().to_string();
+
+                        let mut flip_value = false;
+                        let mut conditions: Vec<String> = Vec::new();
+                        for part in parts.iter().skip(2) {
+                            let trimmed = part.trim();
+                            if trimmed.starts_with('{') && trimmed.ends_with('}') {
+                                conditions.push(
+                                    trimmed
+                                        .trim_matches(|c| c == '{' || c == '}')
+                                        .trim()
+                                        .to_string(),
+                                );
+                            } else if trimmed.eq_ignore_ascii_case("flipvalue") {
+                                flip_value = true;
+                            }
+                        }
+
+                        let visibility_condition = if conditions.len() >= 2 {
+                            Some(conditions[0].clone())
+                        } else {
+                            None
+                        };
+
+                        let enabled_condition = if conditions.len() >= 2 {
+                            Some(conditions[1].clone())
+                        } else if conditions.len() == 1 {
+                            Some(conditions[0].clone())
+                        } else {
+                            None
+                        };
+
+                        dialog.components.push(DialogComponent::Checkbox {
+                            label,
+                            name: field_name,
+                            flip_value,
+                            visibility_condition,
+                            enabled_condition,
+                        });
+                    }
+                }
+            }
+        }
         "table" => {
             if let Some(name) = current_dialog {
                 if let Some(dialog) = def.dialogs.get_mut(name) {

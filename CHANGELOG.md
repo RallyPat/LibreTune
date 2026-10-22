@@ -13,6 +13,54 @@ relevant.
 
 ## [Unreleased]
 
+### 2026-10-22 — INI `checkbox` dialog directives render as checkboxes (issue #338)
+
+`checkbox = ...` lines inside `[UserDefined]` dialogs were silently dropped
+by the parser (no directive arm, no enum variant), so a dialog like
+
+```ini
+dialog = moreIgnitionOptions2, ""
+    field = "Use Prediction", use_prediction
+    checkbox = "Use Prediction", use_prediction, { !use_prediction }
+    checkbox = "Don't use Prediction", use_prediction, flipValue, { use_prediction }
+```
+
+rendered only the surviving `field =` line — and because two-option `bits`
+constants deliberately render as dropdowns, the settings showed as selectors
+instead of checkboxes. The `subMenu` entry point in the report was a red
+herring; the directive was missing from the model entirely.
+
+#### Added
+
+- **`DialogComponent::Checkbox`** (`crates/libretune-core/src/ini/types.rs`)
+  with `label`, `name`, `flip_value`, `visibility_condition`,
+  `enabled_condition`.
+- **Parser arm** (`parse_user_defined_entry` in
+  `crates/libretune-core/src/ini/parser.rs`) for
+  `checkbox = "Label", name, [flipValue], [{visibility}, {enable}]` — a bare
+  case-insensitive `flipValue` token sets `flip_value`; brace conditions
+  follow the `field` convention (two braces = visibility+enable, a single
+  brace = enable-only, i.e. greyed out not hidden).
+- **Frontend rendering** (`CheckboxField.tsx`, wired via
+  `DialogComponentRenderer`/`DialogFieldWrapper` in `PanelComponents.tsx`):
+  a real `<input type="checkbox">` — checked ⇄ non-zero (inverted by
+  `flipValue`), writing 1/0 through `update_constant`. The previously dead
+  checkbox CSS (`.settings-field--checkbox` etc.) is now used. Sibling
+  checkboxes bound to the same constant stay in step via the tab shell's
+  optimistic context update (pending-local override hands off to `context`
+  once it catches up), so the report's dual-checkbox "radio" pattern works:
+  toggling one flips the other and re-evaluates both enable conditions.
+- **Search index**: checkbox labels and constant names are searchable
+  (`commands/menu.rs`).
+
+#### Tests
+
+- `tests/ini_parsing.rs`: the report's exact snippet plus minimal and
+  dual-condition forms.
+- `DialogRenderer.test.tsx`: render, toggle-write semantics, `flipValue`
+  inversion, enable-condition disabling, and the dual-checkbox sibling-sync
+  scenario.
+
 ### 2026-10-02 — Curve Editor honors INI `digits` precision (issue #331)
 
 The Curve Editor ignored the `digits` column of the underlying `[Constants]`

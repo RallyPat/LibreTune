@@ -195,6 +195,40 @@ Other `std_*` panels the synthesizer does not handle (e.g. `std_ms2gentherm`,
 
 **Keyboard Shortcuts**: `&` prefix marks the hotkey character
 
+### [UserDefined] - Dialogs
+
+Settings screens referenced by `subMenu` are defined here. Each `dialog =`
+starts a definition; indented directives append components to it.
+
+```ini
+dialog = moreIgnitionOptions2, ""
+    field = "Use Prediction", use_prediction
+    checkbox = "Use Prediction", use_prediction, { !use_prediction }
+    checkbox = "Don't use Prediction", use_prediction, flipValue, { use_prediction }
+    panel = std_injection, North
+    commandButton = "Apply Defaults", cmd_apply_defaults, { !use_prediction }
+```
+
+**Parsed directives** → `DialogComponent` variants:
+
+| Directive | Variant | Notes |
+|---|---|---|
+| `field` | `Field` | Label + constant; brace conditions (single = enable, two = visibility+enable) |
+| `checkbox` | `Checkbox` | Label + constant; optional bare `flipValue` token inverts sense (checked ⇄ 0); same brace-condition split as `field` |
+| `panel` | `Panel` | Embeds a dialog/indicator/readout panel; TunerStudio condition order (`{enable}, {visibility}`) |
+| `runtimeValue` | `RuntimeValue` | Live output-channel readout |
+| `liveGraph` / `graphLine` | `LiveGraph` | Live graph placeholder |
+| `table` | `Table` | Embedded table editor |
+| `indicator` | `Indicator` | Two-state indicator |
+| `commandButton` | `CommandButton` | Controller command; optional `clickOnClose*` flags |
+| `settingSelector` / `settingOption` | `SettingSelector` | Preset dropdown applying constant assignments |
+| `gauge` | `Gauge` | Embedded gauge |
+| `field` with no constant | `Label` | Single-part `field = "text"` becomes a static label; `#` marks a section header, `!` a note |
+
+Unsupported directives (e.g. `slider`, `displayOnlyField`) are silently
+dropped, matching the parser's lenient recovery strategy (see
+[Error Recovery](#error-recovery)).
+
 ### [TableEditor] - Table Definitions
 
 ```ini

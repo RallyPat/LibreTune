@@ -5,7 +5,7 @@
 // and `get_port_editor`.
 
 export interface DialogComponent {
-  type: 'Panel' | 'Field' | 'RuntimeValue' | 'LiveGraph' | 'Table' | 'Label' | 'Indicator' | 'CommandButton' | 'Gauge' | 'SettingSelector';
+  type: 'Panel' | 'Field' | 'Checkbox' | 'RuntimeValue' | 'LiveGraph' | 'Table' | 'Label' | 'Indicator' | 'CommandButton' | 'Gauge' | 'SettingSelector';
   name?: string;
   label?: string;
   text?: string;
@@ -18,6 +18,8 @@ export interface DialogComponent {
   visibility_condition?: string;  // Visibility condition (hides field if false)
   enabled_condition?: string;     // Enable condition (disables field if false)
   condition?: string;             // Legacy: single condition (treated as enabled_condition)
+  // Checkbox specific fields (TunerStudio `checkbox = "Label", name, [flipValue], [{cond}]`)
+  flip_value?: boolean;           // Inverts the sense: checked ⇄ 0 instead of checked ⇄ non-zero
   // SettingSelector specific fields (TunerStudio preset dropdown)
   options?: Array<{ label: string; assignments: Array<{ name: string; value: number }> }>;
   // CommandButton specific fields

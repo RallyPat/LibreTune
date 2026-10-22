@@ -29,6 +29,7 @@ import { ReadoutPanelRenderer } from './fields/ReadoutPanelRenderer';
 import { DialogGaugeStack } from './fields/DialogGauge';
 import { CommandButton } from './fields/CommandButton';
 import DialogField from './fields/DialogField';
+import CheckboxField from './fields/CheckboxField';
 import { RuntimeValueReadout } from './fields/RuntimeValueReadout';
 import { SettingSelectorField } from './fields/SettingSelectorField';
 import { isUserTableLiveChannel, isGppwmLiveChannel, isCommandButtonPanel, inferLiveStateGateExpression } from './dialogLayout';
@@ -473,11 +474,27 @@ export function DialogFieldWrapper({
   
   // Hide field if visibility condition is false
   if (!fieldVisible || !comp.name) return null;
-  
-  return <DialogField 
-    label={comp.label || ''} 
-    name={comp.name} 
-    onUpdate={onUpdate} 
+
+  if (comp.type === 'Checkbox') {
+    return (
+      <CheckboxField
+        label={comp.label || ''}
+        name={comp.name}
+        flipValue={comp.flip_value ?? false}
+        onUpdate={onUpdate}
+        context={context}
+        fieldEnabledCondition={fieldEnabled}
+        onOptimisticUpdate={onOptimisticUpdate}
+        onFieldFocus={onFieldFocus}
+        showAllHelpIcons={showAllHelpIcons}
+      />
+    );
+  }
+
+  return <DialogField
+    label={comp.label || ''}
+    name={comp.name}
+    onUpdate={onUpdate}
     context={context}
     fieldEnabledCondition={fieldEnabled}
     onOptimisticUpdate={onOptimisticUpdate}
@@ -642,6 +659,11 @@ export function DialogComponentRenderer({
     return <SettingSelectorField comp={comp} context={context} onUpdate={onUpdate} onOptimisticUpdate={onOptimisticUpdate} />;
   }
   if (comp.type === 'Field' && comp.name) {
+    return <DialogFieldWrapper comp={comp} context={context} onUpdate={onUpdate} onOptimisticUpdate={onOptimisticUpdate} onFieldFocus={onFieldFocus} showAllHelpIcons={showAllHelpIcons} />;
+  }
+  if (comp.type === 'Checkbox' && comp.name) {
+    // Reuse the wrapper so visibility/enable conditions are evaluated the
+    // same way as Field; the wrapper dispatches to CheckboxField.
     return <DialogFieldWrapper comp={comp} context={context} onUpdate={onUpdate} onOptimisticUpdate={onOptimisticUpdate} onFieldFocus={onFieldFocus} showAllHelpIcons={showAllHelpIcons} />;
   }
   if (comp.type === 'RuntimeValue' && comp.name) {
