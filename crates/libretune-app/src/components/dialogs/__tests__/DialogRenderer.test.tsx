@@ -1,4 +1,5 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { useState } from 'react';
 import DialogRenderer, { DialogDefinition } from '../DialogRenderer';
 import { ToastProvider } from '../../../contexts/ToastContext';
 import { setupTauriMocks, tearDownTauriMocks } from '../../../test-utils/tauriMocks';
@@ -200,5 +201,168 @@ describe('DialogRenderer numeric input field', () => {
 
     // Should reset to 0
     await waitFor(() => expect(input.value).toBe('0'));
+  });
+});
+
+describe('DialogRenderer checkbox field', () => {
+  const mockGetConstant = {
+    name: 'use_prediction',
+    label: 'Use Prediction',
+    units: '',
+    digits: 0,
+    min: 0,
+    max: 1,
+    value_type: 'scalar',
+    bit_options: [],
+  };
+
+  // setInvokeResponse replaces the whole invoke mock (other commands then
+  // resolve undefined), so each test configures its full response set here.
+  const setupCheckboxMocks = (constantValue: number, extra: Record<string, any> = {}) =>
+    setupTauriMocks({
+      get_constant: mockGetConstant,
+      get_constant_value: constantValue,
+      update_constant: null,
+      get_settings: { show_all_help_icons: true },
+      ...extra,
+    });
+
+  afterEach(() => {
+    tearDownTauriMocks();
+  });
+
+  const renderDialog = (components: DialogDefinition['components']) =>
+    render(
+      <ToastProvider>
+        <DialogRenderer
+          definition={{ name: 'flagsDialog', title: 'Flags', components }}
+          onBack={() => {}}
+          openTable={() => {}}
+          context={{}}
+        />
+      </ToastProvider>
+    );
+
+  it('renders a checkbox bound to a constant (issue #338)', async () => {
+    setupCheckboxMocks(0);
+    renderDialog([{ type: 'Checkbox', label: 'Use Prediction', name: 'use_prediction' }]);
+
+    const cb = await screen.findByRole('checkbox', { name: /use prediction/i });
+    expect(cb).toBeInTheDocument();
+    expect((cb as HTMLInputElement).checked).toBe(false);
+    expect(screen.queryByRole('combobox')).toBeNull(); // checkbox, not a dropdown
+  });
+
+  it('checks when value is non-zero and writes 1 on toggle', async () => {
+    setupCheckboxMocks(1);
+    renderDialog([{ type: 'Checkbox', label: 'Use Prediction', name: 'use_prediction' }]);
+
+    const cb = (await screen.findByRole('checkbox', { name: /use prediction/i })) as HTMLInputElement;
+    expect(cb.checked).toBe(true);
+
+    // Uncheck it — should write 0
+    fireEvent.click(cb);
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith('update_constant', {
+        name: 'use_prediction',
+        value: 0,
+      })
+    );
+  });
+
+  it('inverts sense with flipValue (checked ⇄ 0)', async () => {
+    // value 0 + flipValue ⇒ checked
+    setupCheckboxMocks(0);
+    renderDialog([
+      { type: 'Checkbox', label: "Don't use Prediction", name: 'use_prediction', flip_value: true },
+    ]);
+
+    const cb = (await screen.findByRole('checkbox', { name: /don't use prediction/i })) as HTMLInputElement;
+    expect(cb.checked).toBe(true);
+
+    // Uncheck it — flipValue writes 1
+    fireEvent.click(cb);
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith('update_constant', {
+        name: 'use_prediction',
+        value: 1,
+      })
+    );
+  });
+
+  it('disables the checkbox when the enable condition is false', async () => {
+    setupCheckboxMocks(0, { evaluate_expression: false });
+    renderDialog([
+      {
+        type: 'Checkbox',
+        label: 'Use Prediction',
+        name: 'use_prediction',
+        enabled_condition: '!use_prediction',
+      },
+    ]);
+
+    const cb = (await screen.findByRole('checkbox', { name: /use prediction/i })) as HTMLInputElement;
+    await waitFor(() => expect(cb.disabled).toBe(true));
+    expect(cb).toBeDisabled();
+  });
+
+  it('keeps dual checkboxes on the same constant in step (reporter scenario)', async () => {
+    setupCheckboxMocks(0);
+
+    // Mimic the tab shell (TabContentRouter): context holds all constant
+    // values and is updated optimistically after every write.
+    function Harness() {
+      const [ctx, setCtx] = useState<Record<string, number>>({});
+      return (
+        <ToastProvider>
+          <DialogRenderer
+            definition={{
+              name: 'flagsDialog',
+              title: 'Flags',
+              components: [
+                { type: 'Checkbox', label: 'Use Prediction', name: 'use_prediction' },
+                {
+                  type: 'Checkbox',
+                  label: "Don't use Prediction",
+                  name: 'use_prediction',
+                  flip_value: true,
+                },
+              ],
+            }}
+            onBack={() => {}}
+            openTable={() => {}}
+            context={ctx}
+            onOptimisticUpdate={(name, value) =>
+              setCtx((prev) => ({ ...prev, [name]: value }))
+            }
+          />
+        </ToastProvider>
+      );
+    }
+
+    render(<Harness />);
+
+    const useIt = (await screen.findByRole('checkbox', {
+      name: /^use prediction$/i,
+    })) as HTMLInputElement;
+    const dontUseIt = screen.getByRole('checkbox', {
+      name: /don't use prediction/i,
+    }) as HTMLInputElement;
+
+    // value 0: normal box unchecked, flipped box checked
+    expect(useIt.checked).toBe(false);
+    expect(dontUseIt.checked).toBe(true);
+
+    // Toggle the normal box on ⇒ writes 1; the optimistic context update must
+    // flip the sibling box too (both derive from the constant's value).
+    fireEvent.click(useIt);
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith('update_constant', {
+        name: 'use_prediction',
+        value: 1,
+      })
+    );
+    await waitFor(() => expect(useIt.checked).toBe(true));
+    await waitFor(() => expect(dontUseIt.checked).toBe(false));
   });
 });
