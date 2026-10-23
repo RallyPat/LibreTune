@@ -5,7 +5,7 @@
 // and `get_port_editor`.
 
 export interface DialogComponent {
-  type: 'Panel' | 'Field' | 'Checkbox' | 'RuntimeValue' | 'LiveGraph' | 'Table' | 'Label' | 'Indicator' | 'CommandButton' | 'Gauge' | 'SettingSelector';
+  type: 'Panel' | 'Field' | 'Checkbox' | 'Slider' | 'DisplayOnlyField' | 'RuntimeValue' | 'LiveGraph' | 'Table' | 'Label' | 'Indicator' | 'CommandButton' | 'Gauge' | 'SettingSelector';
   name?: string;
   label?: string;
   text?: string;
@@ -20,6 +20,8 @@ export interface DialogComponent {
   condition?: string;             // Legacy: single condition (treated as enabled_condition)
   // Checkbox specific fields (TunerStudio `checkbox = "Label", name, [flipValue], [{cond}]`)
   flip_value?: boolean;           // Inverts the sense: checked ⇄ 0 instead of checked ⇄ non-zero
+  // Slider specific fields (TunerStudio `slider = "Label", name, [horizontal|vertical], [{cond}]`)
+  orientation?: string;           // "horizontal" | "vertical" (informational; renderer is horizontal)
   // SettingSelector specific fields (TunerStudio preset dropdown)
   options?: Array<{ label: string; assignments: Array<{ name: string; value: number }> }>;
   // CommandButton specific fields
@@ -34,6 +36,9 @@ export interface DialogDefinition {
   /** From `dialog = name, "title", <hint>` — "xAxis" arranges top-level,
    * unpositioned panels in a horizontal row instead of stacking them. */
   layout_hint?: string;
+  /** From an indented `topicHelp = "https://…"` line — rendered as a help
+   * link in the dialog header. */
+  topic_help?: string;
 }
 
 export interface Constant {
@@ -49,6 +54,8 @@ export interface Constant {
   visibility_condition?: string;  // Expression for when field should be visible
   display_offset?: number;  // For bits type: offset to add to displayed value (e.g., +1 for [4:7+1])
   is_pc_variable?: boolean;
+  /** INI [ConstantsExtensions] requiresPowerCycle — edit needs an ECU power cycle to take effect */
+  requires_power_cycle?: boolean;
 }
 
 export interface TableInfo {

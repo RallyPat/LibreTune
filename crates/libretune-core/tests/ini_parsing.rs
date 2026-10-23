@@ -589,6 +589,276 @@ dialog = checkboxForms, ""
     let _ = std::fs::remove_file(&temp_path);
 }
 
+/// The `slider` dialog directive must parse into
+/// DialogComponent::Slider (previously silently dropped). Covers the real
+/// speeduino.ini forms: orientation + enable condition, orientation only,
+/// and the bare label+constant form.
+#[test]
+fn test_parse_slider_dialog_components() {
+    use libretune_core::ini::DialogComponent;
+
+    let ini_content = r#"
+[MegaTune]
+signature = "Test ECU"
+queryCommand = "Q"
+
+[Constants]
+page = 1
+
+[UserDefined]
+dialog = sensorFilters, "Analog sensor filters"
+    slider = "Flex sensor filter", FILTER_FLEX, horizontal, { flexEnabled }
+    slider = "Battery Voltage reading offset", batVoltCorrect, Horizontal
+    slider = "Baro sensor", ADCFILTER_BARO, horizontal, { useExtBaro }, { useExtBaro > 0 }
+    slider = "Simple", simpleConst
+"#;
+
+    let temp_path = std::env::temp_dir().join("test_slider_dialog.ini");
+    std::fs::write(&temp_path, ini_content).expect("Failed to write temp file");
+
+    let def = EcuDefinition::from_file(&temp_path).expect("Failed to parse INI");
+    let dialog = def.dialogs.get("sensorFilters").expect("dialog missing");
+    assert_eq!(dialog.components.len(), 4);
+
+    // Orientation + single brace condition (= enable-only, like field/checkbox)
+    match &dialog.components[0] {
+        DialogComponent::Slider {
+            label,
+            name,
+            orientation,
+            visibility_condition,
+            enabled_condition,
+        } => {
+            assert_eq!(label, "Flex sensor filter");
+            assert_eq!(name, "FILTER_FLEX");
+            assert_eq!(orientation.as_deref(), Some("horizontal"));
+            assert_eq!(enabled_condition.as_deref(), Some("flexEnabled"));
+            assert!(visibility_condition.is_none());
+        }
+        other => panic!("expected Slider, got {other:?}"),
+    }
+
+    // Orientation token is case-insensitive
+    match &dialog.components[1] {
+        DialogComponent::Slider { orientation, .. } => {
+            assert_eq!(orientation.as_deref(), Some("horizontal"));
+        }
+        other => panic!("expected Slider, got {other:?}"),
+    }
+
+    // Two braces = visibility then enable
+    match &dialog.components[2] {
+        DialogComponent::Slider {
+            visibility_condition,
+            enabled_condition,
+            ..
+        } => {
+            assert_eq!(visibility_condition.as_deref(), Some("useExtBaro"));
+            assert_eq!(enabled_condition.as_deref(), Some("useExtBaro > 0"));
+        }
+        other => panic!("expected Slider, got {other:?}"),
+    }
+
+    // Bare form: no orientation, no conditions
+    match &dialog.components[3] {
+        DialogComponent::Slider {
+            label,
+            name,
+            orientation,
+            visibility_condition,
+            enabled_condition,
+        } => {
+            assert_eq!(label, "Simple");
+            assert_eq!(name, "simpleConst");
+            assert!(orientation.is_none());
+            assert!(visibility_condition.is_none());
+            assert!(enabled_condition.is_none());
+        }
+        other => panic!("expected Slider, got {other:?}"),
+    }
+
+    let _ = std::fs::remove_file(&temp_path);
+}
+
+/// An indented `topicHelp = "url"` line inside a dialog definition attaches
+/// the URL to the dialog (rendered as a help link).
+#[test]
+fn test_parse_dialog_topic_help() {
+    let ini_content = r#"
+[MegaTune]
+signature = "Test ECU"
+queryCommand = "Q"
+
+[Constants]
+page = 1
+
+[UserDefined]
+dialog = fanSettings, "Fan Settings"
+    topicHelp = "http://wiki.speeduino.com/en/configuration/Thermo_fan"
+    field = "Fan Mode", fanEnable
+"#;
+
+    let temp_path = std::env::temp_dir().join("test_dialog_topic_help.ini");
+    std::fs::write(&temp_path, ini_content).expect("Failed to write temp file");
+
+    let def = EcuDefinition::from_file(&temp_path).expect("Failed to parse INI");
+    let dialog = def.dialogs.get("fanSettings").expect("dialog missing");
+    assert_eq!(
+        dialog.topic_help.as_deref(),
+        Some("http://wiki.speeduino.com/en/configuration/Thermo_fan")
+    );
+    assert_eq!(dialog.components.len(), 1);
+
+    let _ = std::fs::remove_file(&temp_path);
+}
+
+/// [TableEditor] `gridOrient` (3 numbers) and `upDownLabel` (2 labels) and
+/// [CurveEditor] `lineLabel` (repeated legend labels) must be captured
+/// (previously silently dropped — gridOrient/upDownLabel in every file of
+/// the reference corpus, lineLabel in 683/687).
+#[test]
+fn test_parse_table_and_curve_fidelity_keys() {
+    let ini_content = r#"
+[MegaTune]
+signature = "Test ECU"
+queryCommand = "Q"
+
+[Constants]
+page = 1
+
+[TableEditor]
+    table = veTable1Tbl, veTable1Map, "VE Table", 2
+        xBins = rpmBins, rpm
+        yBins = fuelLoadBins, fuelLoad
+        zBins = veTable1
+        gridHeight = 2.0
+        gridOrient = 250, 0, 340
+        upDownLabel = "(RICHER)", "(LEANER)"
+
+[CurveEditor]
+    curve = warmup_analyzer_curve, "Warmup Enrichment"
+        columnLabel = "Coolant", "Enrichment"
+        yBins = wueRates
+        lineLabel = "Current WUE"
+        lineLabel = "Recommended WUE"
+"#;
+
+    let temp_path = std::env::temp_dir().join("test_table_curve_fidelity.ini");
+    std::fs::write(&temp_path, ini_content).expect("Failed to write temp file");
+
+    let def = EcuDefinition::from_file(&temp_path).expect("Failed to parse INI");
+
+    let table = def.tables.get("veTable1Tbl").expect("table missing");
+    assert_eq!(table.grid_orient, Some((250.0, 0.0, 340.0)));
+    assert_eq!(table.up_label.as_deref(), Some("(RICHER)"));
+    assert_eq!(table.down_label.as_deref(), Some("(LEANER)"));
+
+    let curve = def
+        .curves
+        .get("warmup_analyzer_curve")
+        .expect("curve missing");
+    assert_eq!(
+        curve.line_labels,
+        vec!["Current WUE".to_string(), "Recommended WUE".to_string()]
+    );
+
+    let _ = std::fs::remove_file(&temp_path);
+}
+
+/// `displayOnlyField` must parse into DialogComponent::DisplayOnlyField
+/// (previously silently dropped). Covers the three real-world forms from
+/// speeduino.ini: read-only constant value, text-only note, and a
+/// condition-gated warning with `blankfield`.
+#[test]
+fn test_parse_display_only_field_components() {
+    use libretune_core::ini::DialogComponent;
+
+    let ini_content = r##"
+[MegaTune]
+signature = "Test ECU"
+queryCommand = "Q"
+
+[Constants]
+page = 1
+
+[UserDefined]
+dialog = io_summary, "I/O Summary"
+    displayOnlyField = "fuelPumpPin", fuelPumpPin, {fuelPumpEnable}
+    displayOnlyField = "#     !!! Please note that 1.0 means 100% !!!"
+    displayOnlyField = !"No PWM Fan available on MCU", blankfield, {intcan_available == 0 && fanEnable == 2}, {intcan_available == 0 && fanEnable == 2}
+    displayOnlyField = "Off 0", blankfield, {}, {(caninput_sel0a == 0)}
+"##;
+
+    let temp_path = std::env::temp_dir().join("test_display_only_field.ini");
+    std::fs::write(&temp_path, ini_content).expect("Failed to write temp file");
+
+    let def = EcuDefinition::from_file(&temp_path).expect("Failed to parse INI");
+    let dialog = def.dialogs.get("io_summary").expect("dialog missing");
+    assert_eq!(dialog.components.len(), 4);
+
+    // Read-only constant value, single condition = enable-only
+    match &dialog.components[0] {
+        DialogComponent::DisplayOnlyField {
+            label,
+            name,
+            visibility_condition,
+            enabled_condition,
+        } => {
+            assert_eq!(label, "fuelPumpPin");
+            assert_eq!(name.as_deref(), Some("fuelPumpPin"));
+            assert_eq!(enabled_condition.as_deref(), Some("fuelPumpEnable"));
+            assert!(visibility_condition.is_none());
+        }
+        other => panic!("expected DisplayOnlyField, got {other:?}"),
+    }
+
+    // Text-only note (no constant) — label prefix preserved for the renderer
+    match &dialog.components[1] {
+        DialogComponent::DisplayOnlyField { label, name, .. } => {
+            assert!(label.starts_with('#'));
+            assert!(name.is_none());
+        }
+        other => panic!("expected DisplayOnlyField, got {other:?}"),
+    }
+
+    // Warning with blankfield + dual conditions; `!` prefix preserved
+    match &dialog.components[2] {
+        DialogComponent::DisplayOnlyField {
+            label,
+            name,
+            visibility_condition,
+            enabled_condition,
+        } => {
+            assert!(label.starts_with('!'));
+            assert!(name.is_none(), "blankfield must not become a constant ref");
+            assert_eq!(
+                visibility_condition.as_deref(),
+                Some("intcan_available == 0 && fanEnable == 2")
+            );
+            assert_eq!(
+                enabled_condition.as_deref(),
+                Some("intcan_available == 0 && fanEnable == 2")
+            );
+        }
+        other => panic!("expected DisplayOnlyField, got {other:?}"),
+    }
+
+    // Empty braces are trivial and dropped; remaining single brace = enable
+    match &dialog.components[3] {
+        DialogComponent::DisplayOnlyField {
+            enabled_condition,
+            visibility_condition,
+            ..
+        } => {
+            assert_eq!(enabled_condition.as_deref(), Some("(caninput_sel0a == 0)"));
+            assert!(visibility_condition.is_none());
+        }
+        other => panic!("expected DisplayOnlyField, got {other:?}"),
+    }
+
+    let _ = std::fs::remove_file(&temp_path);
+}
+
 #[test]
 fn test_parse_readout_panel() {
     let ini_content = r#"

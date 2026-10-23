@@ -201,6 +201,7 @@ mod tests {
                     field("ignBypassPin", None),
                 ],
                 layout_hint: None,
+                topic_help: None,
             },
         );
 
@@ -240,6 +241,7 @@ mod tests {
                     field("fanPin", None),
                 ],
                 layout_hint: None,
+                topic_help: None,
             },
         );
 

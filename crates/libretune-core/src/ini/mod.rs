@@ -454,6 +454,7 @@ impl EcuDefinition {
             title: title.to_string(),
             components,
             layout_hint: None,
+            topic_help: None,
         })
     }
 

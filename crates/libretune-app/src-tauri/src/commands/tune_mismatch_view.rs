@@ -281,6 +281,7 @@ fn dialog_definition_or_table(
                 name: name.to_string(),
             }],
             layout_hint: None,
+            topic_help: None,
         });
     }
     None
@@ -597,6 +598,7 @@ mod tests {
                     enabled_condition: None,
                 }],
                 layout_hint: None,
+                topic_help: None,
             },
         );
         def.menus.push(Menu {

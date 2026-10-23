@@ -317,6 +317,83 @@
   font-weight: 400;
 }
 
+/* Slider rows — range control with live value readout */
+.dialog-view .field-slider-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+}
+
+.dialog-view .field-input-wrap input[type='range'] {
+  /* Override the generic text-input styling (border/padding/background) */
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.dialog-view .field-input-wrap input[type='range']:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.dialog-view .field-slider-value {
+  min-width: 52px;
+  text-align: right;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* Read-only display rows (displayOnlyField) */
+.dialog-view .field-display-value {
+  width: 100%;
+  min-width: 0;
+  padding: 3px 7px;
+  border: 1px dashed var(--border-color);
+  border-radius: 6px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.2;
+  box-sizing: border-box;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dialog-view .settings-field--display-only.is-disabled .field-display-value {
+  opacity: 0.6;
+}
+
+/* "Requires power cycle" badge ([ConstantsExtensions] requiresPowerCycle) */
+.power-cycle-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 8px;
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 16px;
+  white-space: nowrap;
+  color: var(--warning, #e6a700);
+  background: color-mix(in srgb, var(--warning, #e6a700) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--warning, #e6a700) 35%, transparent);
+  vertical-align: middle;
+}
+
+.power-cycle-badge svg {
+  flex-shrink: 0;
+}
+
 .help-icon {
   display: inline-flex;
   align-items: center;

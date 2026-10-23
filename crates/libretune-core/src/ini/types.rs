@@ -615,6 +615,11 @@ pub struct DialogDefinition {
     /// already supports separately) are captured but not yet interpreted.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub layout_hint: Option<String>,
+    /// URL from an indented `topicHelp = "https://…"` line inside the dialog
+    /// definition (TunerStudio shows it as a help link). Only the first
+    /// topicHelp line is kept.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub topic_help: Option<String>,
 }
 
 /// Components that can exist inside a dialog
@@ -652,6 +657,37 @@ pub enum DialogComponent {
         label: String,
         name: String,
         flip_value: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        visibility_condition: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        enabled_condition: Option<String>,
+    },
+    /// A range slider bound to a constant
+    /// (`slider = "Label", name, [horizontal|vertical], [{enable}]`). The
+    /// orientation token is captured for fidelity; LibreTune renders a
+    /// horizontal range control either way.
+    Slider {
+        label: String,
+        name: String,
+        /// "horizontal" or "vertical" (lowercased); None when omitted
+        #[serde(skip_serializing_if = "Option::is_none")]
+        orientation: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        visibility_condition: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        enabled_condition: Option<String>,
+    },
+    /// A read-only display row (`displayOnlyField = [!|#]"Label" [, name]
+    /// [, {visibility}, {enable}]`). With a constant name it shows that
+    /// constant's current value (no editor); without one (or with the
+    /// `blankfield` placeholder) it is a static text line whose visibility
+    /// can be condition-driven. `#`/`!` label prefixes carry the usual
+    /// section-header / note styling.
+    DisplayOnlyField {
+        label: String,
+        /// None for text-only lines (`blankfield` or no second token)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         visibility_condition: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]

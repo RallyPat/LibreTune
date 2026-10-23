@@ -1841,6 +1841,29 @@ fn parse_table_editor_entry(
                         table.y_label = Some(parts[1].trim_matches('"').to_string());
                     }
                 }
+                "gridorient" => {
+                    // Format: gridOrient = yaw, pitch, roll (e.g. "250, 0, 340")
+                    let parts: Vec<&str> = value.split(',').map(|s| s.trim()).collect();
+                    if parts.len() >= 3 {
+                        if let (Ok(a), Ok(b), Ok(c)) = (
+                            parts[0].parse::<f32>(),
+                            parts[1].parse::<f32>(),
+                            parts[2].parse::<f32>(),
+                        ) {
+                            table.grid_orient = Some((a, b, c));
+                        }
+                    }
+                }
+                "updownlabel" => {
+                    // Format: upDownLabel = "UpLabel", "DownLabel" (3D view)
+                    let parts = split_ini_line(value);
+                    if !parts.is_empty() {
+                        table.up_label = Some(parts[0].trim_matches('"').to_string());
+                    }
+                    if parts.len() >= 2 {
+                        table.down_label = Some(parts[1].trim_matches('"').to_string());
+                    }
+                }
                 _ => {}
             }
         }
@@ -1934,6 +1957,14 @@ fn parse_curve_editor_entry(
                 "gauge" => {
                     // Format: gauge = GaugeName
                     curve.gauge = Some(value.trim().to_string());
+                }
+                "linelabel" => {
+                    // Format: lineLabel = "Label" — legend label for each
+                    // overlaid curve line (e.g. WUE analyzer's "Current WUE"
+                    // / "Recommended WUE"). Repeated lines append in order.
+                    curve
+                        .line_labels
+                        .push(value.trim().trim_matches('"').to_string());
                 }
                 _ => {}
             }
@@ -2530,6 +2561,17 @@ fn parse_user_defined_entry(
                 }
             }
         }
+        "topichelp" => {
+            // Dialog context: topicHelp = "https://…" attaches a help URL to
+            // the dialog being defined (TunerStudio renders it as a help
+            // link). In [TableEditor]/[CurveEditor]/[ReferenceTables] the
+            // same key is handled by their own parsers.
+            if let Some(name) = current_dialog {
+                if let Some(dialog) = def.dialogs.get_mut(name) {
+                    dialog.topic_help = Some(value.trim().trim_matches('"').to_string());
+                }
+            }
+        }
         "dialog" => {
             let parts = split_ini_line(value);
             if !parts.is_empty() {
@@ -2553,6 +2595,7 @@ fn parse_user_defined_entry(
                     title,
                     components: Vec::new(),
                     layout_hint,
+                    topic_help: None,
                 };
                 def.dialogs.insert(name.clone(), dialog);
                 *current_dialog = Some(name);
@@ -2892,6 +2935,123 @@ fn parse_user_defined_entry(
                             label,
                             name: field_name,
                             flip_value,
+                            visibility_condition,
+                            enabled_condition,
+                        });
+                    }
+                }
+            }
+        }
+        "slider" => {
+            // Format: slider = "Label", name [, horizontal|vertical] [, {visibility}, {enable}]
+            // The orientation token is optional (lowercased when captured).
+            // Any other bare token (e.g. legacy outputChannel refs) is
+            // ignored leniently, matching the parser's recovery strategy.
+            if let Some(name) = current_dialog {
+                if let Some(dialog) = def.dialogs.get_mut(name) {
+                    let parts = split_ini_line(value);
+                    if parts.len() >= 2 {
+                        let label = parts[0].trim_matches('"').to_string();
+                        let field_name = parts[1].trim().to_string();
+
+                        let mut orientation: Option<String> = None;
+                        let mut conditions: Vec<String> = Vec::new();
+                        for part in parts.iter().skip(2) {
+                            let trimmed = part.trim();
+                            if trimmed.starts_with('{') && trimmed.ends_with('}') {
+                                conditions.push(
+                                    trimmed
+                                        .trim_matches(|c| c == '{' || c == '}')
+                                        .trim()
+                                        .to_string(),
+                                );
+                            } else {
+                                let lower = trimmed.to_lowercase();
+                                if lower == "horizontal" || lower == "vertical" {
+                                    orientation = Some(lower);
+                                }
+                            }
+                        }
+
+                        let visibility_condition = if conditions.len() >= 2 {
+                            Some(conditions[0].clone())
+                        } else {
+                            None
+                        };
+
+                        let enabled_condition = if conditions.len() >= 2 {
+                            Some(conditions[1].clone())
+                        } else if conditions.len() == 1 {
+                            Some(conditions[0].clone())
+                        } else {
+                            None
+                        };
+
+                        dialog.components.push(DialogComponent::Slider {
+                            label,
+                            name: field_name,
+                            orientation,
+                            visibility_condition,
+                            enabled_condition,
+                        });
+                    }
+                }
+            }
+        }
+        "displayonlyfield" => {
+            // Format: displayOnlyField = [!|#]"Label" [, name] [, {visibility}, {enable}]
+            // The constant is optional: `blankfield` (or no second token) marks
+            // a text-only line. Empty braces `{}` are trivial conditions and
+            // are dropped, matching TunerStudio semantics.
+            if let Some(name) = current_dialog {
+                if let Some(dialog) = def.dialogs.get_mut(name) {
+                    let parts = split_ini_line(value);
+                    if !parts.is_empty() {
+                        let label = parts[0].trim().trim_matches('"').to_string();
+
+                        let field_name = parts.get(1).map(|p| p.trim().to_string()).filter(|p| {
+                            !p.is_empty()
+                                && p != "blankfield"
+                                && !(p.starts_with('{') && p.ends_with('}'))
+                        });
+
+                        let conditions: Vec<String> = parts
+                            .iter()
+                            .skip(if parts.len() > 1 && field_name.is_some() {
+                                2
+                            } else {
+                                1
+                            })
+                            .filter_map(|p| {
+                                let trimmed = p.trim();
+                                if trimmed.starts_with('{') && trimmed.ends_with('}') {
+                                    let inner = trimmed
+                                        .trim_matches(|c| c == '{' || c == '}')
+                                        .trim()
+                                        .to_string();
+                                    (!inner.is_empty()).then_some(inner)
+                                } else {
+                                    None
+                                }
+                            })
+                            .collect();
+
+                        let visibility_condition = if conditions.len() >= 2 {
+                            Some(conditions[0].clone())
+                        } else {
+                            None
+                        };
+                        let enabled_condition = if conditions.len() >= 2 {
+                            Some(conditions[1].clone())
+                        } else if conditions.len() == 1 {
+                            Some(conditions[0].clone())
+                        } else {
+                            None
+                        };
+
+                        dialog.components.push(DialogComponent::DisplayOnlyField {
+                            label,
+                            name: field_name,
                             visibility_condition,
                             enabled_condition,
                         });

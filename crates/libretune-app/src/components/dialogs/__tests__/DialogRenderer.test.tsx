@@ -366,3 +366,334 @@ describe('DialogRenderer checkbox field', () => {
     await waitFor(() => expect(dontUseIt.checked).toBe(false));
   });
 });
+
+describe('DialogRenderer slider field', () => {
+  // ADCFILTER_* sliders in speeduino.ini: U08 0..240, digits 0
+  const mockSliderConstant = {
+    name: 'ADCFILTER_TPS',
+    label: 'Throttle Position sensor',
+    units: '%',
+    digits: 0,
+    min: 0,
+    max: 240,
+    value_type: 'scalar',
+    bit_options: [],
+  };
+
+  const setupSliderMocks = (constantValue: number, extra: Record<string, any> = {}) =>
+    setupTauriMocks({
+      get_constant: mockSliderConstant,
+      get_constant_value: constantValue,
+      update_constant: null,
+      get_settings: { show_all_help_icons: true },
+      ...extra,
+    });
+
+  afterEach(() => {
+    tearDownTauriMocks();
+  });
+
+  const renderDialog = (components: DialogDefinition['components']) =>
+    render(
+      <ToastProvider>
+        <DialogRenderer
+          definition={{ name: 'sensorFilters', title: 'Analog sensor filters', components }}
+          onBack={() => {}}
+          openTable={() => {}}
+          context={{}}
+        />
+      </ToastProvider>
+    );
+
+  it('renders a range control bounded by the constant min/max with a value readout', async () => {
+    setupSliderMocks(50);
+    renderDialog([{ type: 'Slider', label: 'Throttle Position sensor', name: 'ADCFILTER_TPS' }]);
+
+    const slider = (await screen.findByRole('slider', {
+      name: /throttle position sensor/i,
+    })) as HTMLInputElement;
+    expect(slider).toBeInTheDocument();
+    expect(parseFloat(slider.min)).toBe(0);
+    expect(parseFloat(slider.max)).toBe(240);
+    expect(slider.value).toBe('50');
+    // Value readout with units next to the control
+    expect(screen.getByText('50 %')).toBeInTheDocument();
+  });
+
+  it('updates the display while dragging but only writes on release', async () => {
+    setupSliderMocks(50);
+    renderDialog([{ type: 'Slider', label: 'Throttle Position sensor', name: 'ADCFILTER_TPS' }]);
+
+    const slider = (await screen.findByRole('slider', {
+      name: /throttle position sensor/i,
+    })) as HTMLInputElement;
+
+    // Drag to 60: display follows, no ECU write yet
+    fireEvent.change(slider, { target: { value: '60' } });
+    await waitFor(() => expect(screen.getByText('60 %')).toBeInTheDocument());
+    expect(invoke).not.toHaveBeenCalledWith('update_constant', expect.anything());
+
+    // Release: single committed write (invoke also carries get_constant* calls)
+    fireEvent.pointerUp(slider, { target: { value: '60' } });
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith('update_constant', {
+        name: 'ADCFILTER_TPS',
+        value: 60,
+      })
+    );
+    const updateCalls = (invoke as any).mock.calls.filter(
+      ([cmd]: [string]) => cmd === 'update_constant'
+    );
+    expect(updateCalls).toHaveLength(1);
+  });
+
+  it('reverts cleanly when released at the original position (no write)', async () => {
+    setupSliderMocks(50);
+    renderDialog([{ type: 'Slider', label: 'Throttle Position sensor', name: 'ADCFILTER_TPS' }]);
+
+    const slider = (await screen.findByRole('slider', {
+      name: /throttle position sensor/i,
+    })) as HTMLInputElement;
+
+    // Drag away and back, then release at the original value
+    fireEvent.change(slider, { target: { value: '80' } });
+    fireEvent.change(slider, { target: { value: '50' } });
+    fireEvent.pointerUp(slider, { target: { value: '50' } });
+
+    // Give any accidental write a chance to surface
+    await new Promise((r) => setTimeout(r, 50));
+    expect(invoke).not.toHaveBeenCalledWith('update_constant', expect.anything());
+    expect(screen.getByText('50 %')).toBeInTheDocument();
+  });
+
+  it('disables the slider when the enable condition is false', async () => {
+    setupSliderMocks(50, { evaluate_expression: false });
+    renderDialog([
+      {
+        type: 'Slider',
+        label: 'Throttle Position sensor',
+        name: 'ADCFILTER_TPS',
+        enabled_condition: 'alwaysOn',
+      },
+    ]);
+
+    const slider = (await screen.findByRole('slider', {
+      name: /throttle position sensor/i,
+    })) as HTMLInputElement;
+    await waitFor(() => expect(slider.disabled).toBe(true));
+    expect(slider).toBeDisabled();
+  });
+});
+
+describe('DialogRenderer displayOnlyField', () => {
+  const mockBitsConstant = {
+    name: 'fuelPumpPin',
+    label: 'Fuel pump pin',
+    units: '',
+    digits: 0,
+    min: 0,
+    max: 63,
+    value_type: 'bits',
+    bit_options: ['Board Default', 'INVALID', 'INVALID', '3', '4'],
+    help: 'The pin the fuel pump is on',
+  };
+
+  afterEach(() => {
+    tearDownTauriMocks();
+  });
+
+  it('shows the bits option text for a bound constant (read-only)', async () => {
+    setupTauriMocks({
+      get_constant: mockBitsConstant,
+      // raw index 3 = option "3"
+      get_constant_value: 3,
+      get_settings: { show_all_help_icons: true },
+    });
+    render(
+      <ToastProvider>
+        <DialogRenderer
+          definition={{
+            name: 'ioSummary',
+            title: 'I/O Summary',
+            components: [
+              { type: 'DisplayOnlyField', label: 'Fuel pump pin', name: 'fuelPumpPin' },
+            ],
+          }}
+          onBack={() => {}}
+          openTable={() => {}}
+          context={{}}
+        />
+      </ToastProvider>
+    );
+
+    // Read-only value shows the option text, not the raw index
+    await waitFor(() => expect(screen.getByText('3')).toBeInTheDocument());
+    // No editable control rendered for the row
+    expect(screen.queryByRole('combobox')).toBeNull();
+    expect(screen.queryByRole('slider')).toBeNull();
+  });
+
+  it('renders text-only lines with note styling', async () => {
+    setupTauriMocks({ get_settings: { show_all_help_icons: true } });
+    render(
+      <ToastProvider>
+        <DialogRenderer
+          definition={{
+            name: 'closedLoopIdle',
+            title: 'Closed Loop Idle',
+            components: [
+              {
+                type: 'DisplayOnlyField',
+                label: '#     !!! Please note that 1.0 means 100% !!!',
+              },
+            ],
+          }}
+          onBack={() => {}}
+          openTable={() => {}}
+          context={{}}
+        />
+      </ToastProvider>
+    );
+
+    const note = await screen.findByText('!!! Please note that 1.0 means 100% !!!');
+    expect(note).toBeInTheDocument();
+    expect(note.className).toMatch(/dialog-section-header|dialog-label/);
+  });
+
+  it('hides the line when the visibility condition is false', async () => {
+    setupTauriMocks({
+      get_constant: mockBitsConstant,
+      get_constant_value: 0,
+      evaluate_expression: false,
+      get_settings: { show_all_help_icons: true },
+    });
+    render(
+      <ToastProvider>
+        <DialogRenderer
+          definition={{
+            name: 'ioSummary',
+            title: 'I/O Summary',
+            components: [
+              {
+                type: 'DisplayOnlyField',
+                label: 'Fuel pump pin',
+                name: 'fuelPumpPin',
+                visibility_condition: 'fuelPumpEnable',
+              },
+            ],
+          }}
+          onBack={() => {}}
+          openTable={() => {}}
+          context={{}}
+        />
+      </ToastProvider>
+    );
+
+    // Wrapper hides the whole row when the condition is false
+    await waitFor(() =>
+      expect(screen.queryByText('Fuel pump pin')).toBeNull()
+    );
+  });
+});
+
+describe('DialogRenderer requiresPowerCycle badge', () => {
+  afterEach(() => {
+    tearDownTauriMocks();
+  });
+
+  it('shows a power-cycle badge on a Field marked requiresPowerCycle', async () => {
+    setupTauriMocks({
+      get_constant: {
+        name: 'nCylinders',
+        label: 'Cylinder Count',
+        units: '',
+        digits: 0,
+        min: 1,
+        max: 12,
+        value_type: 'scalar',
+        bit_options: [],
+        requires_power_cycle: true,
+      },
+      get_constant_value: 4,
+      get_settings: { show_all_help_icons: true },
+    });
+    render(
+      <ToastProvider>
+        <DialogRenderer
+          definition={{
+            name: 'engineConstants',
+            title: 'Engine Constants',
+            components: [{ type: 'Field', label: 'Cylinder Count', name: 'nCylinders' }],
+          }}
+          onBack={() => {}}
+          openTable={() => {}}
+          context={{}}
+        />
+      </ToastProvider>
+    );
+
+    const badge = await screen.findByText('power cycle');
+    expect(badge).toBeInTheDocument();
+    expect(badge.closest('.power-cycle-badge')).toBeInTheDocument();
+  });
+
+  it('shows no badge when the constant is not marked', async () => {
+    setupTauriMocks({
+      get_constant: {
+        name: 'reqFuel',
+        label: 'Required Fuel',
+        units: 'ms',
+        digits: 1,
+        min: 0,
+        max: 25.5,
+        value_type: 'scalar',
+        bit_options: [],
+        requires_power_cycle: false,
+      },
+      get_constant_value: 12.6,
+      get_settings: { show_all_help_icons: true },
+    });
+    render(
+      <ToastProvider>
+        <DialogRenderer
+          definition={{
+            name: 'engineConstants',
+            title: 'Engine Constants',
+            components: [{ type: 'Field', label: 'Required Fuel', name: 'reqFuel' }],
+          }}
+          onBack={() => {}}
+          openTable={() => {}}
+          context={{}}
+        />
+      </ToastProvider>
+    );
+
+    await waitFor(() => expect(screen.getByDisplayValue('12.6')).toBeInTheDocument());
+    expect(screen.queryByText('power cycle')).toBeNull();
+  });
+
+  it('renders a header help link for dialogs with topicHelp', async () => {
+    setupTauriMocks({ get_settings: { show_all_help_icons: true } });
+    render(
+      <ToastProvider>
+        <DialogRenderer
+          definition={{
+            name: 'fanSettings',
+            title: 'Fan Settings',
+            topic_help: 'http://wiki.speeduino.com/en/configuration/Thermo_fan',
+            components: [],
+          }}
+          onBack={() => {}}
+          openTable={() => {}}
+          context={{}}
+        />
+      </ToastProvider>
+    );
+
+    const helpBtn = await screen.findByTitle(
+      'http://wiki.speeduino.com/en/configuration/Thermo_fan'
+    );
+    expect(helpBtn).toBeInTheDocument();
+    expect(helpBtn.className).toMatch(/dialog-topic-help/);
+  });
+});

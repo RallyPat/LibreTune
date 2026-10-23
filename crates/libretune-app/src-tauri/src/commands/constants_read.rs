@@ -67,6 +67,7 @@ pub async fn get_constant(
         help: constant.help.clone(),
         visibility_condition: constant.visibility_condition.clone(),
         is_pc_variable: constant.is_pc_variable,
+        requires_power_cycle: def.requires_power_cycle.contains(&name),
     })
 }
 

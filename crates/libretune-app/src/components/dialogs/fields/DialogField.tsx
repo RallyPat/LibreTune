@@ -4,6 +4,7 @@ import { HelpCircle } from 'lucide-react';
 import type { Constant, FieldInfo } from '../types';
 import { isIncompleteNumericInput } from '../types';
 import { useDialogValueSource } from '../DialogValueSource';
+import { PowerCycleBadge } from './PowerCycleBadge';
 
 export default function DialogField({ 
   label, 
@@ -160,6 +161,7 @@ export default function DialogField({
   const renderLabel = () => (
     <label className="field-label">
       <span className="field-label-text">{displayLabel}</span>
+      {constant.requires_power_cycle && <PowerCycleBadge />}
       {(showAllHelpIcons || constant.help) && (
         <span
           className="help-icon"
@@ -275,6 +277,7 @@ export default function DialogField({
         <div className={fieldRowClass()}>
           <label className="field-label">
             <span className="field-label-text">{displayLabel}</span>
+            {constant.requires_power_cycle && <PowerCycleBadge />}
           </label>
           <div className="field-input-wrap">
             <input

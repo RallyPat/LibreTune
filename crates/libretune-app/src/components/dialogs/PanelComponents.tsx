@@ -30,6 +30,8 @@ import { DialogGaugeStack } from './fields/DialogGauge';
 import { CommandButton } from './fields/CommandButton';
 import DialogField from './fields/DialogField';
 import CheckboxField from './fields/CheckboxField';
+import SliderField from './fields/SliderField';
+import DisplayOnlyField from './fields/DisplayOnlyField';
 import { RuntimeValueReadout } from './fields/RuntimeValueReadout';
 import { SettingSelectorField } from './fields/SettingSelectorField';
 import { isUserTableLiveChannel, isGppwmLiveChannel, isCommandButtonPanel, inferLiveStateGateExpression } from './dialogLayout';
@@ -472,14 +474,17 @@ export function DialogFieldWrapper({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [comp.enabled_condition, comp.condition, context, comp.name]);
   
-  // Hide field if visibility condition is false
-  if (!fieldVisible || !comp.name) return null;
+  // Hide field if visibility condition is false. DisplayOnlyField may be a
+  // text-only line (name legitimately absent), so only it bypasses the name
+  // guard.
+  if (!fieldVisible) return null;
+  if (!comp.name && comp.type !== 'DisplayOnlyField') return null;
 
   if (comp.type === 'Checkbox') {
     return (
       <CheckboxField
         label={comp.label || ''}
-        name={comp.name}
+        name={comp.name || ''}
         flipValue={comp.flip_value ?? false}
         onUpdate={onUpdate}
         context={context}
@@ -491,9 +496,37 @@ export function DialogFieldWrapper({
     );
   }
 
+  if (comp.type === 'Slider') {
+    return (
+      <SliderField
+        label={comp.label || ''}
+        name={comp.name || ''}
+        onUpdate={onUpdate}
+        context={context}
+        fieldEnabledCondition={fieldEnabled}
+        onOptimisticUpdate={onOptimisticUpdate}
+        onFieldFocus={onFieldFocus}
+        showAllHelpIcons={showAllHelpIcons}
+      />
+    );
+  }
+
+  if (comp.type === 'DisplayOnlyField') {
+    return (
+      <DisplayOnlyField
+        label={comp.label || ''}
+        name={comp.name}
+        fieldEnabledCondition={fieldEnabled}
+        onFieldFocus={onFieldFocus}
+        showAllHelpIcons={showAllHelpIcons}
+      />
+    );
+  }
+
+  // Remaining types (Field) require a name — the guard above ensured it.
   return <DialogField
     label={comp.label || ''}
-    name={comp.name}
+    name={comp.name || ''}
     onUpdate={onUpdate}
     context={context}
     fieldEnabledCondition={fieldEnabled}
@@ -664,6 +697,15 @@ export function DialogComponentRenderer({
   if (comp.type === 'Checkbox' && comp.name) {
     // Reuse the wrapper so visibility/enable conditions are evaluated the
     // same way as Field; the wrapper dispatches to CheckboxField.
+    return <DialogFieldWrapper comp={comp} context={context} onUpdate={onUpdate} onOptimisticUpdate={onOptimisticUpdate} onFieldFocus={onFieldFocus} showAllHelpIcons={showAllHelpIcons} />;
+  }
+  if (comp.type === 'Slider' && comp.name) {
+    // Same wrapper reuse: visibility/enable conditions like Field.
+    return <DialogFieldWrapper comp={comp} context={context} onUpdate={onUpdate} onOptimisticUpdate={onOptimisticUpdate} onFieldFocus={onFieldFocus} showAllHelpIcons={showAllHelpIcons} />;
+  }
+  if (comp.type === 'DisplayOnlyField') {
+    // Condition-gated read-only row / text line. Note: no comp.name guard —
+    // name is legitimately optional here (text-only lines).
     return <DialogFieldWrapper comp={comp} context={context} onUpdate={onUpdate} onOptimisticUpdate={onOptimisticUpdate} onFieldFocus={onFieldFocus} showAllHelpIcons={showAllHelpIcons} />;
   }
   if (comp.type === 'RuntimeValue' && comp.name) {
