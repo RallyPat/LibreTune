@@ -92,6 +92,9 @@ pub(crate) struct ConstantInfo {
     pub help: Option<String>,
     pub visibility_condition: Option<String>, // Expression for when field should be visible
     pub is_pc_variable: bool,
+    /// True when the INI marks this constant in [ConstantsExtensions]
+    /// `requiresPowerCycle` — editing it needs an ECU power cycle to apply.
+    pub requires_power_cycle: bool,
 }
 /// Sync response with progress information
 #[derive(Serialize)]

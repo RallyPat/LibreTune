@@ -372,6 +372,28 @@
   opacity: 0.6;
 }
 
+/* "Requires power cycle" badge ([ConstantsExtensions] requiresPowerCycle) */
+.power-cycle-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 8px;
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 16px;
+  white-space: nowrap;
+  color: var(--warning, #e6a700);
+  background: color-mix(in srgb, var(--warning, #e6a700) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--warning, #e6a700) 35%, transparent);
+  vertical-align: middle;
+}
+
+.power-cycle-badge svg {
+  flex-shrink: 0;
+}
+
 .help-icon {
   display: inline-flex;
   align-items: center;

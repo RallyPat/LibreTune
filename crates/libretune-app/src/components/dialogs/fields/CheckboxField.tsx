@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { HelpCircle } from 'lucide-react';
 import type { Constant, FieldInfo } from '../types';
 import { useDialogValueSource } from '../DialogValueSource';
+import { PowerCycleBadge } from './PowerCycleBadge';
 
 /**
  * Renders a TunerStudio `checkbox = "Label", name, [flipValue], [{cond}]`
@@ -167,6 +168,7 @@ export default function CheckboxField({
     <div className={rowClass}>
       <label className="field-label">
         <span className="field-label-text">{displayLabel}</span>
+        {constant.requires_power_cycle && <PowerCycleBadge />}
         {(showAllHelpIcons || constant.help) && (
           <span
             className="help-icon"

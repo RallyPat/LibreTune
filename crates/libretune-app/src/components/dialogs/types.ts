@@ -51,6 +51,8 @@ export interface Constant {
   visibility_condition?: string;  // Expression for when field should be visible
   display_offset?: number;  // For bits type: offset to add to displayed value (e.g., +1 for [4:7+1])
   is_pc_variable?: boolean;
+  /** INI [ConstantsExtensions] requiresPowerCycle — edit needs an ECU power cycle to take effect */
+  requires_power_cycle?: boolean;
 }
 
 export interface TableInfo {

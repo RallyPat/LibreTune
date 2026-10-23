@@ -484,7 +484,7 @@ export function DialogFieldWrapper({
     return (
       <CheckboxField
         label={comp.label || ''}
-        name={comp.name}
+        name={comp.name || ''}
         flipValue={comp.flip_value ?? false}
         onUpdate={onUpdate}
         context={context}
@@ -500,7 +500,7 @@ export function DialogFieldWrapper({
     return (
       <SliderField
         label={comp.label || ''}
-        name={comp.name}
+        name={comp.name || ''}
         onUpdate={onUpdate}
         context={context}
         fieldEnabledCondition={fieldEnabled}
@@ -516,19 +516,17 @@ export function DialogFieldWrapper({
       <DisplayOnlyField
         label={comp.label || ''}
         name={comp.name}
-        onUpdate={onUpdate}
-        context={context}
         fieldEnabledCondition={fieldEnabled}
-        onOptimisticUpdate={onOptimisticUpdate}
         onFieldFocus={onFieldFocus}
         showAllHelpIcons={showAllHelpIcons}
       />
     );
   }
 
+  // Remaining types (Field) require a name — the guard above ensured it.
   return <DialogField
     label={comp.label || ''}
-    name={comp.name}
+    name={comp.name || ''}
     onUpdate={onUpdate}
     context={context}
     fieldEnabledCondition={fieldEnabled}

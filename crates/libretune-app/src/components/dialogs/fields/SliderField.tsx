@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { HelpCircle } from 'lucide-react';
 import type { Constant, FieldInfo } from '../types';
 import { useDialogValueSource } from '../DialogValueSource';
+import { PowerCycleBadge } from './PowerCycleBadge';
 
 /**
  * Renders a TunerStudio `slider = "Label", name, [horizontal|vertical],
@@ -168,6 +169,7 @@ export default function SliderField({
   const renderLabel = () => (
     <label className="field-label">
       <span className="field-label-text">{displayLabel}</span>
+      {constant.requires_power_cycle && <PowerCycleBadge />}
       {(showAllHelpIcons || constant.help) && (
         <span
           className="help-icon"

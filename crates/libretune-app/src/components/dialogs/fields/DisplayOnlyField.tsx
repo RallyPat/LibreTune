@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { HelpCircle } from 'lucide-react';
 import type { Constant, FieldInfo } from '../types';
 import { useDialogValueSource } from '../DialogValueSource';
+import { PowerCycleBadge } from './PowerCycleBadge';
 
 /**
  * Renders a TunerStudio `displayOnlyField = [!|#]"Label" [, name], [{cond}]`
@@ -21,19 +22,13 @@ import { useDialogValueSource } from '../DialogValueSource';
 export default function DisplayOnlyField({
   label,
   name,
-  onUpdate,
-  context,
   fieldEnabledCondition,
-  onOptimisticUpdate,
   onFieldFocus,
   showAllHelpIcons = true,
 }: {
   label: string;
   name?: string;
-  onUpdate?: () => void;
-  context: Record<string, number>;
   fieldEnabledCondition?: boolean;
-  onOptimisticUpdate?: (name: string, value: number) => void;
   onFieldFocus?: (info: FieldInfo) => void;
   showAllHelpIcons?: boolean;
 }) {
@@ -132,6 +127,7 @@ export default function DisplayOnlyField({
     <div className={rowClass}>
       <label className="field-label">
         <span className="field-label-text">{displayLabel}</span>
+        {constant.requires_power_cycle && <PowerCycleBadge />}
         {(showAllHelpIcons || constant.help) && (
           <span
             className="help-icon"

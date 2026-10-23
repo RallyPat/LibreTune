@@ -595,3 +595,80 @@ describe('DialogRenderer displayOnlyField', () => {
     );
   });
 });
+
+describe('DialogRenderer requiresPowerCycle badge', () => {
+  afterEach(() => {
+    tearDownTauriMocks();
+  });
+
+  it('shows a power-cycle badge on a Field marked requiresPowerCycle', async () => {
+    setupTauriMocks({
+      get_constant: {
+        name: 'nCylinders',
+        label: 'Cylinder Count',
+        units: '',
+        digits: 0,
+        min: 1,
+        max: 12,
+        value_type: 'scalar',
+        bit_options: [],
+        requires_power_cycle: true,
+      },
+      get_constant_value: 4,
+      get_settings: { show_all_help_icons: true },
+    });
+    render(
+      <ToastProvider>
+        <DialogRenderer
+          definition={{
+            name: 'engineConstants',
+            title: 'Engine Constants',
+            components: [{ type: 'Field', label: 'Cylinder Count', name: 'nCylinders' }],
+          }}
+          onBack={() => {}}
+          openTable={() => {}}
+          context={{}}
+        />
+      </ToastProvider>
+    );
+
+    const badge = await screen.findByText('power cycle');
+    expect(badge).toBeInTheDocument();
+    expect(badge.closest('.power-cycle-badge')).toBeInTheDocument();
+  });
+
+  it('shows no badge when the constant is not marked', async () => {
+    setupTauriMocks({
+      get_constant: {
+        name: 'reqFuel',
+        label: 'Required Fuel',
+        units: 'ms',
+        digits: 1,
+        min: 0,
+        max: 25.5,
+        value_type: 'scalar',
+        bit_options: [],
+        requires_power_cycle: false,
+      },
+      get_constant_value: 12.6,
+      get_settings: { show_all_help_icons: true },
+    });
+    render(
+      <ToastProvider>
+        <DialogRenderer
+          definition={{
+            name: 'engineConstants',
+            title: 'Engine Constants',
+            components: [{ type: 'Field', label: 'Required Fuel', name: 'reqFuel' }],
+          }}
+          onBack={() => {}}
+          openTable={() => {}}
+          context={{}}
+        />
+      </ToastProvider>
+    );
+
+    await waitFor(() => expect(screen.getByDisplayValue('12.6')).toBeInTheDocument());
+    expect(screen.queryByText('power cycle')).toBeNull();
+  });
+});
