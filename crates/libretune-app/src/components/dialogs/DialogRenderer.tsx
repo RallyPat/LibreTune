@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, ExternalLink } from 'lucide-react';
+import { openUrl } from '@tauri-apps/plugin-opener';
 import './DialogRenderer.css';
 import {
   type DialogDefinition,
@@ -99,6 +100,19 @@ export default function DialogRenderer({ definition, onBack, openTable, context,
         <h2 className="content-title" style={{ margin: 0 }}>
           {displayTitle || definition.title}
         </h2>
+        {definition.topic_help && (
+          <button
+            onClick={() => {
+              openUrl(definition.topic_help!).catch((err) =>
+                console.error('[DialogRenderer] Failed to open help URL:', err)
+              );
+            }}
+            className="icon-btn dialog-topic-help"
+            title={definition.topic_help}
+          >
+            <ExternalLink size={16} />
+          </button>
+        )}
       </div>
 
       <div className="glass-card dialog-container" ref={containerRef}>

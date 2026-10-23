@@ -2530,6 +2530,17 @@ fn parse_user_defined_entry(
                 }
             }
         }
+        "topichelp" => {
+            // Dialog context: topicHelp = "https://…" attaches a help URL to
+            // the dialog being defined (TunerStudio renders it as a help
+            // link). In [TableEditor]/[CurveEditor]/[ReferenceTables] the
+            // same key is handled by their own parsers.
+            if let Some(name) = current_dialog {
+                if let Some(dialog) = def.dialogs.get_mut(name) {
+                    dialog.topic_help = Some(value.trim().trim_matches('"').to_string());
+                }
+            }
+        }
         "dialog" => {
             let parts = split_ini_line(value);
             if !parts.is_empty() {
@@ -2553,6 +2564,7 @@ fn parse_user_defined_entry(
                     title,
                     components: Vec::new(),
                     layout_hint,
+                    topic_help: None,
                 };
                 def.dialogs.insert(name.clone(), dialog);
                 *current_dialog = Some(name);

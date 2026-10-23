@@ -671,4 +671,29 @@ describe('DialogRenderer requiresPowerCycle badge', () => {
     await waitFor(() => expect(screen.getByDisplayValue('12.6')).toBeInTheDocument());
     expect(screen.queryByText('power cycle')).toBeNull();
   });
+
+  it('renders a header help link for dialogs with topicHelp', async () => {
+    setupTauriMocks({ get_settings: { show_all_help_icons: true } });
+    render(
+      <ToastProvider>
+        <DialogRenderer
+          definition={{
+            name: 'fanSettings',
+            title: 'Fan Settings',
+            topic_help: 'http://wiki.speeduino.com/en/configuration/Thermo_fan',
+            components: [],
+          }}
+          onBack={() => {}}
+          openTable={() => {}}
+          context={{}}
+        />
+      </ToastProvider>
+    );
+
+    const helpBtn = await screen.findByTitle(
+      'http://wiki.speeduino.com/en/configuration/Thermo_fan'
+    );
+    expect(helpBtn).toBeInTheDocument();
+    expect(helpBtn.className).toMatch(/dialog-topic-help/);
+  });
 });

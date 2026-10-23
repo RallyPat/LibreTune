@@ -36,6 +36,9 @@ export interface DialogDefinition {
   /** From `dialog = name, "title", <hint>` — "xAxis" arranges top-level,
    * unpositioned panels in a horizontal row instead of stacking them. */
   layout_hint?: string;
+  /** From an indented `topicHelp = "https://…"` line — rendered as a help
+   * link in the dialog header. */
+  topic_help?: string;
 }
 
 export interface Constant {

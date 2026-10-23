@@ -615,6 +615,11 @@ pub struct DialogDefinition {
     /// already supports separately) are captured but not yet interpreted.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub layout_hint: Option<String>,
+    /// URL from an indented `topicHelp = "https://…"` line inside the dialog
+    /// definition (TunerStudio shows it as a help link). Only the first
+    /// topicHelp line is kept.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub topic_help: Option<String>,
 }
 
 /// Components that can exist inside a dialog

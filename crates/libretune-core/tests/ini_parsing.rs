@@ -680,6 +680,38 @@ dialog = sensorFilters, "Analog sensor filters"
     let _ = std::fs::remove_file(&temp_path);
 }
 
+/// An indented `topicHelp = "url"` line inside a dialog definition attaches
+/// the URL to the dialog (rendered as a help link).
+#[test]
+fn test_parse_dialog_topic_help() {
+    let ini_content = r#"
+[MegaTune]
+signature = "Test ECU"
+queryCommand = "Q"
+
+[Constants]
+page = 1
+
+[UserDefined]
+dialog = fanSettings, "Fan Settings"
+    topicHelp = "http://wiki.speeduino.com/en/configuration/Thermo_fan"
+    field = "Fan Mode", fanEnable
+"#;
+
+    let temp_path = std::env::temp_dir().join("test_dialog_topic_help.ini");
+    std::fs::write(&temp_path, ini_content).expect("Failed to write temp file");
+
+    let def = EcuDefinition::from_file(&temp_path).expect("Failed to parse INI");
+    let dialog = def.dialogs.get("fanSettings").expect("dialog missing");
+    assert_eq!(
+        dialog.topic_help.as_deref(),
+        Some("http://wiki.speeduino.com/en/configuration/Thermo_fan")
+    );
+    assert_eq!(dialog.components.len(), 1);
+
+    let _ = std::fs::remove_file(&temp_path);
+}
+
 /// `displayOnlyField` must parse into DialogComponent::DisplayOnlyField
 /// (previously silently dropped). Covers the three real-world forms from
 /// speeduino.ini: read-only constant value, text-only note, and a
