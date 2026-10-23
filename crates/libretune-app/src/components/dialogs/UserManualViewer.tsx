@@ -19,7 +19,17 @@ import { ExternalLink, ChevronLeft, ChevronRight, Home, Book } from 'lucide-reac
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { marked } from 'marked';
 import { Dialog } from '../common';
+import { isSafeWebUrl } from '../../utils/urlSafety';
 import './UserManualViewer.css';
+
+/** Escape a value interpolated into a double-quoted HTML attribute. */
+function escapeHtmlAttr(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
 
 /** Props for UserManualViewer component */
 interface UserManualViewerProps {
@@ -226,23 +236,30 @@ export default function UserManualViewer({ section = 'introduction', onClose }: 
     const renderer = new marked.Renderer();
 
     renderer.image = (href, title, text) => {
-      const src = normalizeImageSrc(href ?? '', baseSection);
-      const safeTitle = title ? ` title="${title}"` : '';
-      const alt = text ?? '';
+      const src = escapeHtmlAttr(normalizeImageSrc(href ?? '', baseSection));
+      const safeTitle = title ? ` title="${escapeHtmlAttr(title)}"` : '';
+      const alt = escapeHtmlAttr(text ?? '');
       return `<img src="${src}" alt="${alt}"${safeTitle} />`;
     };
 
     renderer.link = (href, title, text) => {
       if (!href) return text ?? '';
       if (href.startsWith('http') || href.startsWith('mailto:')) {
-        const safeTitle = title ? ` title="${title}"` : '';
-        return `<a href="${href}" target="_blank" rel="noreferrer"${safeTitle}>${text ?? href}</a>`;
+        // Only http(s) links may become real anchors; anything else from the
+        // document (javascript:, data:, ...) is reduced to plain text. `text`
+        // is already-escaped inline HTML from marked — do not escape again.
+        if (!isSafeWebUrl(href, true)) {
+          return text ?? '';
+        }
+        const safeHref = escapeHtmlAttr(href);
+        const safeTitle = title ? ` title="${escapeHtmlAttr(title)}"` : '';
+        return `<a href="${safeHref}" target="_blank" rel="noreferrer"${safeTitle}>${text ?? href}</a>`;
       }
 
       const resolved = resolveRelativePath(baseSection, href.replace(/^\.\//, ''));
       const sectionPath = normalizeSectionPath(resolved);
-      const safeTitle = title ? ` title="${title}"` : '';
-      return `<a href="#" data-manual-link="${sectionPath}"${safeTitle}>${text ?? href}</a>`;
+      const safeTitle = title ? ` title="${escapeHtmlAttr(title)}"` : '';
+      return `<a href="#" data-manual-link="${escapeHtmlAttr(sectionPath)}"${safeTitle}>${text ?? href}</a>`;
     };
 
     return renderer;
