@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { RefreshCw } from "lucide-react";
+import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
+import { RefreshCw, FileUp } from "lucide-react";
 import { Dialog, Button } from "../common";
+import type { IniEntry } from "../../types/app";
 
 interface OnlineIniEntry {
   source: string;
@@ -21,6 +23,9 @@ interface OnlineIniListResponse {
 interface OnlineIniDialogProps {
   isOpen: boolean;
   onClose: () => void;
+  /** Called after a user-provided .ini is imported, so the parent can refresh
+   *  its INI list (the same callback New Project uses). */
+  onIniImported?: (entry: IniEntry) => void;
 }
 
 /**
@@ -35,7 +40,7 @@ interface OnlineIniDialogProps {
  * cache instantly (refreshing in the background only when stale), and the
  * Refresh button forces a network re-scan via `refresh_online_inis`.
  */
-export default function OnlineIniDialog({ isOpen, onClose }: OnlineIniDialogProps) {
+export default function OnlineIniDialog({ isOpen, onClose, onIniImported }: OnlineIniDialogProps) {
   const [results, setResults] = useState<OnlineIniEntry[]>([]);
   const [filter, setFilter] = useState("");
   const [searching, setSearching] = useState(false);
@@ -44,6 +49,7 @@ export default function OnlineIniDialog({ isOpen, onClose }: OnlineIniDialogProp
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [downloading, setDownloading] = useState<string | null>(null);
+  const [importing, setImporting] = useState(false);
   const [done, setDone] = useState<string | null>(null);
 
   useEffect(() => {
@@ -110,6 +116,32 @@ export default function OnlineIniDialog({ isOpen, onClose }: OnlineIniDialogProp
     }
   }
 
+  /** Use an .ini file from the user's computer: import it into the local
+   *  repository, then make it the project's INI — the local-file counterpart
+   *  of download(). Serves users whose ECU/firmware isn't in the online
+   *  sources (custom firmware, vendor-supplied definitions). */
+  async function importLocal() {
+    setError(null);
+    setNotice(null);
+    setDone(null);
+    const selected = await openFileDialog({
+      multiple: false,
+      filters: [{ name: "INI Definition", extensions: ["ini"] }],
+    });
+    if (!selected || typeof selected !== "string") return; // cancelled
+    setImporting(true);
+    try {
+      const entry = await invoke<IniEntry>("import_ini", { sourcePath: selected });
+      await invoke("update_project_ini", { iniPath: entry.path, forceResync: true });
+      onIniImported?.(entry);
+      setDone(`Loaded ${entry.name} (local file).`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setImporting(false);
+    }
+  }
+
   const shown = results.filter((r) => {
     if (!filter.trim()) return true;
     const q = filter.toLowerCase();
@@ -125,8 +157,8 @@ export default function OnlineIniDialog({ isOpen, onClose }: OnlineIniDialogProp
       <Dialog.Body>
         <p style={{ marginTop: 0, opacity: 0.8 }}>
           Browse and download ECU definitions from the official online sources
-          (Speeduino, rusEFI, epicEFI, FOME). The selected file becomes the
-          project's INI.
+          (Speeduino, rusEFI, epicEFI, FOME), or provide your own .ini file —
+          the selected file becomes the project's INI.
         </p>
 
         <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", marginBottom: "0.25rem" }}>
@@ -139,8 +171,17 @@ export default function OnlineIniDialog({ isOpen, onClose }: OnlineIniDialogProp
           />
           <Button
             variant="secondary"
+            onClick={importLocal}
+            disabled={importing || refreshing || searching || downloading !== null}
+            title="Use an .ini definition file from your computer"
+          >
+            <FileUp size={14} style={{ marginRight: "0.35rem", verticalAlign: "-2px" }} />
+            {importing ? "Importing…" : "Use local file…"}
+          </Button>
+          <Button
+            variant="secondary"
             onClick={refresh}
-            disabled={refreshing || searching || downloading !== null}
+            disabled={refreshing || searching || downloading !== null || importing}
             title="Re-scan all online sources now, ignoring the cache"
           >
             <RefreshCw size={14} style={{ marginRight: "0.35rem", verticalAlign: "-2px" }} className={refreshing ? "icon-spinning" : undefined} />
