@@ -67,7 +67,6 @@ export default function DisplayOnlyField({
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [name, valueSource]);
 
   // ── Text-only line: mirror the Label renderer's styling semantics ──
