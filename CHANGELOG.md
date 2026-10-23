@@ -13,6 +13,50 @@ relevant.
 
 ## [Unreleased]
 
+### 2026-10-22 — INI fidelity pass: displayOnlyField, power-cycle badges, dialog help links, 3D/curve metadata
+
+A coverage audit against the 687-file reference corpus (speeduino, rusEFI,
+FOME, epicECU, MS2/MS3/MShift) quantified what the parser silently dropped
+or parsed-but-never-used. This pass closes the small, high-frequency gaps;
+deferred items are listed at the end.
+
+#### Added
+
+- **`displayOnlyField`** (`DialogComponent::DisplayOnlyField` + parser arm +
+  `DisplayOnlyField.tsx`): read-only rows from
+  `displayOnlyField = [!|#]"Label" [, name] [, {vis}] [, {enable}]`. With a
+  constant it shows the current value (the option TEXT for `bits`, e.g. the
+  configured pin; number+units for scalars); without one (`blankfield`) it is
+  a condition-gated text line with the usual `#`/`!` header/note styling.
+  Restores speeduino's I/O summary rows, CAN source status lines, and MCU
+  warnings (263 lines across 4 corpus files previously invisible).
+- **Power-cycle badges**: constants listed in `[ConstantsExtensions]
+  requiresPowerCycle` (38,376 lines in 686/687 corpus files!) now flow
+  through `get_constant` as `requires_power_cycle` and render a
+  "power cycle" badge next to the label in every dialog field type
+  (Field/Checkbox/Slider/DisplayOnlyField), so users know a change only
+  applies after an ECU restart.
+- **Dialog `topicHelp`** (`DialogDefinition.topic_help` + parser arm): an
+  indented `topicHelp = "https://…"` inside a dialog now renders an
+  external-link button in the dialog header.
+- **`[TableEditor] gridOrient / upDownLabel`**: parsed into
+  `TableDefinition.grid_orient: (f32,f32,f32)` and
+  `up_label`/`down_label` (the old never-populated `up_color`/`down_color:
+  Option<u8>`-typed fields were renamed/retyped). Data is captured for the
+  3D view; renderer wiring is future work.
+- **`[CurveEditor] lineLabel`**: repeated legend labels captured into
+  `CurveDefinition.line_labels` (14,679 lines in 683/687 corpus files).
+
+#### Notes
+
+- `menuDialog = main` (709 lines, all files) is intentionally ignored — it
+  positions menus in TunerStudio's main window chrome, which has no
+  LibreTune equivalent.
+- Deferred (bigger efforts, tracked separately): real `liveGraph` rendering
+  (currently a labeled placeholder), stateful expression functions
+  (`smoothBasic`/`pastValue`/`maxValue` in LoggerDefinition calc fields),
+  FrontPage indicator rows.
+
 ### 2026-10-22 — INI `slider` dialog directives render as range controls
 
 Follow-up to the checkbox fix (issue #338): the `slider` directive was

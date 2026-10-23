@@ -137,6 +137,19 @@ own min/max, committing the written value when the handle is released. The
 optional orientation token (`horizontal`/`vertical`) is accepted;
 LibreTune renders the control horizontally either way.
 
+**displayOnlyField directives** are read-only rows. With a constant they show
+its current value (for `bits` constants, the option text — e.g. the
+configured pin); without one (or with `blankfield`) they render a static
+text line, with visibility/enable conditions applied as usual. `#`/`!`
+label prefixes style the line as a section header or note.
+
+**requiresPowerCycle**: constants listed under `[ConstantsExtensions]`
+`requiresPowerCycle` show a "power cycle" badge in dialogs — the change only
+takes effect after the ECU is restarted.
+
+**topicHelp** inside a dialog definition (`topicHelp = "https://…"`) is
+rendered as an external help link in the dialog header.
+
 ## Gauge Definitions
 
 Configure gauges:
