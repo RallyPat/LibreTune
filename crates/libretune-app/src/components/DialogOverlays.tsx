@@ -257,6 +257,17 @@ export function DialogOverlays(props: DialogOverlaysProps) {
     pluginPanelOpen, setPluginPanelOpen,
   } = props;
 
+  // Shared handler for dialogs that import a user-provided .ini (New Project,
+  // Connect-ECU wizard, Search-for-INI-Online): add the entry to the in-memory
+  // repository list so the INI pickers update immediately. import_ini is
+  // idempotent by signature, so guard against appending a duplicate when the
+  // same file is imported twice.
+  const handleIniImported = (entry: IniEntry) => {
+    setRepositoryInis((prev) =>
+      prev.some((e) => e.id === entry.id) ? prev : [...prev, entry],
+    );
+  };
+
   return (
     <>
       <SaveDialog
@@ -336,11 +347,13 @@ export function DialogOverlays(props: DialogOverlaysProps) {
       <OnlineIniDialog
         isOpen={onlineIniDialogOpen}
         onClose={() => setOnlineIniDialogOpen(false)}
+        onIniImported={handleIniImported}
       />
       <ConnectEcuWizard
         isOpen={connectEcuWizardOpen}
         onClose={() => setConnectEcuWizardOpen(false)}
         inis={repositoryInis}
+        onIniImported={handleIniImported}
         onCreateProject={createProject}
         onConnect={connectWizardEcu}
       />
@@ -349,7 +362,7 @@ export function DialogOverlays(props: DialogOverlaysProps) {
         isOpen={newProjectDialogOpen}
         onClose={() => setNewProjectDialogOpen(false)}
         inis={repositoryInis}
-        onIniImported={(entry) => setRepositoryInis((prev) => [...prev, entry])}
+        onIniImported={handleIniImported}
         onCreateProject={createProject}
         onImportTune={handleImportTuneIntoProject}
         onGenerateBaseMap={() => setBaseMapDialogOpen(true)}
