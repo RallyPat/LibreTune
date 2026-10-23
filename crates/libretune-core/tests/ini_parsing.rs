@@ -680,6 +680,100 @@ dialog = sensorFilters, "Analog sensor filters"
     let _ = std::fs::remove_file(&temp_path);
 }
 
+/// `displayOnlyField` must parse into DialogComponent::DisplayOnlyField
+/// (previously silently dropped). Covers the three real-world forms from
+/// speeduino.ini: read-only constant value, text-only note, and a
+/// condition-gated warning with `blankfield`.
+#[test]
+fn test_parse_display_only_field_components() {
+    use libretune_core::ini::DialogComponent;
+
+    let ini_content = r##"
+[MegaTune]
+signature = "Test ECU"
+queryCommand = "Q"
+
+[Constants]
+page = 1
+
+[UserDefined]
+dialog = io_summary, "I/O Summary"
+    displayOnlyField = "fuelPumpPin", fuelPumpPin, {fuelPumpEnable}
+    displayOnlyField = "#     !!! Please note that 1.0 means 100% !!!"
+    displayOnlyField = !"No PWM Fan available on MCU", blankfield, {intcan_available == 0 && fanEnable == 2}, {intcan_available == 0 && fanEnable == 2}
+    displayOnlyField = "Off 0", blankfield, {}, {(caninput_sel0a == 0)}
+"##;
+
+    let temp_path = std::env::temp_dir().join("test_display_only_field.ini");
+    std::fs::write(&temp_path, ini_content).expect("Failed to write temp file");
+
+    let def = EcuDefinition::from_file(&temp_path).expect("Failed to parse INI");
+    let dialog = def.dialogs.get("io_summary").expect("dialog missing");
+    assert_eq!(dialog.components.len(), 4);
+
+    // Read-only constant value, single condition = enable-only
+    match &dialog.components[0] {
+        DialogComponent::DisplayOnlyField {
+            label,
+            name,
+            visibility_condition,
+            enabled_condition,
+        } => {
+            assert_eq!(label, "fuelPumpPin");
+            assert_eq!(name.as_deref(), Some("fuelPumpPin"));
+            assert_eq!(enabled_condition.as_deref(), Some("fuelPumpEnable"));
+            assert!(visibility_condition.is_none());
+        }
+        other => panic!("expected DisplayOnlyField, got {other:?}"),
+    }
+
+    // Text-only note (no constant) — label prefix preserved for the renderer
+    match &dialog.components[1] {
+        DialogComponent::DisplayOnlyField { label, name, .. } => {
+            assert!(label.starts_with('#'));
+            assert!(name.is_none());
+        }
+        other => panic!("expected DisplayOnlyField, got {other:?}"),
+    }
+
+    // Warning with blankfield + dual conditions; `!` prefix preserved
+    match &dialog.components[2] {
+        DialogComponent::DisplayOnlyField {
+            label,
+            name,
+            visibility_condition,
+            enabled_condition,
+        } => {
+            assert!(label.starts_with('!'));
+            assert!(name.is_none(), "blankfield must not become a constant ref");
+            assert_eq!(
+                visibility_condition.as_deref(),
+                Some("intcan_available == 0 && fanEnable == 2")
+            );
+            assert_eq!(
+                enabled_condition.as_deref(),
+                Some("intcan_available == 0 && fanEnable == 2")
+            );
+        }
+        other => panic!("expected DisplayOnlyField, got {other:?}"),
+    }
+
+    // Empty braces are trivial and dropped; remaining single brace = enable
+    match &dialog.components[3] {
+        DialogComponent::DisplayOnlyField {
+            enabled_condition,
+            visibility_condition,
+            ..
+        } => {
+            assert_eq!(enabled_condition.as_deref(), Some("(caninput_sel0a == 0)"));
+            assert!(visibility_condition.is_none());
+        }
+        other => panic!("expected DisplayOnlyField, got {other:?}"),
+    }
+
+    let _ = std::fs::remove_file(&temp_path);
+}
+
 #[test]
 fn test_parse_readout_panel() {
     let ini_content = r#"

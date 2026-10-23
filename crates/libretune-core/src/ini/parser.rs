@@ -2955,6 +2955,67 @@ fn parse_user_defined_entry(
                 }
             }
         }
+        "displayonlyfield" => {
+            // Format: displayOnlyField = [!|#]"Label" [, name] [, {visibility}, {enable}]
+            // The constant is optional: `blankfield` (or no second token) marks
+            // a text-only line. Empty braces `{}` are trivial conditions and
+            // are dropped, matching TunerStudio semantics.
+            if let Some(name) = current_dialog {
+                if let Some(dialog) = def.dialogs.get_mut(name) {
+                    let parts = split_ini_line(value);
+                    if !parts.is_empty() {
+                        let label = parts[0].trim().trim_matches('"').to_string();
+
+                        let field_name = parts.get(1).map(|p| p.trim().to_string()).filter(|p| {
+                            !p.is_empty()
+                                && p != "blankfield"
+                                && !(p.starts_with('{') && p.ends_with('}'))
+                        });
+
+                        let conditions: Vec<String> = parts
+                            .iter()
+                            .skip(if parts.len() > 1 && field_name.is_some() {
+                                2
+                            } else {
+                                1
+                            })
+                            .filter_map(|p| {
+                                let trimmed = p.trim();
+                                if trimmed.starts_with('{') && trimmed.ends_with('}') {
+                                    let inner = trimmed
+                                        .trim_matches(|c| c == '{' || c == '}')
+                                        .trim()
+                                        .to_string();
+                                    (!inner.is_empty()).then_some(inner)
+                                } else {
+                                    None
+                                }
+                            })
+                            .collect();
+
+                        let visibility_condition = if conditions.len() >= 2 {
+                            Some(conditions[0].clone())
+                        } else {
+                            None
+                        };
+                        let enabled_condition = if conditions.len() >= 2 {
+                            Some(conditions[1].clone())
+                        } else if conditions.len() == 1 {
+                            Some(conditions[0].clone())
+                        } else {
+                            None
+                        };
+
+                        dialog.components.push(DialogComponent::DisplayOnlyField {
+                            label,
+                            name: field_name,
+                            visibility_condition,
+                            enabled_condition,
+                        });
+                    }
+                }
+            }
+        }
         "table" => {
             if let Some(name) = current_dialog {
                 if let Some(dialog) = def.dialogs.get_mut(name) {

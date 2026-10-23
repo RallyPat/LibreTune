@@ -484,3 +484,114 @@ describe('DialogRenderer slider field', () => {
     expect(slider).toBeDisabled();
   });
 });
+
+describe('DialogRenderer displayOnlyField', () => {
+  const mockBitsConstant = {
+    name: 'fuelPumpPin',
+    label: 'Fuel pump pin',
+    units: '',
+    digits: 0,
+    min: 0,
+    max: 63,
+    value_type: 'bits',
+    bit_options: ['Board Default', 'INVALID', 'INVALID', '3', '4'],
+    help: 'The pin the fuel pump is on',
+  };
+
+  afterEach(() => {
+    tearDownTauriMocks();
+  });
+
+  it('shows the bits option text for a bound constant (read-only)', async () => {
+    setupTauriMocks({
+      get_constant: mockBitsConstant,
+      // raw index 3 = option "3"
+      get_constant_value: 3,
+      get_settings: { show_all_help_icons: true },
+    });
+    render(
+      <ToastProvider>
+        <DialogRenderer
+          definition={{
+            name: 'ioSummary',
+            title: 'I/O Summary',
+            components: [
+              { type: 'DisplayOnlyField', label: 'Fuel pump pin', name: 'fuelPumpPin' },
+            ],
+          }}
+          onBack={() => {}}
+          openTable={() => {}}
+          context={{}}
+        />
+      </ToastProvider>
+    );
+
+    // Read-only value shows the option text, not the raw index
+    await waitFor(() => expect(screen.getByText('3')).toBeInTheDocument());
+    // No editable control rendered for the row
+    expect(screen.queryByRole('combobox')).toBeNull();
+    expect(screen.queryByRole('slider')).toBeNull();
+  });
+
+  it('renders text-only lines with note styling', async () => {
+    setupTauriMocks({ get_settings: { show_all_help_icons: true } });
+    render(
+      <ToastProvider>
+        <DialogRenderer
+          definition={{
+            name: 'closedLoopIdle',
+            title: 'Closed Loop Idle',
+            components: [
+              {
+                type: 'DisplayOnlyField',
+                label: '#     !!! Please note that 1.0 means 100% !!!',
+              },
+            ],
+          }}
+          onBack={() => {}}
+          openTable={() => {}}
+          context={{}}
+        />
+      </ToastProvider>
+    );
+
+    const note = await screen.findByText('!!! Please note that 1.0 means 100% !!!');
+    expect(note).toBeInTheDocument();
+    expect(note.className).toMatch(/dialog-section-header|dialog-label/);
+  });
+
+  it('hides the line when the visibility condition is false', async () => {
+    setupTauriMocks({
+      get_constant: mockBitsConstant,
+      get_constant_value: 0,
+      evaluate_expression: false,
+      get_settings: { show_all_help_icons: true },
+    });
+    render(
+      <ToastProvider>
+        <DialogRenderer
+          definition={{
+            name: 'ioSummary',
+            title: 'I/O Summary',
+            components: [
+              {
+                type: 'DisplayOnlyField',
+                label: 'Fuel pump pin',
+                name: 'fuelPumpPin',
+                visibility_condition: 'fuelPumpEnable',
+              },
+            ],
+          }}
+          onBack={() => {}}
+          openTable={() => {}}
+          context={{}}
+        />
+      </ToastProvider>
+    );
+
+    // Wrapper hides the whole row when the condition is false
+    await waitFor(() =>
+      expect(screen.queryByText('Fuel pump pin')).toBeNull()
+    );
+  });
+});

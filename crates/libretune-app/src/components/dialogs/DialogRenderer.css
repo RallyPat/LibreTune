@@ -352,6 +352,26 @@
   flex-shrink: 0;
 }
 
+/* Read-only display rows (displayOnlyField) */
+.dialog-view .field-display-value {
+  width: 100%;
+  min-width: 0;
+  padding: 3px 7px;
+  border: 1px dashed var(--border-color);
+  border-radius: 6px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.2;
+  box-sizing: border-box;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dialog-view .settings-field--display-only.is-disabled .field-display-value {
+  opacity: 0.6;
+}
+
 .help-icon {
   display: inline-flex;
   align-items: center;

@@ -5,7 +5,7 @@
 // and `get_port_editor`.
 
 export interface DialogComponent {
-  type: 'Panel' | 'Field' | 'Checkbox' | 'Slider' | 'RuntimeValue' | 'LiveGraph' | 'Table' | 'Label' | 'Indicator' | 'CommandButton' | 'Gauge' | 'SettingSelector';
+  type: 'Panel' | 'Field' | 'Checkbox' | 'Slider' | 'DisplayOnlyField' | 'RuntimeValue' | 'LiveGraph' | 'Table' | 'Label' | 'Indicator' | 'CommandButton' | 'Gauge' | 'SettingSelector';
   name?: string;
   label?: string;
   text?: string;

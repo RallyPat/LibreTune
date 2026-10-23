@@ -672,6 +672,22 @@ pub enum DialogComponent {
         #[serde(skip_serializing_if = "Option::is_none")]
         enabled_condition: Option<String>,
     },
+    /// A read-only display row (`displayOnlyField = [!|#]"Label" [, name]
+    /// [, {visibility}, {enable}]`). With a constant name it shows that
+    /// constant's current value (no editor); without one (or with the
+    /// `blankfield` placeholder) it is a static text line whose visibility
+    /// can be condition-driven. `#`/`!` label prefixes carry the usual
+    /// section-header / note styling.
+    DisplayOnlyField {
+        label: String,
+        /// None for text-only lines (`blankfield` or no second token)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        visibility_condition: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        enabled_condition: Option<String>,
+    },
     /// Preset dropdown (`settingSelector`) that applies constant assignments
     SettingSelector {
         label: String,
