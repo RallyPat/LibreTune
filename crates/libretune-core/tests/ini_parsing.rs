@@ -712,6 +712,59 @@ dialog = fanSettings, "Fan Settings"
     let _ = std::fs::remove_file(&temp_path);
 }
 
+/// [TableEditor] `gridOrient` (3 numbers) and `upDownLabel` (2 labels) and
+/// [CurveEditor] `lineLabel` (repeated legend labels) must be captured
+/// (previously silently dropped — gridOrient/upDownLabel in every file of
+/// the reference corpus, lineLabel in 683/687).
+#[test]
+fn test_parse_table_and_curve_fidelity_keys() {
+    let ini_content = r#"
+[MegaTune]
+signature = "Test ECU"
+queryCommand = "Q"
+
+[Constants]
+page = 1
+
+[TableEditor]
+    table = veTable1Tbl, veTable1Map, "VE Table", 2
+        xBins = rpmBins, rpm
+        yBins = fuelLoadBins, fuelLoad
+        zBins = veTable1
+        gridHeight = 2.0
+        gridOrient = 250, 0, 340
+        upDownLabel = "(RICHER)", "(LEANER)"
+
+[CurveEditor]
+    curve = warmup_analyzer_curve, "Warmup Enrichment"
+        columnLabel = "Coolant", "Enrichment"
+        yBins = wueRates
+        lineLabel = "Current WUE"
+        lineLabel = "Recommended WUE"
+"#;
+
+    let temp_path = std::env::temp_dir().join("test_table_curve_fidelity.ini");
+    std::fs::write(&temp_path, ini_content).expect("Failed to write temp file");
+
+    let def = EcuDefinition::from_file(&temp_path).expect("Failed to parse INI");
+
+    let table = def.tables.get("veTable1Tbl").expect("table missing");
+    assert_eq!(table.grid_orient, Some((250.0, 0.0, 340.0)));
+    assert_eq!(table.up_label.as_deref(), Some("(RICHER)"));
+    assert_eq!(table.down_label.as_deref(), Some("(LEANER)"));
+
+    let curve = def
+        .curves
+        .get("warmup_analyzer_curve")
+        .expect("curve missing");
+    assert_eq!(
+        curve.line_labels,
+        vec!["Current WUE".to_string(), "Recommended WUE".to_string()]
+    );
+
+    let _ = std::fs::remove_file(&temp_path);
+}
+
 /// `displayOnlyField` must parse into DialogComponent::DisplayOnlyField
 /// (previously silently dropped). Covers the three real-world forms from
 /// speeduino.ini: read-only constant value, text-only note, and a

@@ -44,17 +44,19 @@ pub struct TableDefinition {
     /// Number of rows (1 for 2D tables)
     pub y_size: usize,
 
-    /// Up-from color (high values)
-    pub up_color: Option<String>,
+    /// Label for increasing values shown on the 3D view (from `upDownLabel`
+    /// first token, e.g. "(RICHER)")
+    pub up_label: Option<String>,
 
-    /// Down-from color (low values)
-    pub down_color: Option<String>,
+    /// Label for decreasing values shown on the 3D view (from `upDownLabel`
+    /// second token, e.g. "(LEANER)")
+    pub down_label: Option<String>,
 
     /// Grid height for display
     pub grid_height: Option<f32>,
 
-    /// Grid orientation
-    pub grid_orient: Option<u8>,
+    /// Grid orientation (yaw, pitch, roll) from `gridOrient = 250, 0, 340`
+    pub grid_orient: Option<(f32, f32, f32)>,
 
     /// Help text
     pub help: Option<String>,
@@ -136,8 +138,8 @@ impl TableDefinition {
             page: 0,
             x_size,
             y_size: 1,
-            up_color: None,
-            down_color: None,
+            up_label: None,
+            down_label: None,
             grid_height: None,
             grid_orient: None,
             help: None,
@@ -172,8 +174,8 @@ impl TableDefinition {
             page: 0,
             x_size,
             y_size,
-            up_color: None,
-            down_color: None,
+            up_label: None,
+            down_label: None,
             grid_height: None,
             grid_orient: None,
             help: None,
@@ -246,6 +248,12 @@ pub struct CurveDefinition {
 
     /// Gauge name for live display (from gauge = GaugeName in INI)
     pub gauge: Option<String>,
+
+    /// Legend labels for overlaid curve lines (from repeated `lineLabel =`
+    /// lines; e.g. the WUE analyzer curve overlays "Current WUE" and
+    /// "Recommended WUE"). Empty for single-line curves.
+    #[serde(default)]
+    pub line_labels: Vec<String>,
 }
 
 impl CurveDefinition {
@@ -268,6 +276,7 @@ impl CurveDefinition {
             page: 0,
             help: None,
             gauge: None,
+            line_labels: Vec::new(),
         }
     }
 }

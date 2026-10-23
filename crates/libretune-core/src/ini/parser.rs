@@ -1841,6 +1841,29 @@ fn parse_table_editor_entry(
                         table.y_label = Some(parts[1].trim_matches('"').to_string());
                     }
                 }
+                "gridorient" => {
+                    // Format: gridOrient = yaw, pitch, roll (e.g. "250, 0, 340")
+                    let parts: Vec<&str> = value.split(',').map(|s| s.trim()).collect();
+                    if parts.len() >= 3 {
+                        if let (Ok(a), Ok(b), Ok(c)) = (
+                            parts[0].parse::<f32>(),
+                            parts[1].parse::<f32>(),
+                            parts[2].parse::<f32>(),
+                        ) {
+                            table.grid_orient = Some((a, b, c));
+                        }
+                    }
+                }
+                "updownlabel" => {
+                    // Format: upDownLabel = "UpLabel", "DownLabel" (3D view)
+                    let parts = split_ini_line(value);
+                    if !parts.is_empty() {
+                        table.up_label = Some(parts[0].trim_matches('"').to_string());
+                    }
+                    if parts.len() >= 2 {
+                        table.down_label = Some(parts[1].trim_matches('"').to_string());
+                    }
+                }
                 _ => {}
             }
         }
@@ -1934,6 +1957,14 @@ fn parse_curve_editor_entry(
                 "gauge" => {
                     // Format: gauge = GaugeName
                     curve.gauge = Some(value.trim().to_string());
+                }
+                "linelabel" => {
+                    // Format: lineLabel = "Label" — legend label for each
+                    // overlaid curve line (e.g. WUE analyzer's "Current WUE"
+                    // / "Recommended WUE"). Repeated lines append in order.
+                    curve
+                        .line_labels
+                        .push(value.trim().trim_matches('"').to_string());
                 }
                 _ => {}
             }
