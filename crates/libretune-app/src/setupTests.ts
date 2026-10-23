@@ -1,4 +1,6 @@
-import '@testing-library/jest-dom';
+// Import the vitest-specific entry point: it extends vitest's `expect`
+// (rather than jest's) with the DOM matchers at runtime.
+import '@testing-library/jest-dom/vitest';
 
 // Provide a minimal localStorage stub for jsdom environments where it is missing.
 if (typeof globalThis.localStorage === 'undefined') {

@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { AlertTriangle } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
+import { isSafeWebUrl } from "./utils/urlSafety";
 import { listen } from "@tauri-apps/api/event";
 import { ThemeProvider, useTheme } from "./themes";
 import { initializeHotkeyManager } from "./services/hotkeyService";
@@ -1475,9 +1476,15 @@ function AppContent() {
         const topic = await invoke<HelpTopicData>("get_help_topic", { name: topicName });
         console.log("[openHelpTopic] Got help topic:", topic);
         
-        // If there's a web URL and no text content, open directly in browser
+        // If there's a web URL and no text content, open directly in browser.
+        // web_url comes from the INI definition file (external content), so
+        // only http(s) URLs may be opened.
         if (topic.web_url && (!topic.text_lines || topic.text_lines.length === 0)) {
-          window.open(topic.web_url, "_blank");
+          if (isSafeWebUrl(topic.web_url)) {
+            window.open(topic.web_url, "_blank", "noopener,noreferrer");
+          } else {
+            console.warn("[openHelpTopic] Refusing to open non-http(s) web_url from INI:", topic.web_url);
+          }
           return;
         }
         

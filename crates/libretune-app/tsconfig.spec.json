@@ -1,7 +1,7 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
-    "types": ["vitest", "@testing-library/jest-dom"],
+    "types": ["vitest", "@testing-library/jest-dom", "node"],
     "noEmit": true
   },
   "include": [
