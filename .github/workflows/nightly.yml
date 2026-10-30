@@ -78,6 +78,7 @@ jobs:
         working-directory: crates/libretune-app
         run: |
           npm ci
+          npm run check:tauri-sync
           npx tsc --noEmit
           npm run lint
 

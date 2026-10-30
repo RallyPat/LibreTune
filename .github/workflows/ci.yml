@@ -101,6 +101,12 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # `tauri build` (nightly/release only) rejects mismatched major.minor
+      # versions between the tauri Rust crates and the @tauri-apps npm
+      # packages. Catch the drift here, at PR time, instead (issue #345).
+      - name: Check Tauri crate/npm version sync
+        run: npm run check:tauri-sync
+
       - name: Type check
         run: npx tsc --noEmit
 

@@ -13,6 +13,35 @@ relevant.
 
 ## [Unreleased]
 
+### 2026-10-30 — Nightly build fix: Tauri crate/npm version realignment + PR-time drift guard (issue #345)
+
+The Oct 24 nightly failed on all three platforms ~1s into `tauri build`:
+PR #343's package-lock regeneration ("npm audit to 0") floated the
+`@tauri-apps/*` npm packages forward inside their `^` ranges while
+`Cargo.lock` kept the older Rust crates, and the CLI's major/minor
+consistency check refused the mixed set. No PR-time CI job runs
+`tauri build`, so only the nightly caught it.
+
+#### Fixed
+
+- Realigned `Cargo.lock` with `package-lock.json` so all crate/npm pairs
+  share a major.minor release: `tauri` 2.10.2 → 2.12.4 (wry 0.57, tao 0.37),
+  `tauri-plugin-dialog` 2.6.0 → 2.8.3, `tauri-plugin-opener` 2.5.3 → 2.7.2
+  (`tauri-plugin-fs` floated to 2.7.1 as a resolution side effect; it has no
+  npm counterpart so it is not part of the check). Verified:
+  `cargo check/clippy --workspace` clean, `cargo test --workspace` green,
+  `tauri build` passes the version gate and compiles, `cargo audit`
+  unchanged versus main (the 8 current advisories pre-date this change).
+
+#### Added
+
+- `npm run check:tauri-sync` (`scripts/check-tauri-version-sync.mjs`):
+  compares the `tauri*` crate versions in `Cargo.lock` against the
+  `@tauri-apps/*` package versions in `package-lock.json` and fails with
+  re-alignment instructions on any major.minor drift. Wired into the CI
+  `frontend` job and the nightly gate so this class of breakage is caught
+  at PR time instead of the next nightly.
+
 ### 2026-10-22 — INI fidelity pass: displayOnlyField, power-cycle badges, dialog help links, 3D/curve metadata
 
 A coverage audit against the 687-file reference corpus (speeduino, rusEFI,
