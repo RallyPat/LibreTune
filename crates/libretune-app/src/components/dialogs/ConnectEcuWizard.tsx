@@ -47,6 +47,9 @@ interface ConnectEcuWizardProps {
   onClose: () => void;
   /** Locally installed INI definitions, offered as a picker on the offline path. */
   inis: IniEntry[];
+  /** Called after a user-provided .ini is imported, so the parent can refresh
+   *  its INI list (the same callback New Project uses). */
+  onIniImported?: (entry: IniEntry) => void;
   /** Mirrors New Project's creation flow (close prior project, load menus/tabs, toast). */
   onCreateProject: (name: string, iniId: string) => Promise<boolean>;
   /** Connects using the params this wizard already collected, reusing the
@@ -72,7 +75,7 @@ interface ConnectEcuWizardProps {
  * offline path skips straight to naming, where the user picks an installed INI
  * by hand (same flow as New Project) and Finish creates the project.
  */
-export default function ConnectEcuWizard({ isOpen, onClose, inis, onCreateProject, onConnect }: ConnectEcuWizardProps) {
+export default function ConnectEcuWizard({ isOpen, onClose, inis, onIniImported, onCreateProject, onConnect }: ConnectEcuWizardProps) {
   const [transport, setTransport] = useState<WizardTransport | null>(null);
   const [step, setStep] = useState<WizardStep>("transport");
   const [projectName, setProjectName] = useState("");
@@ -116,6 +119,7 @@ export default function ConnectEcuWizard({ isOpen, onClose, inis, onCreateProjec
   } | null>(null);
   const [resolvedIni, setResolvedIni] = useState<ResolvedIni | null>(null);
   const [resolveBusy, setResolveBusy] = useState<string | null>(null);
+  const [manualImportError, setManualImportError] = useState<string | null>(null);
 
   // Project creation (Phase 4).
   const [creating, setCreating] = useState(false);
@@ -268,19 +272,27 @@ export default function ConnectEcuWizard({ isOpen, onClose, inis, onCreateProjec
     }
   }
 
+  /** File picker → import into the local repository → use as the resolved
+   *  definition. Offered on the resolve step (last resort when nothing matched
+   *  online) and on the offline path (the primary way to provide your own INI
+   *  when starting a project without an ECU connected). */
   async function pickManualIni() {
+    setManualImportError(null);
     const selected = await openFileDialog({
       filters: [{ name: "INI definition", extensions: ["ini"] }],
     });
     if (!selected || Array.isArray(selected)) return;
     setResolveBusy("manual");
     try {
-      const entry = await invoke<{ id: string; path: string; name: string }>("import_ini", {
+      const entry = await invoke<IniEntry>("import_ini", {
         sourcePath: selected,
       });
       setResolvedIni({ id: entry.id, path: entry.path, name: entry.name, source: "manual" });
-    } catch {
-      /* ignore */
+      onIniImported?.(entry);
+    } catch (e) {
+      setManualImportError(
+        e instanceof Error ? e.message : `Failed to import ${selected}`,
+      );
     } finally {
       setResolveBusy(null);
     }
@@ -314,6 +326,7 @@ export default function ConnectEcuWizard({ isOpen, onClose, inis, onCreateProjec
     setOnlineResults([]);
     setDerived(null);
     setResolvedIni(null);
+    setManualImportError(null);
     resolveTriedRef.current = null;
     connectTriedForRef.current = null;
     setCreating(false);
@@ -562,6 +575,11 @@ export default function ConnectEcuWizard({ isOpen, onClose, inis, onCreateProjec
               <Button variant="secondary" onClick={pickManualIni} disabled={resolveBusy === "manual"}>
                 {resolveBusy === "manual" ? "Importing…" : "Choose .ini file manually…"}
               </Button>
+              {manualImportError && (
+                <div style={{ color: "var(--color-error, #d33)", fontSize: 12, marginTop: 4 }}>
+                  {manualImportError}
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -586,8 +604,8 @@ export default function ConnectEcuWizard({ isOpen, onClose, inis, onCreateProjec
                 <label style={{ display: "block", marginBottom: "0.5rem" }}>ECU definition (INI)</label>
                 {inis.length === 0 ? (
                   <p style={{ opacity: 0.7, fontSize: 12 }}>
-                    No definitions installed yet — add one via New Project → Browse or the
-                    online INI repository, then come back.
+                    No definitions installed yet — browse for your ECU's .ini file below, or
+                    use File → Search for INI Online.
                   </p>
                 ) : (
                   <select
@@ -611,6 +629,21 @@ export default function ConnectEcuWizard({ isOpen, onClose, inis, onCreateProjec
                     ))}
                   </select>
                 )}
+                <div style={{ marginTop: "0.5rem" }}>
+                  <Button
+                    variant="secondary"
+                    onClick={pickManualIni}
+                    disabled={resolveBusy === "manual" || creating}
+                    title="Browse your computer for an .ini definition file"
+                  >
+                    {resolveBusy === "manual" ? "Importing…" : "Browse for .ini file…"}
+                  </Button>
+                  {manualImportError && (
+                    <div style={{ color: "var(--color-error, #d33)", fontSize: 12, marginTop: 4 }}>
+                      {manualImportError}
+                    </div>
+                  )}
+                </div>
                 <p style={{ opacity: 0.7, fontSize: 12, marginTop: "0.5rem" }}>
                   Pick a definition to create the project; Finish without one just closes.
                 </p>
