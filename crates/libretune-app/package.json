@@ -19,6 +19,7 @@
     "release:clean": "bash ../../scripts/build-release.sh --clean",
     "docs:frontend": "typedoc",
     "docs:sync": "node scripts/sync-manual.mjs",
+    "check:tauri-sync": "node scripts/check-tauri-version-sync.mjs",
     "docs:rust": "cd ../libretune-core && cargo doc --no-deps --open",
     "docs:user": "mdbook build ../../docs && mdbook serve ../../docs --open",
     "docs:all": "bash ../../scripts/build-docs.sh",
