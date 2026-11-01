@@ -452,6 +452,10 @@ pub struct AutoTuneReferenceTables {
 #[derive(Debug)]
 pub struct AutoTuneState {
     pub is_running: bool,
+    /// The table these recommendations were accumulated for. Kept past
+    /// `stop()` (the session config is not) so a later send can refuse any
+    /// other table.
+    pub table_name: Option<String>,
     /// A set, not a list: the UI resends the *whole* current selection on
     /// every Lock click, so a `Vec` accumulated the same cell once per click
     /// and `unlock_cells` - which removed a single match - left the backend
@@ -494,6 +498,7 @@ impl Default for AutoTuneState {
     fn default() -> Self {
         Self {
             is_running: false,
+            table_name: None,
             locked_cells: HashSet::new(),
             recommendations: HashMap::new(),
             data_buffer: std::collections::VecDeque::new(),

@@ -230,3 +230,27 @@ test('it opens on Traces and can move to the analysis and back', async () => {
   await user.click(screen.getByRole('tab', { name: 'Traces' }));
   expect(screen.queryByText(/blue adds fuel/)).not.toBeInTheDocument();
 });
+
+/**
+ * The proposal is indexed by cell for the table it was analysed against.
+ * Switching tables must discard it, or Apply writes VE values into the wrong
+ * table.
+ */
+test('switching table discards the proposal so it cannot be applied elsewhere', async () => {
+  (invoke as unknown as any).mockImplementation((cmd: string) => {
+    if (cmd === 'list_tunable_tables') return Promise.resolve(['veTable1Tbl', 'advanceTable1']);
+    if (cmd === 'get_table_data') return Promise.resolve(TABLE_DATA);
+    if (cmd === 'read_file_contents') return Promise.resolve(LOG);
+    if (cmd === 'analyse_log') return Promise.resolve(report());
+    return Promise.resolve();
+  });
+  const user = await loadAndAnalyse();
+  await waitFor(() => expect(screen.getByRole('button', { name: /Apply 1 cells/i })).toBeEnabled());
+
+  await user.selectOptions(screen.getByDisplayValue('veTable1Tbl'), 'advanceTable1');
+
+  await waitFor(() => expect(screen.getByRole('button', { name: /Apply/i })).toBeDisabled());
+  expect(
+    (invoke as unknown as any).mock.calls.some((c: any[]) => c[0] === 'update_table_data'),
+  ).toBe(false);
+});
