@@ -35,7 +35,7 @@ pub async fn update_project_ini(
 
     // Update the loaded definition
     let mut def_guard = state.definition.lock().await;
-    let def_clone = new_def.clone();
+    let mut def_clone = new_def.clone();
     *def_guard = Some(new_def);
     drop(def_guard);
     crate::commands::data_logging::stop_recording_on_definition_change(&state).await;
@@ -61,6 +61,11 @@ pub async fn update_project_ini(
     if let Some(tune) = project_tune {
         if let Some(cache) = cache_guard.as_mut() {
             crate::commands::tune_apply::load_msq_pages_into_cache(cache, &tune);
+            crate::commands::tune_apply::resolve_scales_for_tune(
+                &mut def_clone,
+                Some(&tune),
+                Some(cache),
+            );
 
             // Apply constants from tune file to cache (same logic as open_project)
             use libretune_core::tune::TuneValue;
@@ -153,6 +158,7 @@ pub async fn update_project_ini(
         }
     }
     drop(cache_guard);
+    crate::commands::load_tune::resolve_scales_from_tune(&state).await;
 
     // If force_resync is requested and we're connected, trigger re-sync
     if force_resync {

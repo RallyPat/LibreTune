@@ -152,8 +152,8 @@ pub async fn use_project_tune(
     }
 
     let merged_pages = {
-        let def_guard = state.definition.lock().await;
-        let def = def_guard.as_ref().ok_or("Definition not loaded")?;
+        let mut def_guard = state.definition.lock().await;
+        let def = def_guard.as_mut().ok_or("Definition not loaded")?;
         materialize_project_pages(def, &project_msq, &ecu_base)
     };
 
