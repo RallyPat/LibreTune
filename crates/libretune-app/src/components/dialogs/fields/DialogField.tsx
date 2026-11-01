@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { HelpCircle } from 'lucide-react';
 import type { Constant, FieldInfo } from '../types';
-import { isIncompleteNumericInput } from '../types';
 import { useDialogValueSource } from '../DialogValueSource';
 import { PowerCycleBadge } from './PowerCycleBadge';
 
@@ -416,18 +415,8 @@ export default function DialogField({
                   onUpdate?.();
                 })
                 .catch((e) => alert('Update failed: ' + e));
-            } else if (isIncompleteNumericInput(numInputStr)) {
-              // Incomplete input (empty, just minus, or just decimal) - treat as 0
-              setNumValue(0);
-              setNumInputStr('0');
-              invoke('update_constant', { name, value: 0 })
-                .then(() => {
-                  onOptimisticUpdate?.(name, 0);
-                  onUpdate?.();
-                })
-                .catch((e) => alert('Update failed: ' + e));
             } else {
-              // Invalid input - restore previous valid value
+              // Empty/incomplete/invalid input - restore previous value, write nothing
               setNumInputStr(numValue?.toString() ?? '0');
             }
           }}
