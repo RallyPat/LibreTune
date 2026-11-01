@@ -480,8 +480,14 @@ fn a_page_read_of_the_wrong_length_is_an_error() {
         })
     };
 
-    assert_eq!(read(&mut conn, 5).expect("exact length"), vec![1, 2, 3, 4, 5]);
+    assert_eq!(
+        read(&mut conn, 5).expect("exact length"),
+        vec![1, 2, 3, 4, 5]
+    );
     let err = read(&mut conn, 4).expect_err("a long reply must be rejected");
     assert!(err.to_string().contains("page 1"), "{err}");
-    assert!(read(&mut conn, 6).is_err(), "a short reply must be rejected");
+    assert!(
+        read(&mut conn, 6).is_err(),
+        "a short reply must be rejected"
+    );
 }
