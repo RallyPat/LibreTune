@@ -189,6 +189,9 @@ fn run_modern_sim(mut stream: TcpStream, state: Arc<Mutex<SimState>>) {
                 reply.extend_from_slice(&crc.unwrap_or(0).to_be_bytes());
                 send(&mut stream, &reply);
             }
+            // Page read: always answer with five data bytes, whatever was
+            // asked for, so a test can provoke a reply of the wrong length.
+            Some(b'R') => send(&mut stream, &[0u8, 1, 2, 3, 4, 5]),
             _ => send(&mut stream, &[0x83u8]), // SERIAL_RC_UKWN_ERR
         }
     }
@@ -459,4 +462,26 @@ fn temperature_payload_stays_little_endian_inside_a_big_endian_header() {
         140,
         "100 °C + 40 offset"
     );
+}
+
+/// A page read must return exactly the bytes asked for. A longer reply used to
+/// pass the short-read guard and be appended whole, shifting every later byte
+/// of the page in the cache and in the saved tune.
+#[test]
+fn a_page_read_of_the_wrong_length_is_an_error() {
+    use libretune_core::protocol::commands::ReadMemoryParams;
+    let (mut conn, _state) = connect(true);
+    let read = |conn: &mut Connection, length| {
+        conn.read_memory(ReadMemoryParams {
+            can_id: 0,
+            page: 1,
+            offset: 0,
+            length,
+        })
+    };
+
+    assert_eq!(read(&mut conn, 5).expect("exact length"), vec![1, 2, 3, 4, 5]);
+    let err = read(&mut conn, 4).expect_err("a long reply must be rejected");
+    assert!(err.to_string().contains("page 1"), "{err}");
+    assert!(read(&mut conn, 6).is_err(), "a short reply must be rejected");
 }

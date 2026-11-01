@@ -445,6 +445,10 @@ pub struct Connection {
     /// fifteen `burnCommand` entries, one per page, each taking the page number),
     /// so burning "the tune" means burning each page that has changed.
     dirty_pages: std::collections::BTreeSet<u8>,
+    /// Pages whose last bulk write failed or did not CRC-verify. Their RAM
+    /// image is unknown, so every burn is refused until they are written
+    /// cleanly again (or the connection is rebuilt).
+    failed_pages: std::collections::BTreeSet<u8>,
     /// ECU type detected from the INI signature (Issue #71).
     /// Drives conservative runtime-command selection for Speeduino/MS2/MS3.
     ecu_type: EcuType,
@@ -476,6 +480,7 @@ impl Connection {
             rx_packets: 0,
             last_written_page: None,
             dirty_pages: std::collections::BTreeSet::new(),
+            failed_pages: std::collections::BTreeSet::new(),
             ecu_type: EcuType::Unknown,
             cancel: Arc::new(AtomicBool::new(false)),
         }
@@ -514,6 +519,7 @@ impl Connection {
             rx_packets: 0,
             last_written_page: None,
             dirty_pages: std::collections::BTreeSet::new(),
+            failed_pages: std::collections::BTreeSet::new(),
             ecu_type: EcuType::Unknown,
             cancel: Arc::new(AtomicBool::new(false)),
         }
@@ -1757,10 +1763,11 @@ impl Connection {
         // cached as if it were whole. The legacy read returns whatever arrived
         // before the line fell quiet, and the modern read trusts the frame's
         // own length field, so neither can spot this on its own. This is the
-        // same guard the write-side read-back already applies.
-        if data.len() < params.length as usize {
+        // same guard the write-side read-back already applies. A long reply
+        // is just as wrong: appended whole, it shifts the rest of the page.
+        if data.len() != params.length as usize {
             return Err(ProtocolError::ProtocolError(format!(
-                "short read on page {} offset {}: got {} of {} bytes",
+                "wrong-length read on page {} offset {}: got {} of {} bytes",
                 params.page,
                 params.offset,
                 data.len(),
@@ -1899,7 +1906,21 @@ impl Connection {
     }
 
     /// Write a full page to ECU, respecting blocking factor (same chunking as `read_page`).
+    ///
+    /// A page that fails to write or verify blocks every burn until it is
+    /// written cleanly: burning it would commit a RAM image known to be wrong,
+    /// and burning the pages written before it would commit half a tune.
     pub fn write_page(&mut self, page: u8, data: &[u8]) -> Result<(), ProtocolError> {
+        let result = self.write_and_verify_page(page, data);
+        if result.is_ok() {
+            self.failed_pages.remove(&page);
+        } else {
+            self.failed_pages.insert(page);
+        }
+        result
+    }
+
+    fn write_and_verify_page(&mut self, page: u8, data: &[u8]) -> Result<(), ProtocolError> {
         let chunk_size = self.effective_write_chunk();
 
         let mut offset = 0usize;
@@ -2075,7 +2096,14 @@ impl Connection {
         // corruption on power loss.
         if self.config.auto_burn_on_page_change {
             if let Some(prev_page) = self.last_written_page {
-                if prev_page != params.page {
+                if prev_page != params.page && !self.failed_pages.is_empty() {
+                    // The burn would be refused; failing this write over it
+                    // would drop the edit. It still reaches RAM.
+                    tracing::warn!(
+                        "auto-burn skipped: page(s) {:?} failed to write or verify",
+                        self.failed_pages
+                    );
+                } else if prev_page != params.page {
                     tracing::info!(
                         "auto-burn: page change {} -> {}, burning previous page first",
                         prev_page,
@@ -2221,6 +2249,12 @@ impl Connection {
 
     /// Burn current page to flash using INI-defined command format
     pub fn burn(&mut self, params: BurnParams) -> Result<(), ProtocolError> {
+        if !self.failed_pages.is_empty() {
+            return Err(ProtocolError::ProtocolError(format!(
+                "refusing to burn: page(s) {:?} failed to write or verify; write the tune again or reconnect first",
+                self.failed_pages
+            )));
+        }
         let page = params.page as usize;
 
         // Get page identifier (may differ from page index)
@@ -4252,6 +4286,44 @@ mod burn_page_tests {
             dirty.iter().copied().collect::<Vec<_>>(),
             vec![0, 2, 3, 7, 15]
         );
+    }
+
+    /// A page whose write failed must never reach flash - not through the
+    /// Burn button, not through the empty-set page-0 fallback, and not through
+    /// an explicit single-page burn.
+    #[test]
+    fn a_failed_page_write_blocks_every_burn() {
+        use super::{BurnParams, Connection, ConnectionConfig};
+        let mut conn = Connection::new(ConnectionConfig::default());
+        // No port: the write fails, just as a dropped link or CRC mismatch would.
+        assert!(conn.write_page(0, &[1, 2, 3]).is_err());
+
+        let err = conn.send_burn_command().expect_err("burn must be refused");
+        assert!(err.to_string().contains("refusing to burn"), "{err}");
+        let err = conn
+            .burn(BurnParams { can_id: 0, page: 2 })
+            .expect_err("burn must be refused");
+        assert!(err.to_string().contains("refusing to burn"), "{err}");
+    }
+
+    /// An edit on another page after a failed write must not fail on the
+    /// refused auto-burn; that would drop the edit.
+    #[test]
+    fn a_failed_page_write_skips_auto_burn_instead_of_failing_the_edit() {
+        use super::{Connection, ConnectionConfig, WriteMemoryParams};
+        let mut conn = Connection::new(ConnectionConfig::default());
+        assert!(conn.write_page(0, &[1, 2, 3]).is_err());
+        conn.last_written_page = Some(1);
+
+        let result = conn.write_memory(WriteMemoryParams {
+            can_id: 0,
+            page: 2,
+            offset: 0,
+            data: vec![7],
+        });
+        if let Err(err) = result {
+            assert!(!err.to_string().contains("refusing to burn"), "{err}");
+        }
     }
 }
 
