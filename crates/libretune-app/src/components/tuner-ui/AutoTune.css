@@ -210,7 +210,14 @@
   font-size: 12px;
 }
 
+.autotune-table-toolbar button.active {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: white;
+}
+
 .autotune-table-container {
+  position: relative; /* trail overlay anchors here (content-space) */
   flex: 1;
   overflow: auto;
   padding: 12px;
@@ -240,6 +247,14 @@
 
 .autotune-table thead th {
   top: 0;
+  z-index: 2;
+}
+
+/* Flipped view: the X-axis header moves to the table's foot (issue #132
+   follow-up), so it sticks to the bottom edge the way the default header
+   sticks to the top. */
+.autotune-table tfoot th {
+  bottom: 0;
   z-index: 2;
 }
 

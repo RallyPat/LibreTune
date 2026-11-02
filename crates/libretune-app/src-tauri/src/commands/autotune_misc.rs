@@ -1,5 +1,6 @@
 //! Misc AutoTune commands (stop, recommendations, heatmap, send/burn, lock/unlock).
 
+use crate::state::AutoTuneLoadSource;
 use crate::AppState;
 use serde::Serialize;
 
@@ -86,6 +87,12 @@ pub struct AutotuneStatus {
     pub accepted_samples: u64,
     /// Filter rejections this session, most frequent reason first.
     pub rejections: Vec<AutotuneRejectionCount>,
+    /// The load source the running session actually uses, after backend-side
+    /// auto-detection (Speeduino's `algorithm` constant decides when the
+    /// channel name cannot). Lets the UI sync its dropdown to a session it
+    /// did not configure — mid-session restarts and re-attach — instead of
+    /// silently disagreeing with it. `None` when no session is running.
+    pub resolved_load_source: Option<AutoTuneLoadSource>,
 }
 
 /// One row of the rejection tally exposed by [`AutotuneStatus`].
@@ -120,6 +127,7 @@ pub async fn get_autotune_status(
             secondary_table_name: config.secondary_table_name.clone(),
             accepted_samples,
             rejections,
+            resolved_load_source: Some(config.load_source),
         },
         None => AutotuneStatus {
             running: false,
@@ -127,6 +135,7 @@ pub async fn get_autotune_status(
             secondary_table_name: None,
             accepted_samples,
             rejections,
+            resolved_load_source: None,
         },
     })
 }
