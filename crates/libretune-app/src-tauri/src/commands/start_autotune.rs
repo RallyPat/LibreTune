@@ -376,14 +376,8 @@ pub(crate) async fn start_autotune_inner(
         prev.as_ref().and_then(|p| p.4.as_deref()),
         prev.as_ref().and_then(|p| p.5.as_deref()),
         config.secondary_table_name.as_deref().unwrap_or(""),
-        config
-            .secondary_x_bins
-            .as_deref()
-            .unwrap_or(&[]),
-        config
-            .secondary_y_bins
-            .as_deref()
-            .unwrap_or(&[]),
+        config.secondary_x_bins.as_deref().unwrap_or(&[]),
+        config.secondary_y_bins.as_deref().unwrap_or(&[]),
     );
 
     *state.autotune_config.lock().await = Some(config);
@@ -1570,7 +1564,9 @@ mod restart_preservation_tests {
         } else {
             state.autotune_state.lock().await
         };
-        guard.recommendations.insert((0, 0), seeded_recommendation());
+        guard
+            .recommendations
+            .insert((0, 0), seeded_recommendation());
     }
 
     async fn recommendation_count(state: &AppState, secondary: bool) -> usize {
