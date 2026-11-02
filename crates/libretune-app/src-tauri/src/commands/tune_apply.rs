@@ -367,6 +367,29 @@ mod tests {
         );
     }
 
+    #[test]
+    fn selected_constants_encode_with_real_width_and_bit_rmw() {
+        let mut def = tiny_def();
+        def.page_sizes = vec![8];
+        def.endianness = libretune_core::ini::Endianness::Little;
+        let mut rpm = Constant::new("rpm", 0, 2, DataType::U16);
+        rpm.max = 65535.0;
+        def.constants.insert("rpm".into(), rpm);
+        let mut cache = TuneCache::from_definition(&def);
+        cache.load_page(0, vec![0xFF, 0, 0, 0, 0, 0, 0, 0]);
+
+        let mut sel = TuneFile::new("test");
+        sel.constants
+            .insert("rpm".into(), TuneValue::Scalar(5000.0));
+        sel.constants
+            .insert("flagBits".into(), TuneValue::String("false".into()));
+        apply_tune_constants_to_cache(&mut cache, &def, &sel, &HashSet::new());
+
+        let page = cache.get_page(0).unwrap();
+        assert_eq!(&page[2..4], &5000u16.to_le_bytes());
+        assert_eq!(page[0], 0xFE, "bit 0 cleared, neighbours untouched");
+    }
+
     /// A TunerStudio MSQ stores Speeduino load bins in display kPa, and the
     /// bins scale by `{fuelLoadRes}` (2.0 for MAP). Encoding at the 1.0
     /// parse-time fallback stored raw 16 where 8 belongs (read back as 32 kPa).

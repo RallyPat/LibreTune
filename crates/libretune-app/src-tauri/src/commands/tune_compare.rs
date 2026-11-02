@@ -1,6 +1,6 @@
 //! Cross-file tune comparison and merge Tauri commands.
 
-use libretune_core::tune::{TuneDiff, TuneFile, TuneValue};
+use libretune_core::tune::{TuneDiff, TuneFile};
 
 use crate::state::AppState;
 
@@ -36,18 +36,18 @@ pub async fn merge_from_tune(
 
     if merged > 0 {
         if let (Some(cache), Some(def)) = (cache_guard.as_mut(), def_guard.as_ref()) {
-            for name in &constant_names {
-                if let Some(value) = source.constants.get(name) {
-                    if let Some(constant) = def.constants.get(name) {
-                        if let TuneValue::Scalar(v) = value {
-                            let raw_val = ((*v - constant.translate) / constant.scale) as i64;
-                            let page = constant.page;
-                            let offset = constant.offset;
-                            cache.write_bytes(page, offset, &[(raw_val & 0xFF) as u8]);
-                        }
-                    }
-                }
-            }
+            // Encode via the shared helper (width, endianness, bits, arrays, strings).
+            let mut selected = TuneFile::new("");
+            selected.constants = constant_names
+                .iter()
+                .filter_map(|n| Some((n.clone(), source.constants.get(n)?.clone())))
+                .collect();
+            super::tune_apply::apply_tune_constants_to_cache(
+                cache,
+                def,
+                &selected,
+                &Default::default(),
+            );
         }
     }
 
