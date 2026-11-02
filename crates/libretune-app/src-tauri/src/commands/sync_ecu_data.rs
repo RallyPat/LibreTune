@@ -234,8 +234,8 @@ pub async fn sync_ecu_data(
     };
 
     let project_pages = {
-        let def_guard = state.definition.lock().await;
-        if let (Some(def), Some(msq)) = (def_guard.as_ref(), project_msq.as_ref()) {
+        let mut def_guard = state.definition.lock().await;
+        if let (Some(def), Some(msq)) = (def_guard.as_mut(), project_msq.as_ref()) {
             materialize_project_pages(def, msq, &ecu_tune.pages)
         } else {
             baseline_pages.clone()

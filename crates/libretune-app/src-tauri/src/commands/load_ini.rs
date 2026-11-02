@@ -52,7 +52,7 @@ pub async fn load_ini(
             };
 
             // Update definition
-            let def_clone = def.clone();
+            let mut def_clone = def.clone();
             let mut guard = state.definition.lock().await;
             *guard = Some(def);
             drop(guard);
@@ -103,6 +103,11 @@ pub async fn load_ini(
                 crate::commands::tune_apply::load_msq_pages_into_cache(
                     cache_guard.as_mut().unwrap(),
                     &tune,
+                );
+                crate::commands::tune_apply::resolve_scales_for_tune(
+                    &mut def_clone,
+                    Some(&tune),
+                    cache_guard.as_ref(),
                 );
                 use libretune_core::tune::TuneValue;
 
@@ -326,6 +331,7 @@ pub async fn load_ini(
                 let _ = app.emit("tune:loaded", "ini_changed");
             }
             drop(cache_guard);
+            crate::commands::load_tune::resolve_scales_from_tune(&state).await;
 
             // Emit event to notify UI that definition is fully loaded with stats
             let _ = app.emit(

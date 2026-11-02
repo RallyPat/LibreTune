@@ -19,52 +19,17 @@ use tauri::Emitter;
 /// of scale/translate fields updated, so callers can refresh open tables only
 /// when something actually changed.
 pub(crate) async fn resolve_scales_from_tune(state: &AppState) -> usize {
-    // Read values under an immutable borrow, then re-lock mutably to apply —
-    // the definition mutex cannot be held both ways at once.
-    let values = {
-        let def_guard = state.definition.lock().await;
-        let Some(def) = def_guard.as_ref() else {
-            return 0;
-        };
-        if !def
-            .constants
-            .values()
-            .any(|c| c.scale_expr.is_some() || c.translate_expr.is_some())
-        {
-            return 0; // nothing deferred in this INI
-        }
-        let endianness = def.endianness;
-        let cache_guard = state.tune_cache.lock().await;
-        let tune_guard = state.current_tune.lock().await;
-        def.constants
-            .iter()
-            .filter(|(_, c)| c.shape == libretune_core::ini::Shape::Scalar)
-            .map(|(name, c)| {
-                let v = crate::commands::constant_values::read_constant_from_cache_or_tune(
-                    name,
-                    c,
-                    endianness,
-                    tune_guard.as_ref(),
-                    cache_guard.as_ref(),
-                );
-                (name.clone(), v)
-            })
-            .collect::<std::collections::HashMap<String, f64>>()
-    };
-
     let mut def_guard = state.definition.lock().await;
-    if let Some(def) = def_guard.as_mut() {
-        let n = def.resolve_dynamic_scales(&values);
-        if n > 0 {
-            eprintln!(
-                "[INFO] Resolved {} expression-valued INI scale/translate field(s)",
-                n
-            );
-        }
-        n
-    } else {
-        0
-    }
+    let Some(def) = def_guard.as_mut() else {
+        return 0;
+    };
+    let cache_guard = state.tune_cache.lock().await;
+    let tune_guard = state.current_tune.lock().await;
+    crate::commands::tune_apply::resolve_scales_for_tune(
+        def,
+        tune_guard.as_ref(),
+        cache_guard.as_ref(),
+    )
 }
 
 #[tauri::command]
@@ -214,15 +179,15 @@ pub async fn load_tune(
     // Populate TuneCache from loaded tune data
     // This allows table operations to use cached data instead of reading from ECU
     {
-        let def_guard = state.definition.lock().await;
-        let def = def_guard.as_ref();
+        let mut def_guard = state.definition.lock().await;
+        let def = def_guard.as_mut();
         let mut cache_guard = state.tune_cache.lock().await;
 
         // Keep any ECU pages already in the cache. Resetting to a zero-filled
         // definition and then overlaying MSQ constants is what later gets
         // burned as a full page of zeros.
         if cache_guard.is_none() {
-            if let Some(def) = def {
+            if let Some(def) = def.as_deref() {
                 *cache_guard = Some(TuneCache::from_definition(def));
             } else {
                 eprintln!("[WARN] load_tune: No definition loaded, cannot initialize cache");
@@ -233,6 +198,7 @@ pub async fn load_tune(
         if let Some(cache) = cache_guard.as_mut() {
             if let Some(def) = def {
                 crate::commands::tune_apply::load_msq_pages_into_cache(cache, &tune);
+                crate::commands::tune_apply::resolve_scales_for_tune(def, Some(&tune), Some(cache));
                 let complete_pages =
                     crate::commands::tune_apply::pages_with_complete_page_data(def, &tune);
                 eprintln!(
@@ -641,6 +607,20 @@ pub async fn load_tune(
                 eprintln!("[DEBUG] load_tune: no definition loaded, skipping constant application");
             }
         }
+    }
+
+    // Nothing came out of the file (a format the parser can't read): fail the
+    // load instead of auto-saving an empty tune over the project's
+    // CurrentTune.msq below.
+    let has_page_data = tune
+        .pages
+        .values()
+        .any(|p| crate::commands::tune_apply::page_has_content(p));
+    if !has_page_data && tune.constants.is_empty() {
+        return Err(format!(
+            "No tune data could be read from {}; the project tune was left unchanged.",
+            path
+        ));
     }
 
     *state.current_tune.lock().await = Some(tune.clone());

@@ -10,7 +10,7 @@
 //! "Use LibreTune Settings" we save full pages but may keep stale constant XML;
 //! re-applying those on the next connect corrupts critical bits and can brick.
 
-use libretune_core::ini::{DataType, EcuDefinition};
+use libretune_core::ini::{DataType, EcuDefinition, Shape};
 use libretune_core::tune::{TuneCache, TuneFile, TuneValue};
 use std::collections::{HashMap, HashSet};
 
@@ -42,9 +42,53 @@ pub fn load_msq_pages_into_cache(cache: &mut TuneCache, tune: &TuneFile) {
     }
 }
 
+/// Resolve the INI's `{expression}` scale/translate fields from `tune`'s own
+/// values, falling back to `cache` bytes for anything the tune lacks.
+///
+/// Must run before any MSQ display value is encoded with `display_to_raw`:
+/// Speeduino load axes scale by `{fuelLoadRes}` (2.0 for MAP), so encoding at
+/// the 1.0 parse-time fallback stores raw 16 for 16 kPa, which the ECU then
+/// reads as 32 kPa. Returns the number of fields updated.
+pub fn resolve_scales_for_tune(
+    def: &mut EcuDefinition,
+    tune: Option<&TuneFile>,
+    cache: Option<&TuneCache>,
+) -> usize {
+    if !def
+        .constants
+        .values()
+        .any(|c| c.scale_expr.is_some() || c.translate_expr.is_some())
+    {
+        return 0; // nothing deferred in this INI
+    }
+    let values: HashMap<String, f64> = def
+        .constants
+        .iter()
+        .filter(|(_, c)| c.shape == Shape::Scalar)
+        .map(|(name, c)| {
+            let v = crate::commands::constant_values::read_constant_from_cache_or_tune(
+                name,
+                c,
+                def.endianness,
+                tune,
+                cache,
+            );
+            (name.clone(), v)
+        })
+        .collect();
+    let n = def.resolve_dynamic_scales(&values);
+    if n > 0 {
+        eprintln!(
+            "[INFO] Resolved {} expression-valued INI scale/translate field(s)",
+            n
+        );
+    }
+    n
+}
+
 /// Build full page images = `ecu_base` + optional complete MSQ page blobs + MSQ constants.
 pub fn materialize_project_pages(
-    def: &EcuDefinition,
+    def: &mut EcuDefinition,
     project_tune: &TuneFile,
     ecu_base: &HashMap<u8, Vec<u8>>,
 ) -> HashMap<u8, Vec<u8>> {
@@ -63,6 +107,8 @@ pub fn materialize_project_pages(
             cache.load_page(*page_num, page_data.clone());
         }
     }
+
+    resolve_scales_for_tune(def, Some(project_tune), Some(&cache));
 
     // Only overlay named constants onto pages that still need them.
     apply_tune_constants_to_cache(&mut cache, def, project_tune, &complete_pages);
@@ -257,7 +303,7 @@ mod tests {
 
     #[test]
     fn complete_page_data_not_overwritten_by_stale_constants() {
-        let def = tiny_def();
+        let mut def = tiny_def();
         // ECU / previously-written page: flag bit set (true)
         let mut ecu_base = HashMap::new();
         ecu_base.insert(0u8, vec![0x01, 0x00, 0x00, 0x00]);
@@ -269,13 +315,13 @@ mod tests {
         msq.constants
             .insert("flagBits".into(), TuneValue::String("false".into()));
 
-        let pages = materialize_project_pages(&def, &msq, &ecu_base);
+        let pages = materialize_project_pages(&mut def, &msq, &ecu_base);
         assert_eq!(pages.get(&0).unwrap()[0], 0x01);
     }
 
     #[test]
     fn constants_still_apply_when_page_data_missing() {
-        let def = tiny_def();
+        let mut def = tiny_def();
         let mut ecu_base = HashMap::new();
         ecu_base.insert(0u8, vec![0x01, 0x00, 0x00, 0x00]);
 
@@ -283,13 +329,13 @@ mod tests {
         msq.constants
             .insert("flagBits".into(), TuneValue::String("false".into()));
 
-        let pages = materialize_project_pages(&def, &msq, &ecu_base);
+        let pages = materialize_project_pages(&mut def, &msq, &ecu_base);
         assert_eq!(pages.get(&0).unwrap()[0], 0x00);
     }
 
     #[test]
     fn wrong_length_page_data_is_not_authoritative() {
-        let def = tiny_def();
+        let mut def = tiny_def();
         let mut ecu_base = HashMap::new();
         ecu_base.insert(0u8, vec![0x01, 0x00, 0x00, 0x00]);
 
@@ -298,13 +344,13 @@ mod tests {
         msq.constants
             .insert("flagBits".into(), TuneValue::String("false".into()));
 
-        let pages = materialize_project_pages(&def, &msq, &ecu_base);
+        let pages = materialize_project_pages(&mut def, &msq, &ecu_base);
         assert_eq!(pages.get(&0).unwrap()[0], 0x00);
     }
 
     #[test]
     fn all_zero_page_data_is_not_authoritative() {
-        let def = tiny_def();
+        let mut def = tiny_def();
         let mut ecu_base = HashMap::new();
         ecu_base.insert(0u8, vec![0x01, 0x00, 0x00, 0x00]);
 
@@ -313,11 +359,58 @@ mod tests {
         msq.constants
             .insert("flagBits".into(), TuneValue::String("false".into()));
 
-        let pages = materialize_project_pages(&def, &msq, &ecu_base);
+        let pages = materialize_project_pages(&mut def, &msq, &ecu_base);
         assert_eq!(pages.get(&0).unwrap()[0], 0x00);
         assert!(
             !pages_with_complete_page_data(&def, &msq).contains(&0),
             "zero-filled pageData must not mask the ECU image"
         );
+    }
+
+    /// A TunerStudio MSQ stores Speeduino load bins in display kPa, and the
+    /// bins scale by `{fuelLoadRes}` (2.0 for MAP). Encoding at the 1.0
+    /// parse-time fallback stored raw 16 where 8 belongs (read back as 32 kPa).
+    #[test]
+    fn expression_scale_resolved_from_msq_before_encoding() {
+        let mut def = EcuDefinition {
+            n_pages: 1,
+            page_sizes: vec![17],
+            ..EcuDefinition::default()
+        };
+        let mut bins = Constant::new("fuelLoadBins", 0, 0, DataType::U08);
+        bins.shape = Shape::Array1D(16);
+        bins.scale_expr = Some("fuelLoadRes".into());
+        bins.scale = 1.0; // parse-time fallback
+        def.constants.insert(bins.name.clone(), bins);
+        let mut algorithm = Constant::new("algorithm", 0, 16, DataType::Bits);
+        algorithm.bit_position = Some(0);
+        algorithm.bit_size = Some(2);
+        algorithm.bit_options = vec!["MAP".into(), "TPS".into()];
+        def.constants.insert("algorithm".into(), algorithm);
+        def.output_channels.insert(
+            "fuelLoadRes".into(),
+            libretune_core::ini::OutputChannel {
+                name: "fuelLoadRes".into(),
+                expression: Some("((algorithm == 0) || (algorithm == 2)) ? 2.000 : 0.500".into()),
+                ..Default::default()
+            },
+        );
+
+        // The ECU base still says TPS (0.5); the MSQ's own MAP setting must win.
+        let mut base = vec![0u8; 17];
+        base[16] = 1;
+        let ecu_base = HashMap::from([(0u8, base)]);
+
+        let display: Vec<f64> = (0..16).map(|i| 16.0 + 6.0 * i as f64).collect();
+        let mut msq = TuneFile::new("test");
+        msq.constants
+            .insert("fuelLoadBins".into(), TuneValue::Array(display.clone()));
+        msq.constants
+            .insert("algorithm".into(), TuneValue::String("MAP".into()));
+
+        let pages = materialize_project_pages(&mut def, &msq, &ecu_base);
+        let expected: Vec<u8> = display.iter().map(|v| (v / 2.0) as u8).collect();
+        assert_eq!(&pages[&0][..16], &expected[..]);
+        assert_eq!(pages[&0][16] & 0x03, 0, "algorithm written as MAP");
     }
 }
