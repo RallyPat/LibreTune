@@ -11,10 +11,59 @@ use libretune_core::autotune::{
 use libretune_core::ini::{Constant, EcuDefinition, TableRole};
 use libretune_core::tune::TuneCache;
 
+/// True when a session slot's table and bins are unchanged from the previous
+/// session config. Combined with the slot's `is_running` at application
+/// time: a running slot whose table did not change keeps its accumulated
+/// recommendations through a mid-session re-configuration, while anything
+/// else — table changed, bins changed, or the slot was stopped — starts
+/// fresh, so an explicit stop/start cycle still clears everything
+/// (issue #132 follow-up: switching tables mid-session used to demand a
+/// stop/start that silently threw away both tables' tuning progress).
+fn same_slot(
+    prev_table: Option<&str>,
+    prev_x: Option<&[f64]>,
+    prev_y: Option<&[f64]>,
+    table: &str,
+    x: &[f64],
+    y: &[f64],
+) -> bool {
+    prev_table == Some(table) && prev_x == Some(x) && prev_y == Some(y)
+}
+
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub async fn start_autotune(
     state: tauri::State<'_, AppState>,
+    table_name: String,
+    secondary_table_name: Option<String>,
+    load_source: Option<AutoTuneLoadSource>,
+    settings: AutoTuneSettings,
+    filters: AutoTuneFilters,
+    authority_limits: AutoTuneAuthorityLimits,
+    target_afr_table_name: Option<String>,
+    lambda_delay_table_name: Option<String>,
+    strict_lambda_match: Option<bool>,
+) -> Result<(), String> {
+    start_autotune_inner(
+        &state,
+        table_name,
+        secondary_table_name,
+        load_source,
+        settings,
+        filters,
+        authority_limits,
+        target_afr_table_name,
+        lambda_delay_table_name,
+        strict_lambda_match,
+    )
+    .await
+}
+
+/// Body of [`start_autotune`], separated so tests can drive it with a plain
+/// `&AppState` (the same pattern as `stop_autotune_inner`).
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn start_autotune_inner(
+    state: &AppState,
     table_name: String,
     secondary_table_name: Option<String>,
     load_source: Option<AutoTuneLoadSource>,
@@ -275,6 +324,23 @@ pub async fn start_autotune(
     drop(cache_guard);
     drop(def_guard);
 
+    // Snapshot the session already configured, before it is overwritten: a
+    // mid-session re-configuration must keep the accumulated recommendations
+    // of any slot whose table and bins did not change.
+    let prev = {
+        let cfg_guard = state.autotune_config.lock().await;
+        cfg_guard.as_ref().map(|c| {
+            (
+                c.table_name.clone(),
+                c.secondary_table_name.clone(),
+                c.x_bins.clone(),
+                c.y_bins.clone(),
+                c.secondary_x_bins.clone(),
+                c.secondary_y_bins.clone(),
+            )
+        })
+    };
+
     // Store the config for realtime stream to use
     let strict = strict_lambda_match.unwrap_or(true);
     let config = AutoTuneConfig {
@@ -295,20 +361,54 @@ pub async fn start_autotune(
         strict_lambda_match: strict,
     };
 
+    // Compare the incoming slots against the previous config before `config`
+    // (which owns the bins) is moved into state.
+    let primary_same = same_slot(
+        prev.as_ref().map(|p| p.0.as_str()),
+        prev.as_ref().map(|p| p.2.as_slice()),
+        prev.as_ref().map(|p| p.3.as_slice()),
+        config.table_name.as_str(),
+        config.x_bins.as_slice(),
+        config.y_bins.as_slice(),
+    );
+    let secondary_same = same_slot(
+        prev.as_ref().and_then(|p| p.1.as_deref()),
+        prev.as_ref().and_then(|p| p.4.as_deref()),
+        prev.as_ref().and_then(|p| p.5.as_deref()),
+        config.secondary_table_name.as_deref().unwrap_or(""),
+        config.secondary_x_bins.as_deref().unwrap_or(&[]),
+        config.secondary_y_bins.as_deref().unwrap_or(&[]),
+    );
+
     *state.autotune_config.lock().await = Some(config);
 
     let mut guard = state.autotune_state.lock().await;
     guard.set_reference_tables(reference_tables.clone());
     guard.set_strict_lambda_match(strict);
+    let primary_continues = primary_same && guard.is_running;
     guard.table_name = Some(table_name.clone());
-    guard.start();
+    if primary_continues {
+        tracing::info!(
+            table = %table_name,
+            "start_autotune: primary slot unchanged — keeping accumulated recommendations"
+        );
+    } else {
+        guard.start();
+    }
 
     let mut secondary_guard = state.autotune_secondary_state.lock().await;
     secondary_guard.set_reference_tables(reference_tables);
     secondary_guard.set_strict_lambda_match(strict);
+    let secondary_continues = secondary_same && secondary_guard.is_running;
     secondary_guard.table_name = secondary_table_name.clone();
     if secondary_table_name.is_some() {
-        secondary_guard.start();
+        if secondary_continues {
+            tracing::info!(
+                "start_autotune: secondary slot unchanged — keeping accumulated recommendations"
+            );
+        } else {
+            secondary_guard.start();
+        }
     } else {
         secondary_guard.stop();
     }
@@ -1351,5 +1451,245 @@ mod target_afr_resolution_tests {
             "must be unmistakable, got: {msg}"
         );
         assert_eq!(source.table_name(), None);
+    }
+}
+
+/// Mid-session re-configuration (issue #132 follow-up): switching tables or
+/// load source while a session runs re-invokes `start_autotune`, and a slot
+/// whose table and bins did not change must keep its accumulated
+/// recommendations. Switching used to demand a stop/start that silently
+/// discarded both tables' tuning progress.
+#[cfg(test)]
+mod restart_preservation_tests {
+    use super::*;
+    use crate::state::{AppState, RpmStateTracker, StreamStats};
+    use libretune_core::autotune::{AutoTuneRecommendation, AutoTuneState};
+    use libretune_core::datalog::DataLogger;
+    use libretune_core::ini::IncTableCache;
+    use libretune_core::project::OnlineIniRepository;
+    use std::sync::Arc;
+    use tokio::sync::Mutex;
+
+    /// A definition with two Ve-role fuel tables (`veTable1Tbl`/`veTable2Tbl`),
+    /// no constants — axis bins come from the deterministic fallbacks, so the
+    /// same table always yields the same bins across invocations.
+    fn def_with_two_ve_tables() -> EcuDefinition {
+        let mut def = EcuDefinition::default();
+        for name in ["veTable1Tbl", "veTable2Tbl"] {
+            def.tables.insert(
+                name.to_string(),
+                libretune_core::ini::TableDefinition {
+                    name: name.to_string(),
+                    map: format!("{name}Map"),
+                    x_size: 2,
+                    y_size: 2,
+                    role: TableRole::Ve,
+                    ..Default::default()
+                },
+            );
+        }
+        def
+    }
+
+    fn app_state(def: EcuDefinition) -> AppState {
+        AppState {
+            connection: Mutex::new(None),
+            connection_transition: Mutex::new(()),
+            connection_generation: std::sync::atomic::AtomicU64::new(0),
+            definition: Mutex::new(Some(def)),
+            autotune_state: Mutex::new(AutoTuneState::new()),
+            autotune_secondary_state: Mutex::new(AutoTuneState::new()),
+            autotune_config: Mutex::new(None),
+            connection_factory: Mutex::new(None),
+            streaming_task: Mutex::new(None),
+            autotune_send_task: Mutex::new(None),
+            metrics_task: Mutex::new(None),
+            current_tune: Mutex::new(None),
+            current_tune_path: Mutex::new(None),
+            tune_modified: Mutex::new(false),
+            data_logger: Mutex::new(DataLogger::default()),
+            current_project: Mutex::new(None),
+            ini_repository: Mutex::new(None),
+            online_ini_repository: Mutex::new(OnlineIniRepository::new()),
+            tune_cache: Mutex::new(None),
+            tune_mismatch_snapshot: Mutex::new(None),
+            demo_mode: Mutex::new(false),
+            wasm_plugin_manager: Mutex::new(None),
+            migration_report: Mutex::new(None),
+            evaluator: Mutex::new(None),
+            cached_output_channels: Mutex::new(None),
+            console_history: Mutex::new(Vec::new()),
+            rpm_state_tracker: Mutex::new(RpmStateTracker::new()),
+            math_channels: Mutex::new(Vec::new()),
+            stream_stats: Mutex::new(StreamStats::default()),
+            agent_task: Mutex::new(None),
+            app_start_epoch: 0.0,
+            inc_table_cache: Arc::new(std::sync::Mutex::new(IncTableCache::default())),
+        }
+    }
+
+    async fn start(state: &AppState, primary: &str, secondary: Option<&str>) -> Result<(), String> {
+        start_autotune_inner(
+            state,
+            primary.to_string(),
+            secondary.map(|s| s.to_string()),
+            None,
+            AutoTuneSettings::default(),
+            AutoTuneFilters::default(),
+            AutoTuneAuthorityLimits::default(),
+            None,
+            None,
+            None,
+        )
+        .await
+    }
+
+    fn seeded_recommendation() -> AutoTuneRecommendation {
+        AutoTuneRecommendation {
+            cell_x: 0,
+            cell_y: 0,
+            beginning_value: 50.0,
+            recommended_value: 51.0,
+            hit_count: 3,
+            hit_weighting: 3.0,
+            target_afr: 14.7,
+            hit_percentage: 100.0,
+            raw_required_cma: 51.0,
+        }
+    }
+
+    async fn seed(state: &AppState, secondary: bool) {
+        let mut guard = if secondary {
+            state.autotune_secondary_state.lock().await
+        } else {
+            state.autotune_state.lock().await
+        };
+        guard
+            .recommendations
+            .insert((0, 0), seeded_recommendation());
+    }
+
+    async fn recommendation_count(state: &AppState, secondary: bool) -> usize {
+        let guard = if secondary {
+            state.autotune_secondary_state.lock().await
+        } else {
+            state.autotune_state.lock().await
+        };
+        guard.recommendations.len()
+    }
+
+    #[test]
+    fn same_slot_requires_table_and_both_bin_axes_to_match() {
+        let bins = [20.0, 100.0];
+        assert!(same_slot(
+            Some("veTable1Tbl"),
+            Some(&bins),
+            Some(&bins),
+            "veTable1Tbl",
+            &bins,
+            &bins
+        ));
+        // Table changed (the mid-session switch case): fresh start.
+        assert!(!same_slot(
+            Some("veTable1Tbl"),
+            Some(&bins),
+            Some(&bins),
+            "veTable2Tbl",
+            &bins,
+            &bins
+        ));
+        // Either bin axis changed (e.g. a re-binned tune mid-session):
+        // recommendations are cell-indexed against the old bins.
+        let other = [0.0, 100.0];
+        assert!(!same_slot(
+            Some("veTable1Tbl"),
+            Some(&other),
+            Some(&bins),
+            "veTable1Tbl",
+            &bins,
+            &bins
+        ));
+        assert!(!same_slot(
+            Some("veTable1Tbl"),
+            Some(&bins),
+            Some(&other),
+            "veTable1Tbl",
+            &bins,
+            &bins
+        ));
+        // No previous config at all.
+        assert!(!same_slot(None, None, None, "veTable1Tbl", &bins, &bins));
+    }
+
+    #[tokio::test]
+    async fn switching_the_secondary_keeps_the_primarys_recommendations() {
+        let state = app_state(def_with_two_ve_tables());
+        start(&state, "veTable1Tbl", Some("veTable2Tbl"))
+            .await
+            .unwrap();
+        seed(&state, false).await;
+        seed(&state, true).await;
+
+        // Swap the secondary slot to a different table... the definition only
+        // has two Ve tables, so the swap case here is: same tables re-invoked
+        // must keep BOTH, and a lone primary keeps its own.
+        start(&state, "veTable1Tbl", Some("veTable2Tbl"))
+            .await
+            .unwrap();
+        assert_eq!(recommendation_count(&state, false).await, 1);
+        assert_eq!(recommendation_count(&state, true).await, 1);
+    }
+
+    #[tokio::test]
+    async fn changing_the_table_resets_that_slot() {
+        let state = app_state(def_with_two_ve_tables());
+        start(&state, "veTable1Tbl", Some("veTable2Tbl"))
+            .await
+            .unwrap();
+        seed(&state, false).await;
+        seed(&state, true).await;
+
+        // Primary becomes the old secondary; secondary is dropped. The primary
+        // slot now tunes a different table, so its seeded recommendations
+        // must not survive into it.
+        start(&state, "veTable2Tbl", None).await.unwrap();
+        assert_eq!(recommendation_count(&state, false).await, 0);
+        // The secondary slot is stopped (not started): recommendations are
+        // retained per stop() semantics — they stay until the slot restarts.
+        let secondary = state.autotune_secondary_state.lock().await;
+        assert!(!secondary.is_running);
+        assert_eq!(secondary.recommendations.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_stopped_session_starting_the_same_table_clears() {
+        let state = app_state(def_with_two_ve_tables());
+        start(&state, "veTable1Tbl", None).await.unwrap();
+        seed(&state, false).await;
+
+        // Explicit stop, then start the same table: a deliberate stop/start
+        // cycle still means "fresh session" even though nothing changed.
+        crate::commands::autotune_misc::stop_autotune_inner(&state)
+            .await
+            .unwrap();
+        start(&state, "veTable1Tbl", None).await.unwrap();
+        assert_eq!(recommendation_count(&state, false).await, 0);
+    }
+
+    #[tokio::test]
+    async fn secondary_removed_primary_untouched() {
+        let state = app_state(def_with_two_ve_tables());
+        start(&state, "veTable1Tbl", Some("veTable2Tbl"))
+            .await
+            .unwrap();
+        seed(&state, false).await;
+        seed(&state, true).await;
+
+        // Re-configure without a secondary: the primary keeps its progress,
+        // the secondary stops (recommendations retained until it restarts).
+        start(&state, "veTable1Tbl", None).await.unwrap();
+        assert_eq!(recommendation_count(&state, false).await, 1);
+        let secondary = state.autotune_secondary_state.lock().await;
+        assert!(!secondary.is_running);
     }
 }

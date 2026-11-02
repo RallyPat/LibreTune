@@ -1,0 +1,11 @@
+/* Trail line overlay (issue #132): shared rendering for grid views. Same
+   rules as the tab-view TableEditor's overlay — sits above plain cells and
+   z-1 fills (later in DOM wins ties) but below live-cell tints and sticky
+   axis headers, so the line scrolls under them. Kept in its own file so the
+   overlay never depends on another component's CSS being imported. */
+.table-trail-overlay {
+  position: absolute;
+  pointer-events: none;
+  z-index: 1;
+  overflow: visible;
+}

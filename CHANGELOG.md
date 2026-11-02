@@ -13,6 +13,48 @@ relevant.
 
 ## [Unreleased]
 
+### 2026-11-02 — AutoTune Y-axis flip, trace line, mid-session table switching (issue #132 follow-ups)
+
+Second pass on the three suggestions from the issue's final field report
+(two hours of testing on a dual-table TPS/Alpha-N setup):
+
+- **Y-axis order in AutoTune** — the recommendation grid now honors the same
+  global `table_y_axis_bottom` setting as the table editors (suggestion 2:
+  "the Y-axis is missing the option to sort in ascending or descending
+  order"). Toolbar toggle (ArrowUpDown); rows flip display-only with the
+  X-axis header moving to a sticky `<tfoot>`; all cell keys (locks, heatmap,
+  current cell, CSV) stay data-space.
+- **Trace line in AutoTune** — the grid draws the same visited-cell path the
+  fuel tables do (suggestion 3): 3 px line, age-faded dots, halo on the
+  current cell. Implemented as **shared primitives** extracted from the
+  tab-view TableEditor — `useTableTrail` (append/dedupe/prune + 5 Hz fade
+  tick, with cell-identity stabilization), `useTableGridGeometry` (measured
+  thead/tfoot/tbody geometry), and `TableTrailOverlay` (the SVG) — so this
+  is not a third hand-rolled copy of the drawing code. Toggle (MapPin)
+  persists as a view preference; draws whenever live data flows; the grid's
+  axis-channel subscription now falls back to canonical `rpm`/`map` when the
+  INI declares none (parity with the editors — previously nothing
+  highlighted at all on such INIs).
+- **Mid-session table switching** — the Primary/Secondary/Load Source
+  selectors are no longer locked while a session runs (suggestion 1's
+  remaining pain: switching demanded a stop/start, and `AutoTuneState::start`
+  clears accumulated recommendations, so both tables' tuning progress was
+  silently discarded). `start_autotune` now keeps the recommendations of any
+  slot whose table **and** bins did not change (`same_slot` + prev-config
+  snapshot); stop/start still clears. A table leaving the session with unsent
+  recommendations raises a Send & Switch / Discard & Switch / Cancel dialog
+  first. `get_autotune_status` exposes the session's resolved load source so
+  the dropdown can sync after backend-side Alpha-N detection (Speeduino's
+  `algorithm` constant) on re-attach or restart. Primary changes also reset
+  the manual load-source choice so detection re-runs for the new table.
+- Tests: 10 new frontend tests (trail overlay + toggle, Y flip render +
+  persistence, re-attach re-configure, switch guard dialog) and 5 Rust tests
+  (`same_slot` cases + restart preservation through the new
+  `start_autotune_inner`, split out of the command following the
+  `stop_autotune_inner` pattern).
+- Docs: usage guide gains the trace line, Y-axis order, and mid-session
+  switching sections; manual synced.
+
 ### 2026-10-30 — Nightly build fix: Tauri crate/npm version realignment + PR-time drift guard (issue #345)
 
 The Oct 24 nightly failed on all three platforms ~1s into `tauri build`:
