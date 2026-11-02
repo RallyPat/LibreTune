@@ -115,9 +115,11 @@ export const DatalogViewer: React.FC<DatalogViewerProps> = ({ tableName, isConne
 
   useEffect(() => {
     if (!table) return;
+    let stale = false;
     invoke<TableData>('get_table_data', { tableName: table })
-      .then(setTableData)
+      .then((d) => { if (!stale) setTableData(d); })
       .catch((e) => setError(String(e)));
+    return () => { stale = true; };
   }, [table]);
 
   const loadLog = useCallback(async () => {
@@ -304,7 +306,7 @@ export const DatalogViewer: React.FC<DatalogViewerProps> = ({ tableName, isConne
         <button className="dv-btn" onClick={loadLog}>
           <FolderOpen size={15} /> {logName || 'Open log…'}
         </button>
-        <select className="dv-select" value={table} onChange={(e) => setTable(e.target.value)}>
+        <select className="dv-select" value={table} disabled={busy} onChange={(e) => { setTable(e.target.value); setReport(null); }}>
           {tables.length === 0 && <option value="">no tables</option>}
           {tables.map((t) => <option key={t} value={t}>{t}</option>)}
         </select>

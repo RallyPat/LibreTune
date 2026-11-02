@@ -196,7 +196,13 @@ pub(crate) async fn feed_data_logger(app_state: &AppState, data: &HashMap<String
     let values: Vec<f64> = logger
         .channels()
         .iter()
-        .map(|name| data.get(name).copied().unwrap_or(0.0))
+        // Log entries go to the UI as JSON, which cannot carry NaN/Infinity.
+        .map(|name| {
+            data.get(name)
+                .copied()
+                .filter(|v| v.is_finite())
+                .unwrap_or(0.0)
+        })
         .collect();
     logger.record(values);
 }
@@ -345,6 +351,15 @@ pub(crate) async fn feed_autotune_data(
         .or_else(|| data.get("coolantTemperature"))
         .copied()
         .unwrap_or(0.0);
+
+    // A non-finite reading is not data: NaN passes every `<`/`>` range filter
+    // and would poison `last_tps`, so drop the tick.
+    if ![rpm, load_value, afr, ve, clt, tps]
+        .iter()
+        .all(|v| v.is_finite())
+    {
+        return;
+    }
 
     // `tps` was read above (before load_value) so a TPS load source can use it.
 
@@ -944,15 +959,14 @@ pub async fn start_realtime_stream(
 
                         apply_channel_aliases(&mut data);
 
-                        // Sanitize NaN/Infinity — serde_json cannot serialize these,
-                        // which would silently break app_handle.emit().
-                        for v in data.values_mut() {
-                            if !v.is_finite() {
-                                *v = 0.0;
-                            }
-                        }
-
-                        if let Err(e) = app_handle.emit("realtime:update", &data) {
+                        // Sanitize NaN/Infinity for the emit only — serde_json cannot
+                        // serialize these. `data` stays untouched so AutoTune and the
+                        // logger never see a fabricated 0.0.
+                        let emit_data: HashMap<&String, f64> = data
+                            .iter()
+                            .map(|(k, v)| (k, if v.is_finite() { *v } else { 0.0 }))
+                            .collect();
+                        if let Err(e) = app_handle.emit("realtime:update", &emit_data) {
                             stream_log(&format!("emit FAILED (real): {}", e));
                         }
 

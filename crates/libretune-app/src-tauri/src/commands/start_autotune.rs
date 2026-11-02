@@ -300,11 +300,13 @@ pub async fn start_autotune(
     let mut guard = state.autotune_state.lock().await;
     guard.set_reference_tables(reference_tables.clone());
     guard.set_strict_lambda_match(strict);
+    guard.table_name = Some(table_name.clone());
     guard.start();
 
     let mut secondary_guard = state.autotune_secondary_state.lock().await;
     secondary_guard.set_reference_tables(reference_tables);
     secondary_guard.set_strict_lambda_match(strict);
+    secondary_guard.table_name = secondary_table_name.clone();
     if secondary_table_name.is_some() {
         secondary_guard.start();
     } else {

@@ -260,25 +260,32 @@ pub async fn send_autotune_recommendations(
     state: tauri::State<'_, AppState>,
     table_name: String,
 ) -> Result<(), String> {
-    // Collect recommendations
-    let (secondary_name, session_signature) = {
+    let session_signature = {
         let config_guard = state.autotune_config.lock().await;
-        let config = config_guard.as_ref();
-        (
-            config.and_then(|c| c.secondary_table_name.clone()),
-            config.map(|c| c.definition_signature.clone()),
-        )
+        config_guard
+            .as_ref()
+            .map(|c| c.definition_signature.clone())
     };
 
-    let recs = if matches!(
-        (Some(table_name.as_str()), secondary_name.as_deref()),
-        (Some(table), Some(secondary)) if table == secondary
-    ) {
-        let guard = state.autotune_secondary_state.lock().await;
-        guard.get_recommendations()
-    } else {
-        let guard = state.autotune_state.lock().await;
-        guard.get_recommendations()
+    // Recommendations are indexed by cell for the table they were accumulated
+    // on; writing them into any other table would corrupt it. Stop clears the
+    // config but not the recommendations, so route by the table name each
+    // state keeps.
+    let recs = {
+        let primary = state.autotune_state.lock().await;
+        if primary.table_name.as_deref() == Some(table_name.as_str()) {
+            primary.get_recommendations()
+        } else {
+            drop(primary);
+            let secondary = state.autotune_secondary_state.lock().await;
+            if secondary.table_name.as_deref() != Some(table_name.as_str()) {
+                return Err(format!(
+                    "Table {} is not part of the AutoTune session",
+                    table_name
+                ));
+            }
+            secondary.get_recommendations()
+        }
     };
     if recs.is_empty() {
         tracing::info!(table = %table_name, "send_autotune_recommendations: nothing to send (no recommendations accumulated)");
