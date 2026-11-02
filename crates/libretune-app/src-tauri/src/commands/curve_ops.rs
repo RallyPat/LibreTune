@@ -327,12 +327,8 @@ fn write_constant_array_values(
             data: raw_data,
         };
 
-        if let Err(e) = conn.write_memory(params) {
-            eprintln!(
-                "[WARN] Failed to write constant '{}' to ECU: {}",
-                constant.name, e
-            );
-        }
+        conn.write_memory(params)
+            .map_err(|e| format!("Failed to write constant '{}' to ECU: {e}", constant.name))?;
     }
 
     Ok(())

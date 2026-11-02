@@ -128,13 +128,6 @@ export interface PortEditorConfig {
   enable_condition?: string;
 }
 
-/// Returns true if `value` is an in-progress numeric edit (empty, just minus,
-/// just decimal point) that should be tolerated by the input field without
-/// being parsed as a final number.
-export function isIncompleteNumericInput(value: string): boolean {
-  return value === '' || value === '-' || value === '.';
-}
-
 /// Synthetic placeholder definitions for `std_*` panel names that LibreTune
 /// doesn't ship — surfaces a friendly Label component instead of an error.
 ///
