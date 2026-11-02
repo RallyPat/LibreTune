@@ -473,9 +473,8 @@ pub(crate) async fn update_table_z_values_internal(
             offset: constant.offset,
             data: raw_data,
         };
-        if let Err(e) = conn.write_memory(params) {
-            eprintln!("[WARN] Failed to write to ECU: {}", e);
-        }
+        conn.write_memory(params)
+            .map_err(|e| format!("Failed to write to ECU: {e}"))?;
     }
 
     Ok(())
@@ -582,12 +581,8 @@ pub(crate) async fn update_constant_array_internal(
             offset: constant.offset,
             data: raw_data.clone(),
         };
-        if let Err(e) = conn.write_memory(params) {
-            eprintln!(
-                "[WARN] Failed to write axis bins '{}' to ECU: {}",
-                constant_name, e
-            );
-        }
+        conn.write_memory(params)
+            .map_err(|e| format!("Failed to write axis bins '{constant_name}' to ECU: {e}"))?;
     }
 
     Ok(())

@@ -172,7 +172,7 @@ describe('DialogRenderer numeric input field', () => {
     await waitFor(() => expect(input.value).toBe('3.'));
   });
 
-  it('handles empty input on blur by setting to zero', async () => {
+  it('restores previous value and writes nothing on empty input blur', async () => {
     const def: DialogDefinition = {
       name: 'testDialog',
       title: 'Test Dialog',
@@ -199,8 +199,8 @@ describe('DialogRenderer numeric input field', () => {
     fireEvent.change(input, { target: { value: '' } });
     fireEvent.blur(input);
 
-    // Should reset to 0
-    await waitFor(() => expect(input.value).toBe('0'));
+    await waitFor(() => expect(input.value).toBe('1.5'));
+    expect(invoke).not.toHaveBeenCalledWith('update_constant', expect.anything());
   });
 });
 

@@ -24,7 +24,7 @@ pub async fn create_project(
         .ok_or_else(|| format!("INI '{}' not found in repository", ini_id))?;
 
     // Get signature from INI
-    let def =
+    let mut def =
         EcuDefinition::from_file(&ini_path).map_err(|e| format!("Failed to parse INI: {}", e))?;
     let signature = def.signature.clone();
 
@@ -67,6 +67,11 @@ pub async fn create_project(
                 let mut cache_guard = state.tune_cache.lock().await;
                 if let Some(cache) = cache_guard.as_mut() {
                     crate::commands::tune_apply::load_msq_pages_into_cache(cache, &tune);
+                    crate::commands::tune_apply::resolve_scales_for_tune(
+                        &mut def,
+                        Some(&tune),
+                        Some(cache),
+                    );
 
                     // Apply constants from tune file to cache
                     use libretune_core::tune::TuneValue;
@@ -270,7 +275,7 @@ pub async fn open_project(
 
     // Store current project and definition
     let mut def_guard = state.definition.lock().await;
-    let def_clone = def.clone();
+    let mut def_clone = def.clone();
     *def_guard = Some(def);
     drop(def_guard);
     crate::commands::data_logging::stop_recording_on_definition_change(&state).await;
@@ -321,6 +326,11 @@ pub async fn open_project(
         // Populate cache from project tune
         if let Some(cache) = cache_guard.as_mut() {
             crate::commands::tune_apply::load_msq_pages_into_cache(cache, &tune);
+            crate::commands::tune_apply::resolve_scales_for_tune(
+                &mut def_clone,
+                Some(&tune),
+                Some(cache),
+            );
 
             // Apply constants from tune file to cache (same logic as load_tune)
             use libretune_core::tune::TuneValue;
