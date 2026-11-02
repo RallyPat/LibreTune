@@ -49,8 +49,9 @@ uuid = { version = "1.0", features = ["v4", "serde"] }
 rand = "0.8"
 
 # WebAssembly runtime for plugin system
-# Floor 49.0.4: RUSTSEC-2026-0353..0364/-0378/-0379 (wasmtime 49.0.2 panics + aarch64 br_table)
-wasmtime = "49.0.4"
+# Floor 49.0.5: RUSTSEC-2026-0353..0364/-0378/-0379 (wasmtime 49.0.2 panics + aarch64 br_table)
+# and RUSTSEC-2026-0422/-0423/-0424 (wasmtime 49.0.4 — fixed in 49.0.5)
+wasmtime = "49.0.5"
 
 # Testing
 pretty_assertions = "1.4"
