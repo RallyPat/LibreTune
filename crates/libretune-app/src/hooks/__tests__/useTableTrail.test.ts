@@ -81,7 +81,11 @@ describe('useTableTrail', () => {
     const { result, rerender } = renderHook(
       ({ cell }: { cell: { row: number; col: number } | null }) =>
         useTableTrail(cell, 8),
-      { initialProps: { cell: { row: 0, col: 0 } } },
+      {
+        initialProps: {
+          cell: { row: 0, col: 0 },
+        } as { cell: { row: number; col: number } | null },
+      },
     );
     await act(async () => {
       await Promise.resolve();

@@ -1810,14 +1810,16 @@ export function AutoTune({ tableName: initialTableName = '', onClose, isConnecte
                 ))}
               </tbody>
             </table>
-            <TableTrailOverlay
-              geometry={gridGeometry}
-              trail={historyTrail}
-              rowCount={tableData.y_bins.length}
-              yAxisBottom={yAxisBottom}
-              fadeMs={trailFadeSec > 0 ? trailFadeSec * 1000 : Infinity}
-              currentCell={currentCell ? { row: currentCell.y, col: currentCell.x } : null}
-            />
+            {showTrail && (
+              <TableTrailOverlay
+                geometry={gridGeometry}
+                trail={historyTrail}
+                rowCount={tableData.y_bins.length}
+                yAxisBottom={yAxisBottom}
+                fadeMs={trailFadeSec > 0 ? trailFadeSec * 1000 : Infinity}
+                currentCell={currentCell ? { row: currentCell.y, col: currentCell.x } : null}
+              />
+            )}
           </div>
 
           {/* Legend */}

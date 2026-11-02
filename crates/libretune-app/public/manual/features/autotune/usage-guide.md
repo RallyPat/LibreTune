@@ -133,6 +133,23 @@ While the session runs, a small indicator under the title row shows how many sam
 - Look for coverage in your normal operating range
 - Don't stare at screen - safety first!
 
+**Following the Trace Line**
+
+The grid draws a **trace line** over the cells — the same path indicator
+the fuel-table editors have: a line through the recently visited cells, dots
+that fade with age, and a halo on the cell the engine is in *right now*.
+
+- It appears whenever live data flows (no session needs to be running)
+- Toggle it with the **MapPin** button in the grid toolbar
+- Color and fade time follow the Settings → cursor/trail preferences
+
+**Y-Axis Order**
+
+The **↑↓ button** next to the heatmap selector flips the Y axis between
+zero-at-top and zero-at-bottom — the same global setting the table editors
+use. The flip is display-only; cell data, locks, and recommendations are
+unaffected.
+
 ---
 
 ### Phase 3: Reviewing Data (5 minutes)
@@ -248,6 +265,22 @@ measures against, chosen during the preflight check. Ignition timing is a
 separate, manual workflow: scaling degrees of advance by AFR error would add
 timing in exactly the lean, high-load cells where detonation lives, so
 AutoTune refuses ignition tables entirely.
+
+**Switching Tables Mid-Session**
+
+The Primary, Secondary, and Load Source selectors stay live while a session
+runs — no need to stop and restart:
+
+```
+1. Change Primary or Secondary (or tick/untick the secondary box)
+2. The session re-configures in place, keeping the accumulated
+   recommendations of any table whose table and bins did not change
+3. A table leaving the session with unsent recommendations asks first:
+   Send & Switch / Discard & Switch / Cancel
+```
+
+An explicit **Stop → Start** cycle still clears both tables' accumulated
+recommendations, exactly as before.
 
 ### Cell Locking
 
