@@ -9,24 +9,41 @@
 
 Modern, open-source ECU tuning software for Speeduino, rusEFI, epicEFI, and other INI-compatible aftermarket engine control units. Built with a Rust core and a native desktop UI via Tauri.
 
-> ⚠️ **Project status — early days.** These notes are largely agentically written and may not be 100% accurate. Public contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) and the [CHANGELOG](CHANGELOG.md) for what's landed recently.
+> ⚠️ **Pre-release software.** LibreTune is under active development and has not shipped a stable release yet. The [nightly build](https://github.com/RallyPat/LibreTune/releases/tag/nightly) is the recommended way to run it — it is rebuilt whenever there are new commits and published only after the full test suite passes. Expect rough edges, and keep backups of your tunes. Contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) and the [CHANGELOG](CHANGELOG.md) for what's landed recently.
 
-## Downloads
+## Get LibreTune
 
-| Platform | Stable Release | Nightly Build | Notes |
-|----------|----------------|---------------|-------|
-| **Linux** |  No Stable releases at this time, please use the nightly. | [Nightly](https://github.com/RallyPat/LibreTune/releases/tag/nightly) | AppImage is portable, no install needed |
-| **Windows** |  No Stable releases at this time, please use the nightly. | [Portable EXE](https://github.com/RallyPat/LibreTune/releases/tag/nightly) | Nightly is portable, no install needed |
-| **macOS** |   No Stable releases at this time, please use the nightly. | [Nightly](https://github.com/RallyPat/LibreTune/releases/tag/nightly) | Separate builds for Apple Silicon and Intel |
+<!-- No stable release yet. When one ships, add it here and re-add a Stable column to the table below. -->
 
-> ⚠️ **Nightly builds** are automatically generated from the latest code and may be unstable.
+Download the latest **[nightly build](https://github.com/RallyPat/LibreTune/releases/tag/nightly)** — no compilation required:
+
+| Platform | Download | How to run |
+|----------|----------|------------|
+| **Linux** | `AppImage` (recommended; `.deb` and `.rpm` also available) | `chmod +x LibreTune-nightly-*.AppImage`, then run it — no install needed |
+| **Windows** | Portable `EXE` | Download and run — no installer needed |
+| **macOS** | `aarch64` DMG for Apple Silicon (M1+), `x64` DMG for Intel — not universal | Drag **LibreTune** to `Applications`, then see the first-run note below |
+
+<details>
+<summary><strong>First-run notes</strong></summary>
+
+- **macOS**: builds are ad-hoc signed but not notarized, so macOS may report the app as damaged or from an unidentified developer. Open **System Settings → Privacy & Security** and click **Open Anyway**, or run:
+  ```
+  xattr -dr com.apple.quarantine /Applications/LibreTune.app
+  ```
+- **Windows**: the EXE is unsigned, so SmartScreen may warn on first launch — click **More info → Run anyway**.
+- **Linux (AppImage)**: if it will not launch, make sure it is executable and that FUSE is available (most desktop distros ship it).
+
+</details>
 
 ![LibreTune Table Editor](docs/screenshots/LibreTune_table_editor.png)
 
 ## Features
 
+### Base Map Generator
+Starting from a blank tune? Describe your engine — cylinders, displacement, injector size, fuel type, aspiration — and LibreTune generates a conservative, driveable starting tune: VE, ignition, and AFR tables plus cranking and warmup enrichment curves. Available from the new-project flow or **Tools → Generate Base Map**; individual tables can also be regenerated in place via the table editor's **Generate…** action.
+
 ### Table Editing
-Full-featured 2D grid editor with 3D surface visualization, keyboard navigation, and live ECU cursor tracking. Includes Set Equal, Scale, Interpolate, Smooth, Re-bin, Copy/Paste, table comparison, and direct Burn to ECU.
+Full-featured 2D grid editor with 3D surface visualization, keyboard navigation, and live ECU cursor tracking. Includes Set Equal, Scale, Interpolate, Smooth, Re-bin, Copy/Paste, table comparison, per-table generation, and direct Burn to ECU.
 
 ### Dashboards & Gauges
 Import existing .dash files or build layouts from scratch with 13 gauge types (analog dials, bar gauges, sweep gauges, digital readouts, line graphs, histograms, tachometers, and more). Drag-and-drop designer mode with three default dashboards included.
@@ -47,17 +64,22 @@ Project-based workflow with restore points, Git-based tune versioning, CSV expor
 - **Unit preferences**: Temperature (°C/°F/K), pressure (kPa/PSI/bar/inHg), AFR/Lambda
 - **Performance calculator**: Estimated HP/torque curves and acceleration times
 - **Action scripting**: Record and replay tuning actions across tunes, with INI-backed validation
+- **Lua scripting**: Sandboxed Lua 5.4 engine for custom calculations, automated test sequences, and advanced data processing (**Tools → ECU Lua Editor**)
 - **Extensible**: WASM plugin system with sandboxing and permission model
 - **Localization**: i18n scaffold with English, Brazilian Portuguese (`pt-BR`), and Hungarian (`hu-HU`); add new locales under `crates/libretune-app/src/i18n/locales/`
 - **Demo mode**: Run the app without an ECU using the bundled simulator (Settings → Enable Demo Mode)
 
-For full documentation, see the [User Manual](https://rallypat.github.io/LibreTune/) or the [architecture overview](docs/architecture.md).
+For full documentation, open the in-app manual (**Help → User Manual** — bundled with every build, no internet needed) or read the [architecture overview](docs/architecture.md).
 
 ## Screenshots
 
-| Welcome Screen | Settings Dialog | Table Editor |
-|:--------------:|:---------------:|:------------:|
-| ![Welcome](docs/screenshots/welcome.png) | ![Settings](docs/screenshots/LibreTune_Config.png) | ![Table Editor](docs/screenshots/LibreTune_table_editor.png) |
+| Welcome Screen | Settings Dialog | Dashboard |
+|:--------------:|:---------------:|:---------:|
+| ![Welcome](docs/screenshots/welcome.png) | ![Settings](docs/screenshots/settingsdialog.png) | ![Dashboard](docs/screenshots/LibreTune_dash.png) |
+
+| AutoTune | ECU Settings | VE Table |
+|:--------:|:------------:|:--------:|
+| ![AutoTune](docs/screenshots/autotune.png) | ![ECU Settings](docs/screenshots/ECUSettings.png) | ![VE Table](docs/screenshots/vetable.png) |
 
 ## Supported ECUs
 
@@ -71,77 +93,25 @@ For full documentation, see the [User Manual](https://rallypat.github.io/LibreTu
 
 Any ECU using the standard INI definition format should be compatible.
 
-## Quick Start
+## Build from Source
 
-### Prerequisites
+Prefer to compile it yourself? The same procedure works on Windows, macOS, and Linux.
 
-- **Rust (stable)** — Install via [rustup](https://rustup.rs)
-- **Node.js 20+** — For the Tauri frontend
-- **Platform build deps** — see the OS notes below
+<details>
+<summary><strong>Show build instructions</strong></summary>
 
-### Build & Run
+You will need **Rust (stable)** via [rustup](https://rustup.rs), **Node.js 20+**, and your platform's build dependencies — WebKitGTK packages on Linux, Visual Studio Build Tools on Windows, or the Xcode command-line tools on macOS. The exact lists are in [CONTRIBUTING.md](CONTRIBUTING.md):
 
 ```bash
 git clone https://github.com/RallyPat/LibreTune.git
-cd LibreTune
-
-cd crates/libretune-app
+cd LibreTune/crates/libretune-app
 npm install
 npm run tauri dev
 ```
 
-<details>
-<summary><strong>Notes for Linux Users</strong></summary>
-
-Tauri 2 needs WebKitGTK and a few system libraries. On Debian/Ubuntu:
-
-```bash
-sudo apt install -y libwebkit2gtk-4.1-dev librsvg2-dev libssl-dev \
-  build-essential curl wget file libxdo-dev libayatana-appindicator3-dev
-```
-
-On Fedora:
-
-```bash
-sudo dnf install -y webkit2gtk4.1-devel openssl-devel curl wget file \
-  libxdo-devel libappindicator-gtk3-devel librsvg2-devel "@C Development Tools and Libraries"
-```
-
-See the [Tauri prerequisites guide](https://v2.tauri.app/start/prerequisites/) for other distros.
+For an optimized release build, run `npm run tauri build` instead.
 
 </details>
-
-<details>
-<summary><strong>Notes for Windows Users</strong></summary>
-
-If `link.exe` is not found, install the Visual Studio Build Tools:
-
-1. Download from [visualstudio.microsoft.com/downloads](https://visualstudio.microsoft.com/downloads/) → "Tools for Visual Studio" → "Build Tools for Visual Studio"
-2. During installation, enable **Desktop development with C++**
-3. Set the Rust toolchain: `rustup default stable-x86_64-pc-windows-msvc`
-4. Restart your terminal, then build as above
-
-</details>
-
-<details>
-<summary><strong>Notes for macOS Users</strong></summary>
-
-Install the Xcode command-line tools:
-
-```bash
-xcode-select --install
-```
-
-WebKit ships with macOS, so no extra system packages are required.
-
-</details>
-
-### Build for Production
-
-```bash
-cd crates/libretune-app
-npm run tauri build
-```
 
 ## Project Structure
 
@@ -165,7 +135,7 @@ libretune/
 │       │   ├── components/     # UI (dialogs, dashboards, gauges, tuner-ui, …)
 │       │   ├── contexts/       # Cross-cutting React providers
 │       │   ├── hooks/          # Reusable hooks (realtime, ECU events, …)
-│       │   ├── i18n/           # Localization (en, pt-BR)
+│       │   ├── i18n/           # Localization (en, hu-HU, pt-BR)
 │       │   └── stores/         # State stores
 │       └── src-tauri/          # Tauri backend (Rust)
 │           └── src/

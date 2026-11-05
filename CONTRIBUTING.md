@@ -51,6 +51,56 @@ Thank you for your interest in contributing to LibreTune! This document provides
 > "Format Check" job). Run `cargo fmt --all` to auto-format before committing.
 > The hook above does this automatically.
 
+### Platform Build Dependencies
+
+Tauri 2 needs a few system libraries depending on your OS:
+
+<details>
+<summary><strong>Linux</strong></summary>
+
+On Debian/Ubuntu:
+
+```bash
+sudo apt install -y libwebkit2gtk-4.1-dev librsvg2-dev libssl-dev \
+  build-essential curl wget file libxdo-dev libayatana-appindicator3-dev
+```
+
+On Fedora:
+
+```bash
+sudo dnf install -y webkit2gtk4.1-devel openssl-devel curl wget file \
+  libxdo-devel libappindicator-gtk3-devel librsvg2-devel "@C Development Tools and Libraries"
+```
+
+See the [Tauri prerequisites guide](https://v2.tauri.app/start/prerequisites/) for other distros.
+
+</details>
+
+<details>
+<summary><strong>Windows</strong></summary>
+
+If `link.exe` is not found, install the Visual Studio Build Tools:
+
+1. Download from [visualstudio.microsoft.com/downloads](https://visualstudio.microsoft.com/downloads/) → "Tools for Visual Studio" → "Build Tools for Visual Studio"
+2. During installation, enable **Desktop development with C++**
+3. Set the Rust toolchain: `rustup default stable-x86_64-pc-windows-msvc`
+4. Restart your terminal, then build as above
+
+</details>
+
+<details>
+<summary><strong>macOS</strong></summary>
+
+Install the Xcode command-line tools:
+
+```bash
+xcode-select --install
+```
+
+WebKit ships with macOS, so no extra system packages are required.
+
+</details>
+
 ## Project Structure
 
 ```
