@@ -35,7 +35,7 @@ Download the latest **[nightly build](https://github.com/RallyPat/LibreTune/rele
 
 </details>
 
-![LibreTune Table Editor](docs/screenshots/LibreTune_table_editor.png)
+![LibreTune VE Table](docs/screenshots/vetable.png)
 
 ## Features
 
