@@ -33,7 +33,8 @@ runs:
         }
 
         apt_install() {
-          sudo timeout 300 env DEBIAN_FRONTEND=noninteractive \
+          # WebKit is a large package on fresh Ubuntu runner images.
+          sudo timeout 900 env DEBIAN_FRONTEND=noninteractive \
             apt-get install -y --no-install-recommends "$@"
         }
 
