@@ -250,7 +250,9 @@ jobs:
             base64 -d "$sig" > /tmp/sig.minisig
             minisign -Vq -p updater.pub -x /tmp/sig.minisig -m "$2" \
               || { echo "::error::signature of $2 does not verify against plugins.updater.pubkey"; exit 1; }
-            jq -n --arg k "$1" --arg sig "$(cat "$sig")" \
+            # -c: one compact line per entry (jq pretty-prints by default, which
+            # would break the entry-count check below).
+            jq -c -n --arg k "$1" --arg sig "$(cat "$sig")" \
               --arg url "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/download/${TAG}/$(basename "$2")" \
               '{($k): {signature: $sig, url: $url}}' >> /tmp/platforms.jsonl
           }
@@ -274,7 +276,9 @@ jobs:
           entry windows-x86_64        "$nsis"
           entry darwin-aarch64        "$mac_arm"
           entry darwin-x86_64         "$mac_x64"
-          [ "$(wc -l < /tmp/platforms.jsonl)" -eq 8 ] || { echo "::error::expected 8 platform entries"; exit 1; }
+          # Count JSON documents, not physical lines (jq -c keeps one entry per
+          # line, but this stays correct even if that ever changes).
+          [ "$(jq -s length /tmp/platforms.jsonl)" -eq 8 ] || { echo "::error::expected 8 platform entries"; exit 1; }
 
           mkdir -p artifacts/updater
           jq -n --arg version "${TAG#v}" --arg date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
