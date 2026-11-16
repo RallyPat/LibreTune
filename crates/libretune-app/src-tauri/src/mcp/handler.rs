@@ -22,8 +22,8 @@
 use std::sync::Arc;
 
 use rmcp::model::{
-    CallToolRequestParams, CallToolResult, ContentBlock, Implementation, ListToolsResult,
-    PaginatedRequestParams, ServerCapabilities, ServerInfo, Tool,
+    CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, Implementation,
+    ListToolsResult, PaginatedRequestParams, ServerCapabilities, ServerConfig, Tool,
 };
 use rmcp::service::RequestContext;
 use rmcp::{ErrorData as McpError, RoleServer, ServerHandler};
@@ -130,8 +130,8 @@ fn to_rmcp_tool(def: libretune_core::llm::types::ToolDef) -> Tool {
 }
 
 impl ServerHandler for LibreTuneMcp {
-    fn get_info(&self) -> ServerInfo {
-        ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
+    fn get_info(&self) -> ServerConfig {
+        ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
             .with_server_info(Implementation::new("libretune", env!("CARGO_PKG_VERSION")))
             .with_instructions(MCP_INSTRUCTIONS)
     }
@@ -148,7 +148,7 @@ impl ServerHandler for LibreTuneMcp {
         &self,
         request: CallToolRequestParams,
         _context: RequestContext<RoleServer>,
-    ) -> Result<CallToolResult, McpError> {
-        Ok(self.dispatch(&request.name, request.arguments).await)
+    ) -> Result<CallToolResponse, McpError> {
+        Ok(self.dispatch(&request.name, request.arguments).await.into())
     }
 }
