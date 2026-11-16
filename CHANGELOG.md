@@ -13,6 +13,19 @@ relevant.
 
 ## [Unreleased]
 
+### 2026-11-08 — Signed in-app updater
+
+#### Added
+
+- In-app updater: one non-blocking check after startup, a toast when a newer
+  signed release exists, and **Check for updates** / **Install and restart**
+  in Help → About LibreTune. Updates are minisign-verified against a public
+  key built into the app; an unverifiable download is refused.
+- Tagged releases now emit updater artifacts and `latest.json`; the release
+  workflow verifies every signature against the committed public key before
+  publishing, and stamps the version from the tag. Maintainer key setup is
+  documented in CONTRIBUTING.md → Release Builds.
+
 ### 2026-11-02 — AutoTune Y-axis flip, trace line, mid-session table switching (issue #132 follow-ups)
 
 Second pass on the three suggestions from the issue's final field report

@@ -59,14 +59,19 @@ runs:
           linux)
             for root in "${SEARCH_ROOTS[@]}"; do
               copy_glob "$root/*/release/bundle/appimage/*.AppImage"
+              copy_glob "$root/*/release/bundle/appimage/*.AppImage.sig"
               copy_glob "$root/*/release/bundle/deb/*.deb"
+              copy_glob "$root/*/release/bundle/deb/*.deb.sig"
               copy_glob "$root/*/release/bundle/rpm/*.rpm"
+              copy_glob "$root/*/release/bundle/rpm/*.rpm.sig"
             done
             ;;
           windows)
             for root in "${SEARCH_ROOTS[@]}"; do
               copy_glob "$root/*/release/bundle/nsis/*.exe"
+              copy_glob "$root/*/release/bundle/nsis/*.exe.sig"
               copy_glob "$root/*/release/bundle/msi/*.msi"
+              copy_glob "$root/*/release/bundle/msi/*.msi.sig"
               # Portable / --no-bundle builds
               if [ -f "$root/x86_64-pc-windows-msvc/release/libretune-app.exe" ]; then
                 cp "$root/x86_64-pc-windows-msvc/release/libretune-app.exe" \
@@ -79,6 +84,17 @@ runs:
           macos)
             for root in "${SEARCH_ROOTS[@]}"; do
               copy_glob "$root/*/release/bundle/dmg/*.dmg"
+              # Updater archive (+ signature) emitted when createUpdaterArtifacts
+              # is on; same file name for both arches, so suffix the triple.
+              shopt -s nullglob
+              tars=("$root"/*/release/bundle/macos/*.app.tar.gz)
+              shopt -u nullglob
+              for tar in "${tars[@]+"${tars[@]}"}"; do
+                triple="$(basename "$(dirname "$(dirname "$(dirname "$(dirname "$tar")")")")")"
+                base="$(basename "$tar" .app.tar.gz)"
+                copy_glob "$tar" "${base}_${triple}.app.tar.gz"
+                copy_glob "$tar.sig" "${base}_${triple}.app.tar.gz.sig"
+              done
               shopt -s nullglob
               apps=("$root"/*/release/bundle/macos/*.app)
               shopt -u nullglob

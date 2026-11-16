@@ -97,6 +97,23 @@ sudo usermod -a -G dialout $USER
 
 Log out and back in for the change to take effect.
 
+## Updating
+
+LibreTune checks for a newer release once after startup, without blocking
+anything: if one exists you get a short notice, and **Help → About LibreTune**
+has an **Install and restart** button (and a manual **Check for updates**).
+Nothing is downloaded or installed until you press it.
+
+Updates are cryptographically signed. The public key is built into the app,
+and an update whose signature does not verify is refused before it is
+installed. This is separate from macOS notarization and Windows publisher
+signing, which the project does not have yet, so a first install may still
+require **Open Anyway** (macOS) or **More info → Run anyway** (Windows).
+
+Official builds, nightlies included, carry the release public key. A build
+you made yourself without it can still *see* a newer release, but the download
+is refused at the signature check and nothing is installed.
+
 ## Building from Source
 
 For developers who want to build LibreTune from source, see the [Contributing Guide](../contributing.md).

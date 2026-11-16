@@ -562,6 +562,33 @@
   margin-bottom: 16px !important;
 }
 
+.dialog-update {
+  margin: 0.75rem 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.dialog-update p {
+  margin: 0;
+}
+
+.dialog-update-notes {
+  white-space: pre-wrap;
+  font-size: 0.85em;
+  opacity: 0.85;
+}
+
+.dialog-update-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.dialog-update-error {
+  color: var(--error);
+}
+
 .dialog-about-links {
   display: flex;
   justify-content: center;

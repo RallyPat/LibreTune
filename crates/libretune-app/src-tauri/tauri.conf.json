@@ -59,5 +59,13 @@
         "installerIcon": "icons/icon.ico"
       }
     }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "",
+      "endpoints": [
+        "https://github.com/RallyPat/LibreTune/releases/latest/download/latest.json"
+      ]
+    }
   }
 }
