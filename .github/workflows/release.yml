@@ -6,6 +6,12 @@ on:
       - "v*"
   workflow_dispatch:
 
+# Creating the GitHub release (and its notes) needs contents:write; the repo's
+# default workflow-token permissions are read-only (same as nightly.yml, which
+# declares this explicitly).
+permissions:
+  contents: write
+
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
