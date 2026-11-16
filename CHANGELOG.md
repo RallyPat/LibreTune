@@ -13,6 +13,21 @@ relevant.
 
 ## [Unreleased]
 
+### 2026-11-16 — Windows: migrate installs across the product rename
+
+#### Fixed
+
+- **Windows installs updated from ≤0.1.1 land on a split state**: the
+  `productName` rename (`libretune-app` → `LibreTune`) changed every registry
+  key and shortcut name the NSIS installer uses, so an in-app update from a
+  pre-rename install left the old entry alive — a duplicate Add/Remove item,
+  stale `libretune-app` Start-Menu/Desktop shortcuts pointing at an abandoned
+  directory, and no new `LibreTune` shortcut (the updater's `/UPDATE` mode
+  skips shortcut creation). A new NSIS post-install hook (runs in every mode,
+  including silent updates) now creates the correct shortcut and retires the
+  legacy shortcuts, registry keys, and install directory. No-op on fresh
+  installs. Ships in v0.1.2; existing 0.1.0/0.1.1 users self-heal on update.
+
 ### 2026-11-16 — First stable release v0.1.0, product naming, Tools update check
 
 #### Added
