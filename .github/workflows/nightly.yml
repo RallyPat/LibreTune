@@ -85,7 +85,13 @@ jobs:
   build-linux:
     name: Build Linux
     needs: [check-changes, test]
-    runs-on: ubuntu-latest
+    # Build on the OLDEST supported Ubuntu, not ubuntu-latest. The AppImage
+    # bundles WebKitGTK/GLib/etc. from the build host but relies on the user's
+    # system glibc, so every bundled lib must link against a glibc no newer
+    # than the oldest distro we support. ubuntu-latest moved to 26.04
+    # (glibc 2.43), which broke the AppImage on Ubuntu 24.04 / Mint 22
+    # (glibc 2.39) and older.
+    runs-on: ubuntu-22.04
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -117,6 +123,9 @@ jobs:
       - name: Build Tauri app (Linux)
         working-directory: crates/libretune-app
         run: npx tauri build --target x86_64-unknown-linux-gnu
+
+      - name: Check AppImage glibc baseline
+        run: scripts/check-appimage-glibc.sh 2.35
 
       - uses: ./.github/actions/collect-tauri-artifacts
         with:
