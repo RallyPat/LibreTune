@@ -62,7 +62,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEExODlEMDc3NDBBNDI3QjEKUldTeEo2UkFkOUNKb1pVMWp6MGJkRG04cWEvU2FHeE1GMFZUbXFRU3RrQTFwdDJrSmZxQXdjSncK",
       "endpoints": [
         "https://github.com/RallyPat/LibreTune/releases/latest/download/latest.json"
       ]
