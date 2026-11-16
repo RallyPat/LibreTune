@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "libretune-app",
+  "productName": "LibreTune",
   "version": "0.1.0-nightly",
   "identifier": "com.libretune.app",
   "build": {

@@ -47,7 +47,8 @@
     "generateBaseMap": "Generate &Base Map…",
     "plugins": "&Plugins…",
     "aiAssistant": "&AI Assistant",
-    "ecuConnection": "&ECU Connection…"
+    "ecuConnection": "&ECU Connection…",
+    "checkUpdates": "Check for &Updates…"
   },
   "help": {
     "title": "&Help",

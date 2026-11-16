@@ -9,8 +9,8 @@ Download the latest release for your operating system from the [GitHub Releases]
 | Platform | File |
 |----------|------|
 | Windows | `LibreTune_x.x.x_x64-setup.exe` |
-| macOS (Apple Silicon) | `libretune-app_x.x.x_aarch64.dmg` |
-| macOS (Intel) | `libretune-app_x.x.x_x64.dmg` |
+| macOS (Apple Silicon) | `LibreTune_x.x.x_aarch64.dmg` |
+| macOS (Intel) | `LibreTune_x.x.x_x64.dmg` |
 | Linux (Debian/Ubuntu) | `libretune_x.x.x_amd64.deb` |
 | Linux (AppImage) | `LibreTune_x.x.x_amd64.AppImage` |
 

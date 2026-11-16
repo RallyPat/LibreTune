@@ -13,6 +13,29 @@ relevant.
 
 ## [Unreleased]
 
+### 2026-11-16 — First stable release v0.1.0, product naming, Tools update check
+
+#### Added
+
+- Version badge in the status-bar corner (same source as the About dialog;
+  tag builds show their stamped version).
+- **Tools → Check for Updates…** opens About, whose update section runs a
+  check immediately. Localized (en/hu/pt-BR).
+
+#### Changed
+
+- `productName` is now `LibreTune` (was `libretune-app`): the Windows Start
+  Menu shortcut, installer/bundle file names, and the macOS `.app` name now
+  read LibreTune. Docs download table updated to match.
+
+#### Fixed
+
+- Release pipeline (first-ever tagged release flushed out four latent bugs):
+  Windows artifact collection (backslash `GITHUB_WORKSPACE` broke every glob —
+  nightlies had silently shipped Windows portable-EXE only), silent `one()`
+  manifest errors, jq pretty-print vs `wc -l` entry count, and missing
+  `permissions: contents: write` for release creation.
+
 ### 2026-11-08 — Signed in-app updater
 
 #### Added

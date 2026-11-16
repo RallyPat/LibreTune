@@ -47,7 +47,8 @@
     "generateBaseMap": "Generate &Base Map…",
     "plugins": "&Pluginek…",
     "aiAssistant": "&AI Asszisztens",
-    "ecuConnection": "ECU &kapcsolat…"
+    "ecuConnection": "ECU &kapcsolat…",
+    "checkUpdates": "Frissítések &keresése…"
   },
   "help": {
     "title": "&Segítség",

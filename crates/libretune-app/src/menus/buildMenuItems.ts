@@ -284,7 +284,10 @@ export function buildMenuItems(deps: BuildMenuItemsDeps): TunerMenuItem[] {
     { id: "plugins", label: t('tools.plugins'), onClick: () => setPluginPanelOpen(true) },
     { id: "ai-assistant", label: t('tools.aiAssistant'), checked: agentPanelVisible, onClick: () => setAgentPanelVisible(!agentPanelVisible) },
     { id: "connection", label: t('tools.ecuConnection'), onClick: () => setConnectionDialogOpen(true) },
-    { id: "settings", label: t('file.settings'), onClick: () => setSettingsDialogOpen(true) }
+    { id: "settings", label: t('file.settings'), onClick: () => setSettingsDialogOpen(true) },
+    { id: "sep5", label: "", separator: true },
+    // Opens About, whose update section runs a check immediately on mount.
+    { id: "check-updates", label: t('tools.checkUpdates'), onClick: () => setAboutDialogOpen(true) }
   );
 
   const toolsMenu: TunerMenuItem = { id: "tools", label: t('tools.title'), items: toolItems };

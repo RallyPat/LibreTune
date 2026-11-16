@@ -47,7 +47,8 @@
     "generateBaseMap": "&Gerar Mapa Base…",
     "plugins": "&Plugins…",
     "aiAssistant": "&Assistente de IA",
-    "ecuConnection": "&Conexão com ECU…"
+    "ecuConnection": "&Conexão com ECU…",
+    "checkUpdates": "Verificar &atualizações…"
   },
   "help": {
     "title": "Aj&uda",

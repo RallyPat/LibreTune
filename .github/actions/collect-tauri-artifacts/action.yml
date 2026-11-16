@@ -77,13 +77,18 @@ runs:
               copy_glob "$root/*/release/bundle/nsis/*.exe.sig"
               copy_glob "$root/*/release/bundle/msi/*.msi"
               copy_glob "$root/*/release/bundle/msi/*.msi.sig"
-              # Portable / --no-bundle builds
-              if [ -f "$root/x86_64-pc-windows-msvc/release/libretune-app.exe" ]; then
-                cp "$root/x86_64-pc-windows-msvc/release/libretune-app.exe" \
-                  "$DEST/LibreTune-portable.exe"
-                echo "copied portable exe"
-                copied=$((copied + 1))
-              fi
+              # Portable / --no-bundle builds. The cargo binary keeps the
+              # crate name (libretune-app.exe); tauri may also emit a copy named
+              # after productName (LibreTune.exe). Accept either.
+              for bin in libretune-app.exe LibreTune.exe; do
+                if [ -f "$root/x86_64-pc-windows-msvc/release/$bin" ]; then
+                  cp "$root/x86_64-pc-windows-msvc/release/$bin" \
+                    "$DEST/LibreTune-portable.exe"
+                  echo "copied portable exe ($bin)"
+                  copied=$((copied + 1))
+                  break
+                fi
+              done
             done
             ;;
           macos)

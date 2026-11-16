@@ -238,8 +238,8 @@ case "$HOST_OS" in
         fi
         
         # If AppImage failed but AppDir exists, try manual squashfs
-        APPDIR="$PROJECT_ROOT/target/release/bundle/appimage/libretune-app.AppDir"
-        APPIMAGE_OUT="$RELEASES_DIR/linux/libretune-app_${VERSION}_amd64.AppImage"
+        APPDIR="$PROJECT_ROOT/target/release/bundle/appimage/LibreTune.AppDir"
+        APPIMAGE_OUT="$RELEASES_DIR/linux/LibreTune_${VERSION}_amd64.AppImage"
         if [[ -d "$APPDIR" ]] && ! ls "$RELEASES_DIR/linux/"*.AppImage 1>/dev/null 2>&1; then
             echo -e "${YELLOW}▶ AppImage bundle failed, attempting manual creation...${NC}"
             if command -v appimagetool &>/dev/null; then
@@ -272,18 +272,18 @@ case "$HOST_OS" in
         # Create universal binary using lipo
         echo -e "${GREEN}▶ Creating universal binary with lipo...${NC}"
         
-        INTEL_APP="$PROJECT_ROOT/target/x86_64-apple-darwin/release/bundle/macos/libretune-app.app"
-        ARM_APP="$PROJECT_ROOT/target/aarch64-apple-darwin/release/bundle/macos/libretune-app.app"
-        UNIVERSAL_APP="$RELEASES_DIR/macos/libretune-app.app"
+        INTEL_APP="$PROJECT_ROOT/target/x86_64-apple-darwin/release/bundle/macos/LibreTune.app"
+        ARM_APP="$PROJECT_ROOT/target/aarch64-apple-darwin/release/bundle/macos/LibreTune.app"
+        UNIVERSAL_APP="$RELEASES_DIR/macos/LibreTune.app"
         
         # Copy ARM app as base (or Intel, doesn't matter for structure)
         if [[ -d "$ARM_APP" ]]; then
             cp -R "$ARM_APP" "$UNIVERSAL_APP"
             
             # Find the main executable and merge with lipo
-            INTEL_BIN="$INTEL_APP/Contents/MacOS/libretune-app"
-            ARM_BIN="$ARM_APP/Contents/MacOS/libretune-app"
-            UNIVERSAL_BIN="$UNIVERSAL_APP/Contents/MacOS/libretune-app"
+            INTEL_BIN="$INTEL_APP/Contents/MacOS/LibreTune"
+            ARM_BIN="$ARM_APP/Contents/MacOS/LibreTune"
+            UNIVERSAL_BIN="$UNIVERSAL_APP/Contents/MacOS/LibreTune"
             
             if [[ -f "$INTEL_BIN" && -f "$ARM_BIN" ]]; then
                 lipo -create "$INTEL_BIN" "$ARM_BIN" -output "$UNIVERSAL_BIN"
