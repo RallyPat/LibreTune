@@ -19,6 +19,8 @@ const pairs = [
   ['tauri', '@tauri-apps/api'],
   ['tauri-plugin-dialog', '@tauri-apps/plugin-dialog'],
   ['tauri-plugin-opener', '@tauri-apps/plugin-opener'],
+  ['tauri-plugin-updater', '@tauri-apps/plugin-updater'],
+  ['tauri-plugin-process', '@tauri-apps/plugin-process'],
 ];
 
 function crateVersion(crate) {

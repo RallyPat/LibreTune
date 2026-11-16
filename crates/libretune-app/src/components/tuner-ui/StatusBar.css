@@ -35,6 +35,18 @@
   justify-content: flex-end;
 }
 
+/* App version badge (bottom-right corner). Same source as the About dialog:
+   the version stamped into the build config, so it reads 0.1.0 on tagged
+   releases and the nightly placeholder otherwise. */
+.statusbar-version {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs, 0.75rem);
+  white-space: nowrap;
+  padding: 0 var(--space-1);
+  user-select: none;
+}
+
 .statusbar-connection {
   display: flex;
   align-items: center;

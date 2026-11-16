@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
+import { invoke } from '@tauri-apps/api/core';
 import { StatusItem } from './TunerLayout';
 import { useChannelValue } from '../../stores/realtimeStore';
 import type { ConnectionPhase } from '../../utils/connectionWorkflow';
@@ -38,6 +39,23 @@ export function StatusBar({
 }: StatusBarProps) {
   const [currentPage, setCurrentPage] = useState(0);
   const itemsPerPage = 6;
+
+  // App version badge (bottom-right corner). Fetched once from the backend so
+  // tag builds report the version stamped by `tauri build --config` (see
+  // release.yml); hidden entirely when unavailable (browser/vitest contexts).
+  const [appVersion, setAppVersion] = useState<{ version: string; buildId: string } | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    invoke<{ version: string; build_id: string }>('get_build_info')
+      .then((info) => {
+        if (active) setAppVersion({ version: info.version, buildId: info.build_id });
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, []);
 
   // Get center items (non-realtime channel indicators)
   const centerItems = items.filter((item) => item.align === 'center' || !item.align);
@@ -178,6 +196,14 @@ export function StatusBar({
         {rightItems.map((item) => (
           <StatusBarItem key={item.id} item={item} />
         ))}
+        {appVersion && (
+          <span
+            className="statusbar-version"
+            title={`LibreTune v${appVersion.version} (build ${appVersion.buildId})`}
+          >
+            v{appVersion.version}
+          </span>
+        )}
       </div>
     </div>
   );
