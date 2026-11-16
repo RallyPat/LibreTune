@@ -24,6 +24,11 @@ runs:
         PLATFORM="${{ inputs.platform }}"
         mkdir -p "$DEST"
         ROOT="${GITHUB_WORKSPACE:-$(pwd)}"
+        # Windows runners expose GITHUB_WORKSPACE with backslashes (D:\a\...).
+        # Inside a bash glob pattern every '\' is an escape, so globs built from
+        # it silently match nothing — normalize to forward slashes (no-op on
+        # Linux/macOS).
+        ROOT="${ROOT//\\//}"
         # Workspace Cargo.toml lives at repo root → bundles under $ROOT/target
         # Older layouts sometimes wrote under crates/libretune-app/src-tauri/target
         SEARCH_ROOTS=(

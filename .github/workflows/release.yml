@@ -236,7 +236,9 @@ jobs:
 
           one() { # one <glob> → exactly one match or fail
             local m=( $1 )
-            [ "${#m[@]}" -eq 1 ] || { echo "::error::expected one file for $1, got ${#m[@]}: ${m[*]:-none}"; exit 1; }
+            # >&2: one() runs inside "$( )"; without it this message is
+            # captured into the variable and the failure is silent.
+            [ "${#m[@]}" -eq 1 ] || { echo "::error::expected one file for $1, got ${#m[@]}: ${m[*]:-none}" >&2; exit 1; }
             echo "${m[0]}"
           }
           # Verify one artifact and append its manifest entry. Runs as a plain
