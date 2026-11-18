@@ -16,16 +16,17 @@ const editRoles: Record<string, PredefinedMenuItemOptions["item"]> = {
   paste: "Paste",
 };
 
-function convertItem(item: MenuItem, parent: string): NativeItem {
-  const id = `${parent}/${item.id}`;
+function convertItem(item: MenuItem, useEditRoles = false): NativeItem {
   const text = menuText(item.label);
   if (item.separator) return { item: "Separator" };
-  if (parent === "edit" && editRoles[item.id]) return { text, item: editRoles[item.id] };
+  if (useEditRoles && editRoles[item.id]) return { text, item: editRoles[item.id] };
   const enabled = !item.disabled;
   if (item.items) {
-    return { id, text, enabled, items: item.items.map(child => convertItem(child, id)) };
+    return { text, enabled, items: item.items.map(child => convertItem(child)) };
   }
-  const action = { id, text, enabled, action: item.onClick };
+  // Let Tauri allocate a fresh ID. Dropping the old menu unregisters its
+  // handlers by ID, which would also unregister replacements with reused IDs.
+  const action = { text, enabled, action: item.onClick };
   return item.checked === undefined ? action : { ...action, checked: item.checked };
 }
 
@@ -55,7 +56,7 @@ function createMacMenu(items: MenuItem[]): Promise<Menu> {
           { item: "Separator" }, { item: "BringAllToFront" }],
       });
     }
-    const children = (item.items ?? []).map(child => convertItem(child, item.id));
+    const children = (item.items ?? []).map(child => convertItem(child, item.id === "edit"));
     if (item.id === "view") children.push({ item: "Separator" }, { item: "Fullscreen" });
     if (item.id === "edit") children.push({ item: "Separator" }, { item: "SelectAll" });
     menus.push({ text: menuText(item.label), enabled: !item.disabled, items: children });
