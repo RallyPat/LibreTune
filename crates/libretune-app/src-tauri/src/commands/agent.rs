@@ -226,7 +226,11 @@ pub async fn agent_status(app: tauri::AppHandle) -> Result<AgentStatus, String> 
         s.ai_provider.clone()
     };
     let uses_chatgpt = provider == "chatgpt";
-    let model = if uses_chatgpt { &s.ai_chatgpt_model } else { &s.ai_model };
+    let model = if uses_chatgpt {
+        &s.ai_chatgpt_model
+    } else {
+        &s.ai_model
+    };
     let configured = !model.is_empty() && (!uses_chatgpt || super::chatgpt::connected(&app));
     Ok(AgentStatus {
         enabled: s.ai_assistant_enabled,

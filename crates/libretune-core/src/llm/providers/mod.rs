@@ -4,6 +4,6 @@
 //! wire format. All use the shared `reqwest::Client`.
 
 pub mod anthropic;
+pub mod chatgpt;
 pub mod google;
 pub mod openai;
-pub mod chatgpt;
