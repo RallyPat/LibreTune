@@ -291,7 +291,6 @@ function AppContent() {
   const [sidebarVisible, setSidebarVisible] = useState(true);
   // Whether ECU-derived (INI) tuning menus appear in the top menu bar.
   // When off, they remain available in the sidebar.
-  const [nativeMacMenu, setNativeMacMenu] = useState(false);
   const [showEcuMenusInMenubar, setShowEcuMenusInMenubar] = useState(true);
 
   // Gate: don't persist UI state until after the initial restore from
@@ -400,7 +399,7 @@ function AppContent() {
   // const [indicatorTextFit, setIndicatorTextFit] = useState<'scale' | 'wrap'>('scale');
 
   // Tauri check
-  const [isTauri, setIsTauri] = useState(true);
+  const isTauri = Boolean((window as unknown as Record<string, unknown>).__TAURI_INTERNALS__);
 
   // Persist UI layout state to settings so it's restored on next launch.
   // Gated on uiStateRestored so the initial defaults don't overwrite saved
@@ -420,9 +419,7 @@ function AppContent() {
 
   // Check if running in Tauri
   useEffect(() => {
-    const inTauri = !!(window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
-    setIsTauri(inTauri);
-    if (!inTauri) {
+    if (!isTauri) {
       console.warn("Running in browser mode. Use `npm run tauri dev` for full functionality.");
     }
     // Expose debug helper to browser console
@@ -436,7 +433,7 @@ function AppContent() {
         return e;
       }
     };
-  }, []);
+  }, [isTauri]);
 
   // Initial data fetch - initialize INI repository and check for existing project
   useEffect(() => {
@@ -494,7 +491,6 @@ function AppContent() {
         if (settings.last_serial_port) setLastSerialPort(settings.last_serial_port);
         // Restore UI layout state.
         if (settings.sidebar_visible !== undefined) setSidebarVisible(!!settings.sidebar_visible);
-        setNativeMacMenu(settings.native_macos_menu === true);
         if (settings.show_ecu_menus_in_menubar !== undefined) setShowEcuMenusInMenubar(!!settings.show_ecu_menus_in_menubar);
         if (settings.agent_panel_visible !== undefined) setAgentPanelVisible(!!settings.agent_panel_visible);
         // Mark restore complete so the persist effects can start saving.
@@ -1574,15 +1570,6 @@ function AppContent() {
     setActiveTabId,
   });
 
-  const changeNativeMacMenu = async (enabled: boolean) => {
-    try {
-      await invoke("update_setting", { key: "native_macos_menu", value: String(enabled) });
-      setNativeMacMenu(enabled);
-    } catch (error) {
-      showToast(`Could not save the macOS menu setting: ${error}`, "error");
-    }
-  };
-
   const menuItems: TunerMenuItem[] = useMemo(() => buildMenuItems({
     t, currentProject, tuneModified, status, ecuType, iniCapabilities, backendMenus, theme,
     sidebarVisible, showEcuMenus: showEcuMenusInMenubar, tabs, openTarget, handleStdTarget, openHelpTopic, showToast,
@@ -1596,7 +1583,7 @@ function AppContent() {
     setTheme, setTabs, setTabContents, setActiveTabId,
   }), [backendMenus, theme, sidebarVisible, showEcuMenusInMenubar, agentPanelVisible, status.state, ecuType, iniCapabilities, openTarget, handleStdTarget, openHelpTopic, currentProject, tuneModified, showToast, t, tabs]);
   const supportsNativeMacMenu = isTauri && /Mac/.test(navigator.platform);
-  const nativeMacMenuActive = useNativeMacMenu(nativeMacMenu && supportsNativeMacMenu, menuItems, showToast);
+  const nativeMacMenuActive = useNativeMacMenu(supportsNativeMacMenu, menuItems, showToast);
 
   // Listen for the agent pop-out window's "dock back" signal: re-show the
   // docked side panel. (Mirrors the tab:dock handling in useTabPopout.)
@@ -1846,8 +1833,6 @@ function AppContent() {
         setSettingsDialogOpen={setSettingsDialogOpen}
         setUnitsSystem={setUnitsSystem}
         setAutoBurnOnClose={setAutoBurnOnClose}
-        nativeMacMenu={nativeMacMenu}
-        onNativeMacMenuChange={supportsNativeMacMenu ? changeNativeMacMenu : undefined}
         showEcuMenusInMenubar={showEcuMenusInMenubar}
         setShowEcuMenusInMenubar={setShowEcuMenusInMenubar}
         setStatus={setStatus}

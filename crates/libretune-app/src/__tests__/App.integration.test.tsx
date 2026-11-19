@@ -45,9 +45,12 @@ describe('App integration (toolbar connection-info)', () => {
     tearDownTauriMocks();
   });
 
-  it('keeps File → Settings available in the window on Windows with a saved macOS preference', async () => {
-    const platform = vi.spyOn(window.navigator, 'platform', 'get').mockReturnValue('Win32');
-    const createMenu = vi.spyOn(Menu, 'new');
+  it.each(['Win32', 'MacIntel'])('uses the appropriate menu on %s', async (platformName) => {
+    const platform = vi.spyOn(window.navigator, 'platform', 'get').mockReturnValue(platformName);
+    const createMenu = vi.spyOn(Menu, 'new').mockResolvedValue({
+      setAsAppMenu: async () => null,
+      close: async () => {},
+    } as Menu);
     const responses: Record<string, unknown> = {
       list_projects: [],
       list_repository_inis: [],
@@ -57,7 +60,6 @@ describe('App integration (toolbar connection-info)', () => {
       is_onboarding_completed: true,
       get_connection_status: { state: 'Disconnected' },
       get_settings: {
-        native_macos_menu: true,
         runtime_packet_mode: 'Auto',
         units_system: 'metric',
       },
@@ -77,6 +79,11 @@ describe('App integration (toolbar connection-info)', () => {
       );
 
       await waitFor(() => expect(invoke).toHaveBeenCalledWith('is_onboarding_completed'));
+      if (platformName === 'MacIntel') {
+        await waitFor(() => expect(screen.queryByRole('menubar')).not.toBeInTheDocument());
+        expect(createMenu).toHaveBeenCalled();
+        return;
+      }
       expect(screen.getByRole('menubar')).toBeInTheDocument();
       fireEvent.click(screen.getByRole('menuitem', { name: /^F\s*ile$/ }));
       expect(screen.getByRole('menuitem', { name: /^S\s*ettings/ })).toBeEnabled();

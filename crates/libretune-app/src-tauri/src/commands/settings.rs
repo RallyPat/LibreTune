@@ -94,9 +94,6 @@ fn apply_setting(settings: &mut Settings, key: &str, value: &str) -> Result<(), 
         "table_y_axis_bottom" => {
             settings.table_y_axis_bottom = value.parse().map_err(|_| "Invalid boolean value")?
         }
-        "native_macos_menu" => {
-            settings.native_macos_menu = value.parse().map_err(|_| "Invalid boolean value")?
-        }
         "show_ecu_menus_in_menubar" => {
             settings.show_ecu_menus_in_menubar =
                 value.parse().map_err(|_| "Invalid boolean value")?

@@ -77,8 +77,6 @@ export interface DialogOverlaysProps {
   setSettingsDialogOpen: (v: boolean) => void;
   setUnitsSystem: (v: 'metric' | 'imperial') => void;
   setAutoBurnOnClose: (v: boolean) => void;
-  nativeMacMenu: boolean;
-  onNativeMacMenuChange?: (enabled: boolean) => Promise<void>;
   showEcuMenusInMenubar: boolean;
   setShowEcuMenusInMenubar: (v: boolean) => void;
   setStatus: React.Dispatch<React.SetStateAction<ConnectionStatus>>;
@@ -222,7 +220,6 @@ export function DialogOverlays(props: DialogOverlaysProps) {
     newTuneDialogOpen, setNewTuneDialogOpen,
     settingsDialogOpen, setSettingsDialogOpen,
     setUnitsSystem, setAutoBurnOnClose, setStatus, setStatusBarChannels, setDefaultRuntimePacketMode,
-    nativeMacMenu, onNativeMacMenuChange,
     showEcuMenusInMenubar, setShowEcuMenusInMenubar,
     mathChannelsDialogOpen, setMathChannelsDialogOpen,
     afrDelayTestOpen, setAfrDelayTestOpen,
@@ -299,8 +296,6 @@ export function DialogOverlays(props: DialogOverlaysProps) {
         theme={theme}
         onThemeChange={(t) => setTheme(t as ThemeName)}
         currentProject={currentProject}
-        nativeMacMenu={nativeMacMenu}
-        onNativeMacMenuChange={onNativeMacMenuChange}
         showEcuMenusInMenubar={showEcuMenusInMenubar}
         onEcuMenusInMenubarChange={setShowEcuMenusInMenubar}
         onSettingsChange={(settings) => {

@@ -39,14 +39,12 @@ interface SettingsDialogProps extends DialogProps {
   onSettingsChange?: (settings: { units?: string; autoBurnOnClose?: boolean; demoMode?: boolean; indicatorColumnCount?: string; indicatorFillEmpty?: boolean; indicatorTextFit?: string; statusBarChannels?: string[]; runtimePacketMode?: string; autoSyncGaugeRanges?: boolean }) => void;
   currentProject?: CurrentProject | null;
   /** Whether ECU-derived (INI) tuning menus are shown in the top menu bar. */
-  nativeMacMenu?: boolean;
-  onNativeMacMenuChange?: (enabled: boolean) => Promise<void>;
   showEcuMenusInMenubar?: boolean;
   /** Called when the user toggles the ECU-menus-in-menubar setting. */
   onEcuMenusInMenubarChange?: (visible: boolean) => void;
 }
 
-export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettingsChange, currentProject, nativeMacMenu, onNativeMacMenuChange, showEcuMenusInMenubar, onEcuMenusInMenubarChange }: SettingsDialogProps) {
+export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettingsChange, currentProject, showEcuMenusInMenubar, onEcuMenusInMenubarChange }: SettingsDialogProps) {
   const [localTheme, setLocalTheme] = useState(theme);
   const [localLanguage, setLocalLanguage] = useState<SupportedLanguageCode>(() => {
     try {
@@ -127,7 +125,6 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
   const [currentTab, setCurrentTab] = useState<'general' | 'appearance' | 'definitions' | 'hotkeys'>('general');
   // Settings search: filters sections across ALL tabs as you type, mirroring
   // the sidebar search UX. Empty query = normal tabbed view.
-  const [savingNativeMacMenu, setSavingNativeMacMenu] = useState(false);
   const [settingsQuery, setSettingsQuery] = useState('');
   const searchInputRef = useRef<HTMLInputElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -1336,28 +1333,6 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
               </FormField>
 
               <h3 style={{ marginTop: '1.5rem', marginBottom: '0.5rem' }}>Layout</h3>
-
-              {onNativeMacMenuChange && (
-                <div className="dialog-form-group">
-                  <label>
-                    <input
-                      type="checkbox"
-                      checked={nativeMacMenu ?? false}
-                      disabled={savingNativeMacMenu}
-                      onChange={async (event) => {
-                        setSavingNativeMacMenu(true);
-                        try {
-                          await onNativeMacMenuChange(event.target.checked);
-                        } finally {
-                          setSavingNativeMacMenu(false);
-                        }
-                      }}
-                    />
-                    Native macOS menu
-                  </label>
-                  <span className="dialog-form-note">Show LibreTune menus in the system menu bar instead of inside the window</span>
-                </div>
-              )}
 
               <div className="dialog-form-group">
                 <label>

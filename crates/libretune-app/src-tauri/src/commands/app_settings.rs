@@ -60,8 +60,6 @@ pub(crate) struct Settings {
     /// When disabled, those menus are still reachable from the sidebar.
     #[serde(default = "default_true")]
     pub(crate) show_ecu_menus_in_menubar: bool,
-    #[serde(default)]
-    pub(crate) native_macos_menu: bool,
     /// Whether the AI assistant side panel is visible.
     #[serde(default)]
     pub(crate) agent_panel_visible: bool,
@@ -378,7 +376,6 @@ fn default_settings() -> Settings {
         last_active_tab: None,
         sidebar_visible: default_true(),
         show_ecu_menus_in_menubar: default_true(),
-        native_macos_menu: false,
         agent_panel_visible: false,
         sidebar_expanded_ids: None,
         selected_dashboard: None,

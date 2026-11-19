@@ -71,27 +71,20 @@ export function useNativeMacMenu(
 ): boolean {
   const [active, setActive] = useState(false);
   const queue = useRef(Promise.resolve());
-  const original = useRef<Menu | null>(null);
-  const installed = useRef(false);
 
   useEffect(() => {
+    if (!enabled) return;
     let cancelled = false;
     queue.current = queue.current.then(async () => {
-      if (cancelled || (!enabled && !installed.current)) return;
-      const menu = enabled ? await createMacMenu(items) : original.current ?? await Menu.default();
+      if (cancelled) return;
+      const menu = await createMacMenu(items);
       try {
         if (cancelled) return;
         const previous = await menu.setAsAppMenu();
-        if (enabled && !installed.current) {
-          original.current = previous;
-        } else {
-          await previous?.close().catch(console.error);
-        }
-        if (!enabled) original.current = null;
-        installed.current = enabled;
-        setActive(enabled);
+        setActive(true);
+        await previous?.close().catch(console.error);
       } finally {
-        if (menu !== original.current) await menu.close().catch(console.error);
+        await menu.close().catch(console.error);
       }
     }).catch(error => {
       if (!cancelled) showToast(`Could not switch the macOS menu: ${error}`, "error");
