@@ -178,6 +178,7 @@ OpenAI-compatible shim):
 
 | Provider | Setting value | Notes |
 |----------|---------------|-------|
+| **ChatGPT (use my plan)** | `chatgpt` | Browser sign-in and eligible ChatGPT plan usage. |
 | **OpenAI** | `openai` | Also works with any OpenAI-compatible endpoint: OpenRouter, Ollama (`/v1`), LM Studio, vLLM. |
 | **Anthropic** | `anthropic` | Claude models (`claude-3-5-sonnet-…`, etc.). |
 | **Google** | `google` | Gemini models (`gemini-1.5-pro`, etc.). |
@@ -185,6 +186,21 @@ OpenAI-compatible shim):
 The settings dialog also offers **presets** — a one-click dropdown that fills
 in the provider, base URL, and a suggested model for OpenAI, Anthropic,
 Google, and the local options below.
+
+### Use your ChatGPT plan
+
+1. In **Tools → Settings → AI Assistant**, choose **ChatGPT (use my plan)**.
+2. Select **Continue with ChatGPT** and authorize LibreTune to use your plan in
+   the browser.
+3. Return to LibreTune, choose a model available to your account, and click
+   **Apply** or **OK**.
+
+Eligible requests count toward your ChatGPT plan allowance or available
+ChatGPT credits, according to your account settings. **Manage usage** opens
+the ChatGPT controls for app limits and credit permissions. LibreTune uses
+the browser connection for this provider, so you can leave the API key blank.
+The assistant still sends tune context to OpenAI and places proposed changes
+in the same review queue.
 
 ### Provider Settings
 

@@ -12,6 +12,7 @@ import { Dialog, Button, FormField, RiskAcknowledgement } from '../../common';
 import { ThemeName } from '../../../themes';
 import { SUPPORTED_LANGUAGES, LANGUAGE_STORAGE_KEY, type SupportedLanguageCode } from '../../../i18n/languages';
 import ConnectionMetrics from '../../layout/ConnectionMetrics';
+import { ChatGptPlanSection } from './ChatGptPlanSection';
 import { McpServerSection } from './McpServerSection';
 import '../Dialogs.css';
 
@@ -100,6 +101,7 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
   const [aiEnabled, setAiEnabled] = useState(false);
   const [aiRiskAcked, setAiRiskAcked] = useState(false);
   const [aiProvider, setAiProvider] = useState('openai');
+  const [chatGptModel, setChatGptModel] = useState('');
   const [aiBaseUrl, setAiBaseUrl] = useState('');
   const [aiApiKey, setAiApiKey] = useState('');
   const [aiModel, setAiModel] = useState('');
@@ -195,6 +197,7 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
           setAiProvider(p && p.trim() ? p : 'openai');
         }
         if (settings.ai_base_url !== undefined) setAiBaseUrl(settings.ai_base_url);
+        if (settings.ai_chatgpt_model !== undefined) setChatGptModel(settings.ai_chatgpt_model);
         if (settings.ai_api_key !== undefined) setAiApiKey(settings.ai_api_key);
         if (settings.ai_model !== undefined) setAiModel(settings.ai_model);
         if (settings.ai_capability_tier !== undefined) setAiCapabilityTier(settings.ai_capability_tier);
@@ -488,6 +491,7 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
         ['ai_base_url', aiBaseUrl],
         ['ai_api_key', aiApiKey],
         ['ai_model', aiModel],
+        ['ai_chatgpt_model', chatGptModel],
         ['ai_capability_tier', aiCapabilityTier],
         ['ai_risk_acknowledged', aiRiskAcked.toString()],
         ['ai_assistant_enabled', aiEnabled.toString()],
@@ -545,7 +549,7 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
       }
     }
     return errors;
-  }, [localTheme, localLanguage, localUnits, autoBurnOnClose, statusBarChannels, indicatorColumnCount, indicatorFillEmpty, indicatorTextFit, heatmapValueScheme, heatmapChangeScheme, heatmapCoverageScheme, gaugeSnapToGrid, gaugeFreeMove, gaugeLock, autoSyncGaugeRanges, dashboardRefreshHz, gaugeRightAlignValues, autoCommitOnSave, commitMessageFormat, runtimePacketMode, aiProvider, aiBaseUrl, aiApiKey, aiModel, aiCapabilityTier, aiRiskAcked, aiEnabled, autoReconnectAfterControllerCommand, autoReconnectAfterFirmware, autoRecordEnabled, keyOnThresholdRpm, keyOffTimeoutSec, alertLargeChangeEnabled, alertLargeChangeAbs, alertLargeChangePercent, hotkeyBindings, autoConnect, currentProject, onThemeChange, onSettingsChange]);
+  }, [localTheme, localLanguage, localUnits, autoBurnOnClose, statusBarChannels, indicatorColumnCount, indicatorFillEmpty, indicatorTextFit, heatmapValueScheme, heatmapChangeScheme, heatmapCoverageScheme, gaugeSnapToGrid, gaugeFreeMove, gaugeLock, autoSyncGaugeRanges, dashboardRefreshHz, gaugeRightAlignValues, autoCommitOnSave, commitMessageFormat, runtimePacketMode, aiProvider, aiBaseUrl, aiApiKey, aiModel, chatGptModel, aiCapabilityTier, aiRiskAcked, aiEnabled, autoReconnectAfterControllerCommand, autoReconnectAfterFirmware, autoRecordEnabled, keyOnThresholdRpm, keyOffTimeoutSec, alertLargeChangeEnabled, alertLargeChangeAbs, alertLargeChangePercent, hotkeyBindings, autoConnect, currentProject, onThemeChange, onSettingsChange]);
 
   // Windows-convention buttons:
   //  - Apply: save WITHOUT closing (so the user can verify it worked). The
@@ -1109,6 +1113,7 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
                 value={aiProvider}
                 onChange={(e) => setAiProvider(e.target.value)}
               >
+                <option value="chatgpt">ChatGPT (use my plan)</option>
                 <option value="openai">OpenAI (and compatible: OpenRouter, Ollama, LM Studio)</option>
                 <option value="anthropic">Anthropic (Claude)</option>
                 <option value="google">Google (Gemini)</option>
@@ -1116,47 +1121,53 @@ export function SettingsDialog({ isOpen, onClose, theme, onThemeChange, onSettin
             )}
           </FormField>
 
-          <FormField label="Base URL" help="Leave empty for the provider default. For local models use e.g. http://localhost:11434/v1 (Ollama)">
-            {(id) => (
-              <input
-                id={id}
-                type="text"
-                value={aiBaseUrl}
-                onChange={(e) => setAiBaseUrl(e.target.value)}
-                placeholder="(provider default)"
-                style={{ fontFamily: 'monospace' }}
-              />
-            )}
-          </FormField>
+          {aiProvider === 'chatgpt' ? (
+            <ChatGptPlanSection model={chatGptModel} onModelChange={setChatGptModel} />
+          ) : (
+            <>
+                <FormField label="Base URL" help="Leave empty for the provider default. For local models use e.g. http://localhost:11434/v1 (Ollama)">
+                  {(id) => (
+                    <input
+                      id={id}
+                      type="text"
+                      value={aiBaseUrl}
+                      onChange={(e) => setAiBaseUrl(e.target.value)}
+                      placeholder="(provider default)"
+                      style={{ fontFamily: 'monospace' }}
+                    />
+                  )}
+                </FormField>
 
-          <FormField
-            label="API Key"
-            help="Stored in your OS keychain when available (never written to the settings file). Optional for local/no-auth providers"
-          >
-            {(id) => (
-              <input
-                id={id}
-                type="password"
-                value={aiApiKey}
-                onChange={(e) => setAiApiKey(e.target.value)}
-                placeholder="sk-..."
-                style={{ fontFamily: 'monospace' }}
-                autoComplete="off"
-              />
-            )}
-          </FormField>
+                <FormField
+                  label="API Key"
+                  help="Stored in your OS keychain when available (never written to the settings file). Optional for local/no-auth providers"
+                >
+                  {(id) => (
+                    <input
+                      id={id}
+                      type="password"
+                      value={aiApiKey}
+                      onChange={(e) => setAiApiKey(e.target.value)}
+                      placeholder="sk-..."
+                      style={{ fontFamily: 'monospace' }}
+                      autoComplete="off"
+                    />
+                  )}
+                </FormField>
 
-          <FormField label="Model" help="e.g. gpt-4o, claude-3-5-sonnet-20241022, gemini-1.5-pro">
-            {(id) => (
-              <input
-                id={id}
-                type="text"
-                value={aiModel}
-                onChange={(e) => setAiModel(e.target.value)}
-                style={{ fontFamily: 'monospace' }}
-              />
-            )}
-          </FormField>
+                <FormField label="Model" help="e.g. gpt-4o, claude-3-5-sonnet-20241022, gemini-1.5-pro">
+                  {(id) => (
+                    <input
+                      id={id}
+                      type="text"
+                      value={aiModel}
+                      onChange={(e) => setAiModel(e.target.value)}
+                      style={{ fontFamily: 'monospace' }}
+                    />
+                  )}
+                </FormField>
+            </>
+          )}
 
           <FormField
             label="Capability Tier"

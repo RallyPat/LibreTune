@@ -52,7 +52,9 @@ rmcp = { version = "3.10", features = ["server", "transport-streamable-http-serv
 axum = "0.8"
 rand = { workspace = true }
 
-[dev-dependencies]
+base64 = "0.22"
+ring = "0.17"
+uuid = { workspace = true }
 tempfile = "3"
-reqwest = { version = "0.12", default-features = false, features = ["json"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 

@@ -20,6 +20,7 @@ pub mod available_inis;
 pub mod base_map;
 pub mod cache_status;
 pub mod channels;
+pub mod chatgpt;
 pub mod connect_to_ecu;
 pub mod connection;
 pub mod console;
