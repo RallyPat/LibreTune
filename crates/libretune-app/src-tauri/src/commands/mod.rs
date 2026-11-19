@@ -8,6 +8,7 @@ pub mod adaptive_timing;
 pub mod afr_delay_test;
 pub mod agent;
 pub mod ai_keychain;
+pub mod chatgpt;
 pub mod analyse_log;
 pub mod analyze_filters;
 pub mod annotations;

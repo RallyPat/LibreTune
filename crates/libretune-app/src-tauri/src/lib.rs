@@ -480,6 +480,11 @@ pub fn run() {
             download_ini,
             // AI assistant
             agent_status,
+            commands::chatgpt::chatgpt_status,
+            commands::chatgpt::chatgpt_sign_in,
+            commands::chatgpt::chatgpt_select_account,
+            commands::chatgpt::chatgpt_sign_out,
+            commands::chatgpt::chatgpt_models,
             agent_send_message,
             agent_apply_proposals,
             agent_stop,

@@ -15,7 +15,7 @@ use libretune_core::agent::orchestrator::{
 use libretune_core::agent::tiers::ConstantSafetyTier;
 use libretune_core::agent::tools;
 use libretune_core::autotune::AutoTuneAuthorityLimits;
-use libretune_core::llm::types::{LlmError, Message};
+use libretune_core::llm::types::Message;
 use libretune_core::llm::{LlmClient, ProviderConfig};
 use libretune_core::tune::TuneValue;
 use serde::{Deserialize, Serialize};
@@ -29,12 +29,6 @@ fn config_from_settings(s: &crate::Settings) -> ProviderConfig {
         api_key: s.ai_api_key.clone(),
         model: s.ai_model.clone(),
     }
-}
-
-/// Build an `LlmClient` from current settings.
-/// Errors surface as `Result<T, String>` per the app's convention.
-fn build_client(s: &crate::Settings) -> Result<LlmClient, LlmError> {
-    LlmClient::new(&config_from_settings(s))
 }
 
 /// A single chat message as stored in a chat history file.
@@ -231,15 +225,16 @@ pub async fn agent_status(app: tauri::AppHandle) -> Result<AgentStatus, String> 
     } else {
         s.ai_provider.clone()
     };
+    let uses_chatgpt = provider == "chatgpt";
+    let model = if uses_chatgpt { &s.ai_chatgpt_model } else { &s.ai_model };
+    let configured = !model.is_empty() && (!uses_chatgpt || super::chatgpt::connected(&app));
     Ok(AgentStatus {
         enabled: s.ai_assistant_enabled,
         risk_acknowledged: s.ai_risk_acknowledged,
-        provider: provider.clone(),
-        model: s.ai_model.clone(),
+        provider,
+        model: model.clone(),
         capability_tier: s.ai_capability_tier.clone(),
-        // Configured if both provider and model are non-empty (key is optional
-        // for local providers, so we don't require it).
-        configured: !provider.is_empty() && !s.ai_model.is_empty(),
+        configured,
     })
 }
 
@@ -952,7 +947,13 @@ pub async fn agent_send_message(
         return Err("AI assistant risk acknowledgement is missing".to_string());
     }
 
-    let client = build_client(&s).map_err(|e| e.to_string())?;
+    let client = if s.ai_provider == "chatgpt" {
+        let token = super::chatgpt::access_token(&app).await?;
+        LlmClient::chatgpt_plan(token, s.ai_chatgpt_model)
+    } else {
+        LlmClient::new(&config_from_settings(&s))
+    }
+    .map_err(|e| e.to_string())?;
     let executor = LiveReadExecutor::new(app.clone(), request.unit_prefs.clone());
 
     let history: Vec<Message> = request.history.into_iter().map(Into::into).collect();

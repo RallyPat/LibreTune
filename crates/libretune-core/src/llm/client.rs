@@ -18,6 +18,16 @@ impl LlmClient {
         })
     }
 
+    /// Use an OAuth grant for a ChatGPT plan with its own Responses transport.
+    pub fn chatgpt_plan(access_token: String, model: String) -> Result<Self, LlmError> {
+        Ok(Self {
+            provider: Box::new(super::providers::chatgpt::ChatGptProvider::new(
+                access_token,
+                model,
+            )?),
+        })
+    }
+
     /// The provider name (e.g. "openai"), for logging / UI display.
     pub fn provider_name(&self) -> &str {
         self.provider.name()

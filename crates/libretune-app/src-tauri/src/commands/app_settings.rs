@@ -182,6 +182,8 @@ pub(crate) struct Settings {
     /// Model identifier (e.g. "gpt-4o", "claude-3-5-sonnet-...").
     #[serde(default)]
     pub(crate) ai_model: String,
+    #[serde(default)]
+    pub(crate) ai_chatgpt_model: String,
     /// Capability the assistant is unlocked for: "read" | "tune" | "config".
     #[serde(default = "default_ai_capability")]
     pub(crate) ai_capability_tier: String,
@@ -412,6 +414,7 @@ fn default_settings() -> Settings {
         ai_base_url: String::new(),
         ai_api_key: String::new(),
         ai_model: String::new(),
+        ai_chatgpt_model: String::new(),
         ai_capability_tier: default_ai_capability(),
         mcp_enabled: false,
         mcp_port: default_mcp_port(),

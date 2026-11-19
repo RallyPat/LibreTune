@@ -197,6 +197,7 @@ fn apply_setting(settings: &mut Settings, key: &str, value: &str) -> Result<(), 
             }
             settings.ai_api_key = value.to_string();
         }
+        "ai_chatgpt_model" => settings.ai_chatgpt_model = value.to_string(),
         "ai_model" => settings.ai_model = value.to_string(),
         "ai_capability_tier" => settings.ai_capability_tier = value.to_string(),
         // Version control settings
