@@ -15,13 +15,13 @@ import { LoadingProvider } from '../contexts/LoadingContext';
 import { ToastProvider } from '../contexts/ToastContext';
 import { UnitPreferencesProvider } from '../contexts/useUnitPreferences';
 import { invoke } from '@tauri-apps/api/core';
+import { Menu } from '@tauri-apps/api/menu';
 // Note: `App` is imported dynamically inside tests after test-level mocks are installed
 // so that module-level imports (e.g., `listen`) pick up our patched implementations.
 
 import { setupTauriMocks, tearDownTauriMocks } from '../test-utils/tauriMocks';
 
 describe('App integration (toolbar connection-info)', () => {
-
   beforeEach(() => {
     vi.resetAllMocks();
     setupTauriMocks({
@@ -43,6 +43,55 @@ describe('App integration (toolbar connection-info)', () => {
 
   afterEach(() => {
     tearDownTauriMocks();
+  });
+
+  it.each(['Win32', 'MacIntel'])('uses the appropriate menu on %s', async (platformName) => {
+    const platform = vi.spyOn(window.navigator, 'platform', 'get').mockReturnValue(platformName);
+    const createMenu = vi.spyOn(Menu, 'new').mockResolvedValue({
+      setAsAppMenu: async () => null,
+      close: async () => {},
+    } as Menu);
+    const responses: Record<string, unknown> = {
+      list_projects: [],
+      list_repository_inis: [],
+      get_serial_ports: [],
+      get_available_channels: [],
+      get_hotkey_bindings: {},
+      is_onboarding_completed: true,
+      get_connection_status: { state: 'Disconnected' },
+      get_settings: {
+        runtime_packet_mode: 'Auto',
+        units_system: 'metric',
+      },
+    };
+    vi.mocked(invoke).mockImplementation(async <T,>(command: string) => responses[command] as T);
+
+    try {
+      const { default: App } = await import('../App');
+      render(
+        <LoadingProvider>
+          <ToastProvider>
+            <UnitPreferencesProvider>
+              <App />
+            </UnitPreferencesProvider>
+          </ToastProvider>
+        </LoadingProvider>
+      );
+
+      await waitFor(() => expect(invoke).toHaveBeenCalledWith('is_onboarding_completed'));
+      if (platformName === 'MacIntel') {
+        await waitFor(() => expect(screen.queryByRole('menubar')).not.toBeInTheDocument());
+        expect(createMenu).toHaveBeenCalled();
+        return;
+      }
+      expect(screen.getByRole('menubar')).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('menuitem', { name: /^F\s*ile$/ }));
+      expect(screen.getByRole('menuitem', { name: /^S\s*ettings/ })).toBeEnabled();
+      expect(createMenu).not.toHaveBeenCalled();
+    } finally {
+      createMenu.mockRestore();
+      platform.mockRestore();
+    }
   });
 
   it('shows packet mode and receives metrics when connected', async () => {
