@@ -13,6 +13,26 @@ relevant.
 
 ## [Unreleased]
 
+### 2026-11-20 — Security-audit hygiene (issue #365)
+
+#### Security
+
+- **Cleaned 21 dead entries from `.cargo/audit.toml`** — the 11 stale
+  ignores reported in issue #365 (rustls-webpki/quinn-proto advisories
+  already patched in `Cargo.lock`; fxhash/unic-* crates no longer present)
+  plus 10 more found during verification: RUSTSEC-2024-0411..0420, the
+  gtk-rs GTK3 "unmaintained" advisories withdrawn upstream on 2026-08-14
+  (the file comment had mislabeled them as an "instant" cluster). Each of
+  the 5 remaining ignores (proc-macro-error, glib 0.18, quick-xml 0.38 ×2,
+  crossbeam-epoch 0.9.18) still matches a live advisory and now carries an
+  accurate reason. Verified by rehearsal: cargo-audit output is identical
+  before and after for warnings, and no previously muted advisory resurfaces.
+- **wasmtime 49.0.5 → 49.0.7** (workspace floor raised to 49.0.6) — fixes
+  RUSTSEC-2026-0566..0573 (WASI unbounded memory growth, panics/aborts,
+  GC issues) that had turned the Security Audit CI job red since 2026-11-19.
+- **libz-sys 1.1.31 → 1.1.33** (lockfile-only, via libgit2-sys) — fixes
+  RUSTSEC-2026-0544 (heap buffer overflow in zlib).
+
 ### 2026-11-16 — Windows: migrate installs across the product rename
 
 #### Fixed

@@ -1,35 +1,18 @@
 # cargo-audit / rustsec configuration (project-local)
 # Prefer fixing or upgrading; only ignore with a tracked reason.
+# Entries whose crate has left Cargo.lock or whose advisory was withdrawn
+# are dead weight: remove them (issue #365).
 
 [advisories]
 ignore = [
-    # proc-macro-error — unmaintained (transitive)
+    # proc-macro-error 1.x — unmaintained (transitive, e.g. via tauri build scripts)
     "RUSTSEC-2024-0370",
-    # instant — unmaintained / yanked cluster (transitive)
-    "RUSTSEC-2024-0411",
-    "RUSTSEC-2024-0412",
-    "RUSTSEC-2024-0413",
-    "RUSTSEC-2024-0414",
-    "RUSTSEC-2024-0415",
-    "RUSTSEC-2024-0416",
-    "RUSTSEC-2024-0417",
-    "RUSTSEC-2024-0418",
-    "RUSTSEC-2024-0419",
-    "RUSTSEC-2024-0420",
+    # glib <0.20.0 — VariantStrIter unsoundness (transitive via gtk-rs 0.18 Linux webkit stack)
     "RUSTSEC-2024-0429",
-    # Remaining known transitive noise tracked in CI historically
-    "RUSTSEC-2025-0057",
-    "RUSTSEC-2025-0075",
-    "RUSTSEC-2025-0080",
-    "RUSTSEC-2025-0081",
-    "RUSTSEC-2025-0098",
-    "RUSTSEC-2025-0100",
-    "RUSTSEC-2026-0049",
-    "RUSTSEC-2026-0185",
+    # quick-xml <0.41.0 — quadratic duplicate-attribute check (transitive, 0.38.4 in lock)
     "RUSTSEC-2026-0194",
+    # quick-xml <0.41.0 — unbounded namespace-declaration allocation in NsReader (transitive)
     "RUSTSEC-2026-0195",
+    # crossbeam-epoch <0.9.20 — invalid pointer deref in fmt::Pointer impl (transitive)
     "RUSTSEC-2026-0204",
-    "RUSTSEC-2026-0098",
-    "RUSTSEC-2026-0099",
-    "RUSTSEC-2026-0104",
 ]

@@ -51,7 +51,8 @@ rand = "0.8"
 # WebAssembly runtime for plugin system
 # Floor 49.0.5: RUSTSEC-2026-0353..0364/-0378/-0379 (wasmtime 49.0.2 panics + aarch64 br_table)
 # and RUSTSEC-2026-0422/-0423/-0424 (wasmtime 49.0.4 — fixed in 49.0.5)
-wasmtime = "49.0.5"
+# Floor 49.0.6: RUSTSEC-2026-0566..0573 (wasmtime 49.0.5 — WASI memory growth, panics, GC aborts)
+wasmtime = "49.0.6"
 
 # Testing
 pretty_assertions = "1.4"
