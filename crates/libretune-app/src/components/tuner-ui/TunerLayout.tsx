@@ -10,6 +10,7 @@ import './TunerLayout.css';
 export interface TunerLayoutProps {
   // Menu configuration
   menuItems: MenuItem[];
+  hideMenuBar?: boolean;
   
   // Toolbar configuration
   toolbarItems: ToolbarItem[];
@@ -109,6 +110,7 @@ export interface StatusItem {
 
 export function TunerLayout({
   menuItems,
+  hideMenuBar,
   toolbarItems,
   tabs,
   activeTabId,
@@ -150,7 +152,7 @@ export function TunerLayout({
   return (
     <div className="tuner-layout">
       {/* Menu Bar */}
-      <MenuBar items={menuItems} />
+      {!hideMenuBar && <MenuBar items={menuItems} />}
       
       {/* Toolbar */}
       <Toolbar items={toolbarItems} />

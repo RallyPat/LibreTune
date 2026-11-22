@@ -49,6 +49,7 @@ import { useToast } from "./contexts/ToastContext";
 import { formatError } from "./utils/formatError";
 import { buildSidebarItems } from "./utils/buildSidebarItems";
 import { TabContentRouter } from "./components/TabContentRouter";
+import { useNativeMacMenu } from "./menus/useNativeMacMenu";
 import { buildMenuItems } from "./menus/buildMenuItems";
 import { buildToolbarItems } from "./menus/buildToolbarItems";
 import { openTargetImpl } from "./services/openTarget";
@@ -398,7 +399,7 @@ function AppContent() {
   // const [indicatorTextFit, setIndicatorTextFit] = useState<'scale' | 'wrap'>('scale');
 
   // Tauri check
-  const [isTauri, setIsTauri] = useState(true);
+  const isTauri = Boolean((window as unknown as Record<string, unknown>).__TAURI_INTERNALS__);
 
   // Persist UI layout state to settings so it's restored on next launch.
   // Gated on uiStateRestored so the initial defaults don't overwrite saved
@@ -418,9 +419,7 @@ function AppContent() {
 
   // Check if running in Tauri
   useEffect(() => {
-    const inTauri = !!(window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
-    setIsTauri(inTauri);
-    if (!inTauri) {
+    if (!isTauri) {
       console.warn("Running in browser mode. Use `npm run tauri dev` for full functionality.");
     }
     // Expose debug helper to browser console
@@ -434,7 +433,7 @@ function AppContent() {
         return e;
       }
     };
-  }, []);
+  }, [isTauri]);
 
   // Initial data fetch - initialize INI repository and check for existing project
   useEffect(() => {
@@ -1269,7 +1268,7 @@ function AppContent() {
       .then((un) => { unlisten = un; })
       .catch(() => {});
     return () => { if (unlisten) unlisten(); };
-  }, []);
+  }, [isTauri]);
 
   /** Re-fetch open table/curve tabs so they reflect the current tune */
   async function refreshOpenTabs() {
@@ -1355,7 +1354,7 @@ function AppContent() {
     }
   }
 
-  async function closeProject() {
+  const closeProject = useCallback(async () => {
     try {
       await invoke("close_project");
       setCurrentProject(null);
@@ -1368,16 +1367,16 @@ function AppContent() {
     } catch (e) {
       showToast("Failed to close project: " + e, "error");
     }
-  }
+  }, [showToast]);
 
-  async function handleCreateRestorePoint() {
+  const handleCreateRestorePoint = useCallback(async () => {
     try {
       const result = await invoke<{ filename: string; size: number; timestamp: string }>("create_restore_point");
       showToast(`Restore point created: ${result.filename}`, "success");
     } catch (e) {
       showToast("Failed to create restore point: " + e, "error");
     }
-  }
+  }, [showToast]);
 
   async function handleDeleteProject(projectName: string) {
     try {
@@ -1572,7 +1571,7 @@ function AppContent() {
   });
 
   const menuItems: TunerMenuItem[] = useMemo(() => buildMenuItems({
-    t, currentProject, tuneModified, status, ecuType, iniCapabilities, backendMenus, theme,
+    t, currentProject, tuneModified, connectionState: status.state, ecuType, iniCapabilities, backendMenus, theme,
     sidebarVisible, showEcuMenus: showEcuMenusInMenubar, tabs, openTarget, handleStdTarget, openHelpTopic, showToast,
     closeProject, handleCreateRestorePoint,
     setConnectEcuWizardOpen, setImportProjectOpen, setSaveDialogOpen, setLoadDialogOpen,
@@ -1582,7 +1581,9 @@ function AppContent() {
     setTuneFileDiffOpen, setDynoOverlayOpen, setPluginPanelOpen, agentPanelVisible, setAgentPanelVisible, setConnectionDialogOpen,
     setUserManualOpen, setUserManualSection, setAboutDialogOpen, setSidebarVisible,
     setTheme, setTabs, setTabContents, setActiveTabId,
-  }), [backendMenus, theme, sidebarVisible, showEcuMenusInMenubar, agentPanelVisible, status.state, ecuType, iniCapabilities, openTarget, handleStdTarget, openHelpTopic, currentProject, tuneModified, showToast, t, tabs]);
+  }), [backendMenus, theme, sidebarVisible, showEcuMenusInMenubar, agentPanelVisible, status.state, ecuType, iniCapabilities, openTarget, handleStdTarget, openHelpTopic, currentProject, tuneModified, showToast, t, tabs, closeProject, handleCreateRestorePoint, setTheme]);
+  const supportsNativeMacMenu = isTauri && /Mac/.test(navigator.platform);
+  const nativeMacMenuActive = useNativeMacMenu(supportsNativeMacMenu, menuItems, showToast);
 
   // Listen for the agent pop-out window's "dock back" signal: re-show the
   // docked side panel. (Mirrors the tab:dock handling in useTabPopout.)
@@ -1753,6 +1754,7 @@ function AppContent() {
       )}
       <TunerLayout
         menuItems={menuItems}
+        hideMenuBar={nativeMacMenuActive}
         toolbarItems={toolbarItems}
         tabs={tabs}
         activeTabId={activeTabId}
