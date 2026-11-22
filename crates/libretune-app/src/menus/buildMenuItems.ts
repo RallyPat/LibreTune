@@ -16,7 +16,7 @@ export interface BuildMenuItemsDeps {
   t: TFunction;
   currentProject: CurrentProject | null;
   tuneModified: boolean;
-  status: ConnectionStatus;
+  connectionState: ConnectionStatus["state"];
   ecuType: string;
   iniCapabilities: IniCapabilities | null;
   backendMenus: BackendMenu[] | null;
@@ -74,7 +74,7 @@ function quitApp(): void {
 
 export function buildMenuItems(deps: BuildMenuItemsDeps): TunerMenuItem[] {
   const {
-    t, currentProject, tuneModified, status, ecuType, iniCapabilities, backendMenus, theme,
+    t, currentProject, tuneModified, connectionState, ecuType, iniCapabilities, backendMenus, theme,
     sidebarVisible, showEcuMenus, tabs, openTarget, handleStdTarget, openHelpTopic, showToast,
     closeProject, handleCreateRestorePoint,
     setConnectEcuWizardOpen, setImportProjectOpen, setSaveDialogOpen, setLoadDialogOpen,
@@ -101,7 +101,7 @@ export function buildMenuItems(deps: BuildMenuItemsDeps): TunerMenuItem[] {
         { id: "restore-points", label: t('file.restorePoints'), onClick: () => setRestorePointsOpen(true) },
         { id: "tune-history", label: t('file.tuneHistory'), onClick: () => setTuneHistoryOpen(true) },
         { id: "sep3", label: "", separator: true },
-        { id: "burn", label: t('file.burnToEcu'), onClick: () => setBurnDialogOpen(true), disabled: status.state !== "Connected" || !tuneModified },
+        { id: "burn", label: t('file.burnToEcu'), onClick: () => setBurnDialogOpen(true), disabled: connectionState !== "Connected" || !tuneModified },
         { id: "sep4", label: "", separator: true },
         { id: "exit", label: t('file.exit'), onClick: quitApp },
       ]
@@ -235,7 +235,7 @@ export function buildMenuItems(deps: BuildMenuItemsDeps): TunerMenuItem[] {
       id: "console",
       label: t('tools.ecuConsole'),
       onClick: () => openTarget("console", `Console - ${ecuType}`),
-      disabled: !currentProject || status.state !== "Connected",
+      disabled: !currentProject || connectionState !== "Connected",
     });
     if (caps.lua_script_constant) {
       toolItems.push({
@@ -266,7 +266,7 @@ export function buildMenuItems(deps: BuildMenuItemsDeps): TunerMenuItem[] {
             },
           }));
         },
-        disabled: !currentProject || status.state !== "Connected",
+        disabled: !currentProject || connectionState !== "Connected",
       });
     }
   }

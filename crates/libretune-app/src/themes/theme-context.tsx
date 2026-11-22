@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { createContext, useCallback, useContext, useState, useEffect, ReactNode } from 'react';
 
 export type ThemeName = 'dark' | 'light' | 'midnight' | 'carbon' | 'synthwave' | 'solarized' | 'nord' | 'dracula' | 'highcontrast';
 
@@ -31,10 +31,10 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     return (saved as ThemeName) || 'dark';
   });
 
-  const setTheme = (newTheme: ThemeName) => {
+  const setTheme = useCallback((newTheme: ThemeName) => {
     setThemeState(newTheme);
     localStorage.setItem(THEME_STORAGE_KEY, newTheme);
-  };
+  }, []);
 
   useEffect(() => {
     // Apply theme class to document root

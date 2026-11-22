@@ -1268,7 +1268,7 @@ function AppContent() {
       .then((un) => { unlisten = un; })
       .catch(() => {});
     return () => { if (unlisten) unlisten(); };
-  }, []);
+  }, [isTauri]);
 
   /** Re-fetch open table/curve tabs so they reflect the current tune */
   async function refreshOpenTabs() {
@@ -1354,7 +1354,7 @@ function AppContent() {
     }
   }
 
-  async function closeProject() {
+  const closeProject = useCallback(async () => {
     try {
       await invoke("close_project");
       setCurrentProject(null);
@@ -1367,16 +1367,16 @@ function AppContent() {
     } catch (e) {
       showToast("Failed to close project: " + e, "error");
     }
-  }
+  }, [showToast]);
 
-  async function handleCreateRestorePoint() {
+  const handleCreateRestorePoint = useCallback(async () => {
     try {
       const result = await invoke<{ filename: string; size: number; timestamp: string }>("create_restore_point");
       showToast(`Restore point created: ${result.filename}`, "success");
     } catch (e) {
       showToast("Failed to create restore point: " + e, "error");
     }
-  }
+  }, [showToast]);
 
   async function handleDeleteProject(projectName: string) {
     try {
@@ -1571,7 +1571,7 @@ function AppContent() {
   });
 
   const menuItems: TunerMenuItem[] = useMemo(() => buildMenuItems({
-    t, currentProject, tuneModified, status, ecuType, iniCapabilities, backendMenus, theme,
+    t, currentProject, tuneModified, connectionState: status.state, ecuType, iniCapabilities, backendMenus, theme,
     sidebarVisible, showEcuMenus: showEcuMenusInMenubar, tabs, openTarget, handleStdTarget, openHelpTopic, showToast,
     closeProject, handleCreateRestorePoint,
     setConnectEcuWizardOpen, setImportProjectOpen, setSaveDialogOpen, setLoadDialogOpen,
@@ -1581,7 +1581,7 @@ function AppContent() {
     setTuneFileDiffOpen, setDynoOverlayOpen, setPluginPanelOpen, agentPanelVisible, setAgentPanelVisible, setConnectionDialogOpen,
     setUserManualOpen, setUserManualSection, setAboutDialogOpen, setSidebarVisible,
     setTheme, setTabs, setTabContents, setActiveTabId,
-  }), [backendMenus, theme, sidebarVisible, showEcuMenusInMenubar, agentPanelVisible, status.state, ecuType, iniCapabilities, openTarget, handleStdTarget, openHelpTopic, currentProject, tuneModified, showToast, t, tabs]);
+  }), [backendMenus, theme, sidebarVisible, showEcuMenusInMenubar, agentPanelVisible, status.state, ecuType, iniCapabilities, openTarget, handleStdTarget, openHelpTopic, currentProject, tuneModified, showToast, t, tabs, closeProject, handleCreateRestorePoint, setTheme]);
   const supportsNativeMacMenu = isTauri && /Mac/.test(navigator.platform);
   const nativeMacMenuActive = useNativeMacMenu(supportsNativeMacMenu, menuItems, showToast);
 
