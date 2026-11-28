@@ -18,8 +18,8 @@
   max-width: 1536px;
   min-height: 100%;
   margin-inline: auto;
-  padding: clamp(24px, 4cqw, 56px) clamp(18px, 4cqw, 64px) 52px;
-  background: linear-gradient(180deg, transparent, #050b12e8 82%);
+  padding: clamp(24px, 4cqw, 56px) clamp(18px, 4cqw, 64px) 72px;
+  background: radial-gradient(ellipse at center 65%, #050b12f0, transparent 76%);
 }
 
 .welcome-console::after {
@@ -27,24 +27,25 @@
   right: 3%;
   bottom: 22px;
   left: 3%;
-  height: 2px;
+  height: 34px;
   content: "";
   pointer-events: none;
-  background: linear-gradient(90deg, var(--welcome-amber), #ffffff00 23%, var(--welcome-cyan) 75%, #02b3ff00);
-  box-shadow: 0 0 14px #05b5ff66;
+  background: linear-gradient(90deg, var(--welcome-amber), #137da3 25%, var(--welcome-cyan) 86%, #0c4a6a);
+  clip-path: polygon(0 8%, 13% 8%, 17% 92%, 83% 92%, 86% 27%, 96% 27%, 100% 0,
+    100% 7%, 96% 34%, 86% 34%, 83% 100%, 17% 100%, 13% 15%, 0 15%);
 }
 
 .welcome-hero {
   display: grid;
-  grid-template-columns: minmax(145px, 1fr) minmax(0, 3fr) minmax(160px, 1.1fr);
+  grid-template-columns: minmax(145px, 1fr) minmax(0, 2.8fr) minmax(160px, 1fr);
   grid-template-areas: "status title demo";
   align-items: start;
-  gap: 8px;
+  gap: clamp(12px, 2cqw, 28px);
 }
 
 .welcome-header {
   grid-area: title;
-  align-self: center;
+  margin-top: clamp(0px, 1cqw, 12px);
   text-align: center;
 }
 
@@ -54,7 +55,7 @@
   align-items: center;
   gap: .29em;
   margin: 0;
-  font-size: clamp(36px, 6cqw, 84px);
+  font-size: clamp(32px, 5cqw, 72px);
   line-height: 1.15;
   font-weight: 800;
   font-style: normal;
@@ -92,7 +93,7 @@
 .welcome-demo {
   position: relative;
   z-index: 1;
-  margin-top: 14px;
+  margin-top: 8px;
   padding: clamp(12px, 1.6cqw, 22px);
   border: 1px solid #078fc052;
   border-radius: 12px;
@@ -103,6 +104,7 @@
 .welcome-status {
   grid-area: status;
   border-top-color: #eaa73bbb;
+  box-shadow: inset 0 1px 12px #ffc15c13;
 }
 
 .welcome-demo { grid-area: demo; }
@@ -162,6 +164,8 @@
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
+  max-width: 194px;
+  margin-inline: auto;
 }
 
 .welcome-dial {
@@ -257,10 +261,23 @@
   filter: drop-shadow(0 0 8px color-mix(in srgb, var(--action-accent) 75%, transparent));
 }
 
+.welcome-action::after {
+  position: absolute;
+  z-index: -1;
+  right: 12px;
+  bottom: 1px;
+  width: 65px;
+  height: 36px;
+  content: "";
+  border-radius: 8px 0 10px 0;
+  background: linear-gradient(110deg, transparent, color-mix(in srgb, var(--action-accent) 34%, transparent));
+  clip-path: polygon(28% 0, 100% 0, 91% 100%, 0 100%);
+}
+
 .welcome-action-arrow {
   position: absolute;
-  right: 24px;
-  bottom: 12px;
+  right: 26px;
+  bottom: 8px;
 }
 
 .welcome-action strong {
@@ -364,7 +381,7 @@
     grid-template-areas: "title title" "status demo";
   }
   .welcome-status, .welcome-demo { margin-top: 0; }
-  .welcome-dials { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .welcome-dials { grid-template-columns: repeat(4, minmax(0, 1fr)); max-width: none; }
   .welcome-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .welcome-action { padding-inline: 23px; }
   .welcome-features { gap: 12px 18px; }
@@ -378,4 +395,5 @@
   .welcome-actions, .welcome-recent ul { grid-template-columns: 1fr; }
   .welcome-action { min-height: 128px; }
   .welcome-action::before { inset-inline: 0; transform: none; }
+  .welcome-action::after { right: 1px; }
 }
