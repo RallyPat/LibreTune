@@ -1794,6 +1794,7 @@ function AppContent() {
             setTabContents={setTabContents}
             openProject={openProject}
             setConnectEcuWizardOpen={setConnectEcuWizardOpen}
+            setNewProjectDialogOpen={setNewProjectDialogOpen}
             setImportProjectOpen={setImportProjectOpen}
             handleDeleteProject={handleDeleteProject}
             setBurnDialogOpen={setBurnDialogOpen}
