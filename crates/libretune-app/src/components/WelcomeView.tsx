@@ -52,14 +52,6 @@ export default function WelcomeView({
             <h1 id="welcome-title"><img className="welcome-logo" src={logo} alt="" />LibreTune</h1>
             <p>Open-source ECU tuning software</p>
           </header>
-          <div className="welcome-scope" aria-hidden="true">
-            <div className="welcome-trace welcome-trace-crank">
-              {Array.from({ length: 10 }, (_, index) => (
-                <span key={index} className={index === 6 ? "welcome-trace-gap" : undefined} />
-              ))}
-            </div>
-            <div className="welcome-trace welcome-trace-cam"><span /></div>
-          </div>
           <section className="welcome-status" aria-label="ECU status">
             <h2><Cpu size={18} aria-hidden="true" /> ECU status</h2>
             <p className="welcome-connection" data-state={status.state} aria-live="polite">

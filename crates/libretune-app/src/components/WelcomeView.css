@@ -37,13 +37,14 @@
 .welcome-hero {
   display: grid;
   grid-template-columns: minmax(145px, 1fr) minmax(0, 3fr) minmax(160px, 1.1fr);
-  grid-template-areas: "status title demo" "status scope demo";
+  grid-template-areas: "status title demo";
   align-items: start;
   gap: 8px;
 }
 
 .welcome-header {
   grid-area: title;
+  align-self: center;
   text-align: center;
 }
 
@@ -56,7 +57,7 @@
   font-size: clamp(36px, 6cqw, 84px);
   line-height: 1.15;
   font-weight: 800;
-  font-style: italic;
+  font-style: normal;
   letter-spacing: -.055em;
   color: var(--welcome-ink);
   text-shadow: 0 0 24px #00b7ff52;
@@ -85,62 +86,6 @@
   flex: 1;
   height: 1px;
   background: linear-gradient(90deg, transparent, #13b1edaa, transparent);
-}
-
-.welcome-scope {
-  grid-area: scope;
-  position: relative;
-  width: 100%;
-  min-height: 120px;
-  aspect-ratio: 3.5;
-  box-sizing: border-box;
-  margin-top: 6px;
-  background:
-    linear-gradient(#124a633d 1px, transparent 1px),
-    linear-gradient(90deg, #124a633d 1px, transparent 1px),
-    radial-gradient(ellipse, #0a314b 0%, transparent 72%);
-  background-size: 100% 20px, 20px 100%, 100% 100%;
-  mask-image: radial-gradient(ellipse 70% 72%, black 45%, transparent 92%);
-}
-
-.welcome-trace {
-  position: absolute;
-  display: flex;
-  align-items: flex-end;
-  gap: 4%;
-  inset-inline: 0;
-  height: 24%;
-  border-bottom: 2px solid currentColor;
-  filter: drop-shadow(0 0 7px currentColor);
-}
-
-.welcome-trace span {
-  flex: 1;
-  align-self: stretch;
-  border: 2px solid currentColor;
-  border-bottom: 0;
-  background: color-mix(in srgb, currentColor 10%, transparent);
-}
-
-.welcome-trace-crank {
-  top: 19%;
-  color: var(--welcome-cyan);
-}
-
-.welcome-trace .welcome-trace-gap {
-  border: 0;
-  background: transparent;
-}
-
-.welcome-trace-cam {
-  top: 58%;
-  color: var(--welcome-amber);
-  opacity: .85;
-}
-
-.welcome-trace-cam span {
-  flex: 0 0 18%;
-  margin-inline-start: 38%;
 }
 
 .welcome-status,
@@ -288,7 +233,9 @@
   border: 1px solid color-mix(in srgb, var(--action-accent), #143143 35%);
   border-radius: 14px;
   background: linear-gradient(150deg, color-mix(in srgb, var(--action-accent) 17%, #091421), #09121c 74%);
-  box-shadow: inset 0 0 22px color-mix(in srgb, var(--action-accent) 15%, transparent);
+  box-shadow:
+    inset 0 0 22px color-mix(in srgb, var(--action-accent) 15%, transparent),
+    0 0 12px color-mix(in srgb, var(--action-accent) 17%, transparent);
   transform: skewX(-9deg);
   transition: box-shadow 150ms ease, border-color 150ms ease;
 }
@@ -414,9 +361,8 @@
 @container (max-width: 880px) {
   .welcome-hero {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    grid-template-areas: "title title" "scope scope" "status demo";
+    grid-template-areas: "title title" "status demo";
   }
-  .welcome-scope { width: min(100%, 700px); margin-inline: auto; }
   .welcome-status, .welcome-demo { margin-top: 0; }
   .welcome-dials { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .welcome-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -427,7 +373,7 @@
 }
 
 @container (max-width: 510px) {
-  .welcome-hero { grid-template-areas: "title title" "scope scope" "status status" "demo demo"; }
+  .welcome-hero { grid-template-areas: "title title" "status status" "demo demo"; }
   .welcome-dials { max-width: 300px; margin-inline: auto; }
   .welcome-actions, .welcome-recent ul { grid-template-columns: 1fr; }
   .welcome-action { min-height: 128px; }
