@@ -43,8 +43,12 @@
   gap: clamp(12px, 2cqw, 28px);
 }
 
-.welcome-header {
+.welcome-brand {
   grid-area: title;
+  min-width: 0;
+}
+
+.welcome-header {
   margin-top: clamp(0px, 1cqw, 12px);
   text-align: center;
 }
@@ -87,6 +91,102 @@
   flex: 1;
   height: 1px;
   background: linear-gradient(90deg, transparent, #13b1edaa, transparent);
+}
+
+.welcome-backdrop {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: min(100%, 510px);
+  height: clamp(110px, 12cqw, 185px);
+  margin: 12px auto 0;
+  opacity: .62;
+  filter: blur(2px);
+  background: radial-gradient(ellipse at 45% 65%, #0079bd4a, transparent 65%);
+  pointer-events: none;
+}
+
+.welcome-laptop {
+  position: relative;
+  width: 54%;
+  margin-right: 17%;
+  transform: perspective(540px) rotateY(-15deg) rotateX(7deg);
+}
+
+.welcome-laptop::after {
+  position: absolute;
+  right: -10%;
+  bottom: -8px;
+  left: -10%;
+  height: 8px;
+  content: "";
+  border-radius: 0 0 50% 50%;
+  background: linear-gradient(#395b71, #101d2b);
+}
+
+.welcome-laptop-screen {
+  padding: 7px 9px 9px;
+  border: 3px solid #254b67;
+  border-radius: 9px 9px 2px 2px;
+  background: #07121e;
+  box-shadow: 0 0 22px #00aaff38;
+  color: #abd8ed;
+  font: 11px monospace;
+}
+
+.welcome-ve-grid {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 1px;
+  margin-top: 4px;
+  background: linear-gradient(25deg, #0873be, #18a389 43%, #c59645 74%, #d76839);
+}
+
+.welcome-ve-grid > span {
+  min-height: clamp(6px, .8cqw, 13px);
+  outline: 1px solid #08141fad;
+}
+
+.welcome-ve-grid > span:nth-child(5n) { background: #0c213a35; }
+
+.welcome-backdrop-gauges {
+  position: absolute;
+  right: 5%;
+  bottom: 17%;
+  display: flex;
+  align-items: end;
+  gap: 7px;
+}
+
+.welcome-backdrop-gauges > span {
+  position: relative;
+  width: clamp(32px, 6cqw, 88px);
+  aspect-ratio: 1;
+  border: 3px solid #1bbde1;
+  border-right-color: #1bbde147;
+  border-bottom-color: transparent;
+  border-radius: 50%;
+  background: radial-gradient(circle, #1158798c, #07121ed9 68%);
+  box-shadow: 0 0 14px #099fe130;
+}
+
+.welcome-backdrop-gauges > span:last-child {
+  width: clamp(25px, 4cqw, 62px);
+  border-top-color: #e7aa58;
+  border-left-color: #e7aa58;
+  border-right-color: #e7aa5847;
+}
+
+.welcome-backdrop-gauges > span::after {
+  position: absolute;
+  top: 48%;
+  left: 20%;
+  width: 31%;
+  height: 2px;
+  content: "";
+  transform: rotate(36deg);
+  transform-origin: right;
+  background: #9eddef;
 }
 
 .welcome-status,
