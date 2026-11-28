@@ -1,94 +1,124 @@
 import { useState } from "react";
-import { Check, FolderPlus, Download, X } from "lucide-react";
+import {
+  Activity, ArrowRight, Battery, Check, Cpu, Download, FolderOpen,
+  FolderPlus, Gauge, Thermometer, X,
+} from "lucide-react";
+import coupe from "../assets/welcome-coupe.webp";
+import type { ConnectionStatus, ProjectInfo } from "../types/app";
 import "./WelcomeView.css";
-
-interface ProjectInfo {
-  name: string;
-  path: string;
-  signature: string;
-  modified: string;
-}
 
 interface WelcomeViewProps {
   projects: ProjectInfo[];
+  status: ConnectionStatus;
   onOpenProject: (path: string) => void;
+  onConnectEcu: () => void;
   onNewProject: () => void;
+  onBrowseProject: () => void;
   onImportTsProject: () => void;
   onDeleteProject: (name: string) => void;
 }
 
+const connectionLabels: Record<ConnectionStatus["state"], string> = {
+  Connected: "Connected",
+  Connecting: "Connecting",
+  Disconnected: "Not connected",
+  Error: "Connection error",
+};
+
+const demoGauges = [
+  { label: "Engine speed", value: "0", unit: "RPM", icon: Gauge },
+  { label: "Boost pressure", value: "0.00", unit: "bar", icon: Gauge },
+  { label: "Coolant temperature", value: "20", unit: "°C", icon: Thermometer },
+  { label: "Battery voltage", value: "12.4", unit: "V", icon: Battery },
+];
+
 export default function WelcomeView({
-  projects,
-  onOpenProject,
-  onNewProject,
-  onImportTsProject,
-  onDeleteProject,
+  projects, status, onOpenProject, onConnectEcu, onNewProject,
+  onBrowseProject, onImportTsProject, onDeleteProject,
 }: WelcomeViewProps) {
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
-
-  function handleDelete(e: React.MouseEvent, projectName: string) {
-    e.stopPropagation();
-    if (confirmDelete === projectName) {
-      onDeleteProject(projectName);
-      setConfirmDelete(null);
-    } else {
-      setConfirmDelete(projectName);
-    }
-  }
+  const actions = [
+    { label: "Connect ECU", detail: "Detect and connect to a supported ECU", icon: Cpu, run: onConnectEcu },
+    { label: "New Offline Project", detail: "Create a tuning project without an ECU", icon: FolderPlus, run: onNewProject },
+    { label: "Open Existing Project", detail: "Choose a LibreTune project folder", icon: FolderOpen, run: onBrowseProject },
+    { label: "Import TunerStudio Project", detail: "Import an existing project folder", icon: Download, run: onImportTsProject },
+  ];
 
   return (
     <div className="welcome-view">
-      <div className="welcome-header">
-        <h1 className="welcome-title">LibreTune</h1>
-        <p className="welcome-subtitle">Open-source ECU tuning software</p>
-      </div>
-
-      <div className="welcome-actions">
-        <button className="welcome-action-btn primary" onClick={onNewProject}>
-          <span className="action-icon"><FolderPlus size={32} /></span>
-          <span className="action-label">Connect ECU / New Project</span>
-          <span className="action-desc">Detect a connected ECU or start offline</span>
-        </button>
-        <button className="welcome-action-btn" onClick={onImportTsProject}>
-          <span className="action-icon"><Download size={32} /></span>
-          <span className="action-label">Import TS Project</span>
-          <span className="action-desc">Import from TunerStudio</span>
-        </button>
-      </div>
-
-      {projects.length > 0 && (
-        <div className="welcome-recent">
-          <h3 className="recent-title">Recent Projects</h3>
-          <div className="recent-list">
-            {projects.slice(0, 8).map((project) => (
-              <div
-                key={project.path}
-                className="recent-item"
-                onClick={() => onOpenProject(project.path)}
-              >
-                <div className="recent-info">
-                  <div className="recent-name">{project.name}</div>
-                  <div className="recent-sig">{project.signature}</div>
-                  <div className="recent-date">
-                    Last modified: {new Date(project.modified).toLocaleDateString()}
-                  </div>
+      <div className="welcome-console">
+        <div className="welcome-hero">
+          <header className="welcome-header">
+            <h1><span className="welcome-mark" aria-hidden="true" />LibreTune</h1>
+            <p>Open-source ECU tuning software</p>
+          </header>
+          <img className="welcome-coupe" src={coupe} alt="" />
+          <section className="welcome-status" aria-label="ECU status">
+            <h2><Cpu size={18} aria-hidden="true" /> ECU status</h2>
+            <p className="welcome-connection" data-state={status.state} aria-live="polite">
+              {connectionLabels[status.state]}
+            </p>
+            <dl>
+              <div><dt>ECU ID</dt><dd>{status.signature || "—"}</dd></div>
+              <div><dt>Definition</dt><dd>{status.ini_name || (status.has_definition ? "Loaded" : "—")}</dd></div>
+            </dl>
+          </section>
+          <section className="welcome-demo" aria-label="Demo gauges">
+            <h2><Activity size={18} aria-hidden="true" /> Demo gauges</h2>
+            <div className="welcome-dials">
+              {demoGauges.map(({ label, value, unit, icon: Icon }) => (
+                <div className="welcome-dial" key={label} role="img" aria-label={`${label}: ${value} ${unit}`}>
+                  <Icon size={16} aria-hidden="true" />
+                  <strong>{value}</strong><small>{unit}</small>
                 </div>
-                <button
-                  className={`recent-delete ${confirmDelete === project.name ? "confirm" : ""}`}
-                  onClick={(e) => handleDelete(e, project.name)}
-                  title={confirmDelete === project.name ? "Click again to confirm" : "Delete project"}
-                >
-                  {confirmDelete === project.name ? (
-                    <><Check size={14} /> Confirm</>
-                  ) : (
-                    <X size={14} />
-                  )}
-                </button>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          </section>
         </div>
-      )}
+
+        <nav className="welcome-actions" aria-label="Project actions">
+          {actions.map(({ label, detail, icon: Icon, run }) => (
+            <button type="button" className="welcome-action" onClick={run} key={label}>
+              <Icon className="welcome-action-icon" size={32} aria-hidden="true" />
+              <strong>{label}</strong>
+              <span>{detail}</span>
+              <ArrowRight className="welcome-action-arrow" size={22} aria-hidden="true" />
+            </button>
+          ))}
+        </nav>
+
+        {projects.length > 0 && (
+          <section className="welcome-recent" aria-labelledby="welcome-recent-title">
+            <h2 id="welcome-recent-title">Recent projects</h2>
+            <ul>
+              {projects.slice(0, 8).map((project) => (
+                <li key={project.path}>
+                  <button type="button" className="welcome-recent-open" onClick={() => onOpenProject(project.path)}>
+                    <FolderOpen size={17} aria-hidden="true" />
+                    <span><strong>{project.name}</strong><small>{project.signature}</small></span>
+                    <time dateTime={project.modified}>{new Date(project.modified).toLocaleDateString()}</time>
+                  </button>
+                  <button
+                    type="button"
+                    className="welcome-delete"
+                    aria-label={confirmDelete === project.path ? `Confirm deletion of ${project.name}` : `Delete ${project.name}`}
+                    onClick={() => {
+                      if (confirmDelete === project.path) {
+                        onDeleteProject(project.name);
+                        setConfirmDelete(null);
+                      } else {
+                        setConfirmDelete(project.path);
+                      }
+                    }}
+                  >
+                    {confirmDelete === project.path ? <><Check size={15} /> Confirm</> : <X size={15} />}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+      </div>
     </div>
   );
 }

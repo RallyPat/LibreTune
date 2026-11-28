@@ -1,3 +1,4 @@
+import { open } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
 import {
   TableEditor,
@@ -42,6 +43,7 @@ export interface TabContentRouterProps {
   // Welcome view actions
   openProject: (path: string) => void | Promise<void>;
   setConnectEcuWizardOpen: (open: boolean) => void;
+  setNewProjectDialogOpen: (open: boolean) => void;
   setImportProjectOpen: (open: boolean) => void;
   handleDeleteProject: (name: string) => void | Promise<void>;
 
@@ -79,6 +81,7 @@ export function TabContentRouter(props: TabContentRouterProps) {
     setTabContents,
     openProject,
     setConnectEcuWizardOpen,
+    setNewProjectDialogOpen,
     setImportProjectOpen,
     handleDeleteProject,
     setBurnDialogOpen,
@@ -99,7 +102,17 @@ export function TabContentRouter(props: TabContentRouterProps) {
       <WelcomeView
         projects={availableProjects}
         onOpenProject={(path) => openProject(path)}
-        onNewProject={() => setConnectEcuWizardOpen(true)}
+        status={status}
+        onConnectEcu={() => setConnectEcuWizardOpen(true)}
+        onNewProject={() => setNewProjectDialogOpen(true)}
+        onBrowseProject={async () => {
+          try {
+            const path = await open({ directory: true, title: "Open LibreTune project folder" });
+            if (path) await openProject(path);
+          } catch (error) {
+            showToast("Failed to open project: " + String(error), "error");
+          }
+        }}
         onImportTsProject={() => setImportProjectOpen(true)}
         onDeleteProject={handleDeleteProject}
       />
