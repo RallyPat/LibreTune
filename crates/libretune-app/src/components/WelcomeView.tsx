@@ -1,8 +1,9 @@
 import { useState } from "react";
 import {
-  Activity, ArrowRight, Battery, Check, Cpu, Download, FolderOpen,
-  FolderPlus, Gauge, Thermometer, X,
+  Activity, ArrowRight, Battery, Check, CodeXml, Cpu, Download, FolderOpen,
+  FolderPlus, Gauge, Layers, Shield, Thermometer, X, Zap,
 } from "lucide-react";
+import logo from "../../src-tauri/icons/icon.png";
 import coupe from "../assets/welcome-coupe.webp";
 import type { ConnectionStatus, ProjectInfo } from "../types/app";
 import "./WelcomeView.css";
@@ -49,7 +50,7 @@ export default function WelcomeView({
       <div className="welcome-console">
         <section className="welcome-hero" aria-labelledby="welcome-title">
           <header className="welcome-header">
-            <h1 id="welcome-title"><span className="welcome-mark" aria-hidden="true" />LibreTune</h1>
+            <h1 id="welcome-title"><img className="welcome-logo" src={logo} alt="" />LibreTune</h1>
             <p>Open-source ECU tuning software</p>
           </header>
           <img className="welcome-coupe" src={coupe} alt="" />
@@ -86,6 +87,13 @@ export default function WelcomeView({
             </button>
           ))}
         </nav>
+
+        <ul className="welcome-features" aria-label="About LibreTune">
+          <li><CodeXml size={20} aria-hidden="true" /> Open Source</li>
+          <li><Layers size={20} aria-hidden="true" /> Multi-Platform</li>
+          <li><Zap size={20} aria-hidden="true" /> ECU Tuning &amp; Calibration</li>
+          <li><Shield size={20} aria-hidden="true" /> Community Driven</li>
+        </ul>
 
         {projects.length > 0 && (
           <section className="welcome-recent" aria-labelledby="welcome-recent-title">
