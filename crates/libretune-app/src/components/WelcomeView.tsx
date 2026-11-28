@@ -4,7 +4,6 @@ import {
   FolderPlus, Gauge, Layers, Shield, Thermometer, X, Zap,
 } from "lucide-react";
 import logo from "../../src-tauri/icons/icon.png";
-import coupe from "../assets/welcome-coupe.webp";
 import type { ConnectionStatus, ProjectInfo } from "../types/app";
 import "./WelcomeView.css";
 
@@ -53,7 +52,14 @@ export default function WelcomeView({
             <h1 id="welcome-title"><img className="welcome-logo" src={logo} alt="" />LibreTune</h1>
             <p>Open-source ECU tuning software</p>
           </header>
-          <img className="welcome-coupe" src={coupe} alt="" />
+          <div className="welcome-scope" aria-hidden="true">
+            <div className="welcome-trace welcome-trace-crank">
+              {Array.from({ length: 10 }, (_, index) => (
+                <span key={index} className={index === 6 ? "welcome-trace-gap" : undefined} />
+              ))}
+            </div>
+            <div className="welcome-trace welcome-trace-cam"><span /></div>
+          </div>
           <section className="welcome-status" aria-label="ECU status">
             <h2><Cpu size={18} aria-hidden="true" /> ECU status</h2>
             <p className="welcome-connection" data-state={status.state} aria-live="polite">
