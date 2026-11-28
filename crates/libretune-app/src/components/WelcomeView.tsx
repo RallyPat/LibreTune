@@ -48,23 +48,10 @@ export default function WelcomeView({
     <div className="welcome-view">
       <div className="welcome-console">
         <section className="welcome-hero" aria-labelledby="welcome-title">
-          <div className="welcome-brand">
-            <header className="welcome-header">
-              <h1 id="welcome-title"><img className="welcome-logo" src={logo} alt="" />LibreTune</h1>
-              <p>Open-source ECU tuning software</p>
-            </header>
-            <div className="welcome-backdrop" aria-hidden="true">
-              <div className="welcome-laptop">
-                <div className="welcome-laptop-screen">
-                  <span>VE Table</span>
-                  <div className="welcome-ve-grid">
-                    {Array.from({ length: 48 }, (_, index) => <span key={index} />)}
-                  </div>
-                </div>
-              </div>
-              <div className="welcome-backdrop-gauges"><span /><span /></div>
-            </div>
-          </div>
+          <header className="welcome-header">
+            <h1 id="welcome-title"><img className="welcome-logo" src={logo} alt="" />LibreTune</h1>
+            <p>Open-source ECU tuning software</p>
+          </header>
           <section className="welcome-status" aria-label="ECU status">
             <h2><Cpu size={18} aria-hidden="true" /> ECU status</h2>
             <p className="welcome-connection" data-state={status.state} aria-live="polite">
