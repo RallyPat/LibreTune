@@ -47,9 +47,9 @@ export default function WelcomeView({
   return (
     <div className="welcome-view">
       <div className="welcome-console">
-        <div className="welcome-hero">
+        <section className="welcome-hero" aria-labelledby="welcome-title">
           <header className="welcome-header">
-            <h1><span className="welcome-mark" aria-hidden="true" />LibreTune</h1>
+            <h1 id="welcome-title"><span className="welcome-mark" aria-hidden="true" />LibreTune</h1>
             <p>Open-source ECU tuning software</p>
           </header>
           <img className="welcome-coupe" src={coupe} alt="" />
@@ -74,7 +74,7 @@ export default function WelcomeView({
               ))}
             </div>
           </section>
-        </div>
+        </section>
 
         <nav className="welcome-actions" aria-label="Project actions">
           {actions.map(({ label, detail, icon: Icon, run }) => (
